@@ -1570,12 +1570,18 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           retryable: false,
         })
         expect(memoryCommands).toEqual([])
+        expect(actions.filter((action) =>
+          action.kind === 'command'
+          && /(?:^|\s)(?:\.\/)?vault-cli\s+assistant\s+onboarding\s+complete\b/u.test(action.command)
+        )).toEqual([])
         expect(await readFile(resumeContextPath, 'utf8')).toBe(
           resumeContextBefore,
         )
-        expect(reply).toMatch(/bank\/memory\.md:18/iu)
-        expect(reply).toMatch(/\bid\b/iu)
-        expect(reply).toMatch(/(?:fix|repair|correct)/iu)
+        expect(reply).toMatch(/(?:saved|previous|earlier) (?:onboarding |setup )?(?:information|details|context)|what (?:you|we)(?:['’]ve| have)? (?:already )?(?:saved|shared)/iu)
+        expect(reply).toMatch(/(?:can(?:not|['’]t)|unable to|trouble|problem)[^.!?\n]{0,80}(?:read|access|load|retriev)|(?:read|access|load|retriev)[^.!?\n]{0,80}(?:problem|trouble|unavailable)/iu)
+        expect(reply).toMatch(/pause|hold|can(?:not|['’]t) (?:continue|pick up)|stop/iu)
+        expect(reply).not.toMatch(/bank\/|memory\.md|memory_document_invalid|\b(?:canonical|field|line \d+|invalid id)\b/iu)
+        expect(reply).not.toMatch(/(?:you(?:['’]ll| will| need to| should)?|please) (?:fix|repair|edit)|\b(?:i|we)(?:['’]ll| will| have|['’]ve) (?:fix|repair|retry|escalate|contact|report|flag)|\b(?:support|team) (?:has been|was) (?:notified|contacted)/iu)
         expect(reply).not.toMatch(/what should i call you|how old|gender/iu)
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
@@ -11407,6 +11413,69 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
     },
     720_000,
   )
+})
+
+describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
+  it('recognizes a new cycling routine without pattern jargon or disclaimer padding', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    if (!automation) {
+      throw new Error('Expected the managed weekly health digest automation.')
+    }
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-weekly-natural-recognition-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Current synthetic evidence from the completed required reads:',
+          '- Recent conversation: on July 27, the member said, "I want to build enough cardio to feel less winded on fall hikes."',
+          '- This is a parked aspiration. The member has not chosen a first step, asked Murph to act, or created an active goal, plan, experiment, reminder, or accountability request.',
+          '- Baseline activity from July 14 through July 27 had no structured cardio sessions.',
+          '- Activity from July 28 through August 3 contains three separate, consistently classified easy cycling sessions of 20 to 30 minutes.',
+          '- Physiology, symptoms, tracking quality, and other health context are stable. No improvement in hiking or endurance has been measured.',
+          '- No unsolicited health note surfaced recently, this thread has not already been acknowledged, and no urgent or sensitive conversation is competing for attention.',
+          '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[weekly-digest-natural-recognition-e2e] ${JSON.stringify({ decision })}\n`)
+      expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') {
+        throw new Error('Expected the repeated cycling observation to send.')
+      }
+      expect(decision.text).toMatch(/\b(?:3|three)\b/iu)
+      expect(decision.text).toMatch(/cycl|rides?/iu)
+      expect(decision.text).toMatch(/hik/iu)
+      expect(decision.text).not.toMatch(
+        /meaningful new pattern|rather than a one-off|too early to say|not proof|(?:do|does) not prove|(?:don['’]t|doesn['’]t) prove|grade [A-E]|evidence days|score/iu,
+      )
+      expect(decision.text).not.toMatch(
+        /(?:endurance|fitness|capacity) (?:has|have) improved|you(?:’re|'re| are) (?:already )?less winded|will (?:improve|build|make)|you should|keep (?:it|this|going)|scheduled|weekly (?:digest|report)|automation/iu,
+      )
+      expect(decision.text).not.toContain('?')
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
@@ -24534,7 +24603,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'confirms an active stale recurrence while its occurrence projection is pending',
+    'confirms a pending recurring reminder naturally without scheduler terminology',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -24565,6 +24634,21 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         },
       })
       const automationRequests = automationFixture.requests
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null,
+        assistantHostedAutomationAvailable: true,
+        assistantProgressUpdatesAvailable: false,
+        channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'direct',
+        currentLocalDate: '2026-08-10',
+        currentTimeZone: 'America/New_York',
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      expect(layers.stableRouteCapabilityPrompt).toContain('murph.automation')
 
       try {
         const result = await executeRealCodexAppServerTurn({
@@ -24574,8 +24658,11 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions:
-            buildMidnightLinqReminderDeveloperInstructions(),
+          developerInstructions: [
+            layers.staticCacheableCorePrompt,
+            layers.stableRouteCapabilityPrompt,
+            layers.threadContextPrompt,
+          ].join('\n\n'),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
           excludeResumeTurns: true,
@@ -24594,7 +24681,8 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
-            'Change the instructions for my daily-interval-reminder to',
+            layers.dynamicTurnContextPrompt,
+            'Change the instructions for my reminder with ID automation-daily-interval to',
             'send the revised daily interval reminder. Save that edit now.',
           ].join(' '),
           reasoningEffort: 'low',
@@ -24602,10 +24690,19 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           workingDirectory,
         })
 
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        process.stdout.write(`[natural-pending-reminder-e2e] ${JSON.stringify({
+          model: config.model,
+          actions: automationRequests.map((request) => request.action),
+          reply: result.finalMessage,
+        })}\n`)
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(2)
         expect(automationRequests).toHaveLength(2)
-        expect(automationRequests[0]).toMatchObject({ action: 'inspect' })
+        expect(automationRequests[0]).toEqual({ action: 'inspect', lookup: 'automation-daily-interval' })
         expect(automationRequests[1]).toMatchObject({
           action: 'patch',
+          lookup: 'automation-daily-interval',
           expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
           instructions: expect.stringMatching(/revised daily interval reminder/iu),
         })
@@ -24616,9 +24713,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         expect(result.finalMessage).toMatch(
           /24[- ]hour|daily|every (?:24 hours?|day)|remains scheduled|still scheduled/iu,
         )
-        expect(result.finalMessage).toMatch(
-          /automatic|finishing|processing|project(?:ing)?|scheduler.*(?:current|next|work)/iu,
+        expect(result.finalMessage).not.toMatch(
+          /scheduler|projection|occurrence|processing|finishing current|no (?:member )?action (?:is )?needed/iu,
         )
+        expect(result.finalMessage.trim().split(/\s+/u).length).toBeLessThanOrEqual(45)
         expect(result.finalMessage).not.toMatch(
           /if you want|inspect|check again|unconfirmed|not confirmed|could not verify|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled|will (?:deliver|remind|send)/iu,
         )

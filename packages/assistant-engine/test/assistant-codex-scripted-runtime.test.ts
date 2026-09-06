@@ -6599,7 +6599,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is finishing the current reminder work and will project the next occurrence automatically, so no action is needed.',
+        text: 'I updated your reminder. It is still active on its daily schedule.',
       },
     )
 
@@ -6659,7 +6659,8 @@ text(JSON.stringify(result));
     )
     expect(toolOutputs).not.toContain('"timingVerified"')
     expect(result.finalMessage).toMatch(/updated|active/iu)
-    expect(result.finalMessage).toMatch(/automatically|no action is needed/iu)
+    expect(result.finalMessage).toMatch(/daily/iu)
+    expect(result.finalMessage).not.toMatch(/scheduler|projection|occurrence|processing/iu)
     expect(result.finalMessage).not.toMatch(
       /if you want|inspect|10:30|tomorrow|unconfirmed|not confirmed|could not verify/iu,
     )
