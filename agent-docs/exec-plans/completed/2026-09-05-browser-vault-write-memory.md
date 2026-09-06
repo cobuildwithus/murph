@@ -22,8 +22,8 @@ Proof: synthetic complete-output decrypt/readback plus focused failure/authority
 - [x] Obtain ReviewGPT implementation and synthetic memory reproduction.
 - [x] Inspect correctness, simplicity, privacy, runtime cost and compatibility.
 - [x] Run focused tests, affected typecheck, complexity and documentation checks.
-- [ ] Commit and open one draft PR, then run final ReviewGPT concurrently with required CI on the stable pushed candidate.
-- [ ] Resolve findings under the repository disposition policy and leave the functional fix ready for human merge.
+- [x] Commit and open one draft PR, then run final ReviewGPT concurrently with required CI on the stable pushed candidate.
+- [x] Resolve final review with no accepted findings and preserve the functional fix for human merge.
 
 ## Authority and deployment
 
@@ -51,6 +51,13 @@ Base is 99024d9ac4cdbc583bf29f52a3fac00b6692dccf. These single-run injected-dela
 
 To rerun the checked-in Node proof, bundle `apps/cloudflare/test/browser-vault-write-memory.proof.ts` with the existing Cloudflare esbuild dependency (Node platform, CJS format, Node 24 target, root tsconfig); invoke the bundle with `--browser-vault-memory-proof generate <temporary-directory>`, then `node --expose-gc --max-old-space-size=96 <bundle> --browser-vault-memory-proof write <temporary-directory>`, and finally its `read` mode in a separate unconstrained process. Fixture generation and complete readback run outside memory sampling. No production data or credentials are involved.
 
-## Status
+## Final review and completion
 
-Implementation and local parent candidate review complete. Candidate committed and draft PR #2966 opened. Final ReviewGPT and required exact-head CI remain pending. This functional fix will be left for human merge; no production mutation or deployed recovery is claimed. The remaining sweep findings and coverage limitations are maintained in automation memory.
+Final ReviewGPT round one passed on authored head `2a5b08e74b5e5fef30e0f0ec22d58a03b042dcba` on September 6. The managed Mountain lane completed the full snapshot audit after more than seven minutes. The captured response hash matches the separate concrete `gpt-6-pro` model evidence and the exact committed user/assistant turn linkage. The patch, snapshot inventory and first-reviewed baseline were validated. No qualifying findings remain.
+
+The parent re-inspected the production diff, storage admission lifetime, complete-output proof and documented memory/latency limits. No further production change is justified. All four required checks passed on the reviewed head. This closing change only records review evidence and archives the plan; exact-head CI must also finish on that documentation-only closing commit. Existing focused behavior and memory proof remain applicable without rerunning unchanged tests.
+
+PR #2966 remains open for human review and merge. No merge, deployment, production write or recovery was performed. Per-publication memory improves, but the remaining compatibility-root allocation and concurrent-publication exposure still require natural post-deploy observation after a separately authorized rollout. Unresolved production findings and diagnostic coverage belong in automation memory.
+Status: completed
+Updated: 2026-09-06
+Completed: 2026-09-06
