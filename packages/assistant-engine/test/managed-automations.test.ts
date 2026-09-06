@@ -1381,6 +1381,17 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.instructions).toContain(
       'Use only a returned alert about extreme heat, extreme cold, or outdoor air quality',
     )
+    expect(digestRecord?.instructions).toContain(
+      'let the concrete detail show its significance',
+    )
+    expect(digestRecord?.instructions).toContain(
+      'Express necessary uncertainty within the claim',
+    )
+    expect(digestRecord?.instructions).toContain(
+      'Distinguish a possible benefit from an improvement already shown in the member\'s data',
+    )
+    expect(digestRecord?.instructions).not.toContain('usually three to five sentences')
+    expect(digestRecord?.instructions).not.toContain('Frame the digest as a compass')
     expect(digestRecord?.instructions).toContain('Never restate single-day metric values')
     expect(digestRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',

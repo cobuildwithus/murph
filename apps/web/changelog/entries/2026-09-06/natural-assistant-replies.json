@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "natural-assistant-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More natural messages",
+    "summary": "Murph uses plainer language in setup recovery, reminder confirmations, and weekly updates.",
+    "details": "Reminders focus on what was saved, setup errors explain what is blocked, and weekly updates get to the point.",
+    "relevanceTags": ["messaging", "onboarding", "reminders"],
+    "sourcePullRequests": []
+  }
+}
