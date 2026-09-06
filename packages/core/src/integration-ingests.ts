@@ -32,6 +32,7 @@ import {
   shardCompressionFromPath,
   type ShardCompression,
 } from "./shard-compression.ts";
+import { INTEGRATION_INGEST_ARCHIVE_SUFFIXES } from "./write-policy.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
@@ -234,7 +235,6 @@ interface IntegrationIngestNoveltyTailScanResult {
   unsafe: boolean;
 }
 
-const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".br", ".zip"] as const;
 const ZIP_EOCD_SIGNATURE = 0x06054b50;
 const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
 const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
@@ -2270,7 +2270,7 @@ async function listIntegrationIngestRowSources(
   vaultRoot: string,
 ): Promise<IntegrationIngestRowSource[]> {
   const sources = new Map<string, IntegrationIngestRowSource>();
-  for (const extension of [".jsonl", ".jsonl.gz", ".jsonl.br", ".jsonl.zip"] as const) {
+  for (const extension of [".jsonl", ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `.jsonl${suffix}`)]) {
     const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory, {
       extension,
     });

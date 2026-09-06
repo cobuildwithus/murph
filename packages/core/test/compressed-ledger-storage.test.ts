@@ -6,7 +6,10 @@ import path from "node:path";
 import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import { afterEach, test } from "vitest";
 import {
+  buildIntegrationIngestAppendPlan,
   buildIntegrationIngestRecord,
+  runCanonicalWrite,
+  stageIntegrationIngestAppendPlan,
   initializeVault,
   listEventLedgerShardSources,
   readEvent,
@@ -91,6 +94,19 @@ test("Brotli integration shards preserve exact content through append replay and
   await appendArchivedIntegrationIngestShard({ ...input, payload });
   assert.ok(await readIntegrationIngestById(vaultRoot, next.id));
   await truncateArchivedIntegrationIngestShard(input);
+  assert.deepEqual(brotliDecompressSync(await fs.readFile(archivePath)), bytes);
+  const plan = await buildIntegrationIngestAppendPlan(vaultRoot, [next], { allowArchivedShardAmendments: true });
+  const conflictPath = "bank/synthetic-conflict.md";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, conflictPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, conflictPath), "existing\n");
+  await assert.rejects(runCanonicalWrite({
+    vaultRoot, operationType: "synthetic_archive_rollback", summary: "Synthetic rollback proof",
+    mutate: async ({ batch }) => {
+      await stageIntegrationIngestAppendPlan(batch, plan);
+      await batch.stageTextWrite(conflictPath, "replacement\n", { overwrite: false });
+    },
+  }), { code: "VAULT_FILE_EXISTS" });
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
   assert.deepEqual(brotliDecompressSync(await fs.readFile(archivePath)), bytes);
   await fs.writeFile(path.join(vaultRoot, `${logicalPath}.gz`), compressShard(bytes, "gzip"));
   await assert.rejects(readIntegrationIngestById(vaultRoot, first.id), { code: "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT" });
