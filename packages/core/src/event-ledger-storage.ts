@@ -3,11 +3,12 @@ import { createReadStream, createWriteStream, promises as fs } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { Transform, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createGunzip, createGzip } from "node:zlib";
 
 import { prepareFileAtomicExclusive, writeFileAtomic } from "./atomic-write.ts";
 import {
   compressShard,
+  createShardCompressor,
+  createShardDecompressor,
   decompressShard,
   type ShardCompression,
 } from "./shard-compression.ts";
@@ -21,7 +22,7 @@ import {
   resolveVaultPath,
 } from "./path-safety.ts";
 
-import type { UnknownRecord } from "./types.ts";
+import { isErrnoException, type UnknownRecord } from "./types.ts";
 
 export const MAX_EVENT_LEDGER_SHARD_BYTES = 256 * 1024 * 1024;
 export const MAX_EVENT_LEDGER_ARCHIVE_BYTES = 128 * 1024 * 1024;
@@ -648,8 +649,8 @@ async function validatePreparedEventLedgerArchive(input: {
   if (!archiveStat.isFile() || archiveStat.size > MAX_EVENT_LEDGER_ARCHIVE_BYTES) {
     throw new VaultError(
       "EVENT_LEDGER_SHARD_TOO_LARGE",
-      `Event ledger archive "${input.logicalPath}.gz" exceeds its compressed size limit.`,
-      { byteSize: archiveStat.size, relativePath: `${input.logicalPath}.gz` },
+      `Event ledger archive "${input.logicalPath}.br" exceeds its compressed size limit.`,
+      { byteSize: archiveStat.size, relativePath: `${input.logicalPath}.br` },
     );
   }
   const meter = createEventLedgerJsonlReceiptMeter({
@@ -658,7 +659,7 @@ async function validatePreparedEventLedgerArchive(input: {
   });
   await pipeline(
     createReadStream(input.absolutePath, input.signal ? { signal: input.signal } : undefined),
-    createGunzip(),
+    createShardDecompressor("brotli"),
     meter.stream,
     new Writable({
       write(_chunk, _encoding, callback) {
@@ -692,51 +693,22 @@ function assertEventLedgerArchiveSourceUnchanged(
   );
 }
 
-async function archivePlainEventLedgerShard(
+async function archiveEventLedgerShard(
   vaultRoot: string,
   source: EventLedgerShardSource,
   signal: AbortSignal | null,
-): Promise<{ archiveByteCount: number; repaired: boolean; sourceByteCount: number }> {
+): Promise<{ archiveByteCount: number; sourceByteCount: number }> {
   signal?.throwIfAborted();
-  const plainAbsolutePath = resolveVaultPath(vaultRoot, source.logicalPath).absolutePath;
-  if (await pathExists(resolveVaultPath(vaultRoot, `${source.logicalPath}.br`).absolutePath)) {
-    throw new VaultError("EVENT_LEDGER_SHARD_AMBIGUOUS", "Event ledger shard has multiple representations.", {
-      relativePath: source.logicalPath,
-    });
-  }
-  const gzipSource = {
-    kind: "gzip" as const,
+  const sourceAbsolutePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
+  const archiveSource = {
+    kind: "brotli" as const,
     logicalPath: source.logicalPath,
-    sourcePath: `${source.logicalPath}.gz`,
+    sourcePath: `${source.logicalPath}.br`,
   };
-  const gzipAbsolutePath = resolveVaultPath(vaultRoot, gzipSource.sourcePath).absolutePath;
-  if (await pathExists(gzipAbsolutePath)) {
-    const sourceBytes = await readBoundedEventLedgerSourceBytes(vaultRoot, source, signal);
-    parseEventLedgerRows(sourceBytes, source.logicalPath);
-    signal?.throwIfAborted();
-    const archivedBytes = await readBoundedEventLedgerSourceBytes(
-      vaultRoot,
-      gzipSource,
-      signal,
-    );
-    if (!archivedBytes.equals(sourceBytes)) {
-      throw new VaultError(
-        "EVENT_LEDGER_SHARD_AMBIGUOUS",
-        "Plain and gzip event ledger shard representations differ.",
-        { relativePath: source.logicalPath },
-      );
-    }
-    await fs.unlink(plainAbsolutePath);
-    return {
-      archiveByteCount: (await fs.stat(gzipAbsolutePath)).size,
-      repaired: true,
-      sourceByteCount: sourceBytes.byteLength,
-    };
-  }
-
-  await assertPathWithinVaultOnDisk(vaultRoot, plainAbsolutePath);
-  const sourceStatBefore = await fs.stat(plainAbsolutePath);
-  if (!sourceStatBefore.isFile() || sourceStatBefore.size > MAX_EVENT_LEDGER_SHARD_BYTES) {
+  const archiveAbsolutePath = resolveVaultPath(vaultRoot, archiveSource.sourcePath).absolutePath;
+  await assertPathWithinVaultOnDisk(vaultRoot, sourceAbsolutePath);
+  const sourceStatBefore = await fs.stat(sourceAbsolutePath);
+  if (!sourceStatBefore.isFile() || sourceStatBefore.size > (source.kind === "jsonl" ? MAX_EVENT_LEDGER_SHARD_BYTES : MAX_EVENT_LEDGER_ARCHIVE_BYTES)) {
     throw new VaultError(
       "EVENT_LEDGER_SHARD_TOO_LARGE",
       `Event ledger shard "${source.logicalPath}" exceeds its uncompressed size limit.`,
@@ -744,23 +716,23 @@ async function archivePlainEventLedgerShard(
     );
   }
   const sourceReceiptHolder: { value?: EventLedgerShardContentReceipt } = {};
-  await prepareFileAtomicExclusive(gzipAbsolutePath, async (tempAbsolutePath) => {
+  await prepareFileAtomicExclusive(archiveAbsolutePath, async (tempAbsolutePath) => {
     signal?.throwIfAborted();
     const meter = createEventLedgerJsonlReceiptMeter({
       relativePath: source.logicalPath,
       signal,
     });
-    await pipeline(
-      createReadStream(plainAbsolutePath, signal ? { signal } : undefined),
+    await pipeline([
+      createReadStream(sourceAbsolutePath, signal ? { signal } : undefined),
+      ...(source.kind === "jsonl" ? [] : [createShardDecompressor(source.kind)]),
       meter.stream,
-      createGzip({ level: 6 }),
+      createShardCompressor("brotli"),
       createWriteStream(tempAbsolutePath, {
         flags: "wx",
         mode: sourceStatBefore.mode & 0o7777,
         ...(signal ? { signal } : {}),
       }),
-      { signal: signal ?? undefined },
-    );
+    ], { signal: signal ?? undefined });
     const sourceReceipt = meter.readReceipt();
     sourceReceiptHolder.value = sourceReceipt;
     const archivedReceipt = await validatePreparedEventLedgerArchive({
@@ -772,12 +744,12 @@ async function archivePlainEventLedgerShard(
       throw new VaultError(
         "EVENT_LEDGER_ARCHIVE_INVALID",
         "Prepared event ledger archive did not preserve the source shard exactly.",
-        { relativePath: gzipSource.sourcePath },
+        { relativePath: archiveSource.sourcePath },
       );
     }
     assertEventLedgerArchiveSourceUnchanged(
       sourceStatBefore,
-      await fs.stat(plainAbsolutePath),
+      await fs.stat(sourceAbsolutePath),
       source.logicalPath,
     );
   });
@@ -786,15 +758,51 @@ async function archivePlainEventLedgerShard(
     throw new VaultError(
       "EVENT_LEDGER_ARCHIVE_INVALID",
       "Event ledger archive did not produce a source receipt.",
-      { relativePath: gzipSource.sourcePath },
+      { relativePath: archiveSource.sourcePath },
     );
   }
-  await fs.unlink(plainAbsolutePath);
+  await fs.unlink(sourceAbsolutePath);
   return {
-    archiveByteCount: (await fs.stat(gzipAbsolutePath)).size,
-    repaired: false,
+    archiveByteCount: (await fs.stat(archiveAbsolutePath)).size,
     sourceByteCount: sourceReceipt.byteLength,
   };
+}
+
+async function reconcileEventLedgerShardSources(
+  vaultRoot: string,
+  sources: readonly EventLedgerShardSource[],
+  signal: AbortSignal | null,
+): Promise<{ source: EventLedgerShardSource; sourceByteCount: number }> {
+  const source = sources.find((candidate) => candidate.kind === "brotli") ?? sources[0];
+  if (!source) throw new TypeError("Expected an event ledger source.");
+  if (sources.length === 1) return { source, sourceByteCount: 0 };
+  const before = await Promise.all(sources.map((candidate) =>
+    fs.stat(resolveVaultPath(vaultRoot, candidate.sourcePath).absolutePath)
+  ));
+  const content = await readBoundedEventLedgerSourceBytes(vaultRoot, source, signal);
+  parseEventLedgerRows(content, source.logicalPath);
+  const verified: string[] = [];
+  for (const candidate of sources) {
+    signal?.throwIfAborted();
+    if (candidate === source) continue;
+    const bytes = await readBoundedEventLedgerSourceBytes(vaultRoot, candidate, signal);
+    parseEventLedgerRows(bytes, candidate.logicalPath);
+    if (!content.equals(bytes)) {
+      throw new VaultError("EVENT_LEDGER_SHARD_AMBIGUOUS", "Event ledger representations differ.", {
+        relativePath: source.logicalPath,
+      });
+    }
+    verified.push(resolveVaultPath(vaultRoot, candidate.sourcePath).absolutePath);
+  }
+  for (const [index, candidate] of sources.entries()) {
+    assertEventLedgerArchiveSourceUnchanged(before[index]!,
+      await fs.stat(resolveVaultPath(vaultRoot, candidate.sourcePath).absolutePath), candidate.sourcePath);
+  }
+  for (const absolutePath of verified) {
+    signal?.throwIfAborted();
+    await fs.unlink(absolutePath);
+  }
+  return { source, sourceByteCount: content.byteLength };
 }
 
 export async function archiveClosedEventLedgerShards(input: {
@@ -815,37 +823,45 @@ export async function archiveClosedEventLedgerShards(input: {
       VAULT_LAYOUT.eventLedgerDirectory,
       { signal: input.signal },
     );
-    const plainSources = paths
-      .filter((relativePath) => relativePath.endsWith(".jsonl"))
-      .map(toEventLedgerShardSource)
-      .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath));
+    const groups = new Map<string, EventLedgerShardSource[]>();
+    for (const source of paths.filter(isEventLedgerSourcePath).map(toEventLedgerShardSource)) {
+      const group = groups.get(source.logicalPath) ?? [];
+      group.push(source);
+      groups.set(source.logicalPath, group);
+    }
     const result: ArchiveClosedEventLedgerShardsResult = {
       archivedByteCount: 0,
       archivedShardCount: 0,
       blockedShardCount: 0,
       repairedShardCount: 0,
-      scannedShardCount: plainSources.length,
+      scannedShardCount: groups.size,
       sourceByteCount: 0,
     };
-    for (const source of plainSources) {
+    for (const [logicalPath, sources] of [...groups].sort(([left], [right]) => left.localeCompare(right))) {
       input.signal?.throwIfAborted();
-      const month = eventLedgerShardMonth(source.logicalPath);
+      const month = eventLedgerShardMonth(logicalPath);
       if (!month || month >= currentMonth) {
         continue;
       }
       try {
-        const archived = await archivePlainEventLedgerShard(
-          input.vaultRoot,
-          source,
-          input.signal ?? null,
+        const { source, sourceByteCount } = await reconcileEventLedgerShardSources(
+          input.vaultRoot, sources, input.signal ?? null,
         );
+        if (source.kind === "brotli" && sources.length === 1) continue;
+        const archived = source.kind === "brotli"
+          ? {
+              archiveByteCount: (await fs.stat(resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath)).size,
+              sourceByteCount,
+            }
+          : await archiveEventLedgerShard(input.vaultRoot, source, input.signal ?? null);
         result.archivedByteCount += archived.archiveByteCount;
         result.archivedShardCount += 1;
-        result.repairedShardCount += archived.repaired ? 1 : 0;
+        result.repairedShardCount += sources.length > 1 ? 1 : 0;
         result.sourceByteCount += archived.sourceByteCount;
       } catch (error) {
         input.signal?.throwIfAborted();
-        if (!(error instanceof VaultError)) {
+        if (!(error instanceof VaultError) && !(isErrnoException(error)
+          && (error.code === "Z_DATA_ERROR" || error.code === "Z_BUF_ERROR"))) {
           throw error;
         }
         result.blockedShardCount += 1;

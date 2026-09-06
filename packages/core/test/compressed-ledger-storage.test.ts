@@ -6,6 +6,8 @@ import path from "node:path";
 import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import { afterEach, test } from "vitest";
 import {
+  archiveClosedEventLedgerShards,
+  archiveClosedIntegrationIngestShards,
   buildIntegrationIngestAppendPlan,
   buildIntegrationIngestRecord,
   runCanonicalWrite,
@@ -122,3 +124,74 @@ test("malformed Brotli shards fail closed through both public readers", async ()
   await assert.rejects(readEvent({ vaultRoot, eventId: "evt_synthetic_missing" }), { code: "EVENT_LEDGER_ARCHIVE_INVALID" });
   await assert.rejects(readIntegrationIngestById(vaultRoot, "xfm_SyntheticMissing"), { code: "INTEGRATION_INGEST_ARCHIVE_INVALID" });
 });
+
+
+for (const family of ["events", "integration-ingests"] as const) {
+  const archive = (vaultRoot: string) => (family === "events"
+    ? archiveClosedEventLedgerShards
+    : archiveClosedIntegrationIngestShards)({ vaultRoot, now: new Date("2026-02-15T00:00:00.000Z") });
+  const record = family === "events" ? { id: "evt_SyntheticArchive", kind: "note" }
+    : buildIntegrationIngestRecord({
+      id: "xfm_SyntheticArchive", provider: "synthetic", source: "device", importedAt: "2026-01-02T00:00:00.000Z",
+      parts: [], eventOutputs: [], eventIdsComplete: true, sampleIds: [], sampleIdsComplete: true,
+      eventCount: 0, sampleCount: 0,
+    });
+  const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
+  async function shard(vaultRoot: string, month = "01", year = "2026") {
+    const absolutePath = path.join(vaultRoot, `ledger/${family}/${year}/${year}-${month}.jsonl`);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    return absolutePath;
+  }
+
+  test(`${family}: converts historical gzip exactly and leaves current/future months untouched`, async () => {
+    const vaultRoot = await createVault();
+    const historical = await shard(vaultRoot);
+    const current = await shard(vaultRoot, "02");
+    const future = await shard(vaultRoot, "03");
+    const gzip = compressShard(bytes, "gzip");
+    for (const absolutePath of [historical, current, future]) await fs.writeFile(`${absolutePath}.gz`, gzip);
+    assert.equal((await archive(vaultRoot)).archivedShardCount, 1);
+    assert.deepEqual(brotliDecompressSync(await fs.readFile(`${historical}.br`)), bytes);
+    await assert.rejects(fs.access(`${historical}.gz`));
+    assert.deepEqual(await fs.readFile(`${current}.gz`), gzip);
+    assert.deepEqual(await fs.readFile(`${future}.gz`), gzip);
+    assert.equal((await archive(vaultRoot)).archivedShardCount, 0);
+  });
+
+  test(`${family}: resumes interrupted gzip/Brotli publication without rewriting the retained archive`, async () => {
+    const vaultRoot = await createVault();
+    const absolutePath = await shard(vaultRoot);
+    const brotli = compressShard(bytes, "brotli");
+    await fs.writeFile(`${absolutePath}.gz`, compressShard(bytes, "gzip"));
+    await fs.writeFile(`${absolutePath}.br`, brotli);
+    assert.equal((await archive(vaultRoot)).repairedShardCount, 1);
+    await assert.rejects(fs.access(`${absolutePath}.gz`));
+    assert.deepEqual(await fs.readFile(`${absolutePath}.br`), brotli);
+  });
+
+  test(`${family}: preserves conflicting raw/gzip/Brotli copies`, async () => {
+    const vaultRoot = await createVault();
+    const absolutePath = await shard(vaultRoot);
+    const different = Buffer.concat([bytes, bytes]);
+    await fs.writeFile(absolutePath, bytes);
+    await fs.writeFile(`${absolutePath}.gz`, compressShard(bytes, "gzip"));
+    await fs.writeFile(`${absolutePath}.br`, compressShard(different, "brotli"));
+    assert.equal((await archive(vaultRoot)).archivedShardCount, 0);
+    assert.deepEqual(await fs.readFile(absolutePath), bytes);
+    assert.deepEqual(decompressShard(await fs.readFile(`${absolutePath}.gz`), "gzip", 10000), bytes);
+    assert.deepEqual(brotliDecompressSync(await fs.readFile(`${absolutePath}.br`)), different);
+  });
+
+  test(`${family}: a corrupt gzip does not prevent another closed month from archiving`, async () => {
+    const vaultRoot = await createVault();
+    const badPath = await shard(vaultRoot, "12", "2025");
+    await fs.writeFile(`${badPath}.gz`, "broken gzip");
+    const valid = await shard(vaultRoot);
+    await fs.writeFile(`${valid}.gz`, compressShard(bytes, "gzip"));
+    const result = await archive(vaultRoot);
+    assert.equal(result.blockedShardCount, 1);
+    assert.equal(result.archivedShardCount, 1);
+    assert.equal(await fs.readFile(`${badPath}.gz`, "utf8"), "broken gzip");
+    assert.deepEqual(brotliDecompressSync(await fs.readFile(`${valid}.br`)), bytes);
+  });
+}
