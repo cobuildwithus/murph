@@ -1467,15 +1467,22 @@ Last verified: 2026-09-04
   recoverable when that exact owner set names its sequence, independently of
   another connection's position in the global frontier. A later due webhook for that same connection may
   admit the older exact retained mailbox item so newly dirty data can enter the
-  local worker without waiting behind a historical retry. That webhook remains
-  available for an exact continuation only when post-checkpoint
-  acknowledgement reports a newer dirty revision and the retained job hints prove the next pass has
-  admission capacity. Every accepted dirty append advances that revision,
+  local worker without waiting behind a historical retry. At preparation, that
+  selected retained owner absorbs already-queued, unattempted plain webhook and
+  scheduled hints for its exact member, provider, connection, and connection
+  epoch. This transfers the hints to the existing durable continuation before
+  dirty input is fetched; it never discards its provider jobs or backoff. A
+  distinct epoch, lifecycle event, explicit job, manual request, recording or
+  attempted item, or newer cadence remains a same-connection ordering barrier.
+  New hints arriving after admission remain independently queued. On a newer
+  dirty revision, the post-checkpoint acknowledgement directly advances the
+  retained owner's next attempt when the retained job hints prove capacity;
+  continuation therefore needs no leftover webhook signal. Every accepted dirty append advances that revision,
   including payload-only work accepted after the pass fetched its input, while
   ingress still coalesces mailbox delivery for an already-dirty connection.
   Revision inequality is therefore the existing authoritative observed-work
   frontier rather than a second scheduling state. Otherwise, the existing
-  mailbox retention update atomically defers the webhook to the retained retry,
+  mailbox retention update atomically defers any unabsorbed legacy webhook to the retained retry,
   including payload-only backoff and a full retained queue that cannot yet admit
   distinct dirty work.
   The retained wake's job hints suppress provider scheduling,

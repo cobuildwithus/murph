@@ -1296,11 +1296,14 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox webhook dirty work reaches quiescence without starting provider cadence", async () => {
+  test.each([false, true])("system mailbox webhook work checkpoints without starting provider cadence (retained retry: %s)", async (retainedRetry) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const connectionId = "device_sync_connection_webhook_dirty";
+    const retryAt = new Date(Date.parse(TEST_NOW) + 24 * 60 * 60_000).toISOString();
+    const futureJobs = [{ availableAt: retryAt, dedupeKey: "synthetic-future-resource",
+      kind: "resource" as const, maxAttempts: 1, priority: 30 }];
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:webhook-dirty",
       id: "mailbox_item_system_mailbox_device_webhook_dirty",
@@ -1347,6 +1350,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           hint: {
             occurredAt: TEST_NOW,
             reason: "webhook_dirty_transition",
+            ...(retainedRetry ? { jobs: futureJobs } : {}),
           },
           kind: "device-sync.wake",
           occurredAt: TEST_NOW,
@@ -1355,8 +1359,25 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           userId: TEST_USER_ID,
         },
       });
+      if (retainedRetry) {
+        await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+          pending: state.pending.map((item) => ({ ...item, attemptCount: 1,
+            deviceSyncContinuationOwner: true, lastAttemptAt: TEST_NOW, nextAttemptAt: retryAt })),
+        }));
+        for (const [index, reason] of (["reconcile_due", "webhook_hint"] as const).entries()) {
+          const queuedItem = createMailboxItem({
+            dedupeKey: `device-sync.wake:synthetic-queued-${index}`, id: `mailbox_synthetic_queued_${index}`,
+            kind: "device-sync.wake", lane: "system", laneSeq: String(index + 2),
+          });
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncSystemMailboxItem(queuedItem), vaultRoot,
+            wake: { connectionId, eventId: queuedItem.dedupeKey, expectedConnectedAt: TEST_NOW,
+              kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop", reason, userId: TEST_USER_ID },
+          });
+        }
+      }
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
+      importState.watermarks.system = retainedRetry ? "3" : "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty-before.bundle.json",
@@ -1408,13 +1429,23 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(fetchDirtyStatesCalls, 1);
       assert.equal(providerFetch.mock.calls.length, 0);
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.nextWakeReason ?? null, null);
-      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(result.status, retainedRetry ? "scheduled" : "idle");
+      assert.equal(result.nextWakeAt, retainedRetry ? retryAt : null);
+      assert.equal(result.nextWakeReason ?? null, retainedRetry ? "device-sync.reconcile" : null);
+      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+      if (retainedRetry) {
+        assert.equal(pending.length, 1);
+        assert.equal(pending[0]?.itemId, deviceItem.id);
+        assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
+        assert.equal(pending[0]?.nextAttemptAt, retryAt);
+        assert.deepEqual(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.jobs : null, futureJobs);
+        assert.deepEqual(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["1"]);
+      } else {
+        assert.deepEqual(pending, []);
+      }
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "1",
+        retainedRetry ? "3" : "1",
       );
     } finally {
       vi.unstubAllGlobals();
