@@ -56,7 +56,6 @@ import {
   projectHostedSystemMailboxWakeOwnerFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
-  resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   systemMailboxItemIsDue,
   updateHostedSystemMailboxPendingItem,
@@ -986,12 +985,14 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const retryMs = hostedSystemMailboxRecordRetryDelay(input.item.postCheckpointRecord, normalized.code);
     if (retryMs === null) {
       await removeHostedSystemMailboxPendingItemIfCurrent({ item: input.item, vaultRoot: input.vaultRoot });
+      const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot });
       return {
         errorCode: normalized.code,
         errorMessage: normalized.message,
         failed: 1,
         recorded: 0,
-        nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+        nextWakeAt: nextWake.at,
+        ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       };
     }
     const retryAt = new Date(Date.now() + retryMs).toISOString();
@@ -1011,15 +1012,19 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
         runtime: input.runtime,
       });
     }
-    const nextWakeAt = await resolveHostedSystemMailboxNextWakeAt({
+    const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
       vaultRoot: input.vaultRoot,
     });
+    const retryWake = nextWake.at ? nextWake : createHostedRuntimeWakeCandidate(
+      retryAt,
+      resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
+    );
     return {
       errorCode: normalized.code,
       errorMessage: normalized.message,
       failed: 1,
-      nextWakeAt: nextWakeAt ?? retryAt,
-      nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
+      nextWakeAt: retryWake.at,
+      nextWakeReason: retryWake.reason,
       recorded: 0,
     };
   }

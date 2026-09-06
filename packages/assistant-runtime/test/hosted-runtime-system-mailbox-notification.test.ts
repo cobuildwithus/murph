@@ -103,6 +103,121 @@ beforeEach(() => {
 });
 
 describe("hosted system mailbox notification execution context", () => {
+  it.each(["approval", "device", "same-deadline", "retry-only"] as const)(
+    "preserves the selected wake owner after a device callback fails (%s)",
+    async (remaining) => {
+      const workspace = await createHostedRuntimeWorkspace("murph-hosted-callback-owner-");
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(FIXED_NOW);
+      const retryAt = "2026-04-27T00:01:00.000Z";
+      const runtime = createRuntime({
+        deviceSyncPort: {
+          ...createDeviceSyncPortStub(),
+          ackDirtyStateProcessed: vi.fn().mockRejectedValue(new Error("Synthetic callback failure")),
+        },
+      });
+      try {
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedDeviceSyncItem(),
+          vaultRoot: workspace.vaultRoot,
+          wake: buildHostedExecutionDeviceSyncWake({
+            connectionId: "device_connection_failed_callback",
+            eventId: "device-sync.wake:failed-callback",
+            occurredAt: FIXED_NOW,
+            reason: "webhook_hint",
+            userId: "member_123",
+          }),
+        });
+        await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+          pending: state.pending.map((item) => ({
+            ...item,
+            postCheckpointRecord: {
+              connectionId: "device_connection_failed_callback",
+              kind: "device-sync.dirty-processed" as const,
+              processedRevision: "1",
+            },
+            status: "recording" as const,
+          })),
+        }));
+        const failedItem = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+        assert.ok(failedItem);
+        if (remaining === "approval") {
+          const wake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+            effectId: "effect_approved_callback_successor",
+            eventId: "runtime-control:approved-callback-successor",
+            occurredAt: FIXED_NOW,
+            userId: "member_123",
+          });
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedRuntimeControlItem({
+              dedupeKey: wake.eventId,
+              id: "mailbox_callback_successor",
+              kind: wake.kind,
+              laneSeq: "2",
+            }),
+            vaultRoot: workspace.vaultRoot,
+            wake,
+          });
+        } else if (remaining !== "retry-only") {
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncItem({
+              dedupeKey: "device-sync.wake:other-callback-owner",
+              id: "mailbox_callback_successor",
+              laneSeq: "2",
+            }),
+            vaultRoot: workspace.vaultRoot,
+            wake: buildHostedExecutionDeviceSyncWake({
+              connectionId: "device_connection_other",
+              eventId: "device-sync.wake:other-callback-owner",
+              occurredAt: FIXED_NOW,
+              reason: "webhook_hint",
+              userId: "member_123",
+            }),
+          });
+          if (remaining === "same-deadline") {
+            await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+              pending: state.pending.map((item) => item.itemId === "mailbox_callback_successor"
+                ? { ...item, nextAttemptAt: retryAt }
+                : item),
+            }));
+          }
+        }
+        const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+          item: failedItem,
+          runtime,
+          vaultRoot: workspace.vaultRoot,
+        });
+        expect(result).toMatchObject({
+          failed: 1,
+          nextWakeAt: remaining === "approval" ? FIXED_NOW : retryAt,
+          nextWakeReason: remaining === "approval" ? "assistant" : "device-sync.reconcile",
+          recorded: 0,
+        });
+        expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+          .toContainEqual(expect.objectContaining({
+            itemId: failedItem.itemId,
+            nextAttemptAt: retryAt,
+            status: "recording",
+          }));
+        const next = await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => result.nextWakeAt ?? FIXED_NOW,
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        expect(next).toMatchObject({
+          itemId: remaining === "approval"
+            ? "mailbox_callback_successor" : failedItem.itemId,
+          status: remaining === "approval"
+            ? "processed" : "recording",
+        });
+      } finally {
+        vi.useRealTimers();
+        await workspace.cleanup();
+      }
+    },
+  );
   it("carries a closed validation reason without persisting private response text", async () => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-system-mailbox-validation-reason-",
@@ -1772,7 +1887,9 @@ describe("hosted system mailbox notification execution context", () => {
     });
   });
 
-  it.each([null, "CLINICAL_RECORD_OUTCOME_CONFLICT", "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH", "CLINICAL_RECORD_RUN_STALE"])("settles a durable clinical outcome once (error=%s)", async (errorCode) => {
+  it.each([null, "CLINICAL_RECORD_OUTCOME_CONFLICT", "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH", "CLINICAL_RECORD_RUN_STALE"].flatMap(
+    (errorCode) => [false, true].map((remainingDevice) => ({ errorCode, remainingDevice })),
+  ))("settles a durable clinical outcome once (error=$errorCode, remainingDevice=$remainingDevice)", async ({ errorCode, remainingDevice }) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const recordOutcome = vi.fn(async () => { if (errorCode) throw Object.assign(new Error("Outcome rejected"), { code: errorCode }); });
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
@@ -1857,16 +1974,45 @@ describe("hosted system mailbox notification execution context", () => {
         "clinical-records.outcome-recorded",
       );
 
+      if (remainingDevice) {
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedDeviceSyncItem({ laneSeq: "2" }),
+          vaultRoot: workspace.vaultRoot,
+          wake: buildHostedExecutionDeviceSyncWake({
+            eventId: "device-sync.wake:after-clinical-record",
+            occurredAt: FIXED_NOW,
+            reason: "webhook_hint",
+            userId: "member_123",
+          }),
+        });
+      }
+
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toMatchObject({
         failed: errorCode ? 1 : 0,
-        nextWakeAt: null,
+        nextWakeAt: remainingDevice ? expect.any(String) : null,
+        ...(remainingDevice ? { nextWakeReason: "device-sync.reconcile" } : {}),
         recorded: errorCode ? 0 : 1,
       });
-      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toHaveLength(0);
+      const pending = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      expect(pending).toHaveLength(remainingDevice ? 1 : 0);
+      if (remainingDevice) {
+        expect(pending[0]?.routeAction).toBe("run-device-sync-wake");
+        const next = await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => new Date().toISOString(),
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        expect(next).toMatchObject({
+          itemId: "mailbox_item_system_device_sync",
+          status: "processed",
+        });
+      }
       expect(recordOutcome).toHaveBeenCalledOnce();
       expect(recordOutcome).toHaveBeenCalledWith(request);
     } finally {
