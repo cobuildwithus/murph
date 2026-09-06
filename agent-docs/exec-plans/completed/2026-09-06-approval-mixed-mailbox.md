@@ -1,6 +1,6 @@
 # Deliver approved effects alongside queued device work
 
-Status: active
+Status: completed
 Created: 2026-09-06
 Updated: 2026-09-06
 
@@ -60,4 +60,15 @@ no Web or Temporal protocol change or data migration is required.
   and no model/provider-model entry are covered. Product UX: Ready for review.
 - Live model proof is not applicable: this continuation performs no model turn
   and changes no prompt, tool availability, or authored reply.
-- Final review and required CI remain pending. No production mutation performed.
+- Independent round-one review passed on f76684246bb37accdadb8997b2761d63f33e709a;
+  verified model metadata matches the requested model. No qualifying bugs or
+  material Complexity Collapse findings. Initial browser staging failed before
+  submission; the alternate configured lane completed the same review round.
+- Required CI passed on the reviewed code head (32 successes, three expected skips).
+- Parent final review passed. The refreshed base merges without conflicts.
+- The final plan-closure commit changes documentation only; source, tests, and
+  changelog are identical to the reviewed candidate. No new substantive review
+  is needed under the explanatory-docs exemption. Required final-head CI will
+  be verified in the PR rather than creating another plan-only closure commit.
+- No production mutation performed. Deployment remains a separate step.
+Completed: 2026-09-06
