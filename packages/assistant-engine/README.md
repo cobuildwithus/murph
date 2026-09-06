@@ -118,14 +118,94 @@ authority. Dynamic-tool dispatch requires the exact active root turn and
 rejects descendant, stale-turn, or foreign-thread calls; closing the invocation
 withdraws the tools without replacing the App Server.
 
-Codex command failures reuse the existing assistant runtime-issue path. The
-turn-scoped classifier persists only a `search` or `unknown` family, a
-turn-local command ordinal saturated at 10,000, the exact numeric exit code,
-and existing duration and output-size buckets. It never persists command text,
-arguments, paths, output, payloads, or provider action identifiers. A direct
-bare `rg` or `grep` exit code 1 is treated as an expected no-match result. When
-a later direct search succeeds, `recoveredAfterFailure` records only
-family-level recovery; it does not assert that the exact query was retried.
+**Runtime failure diagnostics.** Codex command failures reuse the existing
+assistant runtime-issue path. The turn-scoped classifier persists only the
+existing finite command family, a turn-local command ordinal saturated at
+10,000, the numeric exit code, and duration/output-size buckets. It never
+persists command text, arguments, paths, output, payloads or provider action
+identifiers. A direct bare `rg` or `grep` exit code 1 remains an expected no-match.
+A later direct search success sets `recoveredAfterFailure` only at family level;
+it does not assert that the exact query was retried.
+
+For a failed, already-classified `vault-cli event` command, the same
+`CODEX_COMMAND_EXIT_NONZERO` issue adds `details.vaultCliErrorCategory`:
+`invalid_input`, `not_found`, `conflict`, `unavailable` or `unknown`. The owner
+transiently parses the **entire** `aggregatedOutput` (or its snake-case alias),
+only when at most 16,384 UTF-8 bytes. It accepts the CLI's direct JSON error
+object or `--full-output` `{ok:false,error:...}` envelope, with string code and
+message and optional boolean retryable. Only current event/usecase and
+operator-config projection codes are allowlisted. `contract_invalid` requires
+`stage=validation` to mean invalid input; otherwise its cause is unknown.
+No arbitrary code, text, nested error, output excerpt or metadata is copied.
+Malformed, truncated, excessive, non-JSON and unrecognized output stays
+`unknown`. Other command families have no new field; no extra CLI event or
+success log is emitted. A CLI `not_found` category does not change its exit
+status or existing failed-action count.
+
+Automation's local owner adds one `AUTOMATION_TOOL_FAILED` issue through the
+existing `result.runtimeIssueInputs` transport. `operation` is only `save`,
+`patch`, `inspect`, `reconcile` or `attach_follow_up`. `details.failureReason`
+labels the branch: `unavailable`, `authority_rejected`, `version_conflict`,
+`action_result_mismatch`, `oversized_result`, `result_serialization_failed` or
+`handler_exception`. The last adds `handlerErrorCode`: only `invalid_option`,
+`automation_not_found` or `unknown`. These codes do not infer authority from
+exception prose. Serialization failure and size rejection keep the same
+existing RPC rejection text. Success, including inspect-not-found and accepted
+optional follow-up attachment, emits no branch diagnostic. Validation and
+root-turn dispatch rejection remain with their existing owners.
+
+These are **failure classifications, not another call denominator**. Generic
+`CODEX_DYNAMIC_TOOL_CALL_FAILED` rows may coexist with automation branch rows;
+never add the two to count failed calls. Use existing action-diagnostics
+command/tool call counts for rates over the same window and deployment cohort.
+The unchanged eight-issue per-turn cap, best-effort writes and export retries
+make coverage lossy: missing diagnostics never prove success or no traffic.
+There is no new queue, awaited tool-path I/O, state, schema or dependency.
+
+For future natural-traffic verification, use read-only aggregate queries with
+bounded time parameters. This example returns only finite labels and counts,
+not content, raw rows or identifiers:
+
+```sql
+SELECT
+  CASE WHEN error_code = 'AUTOMATION_TOOL_FAILED' THEN 'automation'
+       ELSE 'vault-cli event' END AS diagnostic_surface,
+  CASE WHEN error_code = 'AUTOMATION_TOOL_FAILED'
+       THEN CASE WHEN operation IN ('save', 'patch', 'inspect', 'reconcile', 'attach_follow_up')
+                 THEN operation ELSE 'missing_or_unrecognized' END
+       ELSE 'command.execution' END AS operation,
+  CASE WHEN error_code = 'AUTOMATION_TOOL_FAILED'
+       THEN CASE WHEN details_json->>'failureReason' IN (
+                   'unavailable', 'authority_rejected', 'version_conflict',
+                   'action_result_mismatch', 'oversized_result',
+                   'result_serialization_failed', 'handler_exception')
+                 THEN details_json->>'failureReason' ELSE 'missing_evidence' END
+       ELSE CASE WHEN NOT (details_json ? 'vaultCliErrorCategory') THEN 'missing_evidence'
+                 WHEN details_json->>'vaultCliErrorCategory' IN (
+                   'invalid_input', 'not_found', 'conflict', 'unavailable', 'unknown')
+                 THEN details_json->>'vaultCliErrorCategory' ELSE 'unrecognized_evidence' END
+       END AS failure_category,
+  CASE WHEN details_json->>'handlerErrorCode' IN ('invalid_option', 'automation_not_found', 'unknown')
+       THEN details_json->>'handlerErrorCode' ELSE 'not_recorded' END AS handler_code,
+  count(*) AS diagnostic_rows
+FROM hosted_assistant_runtime_issue
+WHERE occurred_at >= $1 AND occurred_at < $2
+  AND ((component = 'assistant.automation' AND error_code = 'AUTOMATION_TOOL_FAILED')
+    OR (component = 'assistant.codex-action' AND error_code = 'CODEX_COMMAND_EXIT_NONZERO'
+        AND details_json->>'commandFamily' = 'vault-cli event'))
+GROUP BY 1, 2, 3, 4;
+```
+
+Missing fields from older versions are **missing evidence**, not the explicit
+`unknown` classification. Old automation versions emit no branch rows at all;
+retain their generic failures separately, never union/sum them with branch rows
+as calls. Older classifiers may also lack event-family attribution. Existing
+release provenance can select a compatible deployment cohort before aggregation;
+new optional details remain compatible with existing sanitizers/exporters and
+mixed-version records. After deployment, observe natural traffic only, confirm
+finite categories survive export without content, and compare diagnostic
+coverage with the existing call denominator. No live assistant journey or
+production failure injection is required by this telemetry-only change.
 
 MultiAgent V2 descendants admitted before the root final reply may keep working
 through Codex's native lifecycle after that reply. Root completion and the next

@@ -28,6 +28,7 @@ const TOOL_DIAGNOSTIC_LIMIT = 16
 const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
 const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
 const COMMAND_ORDINAL_MAX = 10_000
+const VAULT_CLI_ERROR_OUTPUT_MAX_BYTES = 16_384
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
 
 type CodexActionKind =
@@ -605,6 +606,9 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
           ? {
               commandFamily: input.commandDiagnostic.commandFamily,
               commandOrdinal: input.commandDiagnostic.commandOrdinal,
+              ...(input.commandDiagnostic.commandFamily === 'vault-cli event'
+                ? { vaultCliErrorCategory: readVaultEventErrorCategory(item) }
+                : {}),
               ...(input.commandDiagnostic.commandFamily === 'search'
                 ? { recoveredAfterFailure: false }
                 : {}),
@@ -637,6 +641,62 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
     errorCode: 'CODEX_TOOL_CALL_FAILED',
     summary: 'Codex tool call failed during provider turn.',
     details: commonDetails,
+  }
+}
+
+function readVaultEventErrorCategory(
+  item: Record<string, unknown> | null,
+): 'invalid_input' | 'not_found' | 'conflict' | 'unavailable' | 'unknown' {
+  const output = readFirstString(item?.aggregatedOutput, item?.aggregated_output)
+  if (
+    output === null
+    || output.length > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
+    || Buffer.byteLength(output, 'utf8') > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
+  ) {
+    return 'unknown'
+  }
+
+  try {
+    // CLI entry/formatting owns both direct and --full-output JSON envelopes.
+    // Parse the entire bounded output, never an excerpt or nested error prose.
+    const envelope = asRecord(JSON.parse(output))
+    const error = envelope?.ok === false
+      ? asRecord(envelope.error)
+      : envelope?.ok === undefined && envelope?.error === undefined ? envelope : null
+    if (
+      typeof error?.code !== 'string'
+      || typeof error.message !== 'string'
+      || (error.retryable !== undefined && typeof error.retryable !== 'boolean')
+    ) {
+      return 'unknown'
+    }
+    return classifyVaultEventError(error)
+  } catch {
+    return 'unknown'
+  }
+}
+
+function classifyVaultEventError(
+  error: Record<string, unknown>,
+): 'invalid_input' | 'not_found' | 'conflict' | 'unavailable' | 'unknown' {
+  // Current event/usecase and operator-config error projection contracts only.
+  switch (error.code) {
+    case 'VALIDATION_ERROR':
+    case 'invalid_option':
+    case 'invalid_payload':
+    case 'VAULT_INVALID_INPUT':
+      return 'invalid_input'
+    case 'contract_invalid':
+      // Without validation evidence this can also mean invalid stored data.
+      return error.stage === 'validation' ? 'invalid_input' : 'unknown'
+    case 'not_found':
+      return 'not_found'
+    case 'conflict':
+      return 'conflict'
+    case 'storage_unavailable':
+      return 'unavailable'
+    default:
+      return 'unknown'
   }
 }
 

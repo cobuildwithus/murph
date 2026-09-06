@@ -31,6 +31,7 @@ import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
 } from '../../assistant/execution-context.js'
+import type { AssistantRuntimeIssueInput } from '../../assistant/issue-reporting.js'
 import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
@@ -895,7 +896,11 @@ export function executeFollowUpAttachmentDynamicTool(input: {
   request: AutomationFollowUpRequest
 }) {
   if (input.allowed !== true) {
-    return automationTextResult(false, 'follow-up attachment is unavailable for this turn')
+    return automationFailureResult(
+      'attach_follow_up',
+      'authority_rejected',
+      'follow-up attachment is unavailable for this turn',
+    )
   }
   return {
     ...automationTextResult(true, 'One optional follow-up is attached to this final message, subject to delivery and conversation limits. Do not promise it will send.'),
@@ -909,20 +914,27 @@ export async function executeAutomationDynamicTool(input: {
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
 }): Promise<{
+  runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
   rpcResult: {
     contentItems: Array<{ text: string; type: 'inputText' }>
     success: boolean
   }
 }> {
+  const action = input.request.request.action
   if (!input.automationTool) {
-    return automationTextResult(false, 'automation management is unavailable for this turn')
+    return automationFailureResult(
+      action,
+      'unavailable',
+      'automation management is unavailable for this turn',
+    )
   }
   if (
     input.request.onboardingFirstReadCompletionRequested === true
     && input.onboardingFirstReadCompletionTransitionAvailable !== true
   ) {
-    return automationTextResult(
-      false,
+    return automationFailureResult(
+      action,
+      'authority_rejected',
       'onboarding first read is unavailable outside its completion transition',
     )
   }
@@ -935,15 +947,16 @@ export async function executeAutomationDynamicTool(input: {
       signal: input.abortSignal ?? null,
     })
     if (response.action !== input.request.request.action) {
-      return automationTextResult(
-        false,
+      return automationFailureResult(
+        action,
+        'action_result_mismatch',
         'automation operation returned an unexpected result',
       )
     }
 
     const text = serializeAutomationToolResponse(response)
-    if (!text) {
-      return automationTextResult(false, 'automation result is too large')
+    if (typeof text !== 'string') {
+      return automationFailureResult(action, text.failureReason, 'automation result is too large')
     }
     return automationTextResult(true, text)
   } catch (error) {
@@ -957,12 +970,20 @@ export async function executeAutomationDynamicTool(input: {
       )
     }
     if (isAutomationConflictError(error)) {
-      return automationTextResult(
-        false,
+      return automationFailureResult(
+        action,
+        'version_conflict',
         'automation changed since the last readback; inspect it again and decide from the current stored schedule before retrying',
       )
     }
-    return automationTextResult(false, 'automation operation is unavailable')
+    return automationFailureResult(
+      action,
+      'handler_exception',
+      'automation operation is unavailable',
+      isUnknownRecord(error) && error.code === 'invalid_option'
+        ? 'invalid_option'
+        : isAutomationNotFoundError(error) ? 'automation_not_found' : 'unknown',
+    )
   }
 }
 
@@ -980,7 +1001,7 @@ function isAutomationConflictError(
 
 function serializeAutomationToolResponse(
   response: AssistantHostedAutomationToolResponse,
-): string | null {
+): string | { failureReason: 'oversized_result' | 'result_serialization_failed' } {
   let payload: Readonly<Record<string, unknown>>
   switch (response.action) {
     case 'reconcile':
@@ -1034,10 +1055,40 @@ function serializeAutomationToolResponse(
       : AUTOMATION_TOOL_RESULT_MAX_BYTES
     return new TextEncoder().encode(text).byteLength <= maxBytes
       ? text
-      : null
+      : { failureReason: 'oversized_result' }
   } catch {
-    return null
+    return { failureReason: 'result_serialization_failed' }
   }
+}
+
+// Only owner-known branches/codes enter telemetry; never inspect exception prose.
+function automationFailureResult(
+  action: AssistantHostedAutomationToolRequest['action'] | 'attach_follow_up',
+  failureReason:
+    | 'unavailable'
+    | 'authority_rejected'
+    | 'version_conflict'
+    | 'action_result_mismatch'
+    | 'oversized_result'
+    | 'result_serialization_failed'
+    | 'handler_exception',
+  text: string,
+  handlerErrorCode?: 'invalid_option' | 'automation_not_found' | 'unknown',
+) {
+  const issue: AssistantRuntimeIssueInput = {
+    component: 'assistant.automation',
+    operation: action,
+    errorCode: 'AUTOMATION_TOOL_FAILED',
+    phase: 'tool_call',
+    issueKind: 'tool_error',
+    severity: 'warning',
+    summary: 'Automation tool failed during provider turn.',
+    details: {
+      failureReason,
+      ...(handlerErrorCode === undefined ? {} : { handlerErrorCode }),
+    },
+  }
+  return { ...automationTextResult(false, text), runtimeIssueInputs: [issue] }
 }
 
 function automationTextResult(success: boolean, text: string): {
