@@ -50,7 +50,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, durable retry ownership, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-05 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-06 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, hosted media receipt recovery and atomic retirement, and escalation rules. | Security policy | High | 2026-09-05 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
