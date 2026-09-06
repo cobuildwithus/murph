@@ -58,6 +58,7 @@ import {
   isHostedStandbyClaimId,
   requireHostedRunnerSlotLifecycle,
   resolveHostedRunnerReleaseId,
+  type HostedStandbySlotBinding,
 } from "../standby-runner-contract.js";
 import {
   createHostedProviderEgressCredential,
@@ -236,12 +237,12 @@ export class RuntimeInvocationService {
   prepareForFreshStart(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
     input: RuntimeInvocationInput;
-  }): (token: RunnerWriteFenceToken) => Promise<PreparedRuntimeInvocation> {
+  }): (token: RunnerWriteFenceToken, verifiedSlotBinding?: HostedStandbySlotBinding) => Promise<PreparedRuntimeInvocation> {
     const preparationInputs = this.prepareInputs(input);
     // Allocation can fail before consuming the reads. Observe rejection while
     // their original request deadlines bound any remaining read-only work.
     void preparationInputs.catch(() => undefined);
-    return (token) => this.prepareWithInputs({ ...input, token }, preparationInputs);
+    return (token, verifiedSlotBinding) => this.prepareWithInputs({ ...input, token }, preparationInputs, verifiedSlotBinding);
   }
 
   private async prepareInputs(input: {
@@ -288,6 +289,7 @@ export class RuntimeInvocationService {
   private async prepareWithInputs(
     input: Parameters<RuntimeInvocationService["prepareWithFence"]>[0],
     preparationInputs: Promise<RuntimeInvocationPreparationInputs>,
+    verifiedSlotBinding?: HostedStandbySlotBinding,
   ): Promise<PreparedRuntimeInvocation> {
     const preparationStartedAtMs = Date.now();
     const preparation = await preparationInputs;
@@ -366,6 +368,7 @@ export class RuntimeInvocationService {
     });
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
       stores,
+      verifiedSlotBinding,
       commandBudget: input.commandBudget,
       hostedAssistantCustomInferenceOverride,
       hostedAssistantModelOverride:
@@ -946,6 +949,7 @@ export class RuntimeInvocationService {
     hostedAssistantSubagentModelOverridesAllowed: boolean;
     processingMode?: HostedWorkspaceInvocationProcessingMode | null;
     stores: RunnerUserStores;
+    verifiedSlotBinding?: HostedStandbySlotBinding;
     token: RunnerWriteFenceToken;
     userId: string;
     workspace: HostedWorkspaceState | null;
@@ -1030,6 +1034,7 @@ export class RuntimeInvocationService {
           stepTimeoutMs: this.input.env.webControlTimeoutMs,
         }),
         this.resolveInvocationRunnerContainerName({
+          verifiedSlotBinding: input.verifiedSlotBinding,
           commandBudget: input.commandBudget ?? null,
           runnerContainerName: input.token.runnerContainerName,
           userId: input.userId,
@@ -1159,6 +1164,7 @@ export class RuntimeInvocationService {
   }
 
   private async resolveInvocationRunnerContainerName(input: {
+    verifiedSlotBinding?: HostedStandbySlotBinding;
     commandBudget: RuntimeProcessingCommandBudget | null;
     runnerContainerName: string | null;
     userId: string;
@@ -1175,13 +1181,16 @@ export class RuntimeInvocationService {
       }
       const readBinding = async () =>
         await requireHostedRunnerSlotLifecycle(namespace.getByName(runnerContainerName)).readStandbySlotBinding();
-      const binding = input.commandBudget
+      // Fresh allocation already checked this immutable binding. Reuse only
+      // its request-local receipt; direct and retained starts still read it.
+      // The container independently authorizes its live binding at launch.
+      const binding = input.verifiedSlotBinding ?? (input.commandBudget
         ? await runRuntimeProcessingCommandStep({
             budget: input.commandBudget,
             operation: readBinding,
             stepTimeoutMs: this.input.env.webControlTimeoutMs,
           })
-        : await readBinding();
+        : await readBinding());
       if (
         !hostedRunnerSlotBindingMatchesTarget(binding, runnerContainerName)
         || binding.state !== "bound"
