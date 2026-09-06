@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Patterns fit your phone",
     "summary": "Each factor now has its own card on phones, with health measures shown together without a selector or sideways scrolling.",
-    "details": "Cards lead with changed results, with quieter comparisons in a compact footer and coverage bars beside each factor. Tap a comparison to inspect its supporting data. Desktop keeps the sortable comparison table.",
+    "details": "Cards lead with changed results, with quieter comparisons in a compact footer and coverage bars beside each factor. Tap a comparison to open its supporting data in a bottom drawer. Desktop keeps the sortable comparison table.",
     "relevanceTags": ["patterns", "mobile"],
     "sourcePullRequests": [],
     "tryIt": { "href": "/patterns", "label": "View your patterns" }

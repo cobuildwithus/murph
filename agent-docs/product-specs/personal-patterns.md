@@ -137,7 +137,9 @@ pending and publishes a report for the newer hash.
 
 The `/patterns` page shows the first 15 factors. Desktop compares every
 supported outcome in a matrix. Phones show one card per factor, with coverage
-bars, changed comparisons together, and tappable result details. Neutral measures appear
+bars and changed comparisons together. Tapping a mobile result opens a bottom
+drawer with the same comparison details and evidence dates as the desktop
+hover popover. Neutral measures appear
 as compact links under one `No clear change` label at the bottom. Measures that
 still need data remain available in a disclosure within the card. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted

@@ -10,10 +10,13 @@ import {
   Minus,
   Moon,
   Sparkles,
+  X,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import {
+  type ReactElement,
+  type ReactNode,
   createContext,
   useContext,
   useEffect,
@@ -37,10 +40,17 @@ import {
   Popover,
   PopoverContent,
   PopoverDescription,
-  PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
 } from "@/src/components/ui/popover";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/src/components/ui/drawer";
 import { Separator } from "@/src/components/ui/separator";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import {
@@ -773,8 +783,6 @@ function PatternCompositeBubble({
   entries: PatternEffectEntry[];
   factorLabel: string;
 }) {
-  const pointerAnchor = usePointerPopoverAnchor();
-  const popover = useExclusivePatternPopover();
   const deltaPercent =
     entries.reduce((sum, entry) => sum + (entry.cell.deltaPercent ?? 0), 0) /
     entries.length;
@@ -797,95 +805,73 @@ function PatternCompositeBubble({
   const period = formatCombinedEvidencePeriod(entries);
 
   return (
-    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
-      <PopoverTrigger
-        closeDelay={200}
-        delay={150}
-        openOnHover
-        render={
-          <button
-            type="button"
-            aria-label={`You slept ${
-              deltaPercent >= 0 ? "better" : "worse"
-            } after ${factor}. ${label} average change across sleep score and sleep efficiency.`}
+    <PatternResultDetails
+      card={card}
+      eyebrow="Sleep quality"
+      title={`You slept ${deltaPercent >= 0 ? "better" : "worse"} after ${factor}.`}
+      description="Sleep score and sleep efficiency comparisons."
+      trigger={
+        <button
+          type="button"
+          aria-label={`You slept ${
+            deltaPercent >= 0 ? "better" : "worse"
+          } after ${factor}. ${label} average change across sleep score and sleep efficiency.`}
+          className={cn(
+            "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
+          )}
+          data-pattern-state="effect"
+        >
+          <span
+            aria-hidden="true"
             className={cn(
-              "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
+              "inline-flex shrink-0 items-center justify-center rounded-full",
+              tone === "positive" &&
+                classification === "pattern" &&
+                "bg-primary text-primary-foreground",
+              tone === "positive" &&
+                classification !== "pattern" &&
+                "bg-primary/15 text-primary",
+              tone === "negative" &&
+                classification === "pattern" &&
+                "bg-red-600 text-white dark:bg-red-500",
+              tone === "negative" &&
+                classification !== "pattern" &&
+                "bg-red-600/10 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+              "size-[18px]",
             )}
-            data-pattern-state="effect"
-            onKeyDown={pointerAnchor.onKeyDown}
-            onPointerMove={pointerAnchor.onPointerMove}
           >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "inline-flex shrink-0 items-center justify-center rounded-full",
-                tone === "positive" &&
-                  classification === "pattern" &&
-                  "bg-primary text-primary-foreground",
-                tone === "positive" &&
-                  classification !== "pattern" &&
-                  "bg-primary/15 text-primary",
-                tone === "negative" &&
-                  classification === "pattern" &&
-                  "bg-red-600 text-white dark:bg-red-500",
-                tone === "negative" &&
-                  classification !== "pattern" &&
-                  "bg-red-600/10 text-red-700 dark:bg-red-500/15 dark:text-red-300",
-                "size-[18px]",
-              )}
-            >
-              <DirectionIcon aria-hidden="true" className="size-3" />
-            </span>
-            <span>{label}</span>
-          </button>
-        }
-      />
-      <PopoverContent
-        align="center"
-        anchor={pointerAnchor.anchor}
-        className="w-[min(24rem,calc(100vw-2rem))]"
-        positionMethod="fixed"
-        side="right"
-        sideOffset={10}
-      >
-        <PopoverHeader className="gap-1.5">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-            Sleep quality
-          </p>
-          <PopoverTitle className="font-serif text-lg font-semibold leading-6">
-            You slept {deltaPercent >= 0 ? "better" : "worse"} after {factor}.
-          </PopoverTitle>
-          <PopoverDescription className="sr-only">
-            Sleep score and sleep efficiency comparisons.
-          </PopoverDescription>
-        </PopoverHeader>
-        <Separator />
-        <div className="space-y-4">
-          {entries.map(({ cell, outcome }) => (
-            <section aria-label={outcome.label} key={outcome.id}>
-              <p className="mb-2 text-xs font-medium text-foreground">
-                {outcome.label}
-              </p>
-              {cell.exposedMean !== null && cell.comparisonMean !== null ? (
-                <PatternComparisonBars
-                  comparisonLabel="Other days"
-                  comparisonMean={cell.comparisonMean}
-                  exposedLabel={`After ${factor}`}
-                  exposedMean={cell.exposedMean}
-                  tone={getPatternEffectTone(outcome.id, cell.deltaPercent)}
-                  unit={outcome.unit}
-                />
-              ) : null}
-            </section>
-          ))}
-        </div>
-        <Separator />
-        <p className="text-xs leading-5 text-muted-foreground">
-          Data from {period}.
-        </p>
-      </PopoverContent>
-    </Popover>
+            <DirectionIcon aria-hidden="true" className="size-3" />
+          </span>
+          <span>{label}</span>
+        </button>
+      }
+    >
+      <Separator />
+      <div className="space-y-4">
+        {entries.map(({ cell, outcome }) => (
+          <section aria-label={outcome.label} key={outcome.id}>
+            <p className="mb-2 text-xs font-medium text-foreground">
+              {outcome.label}
+            </p>
+            {cell.exposedMean !== null && cell.comparisonMean !== null ? (
+              <PatternComparisonBars
+                comparisonLabel="Other days"
+                comparisonMean={cell.comparisonMean}
+                exposedLabel={`After ${factor}`}
+                exposedMean={cell.exposedMean}
+                tone={getPatternEffectTone(outcome.id, cell.deltaPercent)}
+                unit={outcome.unit}
+              />
+            ) : null}
+          </section>
+        ))}
+      </div>
+      <Separator />
+      <p className="text-xs leading-5 text-muted-foreground">
+        Data from {period}.
+      </p>
+    </PatternResultDetails>
   );
 }
 
@@ -910,58 +896,30 @@ function PatternBubble({
   outcomeLabel: string;
   outcomeUnit: string;
 }) {
-  const pointerAnchor = usePointerPopoverAnchor();
-  const popover = useExclusivePatternPopover();
-
   if (!cell || cell.stage === "insufficient") {
     return (
-      <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
-        <PopoverTrigger
-          closeDelay={200}
-          delay={150}
-          openOnHover
-          render={
-            <button
-              type="button"
-              aria-label={`Not enough comparable data to check how ${factorLabel.toLocaleLowerCase()} relates to ${formatSentenceTerm(
-                outcomeLabel,
-              )}.`}
-              className={cn(
-                "inline-flex shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                card ? "min-h-11 justify-start rounded-md border-0 bg-transparent text-left text-sm" : "size-6",
-              )}
-              data-pattern-state="insufficient"
-              onKeyDown={pointerAnchor.onKeyDown}
-              onPointerMove={pointerAnchor.onPointerMove}
-            >
-              {card ? "Not enough data" : <Ellipsis aria-hidden="true" className="size-3" />}
-            </button>
-          }
-        />
-        <PopoverContent
-          align="center"
-          anchor={pointerAnchor.anchor}
-          className="w-[min(21rem,calc(100vw-2rem))]"
-          positionMethod="fixed"
-          side="right"
-          sideOffset={10}
-        >
-          <PopoverHeader className="gap-1.5">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-              Still learning
-            </p>
-            <PopoverTitle className="font-serif text-lg font-semibold leading-6">
-              No comparable days
-            </PopoverTitle>
-            <PopoverDescription className="text-xs leading-5 text-muted-foreground">
-              Murph found {formatDayCount(factorObservedDays)} with{" "}
-              {factorLabel.toLocaleLowerCase()}, but not enough matching days
-              also had {formatSentenceTerm(outcomeLabel)} data for a fair
-              comparison.
-            </PopoverDescription>
-          </PopoverHeader>
-        </PopoverContent>
-      </Popover>
+      <PatternResultDetails
+        card={card}
+        eyebrow="Still learning"
+        title="No comparable days"
+        description={`Murph found ${formatDayCount(factorObservedDays)} with ${factorLabel.toLocaleLowerCase()}, but not enough matching days also had ${formatSentenceTerm(outcomeLabel)} data for a fair comparison.`}
+        showDescription
+        trigger={
+          <button
+            type="button"
+            aria-label={`Not enough comparable data to check how ${factorLabel.toLocaleLowerCase()} relates to ${formatSentenceTerm(
+              outcomeLabel,
+            )}.`}
+            className={cn(
+              "inline-flex shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              card ? "min-h-11 justify-start rounded-md border-0 bg-transparent text-left text-sm" : "size-6",
+            )}
+            data-pattern-state="insufficient"
+          >
+            {card ? "Not enough data" : <Ellipsis aria-hidden="true" className="size-3" />}
+          </button>
+        }
+      />
     );
   }
 
@@ -989,48 +947,39 @@ function PatternBubble({
   )} ${formatEvidenceLabel(cell)}, ${formatEvidencePeriod(cell)}.`;
 
   return (
-    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
-      <PopoverTrigger
-        closeDelay={200}
-        delay={150}
-        openOnHover
-        render={
-          <button
-            type="button"
-            aria-label={accessibleLabel}
-            className={cn(
-              "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
-              cardFlat && "font-sans text-xs font-normal text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-current",
-            )}
-            data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
-            onKeyDown={pointerAnchor.onKeyDown}
-            onPointerMove={pointerAnchor.onPointerMove}
-          >
-            {cardFlat ? null : (
-              <PatternEffectIndicator
-                classification={cell.classification ?? null}
-                DirectionIcon={DirectionIcon}
-                isFlat={isFlat}
-                size={18}
-                tone={tone}
-              />
-            )}
-            {isFlat ? (card ? <span>{neutralLabel}</span> : null) : <span>{label}</span>}
-          </button>
-        }
-      />
-      <PatternPopoverContent
-        anchor={pointerAnchor.anchor}
-        cell={cell}
-        factorLabel={factorLabel}
-        isFlat={isFlat}
-        outcomeId={outcomeId}
-        outcomeLagDays={outcomeLagDays}
-        outcomeLabel={outcomeLabel}
-        outcomeUnit={outcomeUnit}
-      />
-    </Popover>
+    <PatternDetails
+      card={card}
+      cell={cell}
+      factorLabel={factorLabel}
+      isFlat={isFlat}
+      outcomeId={outcomeId}
+      outcomeLagDays={outcomeLagDays}
+      outcomeLabel={outcomeLabel}
+      outcomeUnit={outcomeUnit}
+      trigger={
+        <button
+          type="button"
+          aria-label={accessibleLabel}
+          className={cn(
+            "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
+            cardFlat && "font-sans text-xs font-normal text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-current",
+          )}
+          data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
+        >
+          {cardFlat ? null : (
+            <PatternEffectIndicator
+              classification={cell.classification ?? null}
+              DirectionIcon={DirectionIcon}
+              isFlat={isFlat}
+              size={18}
+              tone={tone}
+            />
+          )}
+          {isFlat ? (card ? <span>{neutralLabel}</span> : null) : <span>{label}</span>}
+        </button>
+      }
+    />
   );
 }
 
@@ -1098,8 +1047,98 @@ function useExclusivePatternPopover(): {
   };
 }
 
-function PatternPopoverContent({
-  anchor,
+function PatternResultDetails({
+  card,
+  children,
+  description,
+  eyebrow,
+  showDescription = false,
+  title,
+  trigger,
+}: {
+  card: boolean;
+  children?: ReactNode;
+  description: string;
+  eyebrow: string;
+  showDescription?: boolean;
+  title: string;
+  trigger: ReactElement;
+}) {
+  const details = useExclusivePatternPopover();
+  const pointerAnchor = usePointerPopoverAnchor();
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const Title = card ? DrawerTitle : PopoverTitle;
+  const Description = card ? DrawerDescription : PopoverDescription;
+  const content = (
+    <>
+      <div className={cn("flex flex-col gap-1.5", card && "pr-10")}>
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+          {eyebrow}
+        </p>
+        <Title className={cn("font-serif font-semibold", card ? "text-2xl leading-8" : "text-lg leading-6")}>
+          {title}
+        </Title>
+        <Description className={cn("text-xs leading-5 text-muted-foreground", !showDescription && "sr-only")}>
+          {description}
+        </Description>
+      </div>
+      {children}
+    </>
+  );
+
+  if (card) {
+    return (
+      <Drawer open={details.open} onOpenChange={details.onOpenChange} autoFocus>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent
+          ref={drawerRef}
+          tabIndex={-1}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            drawerRef.current?.focus();
+          }}
+          className="overflow-y-auto overscroll-contain outline-none data-[vaul-drawer-direction=bottom]:max-h-[85dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl"
+        >
+          <DrawerClose asChild>
+            <Button variant="ghost" size="icon" className="absolute right-3 top-5 size-11" aria-label="Close pattern details">
+              <X aria-hidden="true" />
+            </Button>
+          </DrawerClose>
+          <div className="flex flex-col gap-5 px-6 pt-5 pb-[max(env(safe-area-inset-bottom),1.5rem)]">
+            {content}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Popover open={details.open} onOpenChange={details.onOpenChange}>
+      <PopoverTrigger
+        closeDelay={200}
+        delay={150}
+        openOnHover
+        onKeyDown={pointerAnchor.onKeyDown}
+        onPointerMove={pointerAnchor.onPointerMove}
+        render={trigger}
+      />
+      <PopoverContent
+        align="center"
+        anchor={pointerAnchor.anchor}
+        className="w-[min(23rem,calc(100vw-2rem))]"
+        positionMethod="fixed"
+        side="right"
+        sideOffset={10}
+      >
+        {content}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function PatternDetails({
+  card,
+  trigger,
   cell,
   factorLabel,
   isFlat,
@@ -1108,7 +1147,8 @@ function PatternPopoverContent({
   outcomeLabel,
   outcomeUnit,
 }: {
-  anchor: () => { getBoundingClientRect: () => DOMRect } | null;
+  card: boolean;
+  trigger: ReactElement;
   cell: PersonalPatternCell;
   factorLabel: string;
   isFlat: boolean;
@@ -1129,43 +1169,18 @@ function PatternPopoverContent({
       : "Other days";
 
   return (
-    <PopoverContent
-      align="center"
-      anchor={anchor}
-      className="w-[min(23rem,calc(100vw-2rem))]"
-      positionMethod="fixed"
-      side="right"
-      sideOffset={10}
+    <PatternResultDetails
+      card={card}
+      trigger={trigger}
+      eyebrow={outcomeLabel}
+      title={isFlat ? "No clear pattern" : describePlainResult({
+        cell, factorLabel, outcomeId, outcomeLabel, outcomeLagDays,
+      })}
+      description={isFlat
+        ? `No consistent change in ${formatSentenceTerm(outcomeLabel)} after ${factor}.`
+        : "Comparison details for this personal pattern"}
+      showDescription={isFlat}
     >
-      <PopoverHeader className="gap-1.5">
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-          {outcomeLabel}
-        </p>
-        <PopoverTitle className="font-serif text-lg font-semibold leading-6">
-          {isFlat
-            ? "No clear pattern"
-            : describePlainResult({
-                cell,
-                factorLabel,
-                outcomeId,
-                outcomeLabel,
-                outcomeLagDays,
-              })}
-        </PopoverTitle>
-        <PopoverDescription
-          className={cn(
-            "text-xs leading-5 text-muted-foreground",
-            !isFlat && "sr-only",
-          )}
-        >
-          {isFlat
-            ? `No consistent change in ${formatSentenceTerm(
-                outcomeLabel,
-              )} after ${factor}.`
-            : "Comparison details for this personal pattern"}
-        </PopoverDescription>
-      </PopoverHeader>
-
       {cell.exposedMean !== null && cell.comparisonMean !== null ? (
         <>
           <Separator />
@@ -1184,7 +1199,7 @@ function PatternPopoverContent({
       <p className="text-xs leading-5 text-muted-foreground">
         Data from {formatEvidencePeriod(cell)}.
       </p>
-    </PopoverContent>
+    </PatternResultDetails>
   );
 }
 

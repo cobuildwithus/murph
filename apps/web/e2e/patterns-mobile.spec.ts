@@ -2,6 +2,8 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
+test.use({ hasTouch: true });
+
 test("pattern cards show every measure on phones and retain result details", async ({ page }) => {
   test.setTimeout(180_000);
   await page.route("**/*", (route) => {
@@ -44,9 +46,37 @@ test("pattern cards show every measure on phones and retain result details", asy
     "Sleep quality", "SpO₂",
   ]);
   const result = running.getByRole("button", { name: /^Your HRV was higher after running/ });
-  await result.click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("dialog")).toContainText("running");
+  await populated.locator("h1").evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await result.tap();
+  const drawer = page.locator('[data-slot="drawer-content"]');
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveAccessibleName("Your HRV was higher after running.");
+  await expect(drawer).toBeFocused();
+  await expect(drawer).toContainText("48 ms");
+  await expect(drawer).toContainText("42.7 ms");
+  await expect(drawer).toContainText("Data from");
+  await expect.poll(async () => {
+    const bounds = await drawer.boundingBox();
+    return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;
+  }).toBeLessThanOrEqual(1);
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await mkdir(process.env.DESIGN_PROOF_OUTPUT_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-result-drawer.png"), style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });
+  }
+  await drawer.getByRole("button", { name: "Close pattern details" }).tap();
+  await expect(drawer).toHaveCount(0);
+  await expect(result).toBeFocused();
+  const sleepQuality = running.getByRole("button", { name: /^You slept better after running/ });
+  await sleepQuality.tap();
+  await expect(drawer.getByRole("region", { name: "Sleep score", exact: true })).toBeVisible();
+  await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true })).toBeVisible();
+  await expect.poll(async () => {
+    const bounds = await drawer.boundingBox();
+    return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;
+  }).toBeLessThanOrEqual(1);
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await page.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-sleep-drawer.png"), style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });
+  }
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   const neutral = running.getByRole("group", { name: "No clear change", exact: true });
@@ -100,6 +130,22 @@ test("pattern cards show every measure on phones and retain result details", asy
       const bounds = await result.boundingBox();
       expect(bounds?.width).toBeGreaterThanOrEqual(44);
       expect(bounds?.height).toBeGreaterThanOrEqual(44);
+      await result.tap();
+      await expect(drawer).toBeVisible();
+      await expect.poll(async () => {
+        const bounds = await drawer.boundingBox();
+        return bounds ? Math.abs(bounds.y + bounds.height - 900) : 900;
+      }).toBeLessThanOrEqual(1);
+      expect(await drawer.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await drawer.getByRole("button", { name: "Close pattern details" }).tap();
+      await expect(drawer).toHaveCount(0);
+    } else {
+      await layout.getByRole("button", { name: /^Your HRV was higher after running/ }).hover();
+      const popover = page.locator('[data-slot="popover-content"]');
+      await expect(popover).toBeVisible();
+      await expect(popover).toContainText("48 ms");
+      await expect(drawer).toHaveCount(0);
+      await page.keyboard.press("Escape");
     }
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (output) {
