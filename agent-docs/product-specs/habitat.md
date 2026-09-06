@@ -47,7 +47,11 @@ retryable without blocking Health or Meals. Deploy this additive Web route
 before releasing the native consumer; older Web returns an unavailable report.
 
 The native voice page `/companion/environment-voice` hosts the existing
-`EnvironmentVoiceCapture` with an injected native transport. It has no cookie
+`EnvironmentVoiceCapture` headlessly with an injected native transport. SwiftUI
+owns all visible questions, progress, language selection and recording controls.
+A bounded `state` snapshot publishes the topic, answer statuses, phase and a
+transcript tail; closed native commands invoke existing interview actions. The
+engine renders no Web controls. It has no cookie
 session or private bootstrap of its own. `?view=voice` on the companion route
 returns the canonical question script from the same authorized core snapshot.
 The WKWebView reply bridge carries bounded operation/body messages and plain

@@ -91,7 +91,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Companion app build and authentication recovery telemetry contract. | Companion app build plan | High | 2026-09-05 |
 | `agent-docs/product-specs/ios-address-book-advisory-names.md` | Companion/group privacy contract. | Companion/group privacy contract | High | 2026-08-28 |
-| `agent-docs/product-specs/habitat.md` | Habitat facts, Environment grading, native report projection and voice audit. | Habitat product spec | High | 2026-09-06 |
+| `agent-docs/product-specs/habitat.md` | Habitat facts, Environment grading, native report projection and SwiftUI voice audit bridge. | Habitat product spec | High | 2026-09-06 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar, independent from `/home` first-visit personalization. | Contact-card picker spec | Medium | 2026-07-22 |
 | `agent-docs/product-specs/murph-personas.md` | Murph persona behavior. | Murph persona behavior | High | 2026-07-22 |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Murph speaking-style preference spec. | Murph speaking-style preference spec | Medium | 2026-08-10 |

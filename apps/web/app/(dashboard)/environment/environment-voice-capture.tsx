@@ -1,5 +1,6 @@
 "use client";
 
+import { useNativeVoiceController } from "@/src/lib/environment/native-voice-controller";
 import type { ReactNode } from "react";
 
 import { requestEnvironmentVoice, type EnvironmentVoiceRequest } from "@/src/lib/environment/voice-transport";
@@ -192,7 +193,7 @@ export function EnvironmentVoiceCapture({
   authGate = true,
   contactOptions = [],
   disabled = false,
-  embedded = false,
+  native = false,
   apiRequest = requestEnvironmentVoice,
   onClosed,
   initialTopicId = null,
@@ -210,7 +211,7 @@ export function EnvironmentVoiceCapture({
   authGate?: boolean;
   contactOptions?: readonly MurphContactOption[];
   disabled?: boolean;
-  embedded?: boolean;
+  native?: boolean;
   apiRequest?: EnvironmentVoiceRequest;
   onClosed?: () => void;
   initialTopicId?: string | null;
@@ -225,7 +226,7 @@ export function EnvironmentVoiceCapture({
   triggerSize?: "sm" | "default" | "lg";
   triggerVariant?: "default" | "outline";
 }) {
-  const startsOpen = Boolean(preview || requestedTopicId || embedded);
+  const startsOpen = Boolean(preview || requestedTopicId || native);
   const [open, setOpen] = useState(startsOpen);
   const [state, setState] = useState<RealtimeState>(preview?.state ?? "idle");
   const [topicIndex, setTopicIndex] = useState(() => {
@@ -1228,11 +1229,11 @@ export function EnvironmentVoiceCapture({
       } catch (error) {
         closeConnection();
         setState("error");
-        setNotice(realtimeConnectionNotice(error, embedded));
+        setNotice(realtimeConnectionNotice(error, native));
       }
     },
     [
-      embedded,
+      native,
       closeConnection,
       handleRealtimeEvent,
       prepareForNextTurn,
@@ -1354,6 +1355,17 @@ export function EnvironmentVoiceCapture({
       onClosed?.();
     }
   };
+
+  useNativeVoiceController({
+    audioNeedsAttention,
+    enabled: native, phase: state, topic, topicIndex: activeTopicIndex,
+    topicCount: scriptForView.topics.length, captured: capturedFieldKeys,
+    pending: pendingFieldKeys, languageCode: languageChoice, notice, transcript,
+    hasAcceptedAnswers: completionHasAcceptedWrite,
+    controls: { start: startRealtime, back: goBackOneTopic, next: advanceCurrentTopic,
+      finish: finishInterview, language: selectLanguage },
+  });
+  if (native) return null;
 
   if (presentation === "inline") {
     if (state === "idle") {
@@ -1498,12 +1510,10 @@ export function EnvironmentVoiceCapture({
         onOpenChange={onOpenChange}
       >
         <DialogContent
-          className={embedded
-            ? "flex h-dvh max-h-none max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 ring-0 sm:max-w-none"
-            : "flex h-[calc(100dvh-1rem)] max-h-[52rem] flex-col gap-0 overflow-hidden p-0 sm:h-[min(46rem,calc(100dvh-3rem))] sm:max-w-4xl"}
+          className="flex h-[calc(100dvh-1rem)] max-h-[52rem] flex-col gap-0 overflow-hidden p-0 sm:h-[min(46rem,calc(100dvh-3rem))] sm:max-w-4xl"
           showCloseButton={false}
         >
-          <VoiceDialogHeader state={state} script={scriptForView} topicIndex={activeTopicIndex} embedded={embedded}>
+          <VoiceDialogHeader state={state} script={scriptForView} topicIndex={activeTopicIndex}>
                     <LanguagePicker
                       detectedLanguageCode={detectedLanguageCode}
                       needsAttention={languageNeedsAttention}
@@ -2614,10 +2624,10 @@ function environmentTopicIsResolved(
   );
 }
 
-function realtimeConnectionNotice(error: unknown, embedded = false): string {
+function realtimeConnectionNotice(error: unknown, native = false): string {
   const name = errorName(error);
   if (name === "NotAllowedError" || name === "SecurityError") {
-    return embedded
+    return native
       ? "Microphone access is off. Allow Murph to use your microphone in Settings, then try again."
       : "Microphone access is blocked for this site. Allow it in your browser settings, then try again.";
   }
@@ -2671,11 +2681,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function VoiceDialogHeader({ state, script, topicIndex, embedded, children }: {
+function VoiceDialogHeader({ state, script, topicIndex, children }: {
   state: RealtimeState;
   script: EnvironmentVoiceScript;
   topicIndex: number;
-  embedded: boolean;
   children: ReactNode;
 }) {
   return (
@@ -2715,7 +2724,7 @@ function VoiceDialogHeader({ state, script, topicIndex, embedded, children }: {
             {children}
           </>
         ) : null}
-        {!embedded ? <DialogClose
+        <DialogClose
           render={
             <Button
               aria-label="Close"
@@ -2729,7 +2738,7 @@ function VoiceDialogHeader({ state, script, topicIndex, embedded, children }: {
         >
           <X className="size-4" aria-hidden="true" />
           <span className="sr-only">Close</span>
-        </DialogClose> : null}
+        </DialogClose>
       </div>
     </div>
     <DialogTitle className="sr-only">

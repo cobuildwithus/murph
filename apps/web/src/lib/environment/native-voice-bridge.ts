@@ -1,4 +1,4 @@
-type Operation = "bootstrap" | "connect" | "save" | "close";
+type Operation = "bootstrap" | "connect" | "save" | "close" | "state";
 type NativeReply = { status: number; body: string; contentType: string };
 
 declare global {

@@ -1906,8 +1906,10 @@ remain request-local; there is no score persistence or native vault replica.
 Privy bearer admission and current access/consent checks surround replica I/O.
 The native Home card and report retain only a session-fenced in-memory response.
 The Habitat product spec owns the wire shape, freshness, and voice flow.
-The native voice page embeds the existing interview with a closed WKWebView
-operation bridge. Native keeps credentials and calls the existing realtime and
+The native voice page runs the existing interview headlessly in an invisible
+WKWebView. SwiftUI owns presentation and controls; bounded snapshots and closed
+commands connect it to the existing engine through the operation bridge.
+Native keeps credentials and calls the existing realtime and
 topic APIs, pinning the expected identity to prevent account-switch races.
 Bearer admission checks live access/consent; cookie mutations retain CSRF checks.
 Canonical scripts, parsing, mailbox persistence and grading have one Web owner.

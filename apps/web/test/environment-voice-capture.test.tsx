@@ -667,16 +667,19 @@ async function startRealtimeInterview(
     },
   );
   vi.stubGlobal("fetch", fetchMock);
-  const apiRequest = vi.fn(async (operation: "connect" | "save", _body: string) =>
-    new Response(operation === "connect" ? "answer-sdp" : null, { status: operation === "connect" ? 200 : 202 }));
+  const apiRequest = vi.fn(async (operation: "connect" | "save", body: string) => {
+    assert.ok(body);
+    return new Response(operation === "connect" ? "answer-sdp" : null, { status: operation === "connect" ? 200 : 202 });
+  });
   const rendered = await renderClientComponent(
     createElement(EnvironmentVoiceCapture, {
       apiRequest: native ? apiRequest : undefined,
-      embedded: native,
+      native,
       onAccepted,
       script,
       triggerLabel: "Start report",
     }),
+    { requireButton: false },
   );
   const originalMediaDevices = navigator.mediaDevices;
   Object.defineProperty(navigator, "mediaDevices", {
@@ -684,8 +687,19 @@ async function startRealtimeInterview(
     value: { getUserMedia: vi.fn(async () => stream) },
   });
 
-  if (!native) await clickButton(rendered.window, "Start report");
-  await clickButton(rendered.window, "Start recording");
+  if (native) {
+    Object.defineProperty(rendered.window, "webkit", { configurable: true, value: { messageHandlers: {
+      environment: { postMessage: vi.fn(async () => ({ status: 200, body: "{}", contentType: "application/json" })) },
+    } } });
+    await act(async () => {
+      const event = rendered.window.document.createEvent("CustomEvent");
+      event.initCustomEvent("murph-environment-command", false, false, { action: "start" });
+      rendered.window.dispatchEvent(event);
+    });
+  } else {
+    await clickButton(rendered.window, "Start report");
+    await clickButton(rendered.window, "Start recording");
+  }
   await vi.waitFor(() => {
     assert.equal(
       native ? apiRequest.mock.calls.some(([operation]) => operation === "connect") : fetchMock.mock.calls.some(
@@ -955,10 +969,11 @@ test("reopening after a close does not ask again for an accepted detail", async 
   }
 });
 
-test("embedded interview uses native transport for speech and accepted answers and stops its microphone", async () => {
+test("native controls use the shared engine and native transport for speech and accepted answers and stops its microphone", async () => {
   const onAccepted = vi.fn();
   const harness = await startRealtimeInterview(SCRIPT, onAccepted, true);
   try {
+    assert.equal(harness.rendered.window.document.querySelectorAll("button").length, 0);
     assert.equal(harness.apiRequest.mock.calls[0]?.[0], "connect");
     assert.equal(harness.apiRequest.mock.calls[0]?.[1], "offer-sdp");
     await act(async () => {
@@ -971,6 +986,18 @@ test("embedded interview uses native transport for speech and accepted answers a
     await vi.waitFor(() => assert.equal(onAccepted.mock.calls.length, 1));
     assert.equal(harness.apiRequest.mock.calls[1]?.[0], "save");
     assert.equal(harness.fetchMock.mock.calls.length, 0);
+    await act(async () => {
+      const event = harness.rendered.window.document.createEvent("CustomEvent");
+      event.initCustomEvent("murph-environment-command", false, false, { action: "finish" });
+      harness.rendered.window.dispatchEvent(event);
+    });
+    const bridge = harness.rendered.window.webkit!.messageHandlers!.environment!;
+    const snapshots = vi.mocked(bridge.postMessage).mock.calls
+      .filter(([message]) => message.operation === "state")
+      .map(([message]) => JSON.parse(message.body));
+    assert.equal(snapshots.at(-1)?.phase, "complete");
+    assert.equal(snapshots.at(-1)?.hasAcceptedAnswers, true);
+    assert.ok(harness.track.stop.mock.calls.length > 0);
   } finally { await harness.cleanup(); }
   assert.ok(harness.track.stop.mock.calls.length > 0);
 });
