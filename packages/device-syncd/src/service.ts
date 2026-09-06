@@ -888,6 +888,7 @@ class DeviceSyncServiceController {
     const result = await this.runWorkerPassOnce({
       accountId,
       importSession: createDeviceProviderSnapshotImportSession(),
+      providerExecutors: new Map(),
       maxJobRows: Number.POSITIVE_INFINITY,
     });
     return result?.job ?? null;
@@ -896,6 +897,7 @@ class DeviceSyncServiceController {
   private async runWorkerPassOnce(input: {
     accountId?: string;
     importSession: ReturnType<typeof createDeviceProviderSnapshotImportSession>;
+    providerExecutors: Map<string, DeviceJobExecutor>;
     maxJobRows: number;
   }): Promise<{
     job: DeviceSyncJobRecord;
@@ -1181,7 +1183,7 @@ class DeviceSyncServiceController {
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
     const localConnectionRevision = storedAccount.localConnectionRevision;
-    const jobExecutor = resolveProviderJobExecutor(provider);
+    const jobExecutor = resolveProviderJobExecutor(provider, input.providerExecutors);
 
     if (!jobExecutor) {
       failClaimedJob(
@@ -1759,11 +1761,13 @@ class DeviceSyncServiceController {
     const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
     let processedJobRows = 0;
     const importSession = createDeviceProviderSnapshotImportSession();
+    const providerExecutors = new Map<string, DeviceJobExecutor>();
 
     while (processedJobRows < maxJobRows) {
       const result = await this.runWorkerPassOnce({
         accountId,
         importSession,
+        providerExecutors,
         maxJobRows: maxJobRows - processedJobRows,
       });
 
@@ -2206,8 +2210,20 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
 }
 
-function resolveProviderJobExecutor(provider: DeviceSyncProvider): DeviceJobExecutor | undefined {
-  return provider.jobExecutor;
+function resolveProviderJobExecutor(
+  provider: DeviceSyncProvider,
+  passExecutors?: Map<string, DeviceJobExecutor>,
+): DeviceJobExecutor | undefined {
+  const executor = provider.jobExecutor;
+  if (!executor || !passExecutors) {
+    return executor;
+  }
+  let passExecutor = passExecutors.get(provider.provider);
+  if (!passExecutor) {
+    passExecutor = executor.createPassExecutor?.() ?? executor;
+    passExecutors.set(provider.provider, passExecutor);
+  }
+  return passExecutor;
 }
 
 function isValidProviderJobBatchDescriptor(

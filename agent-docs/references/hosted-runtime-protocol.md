@@ -49,6 +49,11 @@ The live ownership split is:
   notifications remain excluded. Non-idempotent provider work still waits for
   the resulting durable checkpoint.
   Inherited or committed wakes and durability barriers remain checkpoint-first.
+  When the assistant phase disproves a persisted due default wake and finds an
+  empty maintenance frontier, it requests the existing projection-only checkpoint.
+  That checkpoint clears or advances the schedule even without application
+  progress. Future cron work remains projected; newly pending input and unavailable
+  scheduling authority retain their normal execution or retry paths.
   At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
   state before returning success. When Cloudflare reports container activity
   expiry, the shell yields to any active foreground operation; otherwise it runs

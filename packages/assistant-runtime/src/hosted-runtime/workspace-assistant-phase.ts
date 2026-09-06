@@ -5810,6 +5810,27 @@ function resolveDeferredPendingAssistantInputWakeAt(input: {
   ).toISOString();
 }
 
+async function resolveDisprovedDefaultWakeCheckpoint(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
+  requested: boolean;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  if (!input.requested) {
+    return null;
+  }
+  const wake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+    assistantCronWake: resolveHostedAssistantCronWakeCandidate({
+      phaseInput: input.phaseInput,
+      state: await input.readAssistantCronWakeState(),
+    }),
+    input: input.phaseInput,
+  });
+  return withHostedRuntimeWakeCandidate({
+    result: { progressed: false, runtimeProjectionCheckpointRequested: true },
+    wake,
+  });
+}
+
 async function runSystemMailboxMaintenancePhase(input: {
   backgroundRouteActions?: readonly HostedSystemMailboxRouteAction[];
   backgroundWakeKinds?: readonly HostedExecutionSystemWake["kind"][];
@@ -6344,7 +6365,13 @@ async function runSystemMailboxMaintenancePhase(input: {
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
-      result: mergeMemberPreferencesPrePlanningResult(null),
+      result: mergeMemberPreferencesPrePlanningResult(
+        await resolveDisprovedDefaultWakeCheckpoint({
+          phaseInput,
+          readAssistantCronWakeState,
+          requested: staleDefaultProjectionDisproved,
+        }),
+      ),
     };
   }
   const systemMailboxDeliveryEffects =

@@ -1468,6 +1468,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     }
   });
 
+  it.each([null, "2026-04-28T00:00:00.000Z"])(
+    "checkpoints a disproved default wake with next cron wake %s",
+    async (nextRunAt) => {
+      mocks.getAssistantCronStatus.mockResolvedValue({
+        dueJobs: 0, enabledJobs: nextRunAt ? 1 : 0, nextRunAt, runningJobs: 0,
+        totalJobs: nextRunAt ? 1 : 0,
+      });
+      const staleWakeAt = "2026-04-26T23:59:00.000Z";
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [],
+        conversationImportedCount: 0,
+        importedCount: 0,
+        now: () => "2026-04-27T00:00:00.000Z",
+        workspace: createDueAssistantWorkspace({
+          nextDefaultProcessingWakeAt: staleWakeAt,
+          nextDefaultProcessingWakeReason: "assistant",
+          nextWakeAt: staleWakeAt,
+          nextWakeReason: "assistant",
+          systemMailboxProgressGeneration: "1",
+        }),
+      }));
+
+      expect(result).toMatchObject({
+        progressed: false,
+        runtimeProjectionCheckpointRequested: true,
+      });
+      expect(result.nextWakeAt ?? null).toBe(nextRunAt);
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+      const nextResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [], conversationImportedCount: 0, importedCount: 0,
+        now: () => "2026-04-27T00:00:00.000Z",
+        workspace: createDueAssistantWorkspace({
+          nextDefaultProcessingWakeAt: nextRunAt,
+          nextDefaultProcessingWakeReason: nextRunAt ? "assistant" : null,
+          nextWakeAt: nextRunAt,
+          nextWakeReason: nextRunAt ? "assistant" : null,
+          systemMailboxProgressGeneration: "1",
+        }),
+      }));
+      expect(nextResult.runtimeProjectionCheckpointRequested).not.toBe(true);
+    },
+  );
+
   it(
     "hands a model-free device frontier off after disproving a stale default projection",
     async () => {
