@@ -428,6 +428,14 @@ Last verified: 2026-09-04
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Wearable recovery-notice materialization serializes on its existing source
+  row before revalidating eligibility and rereading the episode's mailbox key.
+  A pending item keeps its original immutable payload and is re-signaled after
+  commit; retries never rebuild it with a later timestamp, copy, or route.
+  Consumed items remain terminal. Crypto preparation stays outside the bounded
+  database-only transaction, and strict mailbox payload-conflict checks remain
+  unchanged. Each serial candidate adds one exact source-row lock and at most
+  one unique mailbox read, with no new external calls or pooled concurrency.
 - Exact Cloudflare runtime completion sends `runtime_owner_released` only when
   Web observes actionable work. Its opaque runtime-attempt pointer may clear the
   accepted-processing horizon only for that same owner; stale callbacks cannot
