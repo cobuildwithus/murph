@@ -44,3 +44,19 @@ also recognizes Brotli; a synthetic export retained exact archive bytes and reje
 an ambiguous raw/Brotli pair. Core typecheck, codec tests, complexity and shell syntax
 checks passed again. The first external review was already running on the prior
 head; a follow-up review is required for this production delta.
+
+## Round 1 disposition
+
+ReviewGPT reviewed the original head and reported one High finding: the generic
+write-policy suffix list omitted Brotli, so a canonical amendment could create a
+raw sibling and break rollback. The finding is valid for that historical head and
+already corrected by commit 3334253fe954 before response capture. Current-head
+source rejects this failure path by sharing the archive suffix list, and the real
+write-batch rollback regression passes. No additional production remediation is
+accepted from this result. Remaining corrections are review evidence and the
+isolated frozen-layout documentation expectation, so the non-production disposition
+exception applies. Round 2 will review the full current patch including the fix.
+
+CI's only platform-b failure was the frozen-layout test expecting the old documented
+suffix display. Align that isolated expectation with the Brotli-capable doc. No
+runtime contract or generated registry changes are required.
