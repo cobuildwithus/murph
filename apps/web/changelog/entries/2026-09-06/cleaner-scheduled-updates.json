@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "cleaner-scheduled-updates",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Cleaner scheduled updates",
+    "summary": "Routine reminders and summaries stay focused on their purpose without repeating generic offers to change or pause them.",
+    "details": "You can still change or pause an automation in conversation. Requested message wording and relevant reminder-cadence questions are preserved.",
+    "relevanceTags": [
+      "reminders",
+      "automations"
+    ],
+    "sourcePullRequests": []
+  }
+}
