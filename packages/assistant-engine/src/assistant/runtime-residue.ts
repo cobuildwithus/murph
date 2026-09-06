@@ -35,7 +35,8 @@ import {
 } from './automation/intent-provenance.js'
 import { assistantInputIdFromInboxCaptureId } from './input-source.js'
 import {
-  readHostedMailboxAssistantInputItemInventory,
+  consolidateHostedMailboxAssistantInputItemsAtPaths,
+  removeHostedMailboxAssistantInputItemsAtPaths,
   resolveHostedMailboxAssistantInputItemsDirectory,
   type HostedMailboxAssistantInputItemInventory,
 } from './hosted-mailbox-input-items.js'
@@ -141,7 +142,7 @@ interface AssistantRuntimeResiduePrunePlan {
   evidenceGroups: EvidenceGroup[]
   inputEventPaths: string[]
   journalPaths: string[]
-  hostedMailboxInputItemPaths: string[]
+  hostedMailboxInputItemIds: string[]
   provenancePaths: string[]
   receiptPaths: string[]
 }
@@ -334,9 +335,11 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   for (const filePath of plan.inputEventPaths) {
     await removeAssistantStateFile(filePath, input.signal)
   }
-  for (const filePath of plan.hostedMailboxInputItemPaths) {
-    await removeAssistantStateFile(filePath, input.signal)
-  }
+  await removeHostedMailboxAssistantInputItemsAtPaths({
+    inputIds: plan.hostedMailboxInputItemIds,
+    paths: input.paths,
+    signal: input.signal,
+  })
   for (const filePath of plan.receiptPaths) {
     await removeAssistantStateFile(filePath, input.signal)
   }
@@ -369,7 +372,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     autoReplyEvidenceGroupsPruned: plan.evidenceGroups.length,
     autoReplyIntentProvenancePruned: plan.provenancePaths.length,
     hostedMailboxInputItemMappingsPruned:
-      plan.hostedMailboxInputItemPaths.length,
+      plan.hostedMailboxInputItemIds.length,
     inputEventsPruned: plan.inputEventPaths.length,
     receiptsPruned: plan.receiptPaths.length,
   }
@@ -893,12 +896,12 @@ function planAssistantRuntimeResiduePrune(input: {
       .filter(({ filePath }) => !inputEventPaths.has(filePath))
       .map(({ record }) => record.inputId),
   )
-  const hostedMailboxInputItemPaths =
+  const hostedMailboxInputItemIds =
     input.inventory.inputEvents.trusted &&
     input.inventory.hostedMailboxInputItems.trusted
       ? input.inventory.hostedMailboxInputItems.records
           .filter(({ inputId }) => !survivingInputIds.has(inputId))
-          .map(({ filePath }) => filePath)
+          .map(({ inputId }) => inputId)
       : []
 
   const receiptPaths: string[] = []
@@ -953,7 +956,7 @@ function planAssistantRuntimeResiduePrune(input: {
 
   return {
     evidenceGroups: prunableEvidenceGroups,
-    hostedMailboxInputItemPaths,
+    hostedMailboxInputItemIds,
     inputEventPaths: [...inputEventPaths],
     journalPaths,
     provenancePaths,
@@ -1133,7 +1136,7 @@ async function readAssistantRuntimeResidueInventory(input: {
         input.vault,
         input.signal,
       ),
-      readHostedMailboxAssistantInputItemInventory(input.paths, input.signal),
+      consolidateHostedMailboxAssistantInputItemsAtPaths(input.paths, input.signal),
       readInputEventInventory(
         input.directories.inputEvents,
         input.paths,

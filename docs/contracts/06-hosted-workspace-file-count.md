@@ -144,12 +144,24 @@ landing; record the chosen posture here so the decision is reviewable.
   directories after canonical import, or documenting an explicit indefinite raw
   evidence retention envelope with file-count tests.
 
-- `assistant-state/hosted-mailbox-input-items/*.json` is runtime coupling state:
-  each mapping exists only to relate one hosted mailbox row to its persisted
-  assistant input event. Runtime-residue pruning inventories both owner trees,
-  fails closed on malformed or symlinked entries, removes eligible input events
-  first, then removes every mapping whose input no longer survives. Mappings do
-  not have an independent retention window.
+- `.runtime/operations/assistant/state/hosted-mailbox-inputs.sqlite` is the
+  durable hosted mailbox metadata owner: actual acknowledgement IDs and private
+  group context remain separate from sanitized input events and their blinded
+  source IDs. Each accepted input adds a row, not a file. The store reuses the
+  runtime SQLite migrations and assistant write lock, uses DELETE journaling,
+  secure deletion and private file permissions, and closes each handle before
+  checkpointing. Its one file is portable operational state, not a rebuildable
+  projection. Runtime-residue maintenance removes rows only after their input
+  events no longer survive; metadata has no independent retention window.
+  Exact-ID legacy reads remain available for old `hosted-mailbox-input-items`
+  files. Maintenance validates the legacy inventory, commits missing rows without
+  overwriting current rows, validates the stored rows, and then removes legacy
+  files. An interrupted migration leaves readable duplicates. Malformed or
+  symlinked legacy entries block migration and pruning; a damaged database fails
+  closed rather than falling back to obsolete metadata. Remove legacy support
+  once all retained checkpoints and workspaces have drained those files. The
+  SQLite-capable runner is the rollback floor after its first metadata write;
+  an older runner must not reopen a converted workspace.
 
 - `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` is the sole committed inbox
   metadata owner. Current v2 writes can add attachment bytes but add no
