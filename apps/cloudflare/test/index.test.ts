@@ -52,6 +52,7 @@ import type {
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
 import {
+  HOSTED_RUNNER_REGION,
   HOSTED_STANDBY_LOCATION_HINT,
   HOSTED_STANDBY_REGION,
   createHostedStandbySlotName,
@@ -470,6 +471,56 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it.each([
+    { label: "ready", ready: ["slot-one", "slot-two"], provisioning: [], releaseId: "version-123", status: 200 },
+    { label: "still preparing", ready: ["slot-one"], provisioning: ["slot-two"], releaseId: "version-123", status: 503 },
+    { label: "missing inventory", ready: [], provisioning: [], releaseId: "version-123", status: 503 },
+    { label: "stale release", ready: ["slot-one", "slot-two"], provisioning: [], releaseId: "version-old", status: 503 },
+    { label: "duplicate slots", ready: ["slot-one", "slot-one"], provisioning: [], releaseId: "version-123", status: 503 },
+  ])("checks $label standby inventory through the signed smoke route", async ({ ready, provisioning, releaseId, status }) => {
+    const ensureReadyStandby = vi.fn(async () => ({ accepted: true as const }));
+    const claimReadyStandby = vi.fn(async () => ({ outcome: "disabled" as const }));
+    const getByName = vi.fn(() => ({
+      claimReadyStandby,
+      ensureReadyStandby,
+      async readStandbyCoordinatorState() {
+        return { readySlotNames: ready, provisioningSlotNames: provisioning, releaseId, region: HOSTED_RUNNER_REGION };
+      },
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      CF_VERSION_METADATA: { id: "version-123" },
+      HOSTED_EXECUTION_STANDBY_MODE: "shadow",
+      HOSTED_EXECUTION_STANDBY_TARGET: "2",
+      STANDBY_COORDINATOR: { getByName },
+    });
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const unsigned = await worker.fetch(new Request(url, { method: "POST" }), env);
+    expect(unsigned.status).toBe(401);
+    expect(getByName).not.toHaveBeenCalled();
+    const response = await worker.fetch(new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning,
+        method: "POST", path: url.pathname, payload: "", search: url.search,
+      }),
+      method: "POST",
+    }), env);
+    expect(response.status).toBe(status);
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      standbyInventory: {
+        ready: status === 200,
+        readyCount: new Set(ready).size,
+        provisioningCount: provisioning.length,
+        target: 2,
+        releaseMatches: releaseId === "version-123",
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain("slot-one");
+    expect(getByName).toHaveBeenCalledWith("standby-coordinator--v-version-123--r-global");
+    expect(ensureReadyStandby).toHaveBeenCalledWith({ releaseId: "version-123", region: HOSTED_RUNNER_REGION });
+    expect(claimReadyStandby).not.toHaveBeenCalled();
+  });
+
   it("returns the signed Temporal worker binding admission without caching it", async () => {
     const env = createWorkerEnv();
     const url = new URL(
@@ -687,6 +738,12 @@ describe("cloudflare worker routes", () => {
       };
     });
     const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      STANDBY_COORDINATOR: {
+        getByName() {
+          throw new Error("The model-only phase must not repeat inventory verification.");
+        },
+      },
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
