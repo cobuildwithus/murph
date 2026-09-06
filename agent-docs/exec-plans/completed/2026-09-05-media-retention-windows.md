@@ -55,14 +55,42 @@ No private production conversation was replayed and no production mutation ran.
   Token/byte measurements and transport-field exclusions are recorded in PR
   evidence; private data and auth are excluded.
 
-## Remaining completion
+## Implementation completion
 
 - [x] Implement full-window storage and lookup with recoverable selection.
 - [x] Review source ownership, privacy, and focused behavior.
-- [x] Finalize changelog provenance, rendered proof, and remaining typechecks.
-- [x] Commit the candidate and open draft PR #2972.
-- [ ] Run routed external review and exact-head CI.
-- [ ] Close this plan and report exact completion state and rollout limits.
+- [x] Finalize changelog provenance, rendered proof, and relevant typechecks.
+- [x] Commit the candidate and open PR #2972.
+- [x] Triage and remediate the first external review; complete parent review.
+
+Implementation is complete. The final pushed candidate still requires its
+next ReviewGPT result and exact-head CI before PR completion; those results
+are tracked in the PR evidence. This archive does not claim either pending gate
+passed, nor does it claim production deployment.
+
+## Review and CI remediation
+
+Round 1 reviewed 422f0c791df8 using the guarded full snapshot in managed
+Hercules, selected 6Pro and captured model slug gpt-6-pro. The exact completed
+response and model/hash evidence were captured after the normal waited run
+(approximately 13 minutes overall, minimum marked-response threshold 270s).
+The review reported one ORIGINAL_PR Complexity Collapse and no Critical/High
+bug. Parent accepted the single finding under the documented deletion exception:
+90/30-day windows make the old pending-video 14-day floor ineffective.
+Removing its collector, lock/compaction dependency, membership checks, and
+parameters deletes 32 net production lines without replacement machinery.
+Pending protection remains with actual inbox cleanup. Existing shorter
+reference deadlines, canonical durable saves, retirement, and cold access are
+unchanged. Both publishing entrypoints now have explicit no-collector proof.
+
+Initial CI passed 4,535 assistant tests and failed one live-input fixture: its
+April timestamp was expired under the real September clock. The fixture now
+pins its intended April date and checks complete frozen attachment metadata.
+All 30 live-input tests passed after correction. All 58 runtime artifact/idle
+tests, both affected package typechecks, complexity, and diff readback passed.
+Parent also corrected stale architecture summaries of the old 72-hour policy.
+No runtime or provider behavior beyond the accepted deletion was added during
+this remediation. The next substantive review covers the stable correction.
 
 ## Rollout
 
@@ -85,3 +113,6 @@ normalized. No saved history or connected integrations are present. Base is
 merged #2874's catalog with the new capability off; head enables only that tool.
 These are full synthetic request counts, not billed usage or every member's
 production input.
+Status: completed
+Updated: 2026-09-06
+Completed: 2026-09-06
