@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Clearer Pattern updates",
     "summary": "Personal Pattern messages explain what Murph noticed and how much support it has in everyday language.",
-    "details": "Updates keep uncertainty clear, leave letter grades out of the message, and include a clickable Patterns link when more findings remain.",
+    "details": "Updates sound more like a conversation, leave letter grades out, and link directly to Patterns when more findings remain.",
     "relevanceTags": ["patterns", "messaging"],
     "sourcePullRequests": [2967]
   }

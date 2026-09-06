@@ -1,6 +1,6 @@
 # Personal Patterns
 
-Last verified: 2026-09-05
+Last verified: 2026-09-06
 
 ## Product boundary
 
@@ -164,9 +164,10 @@ because the runtime cannot report while it is offline.
 
 Only a new grade A-D identity can trigger that daily message. Letter grades and
 report classifications stay internal to selection and bookkeeping. Messages
-lead with the finding in everyday language, convey repeated support for A/B,
-tentativeness for C, and limited evidence for D, and state supporting counts in
-the report's actual unit. They preserve comparison and outcome timing without
+lead with the finding in a short conversational paragraph, with a light qualifier
+where evidence is limited and supporting counts in the report's actual unit.
+Uncertainty belongs within the finding, without repeated caveats or a standalone
+causation disclaimer. Messages preserve comparison and outcome timing without
 implying cause or prescribing habit changes. Links use the full
 `https://www.withmurph.ai/patterns` URL on its own final line; a bare route is
 never a message link. Grade E Observations remain visible on the page but stay

@@ -12310,6 +12310,9 @@ describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () =
         workingDirectory,
       })
       const decision = parseAssistantNotificationDecision(result.finalMessage)
+      if (decision.kind !== 'send_message') {
+        process.stdout.write(`[personal-pattern-decision-e2e] ${JSON.stringify(decision)}\n`)
+      }
       expect(decision.kind).toBe('send_message')
       if (decision.kind !== 'send_message') throw new Error('Expected a Pattern message')
       const message = decision.text
@@ -12351,8 +12354,10 @@ describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () =
       expect(finishCalls).toHaveLength(0)
       expect(message).toMatch(/yard work/iu)
       expect(message).not.toMatch(/\bgrade\b|\b[A-E][- ](?:grade|association)\b|evidence days|classification|ledger/iu)
-      expect(message).toMatch(/(?:tentative|early|hint|limited|small|less|fewer)/iu)
-      expect(message).toMatch(/(?:other factors|other differences|doesn.t (?:prove|mean)|can.t (?:prove|tell)|not (?:proof|necessarily)|could (?:be|also)|may (?:be|also))/iu)
+      expect(message).toMatch(/(?:tend(?:ed|s)? to|tentative|early|hint|seem(?:ed|s)?|may|might)/iu)
+      expect(message).not.toMatch(/other factors|proof (?:of|that)|not caus(?:es|ation)|correlation.{0,20}causation/iu)
+      expect(message).not.toMatch(/(?:^|\n)\s*[•*-]\s/u)
+      expect(message.trim().split(/\s+/u).length).toBeLessThanOrEqual(100)
       expect(message).toMatch(/(?:16|sixteen)\s+(?:comparable |matched )?(?:days|nights|comparisons|cases)/iu)
       expect(message.trim()).toMatch(/\nhttps:\/\/www\.withmurph\.ai\/patterns$/u)
       expect(message).not.toMatch(/`|\]\(|(?:^|\s)\/patterns\b/u)

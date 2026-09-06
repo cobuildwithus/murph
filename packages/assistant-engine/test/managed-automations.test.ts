@@ -1330,14 +1330,15 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord?.instructions).toContain(
       'Grades are internal selection and ledger metadata; never include letter grades',
     )
-    expect(patternsUpdateRecord?.instructions).toContain('C is a tentative pattern')
+    expect(patternsUpdateRecord?.instructions).toContain('C/D need a light qualifier')
+    expect(patternsUpdateRecord?.instructions).toContain('A qualifier within the finding is enough')
     expect(patternsUpdateRecord?.instructions).toContain('do not turn cases into days')
     expect(patternsUpdateRecord?.instructions).toContain('Never imply cause')
     expect(patternsUpdateRecord?.instructions).toContain(
       'end with https://www.withmurph.ai/patterns on its own line',
     )
     expect(patternsUpdateRecord?.instructions).not.toMatch(
-      /State each grade|Always state the grade|available on `\/patterns`/u,
+      /State each grade|Always state the grade|available on `\/patterns`|briefly explain that other factors/u,
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'do not rely on a shell environment variable',
