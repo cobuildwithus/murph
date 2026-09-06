@@ -92,7 +92,9 @@ export function JournalViewContent({
   const today = asOfDate ?? localToday;
   const latestWindowEnd = today;
   const earliestDate = journal.days.at(-1)?.date ?? latestWindowEnd;
-  const [selectedWindowEnd, setSelectedWindowEnd] = useState(latestWindowEnd);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const selectedWindowEnd = minDate(selectedDate ?? today, today);
+  const selectDate = (date: string) => setSelectedDate(date >= today ? null : date);
   const todayGreeting = useSyncExternalStore(
     subscribeToClock,
     currentGreeting,
@@ -133,54 +135,47 @@ export function JournalViewContent({
       className="flex w-full flex-col gap-8 lg:gap-[2.125rem]"
     >
       <JournalPageHeader headingId={headingId}>
-        {journal.days.length > 0 ? (
-          <div className="flex items-center gap-2">
-            {isRefreshing ? (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        aria-label="Updating latest data"
-                        className="inline-flex size-8 items-center justify-center text-muted-foreground"
-                        role="status"
-                      >
-                        <RefreshCw
-                          aria-hidden="true"
-                          className="size-3.5 animate-spin"
-                        />
-                      </span>
-                    }
-                  />
-                  <TooltipContent>Updating latest data</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : null}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {isRefreshing ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      aria-label="Updating latest data"
+                      className="inline-flex size-8 items-center justify-center text-muted-foreground"
+                      role="status"
+                    >
+                      <RefreshCw
+                        aria-hidden="true"
+                        className="size-3.5 animate-spin motion-reduce:animate-none"
+                      />
+                    </span>
+                  }
+                />
+                <TooltipContent>Updating latest data</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : null}
+          {journal.days.length > 0 ? (
             <WeekControls
               canGoNext={selectedWindowEnd < latestWindowEnd}
               canGoPrevious={selectedWindowStart > earliestDate}
               earliestDate={earliestDate}
               onNext={() =>
-                setSelectedWindowEnd((current) =>
-                  minDate(
-                    addDays(current, JOURNAL_WINDOW_DAYS),
-                    latestWindowEnd,
-                  ),
-                )
+                selectDate(addDays(selectedWindowEnd, JOURNAL_WINDOW_DAYS))
               }
               onPrevious={() =>
-                setSelectedWindowEnd((current) =>
-                  addDays(current, -JOURNAL_WINDOW_DAYS),
-                )
+                selectDate(addDays(selectedWindowEnd, -JOURNAL_WINDOW_DAYS))
               }
-              onSelectDate={setSelectedWindowEnd}
-              onToday={() => setSelectedWindowEnd(latestWindowEnd)}
+              onSelectDate={selectDate}
+              onToday={() => setSelectedDate(null)}
               selectedWindowEnd={selectedWindowEnd}
               selectedWindowStart={selectedWindowStart}
               today={today}
             />
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </JournalPageHeader>
 
       {journal.days.length === 0 ? (
@@ -194,6 +189,7 @@ export function JournalViewContent({
                 dates={selectedDates}
                 daysByDate={daysByDate}
                 mode="mobile"
+                today={today}
               />
               <div className="mt-4 flex flex-col lg:mt-0">
                 {visibleDates.map((date) => (
@@ -214,7 +210,7 @@ export function JournalViewContent({
                 <MiniCalendar
                   earliestDate={earliestDate}
                   key={selectedWindowEnd.slice(0, 7)}
-                  onSelectDate={setSelectedWindowEnd}
+                  onSelectDate={selectDate}
                   selectedWindowEnd={selectedWindowEnd}
                   today={today}
                 />
@@ -224,6 +220,7 @@ export function JournalViewContent({
                 dates={selectedDates}
                 daysByDate={daysByDate}
                 mode="desktop"
+                today={today}
               />
               {visibleInsights.length > 0 ? (
                 <WeeklyInsights insights={visibleInsights} />
@@ -554,7 +551,7 @@ function WeekControls({
         aria-label="Previous 7 days"
         disabled={!canGoPrevious}
         onClick={onPrevious}
-        className="size-10 rounded-full lg:size-[38px]"
+        className="size-10 rounded-full"
         size="icon"
         variant="outline"
       >
@@ -564,7 +561,7 @@ function WeekControls({
         <DrawerTrigger asChild>
           <Button
             aria-label={`Choose a Journal date. Showing ${windowLabel}`}
-            className="h-10 max-w-24 rounded-full px-2.5 text-xs lg:hidden"
+            className="h-10 max-w-24 whitespace-normal rounded-full px-2.5 text-xs leading-tight lg:hidden"
             size="sm"
             variant="outline"
           >
@@ -601,7 +598,7 @@ function WeekControls({
         </DrawerContent>
       </Drawer>
       <Button
-        className="hidden h-[38px] rounded-full px-[18px] lg:inline-flex"
+        className="hidden h-10 rounded-full px-[18px] lg:inline-flex"
         onClick={onToday}
         size="sm"
         variant="outline"
@@ -612,7 +609,7 @@ function WeekControls({
         aria-label="Next 7 days"
         disabled={!canGoNext}
         onClick={onNext}
-        className="size-10 rounded-full lg:size-[38px]"
+        className="size-10 rounded-full"
         size="icon"
         variant="outline"
       >
@@ -1273,7 +1270,7 @@ function MiniCalendar({
             aria-label="Previous month"
             className={cn(
               "rounded-full",
-              surface === "drawer" ? "size-11" : "size-9",
+              surface === "drawer" ? "size-11" : "size-10",
             )}
             disabled={!canShowPreviousMonth}
             onClick={() => setMonthDate((current) => shiftMonth(current, -1))}
@@ -1286,7 +1283,7 @@ function MiniCalendar({
             aria-label="Next month"
             className={cn(
               "rounded-full",
-              surface === "drawer" ? "size-11" : "size-9",
+              surface === "drawer" ? "size-11" : "size-10",
             )}
             disabled={!canShowNextMonth}
             onClick={() => setMonthDate((current) => shiftMonth(current, 1))}
@@ -1317,8 +1314,9 @@ function MiniCalendar({
             <button
               aria-current={date === today ? "date" : undefined}
               aria-label={formatDayAccessible(date)}
+              aria-pressed={date === selectedWindowEnd}
               className={cn(
-                "flex h-[30px] w-full items-center justify-center text-[11px] text-foreground transition-colors hover:bg-muted focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "flex min-h-10 w-full items-center justify-center text-[11px] text-foreground transition-colors hover:bg-muted focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 !inMonth && "text-muted-foreground",
                 inSelectedWindow && "bg-primary/10",
                 date === selectedWindowStart && "rounded-l-full",
@@ -1333,9 +1331,10 @@ function MiniCalendar({
             >
               <span
                 className={cn(
-                  "flex size-6 items-center justify-center rounded-full",
-                  date === today &&
-                    "bg-primary font-semibold text-primary-foreground",
+                  "flex size-7 items-center justify-center rounded-full",
+                  date === selectedWindowEnd
+                    ? "bg-primary font-semibold text-primary-foreground"
+                    : date === today && "font-semibold ring-1 ring-primary",
                 )}
               >
                 {Number(date.slice(8, 10))}
@@ -1361,11 +1360,13 @@ function WindowStats({
   dates,
   daysByDate,
   mode,
+  today,
 }: {
   className?: string;
   dates: string[];
   daysByDate: Map<string, JournalView["days"][number]>;
   mode: "desktop" | "mobile";
+  today: string;
 }) {
   const stats: WeekStat[] = [];
   const sleepMinutes = buildWeekMetricPoints(
@@ -1410,7 +1411,9 @@ function WindowStats({
   return (
     <section aria-label="Seven days at a glance" className={className}>
       <p className="mb-3 px-1 font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-        Last 7 days
+        {dates.at(-1) === today
+          ? "Last 7 days"
+          : formatJournalWindowLabel(dates[0], dates[dates.length - 1], today)}
       </p>
       <div className="grid grid-cols-3 gap-4 px-1">
         {stats.map((stat) => (
@@ -1703,7 +1706,7 @@ function readJournalDayMetric(
 }
 
 function formatShortDay(date: string): string {
-  return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(
+  return new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(
     new Date(`${date}T12:00:00Z`),
   );
 }

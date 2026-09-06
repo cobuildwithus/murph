@@ -8,7 +8,12 @@ import {
   resolveActivityEvidenceLocalDate,
   resolveInterventionSessionLocalDate,
 } from "./experiment-adherence.ts";
-import { selectMetricSeries, type MetricPoint } from "./metrics/index.ts";
+import {
+  extractMetricPointsFromCanonicalEntities,
+  resolveObservationEffectiveDate,
+  selectMetricSeries,
+  type MetricPoint,
+} from "./metrics/index.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import {
@@ -24,7 +29,7 @@ const MAX_RECORDS = 1_500;
 const JOURNAL_METRICS = [
   { key: "sleep-score", label: "Sleep score", group: "sleep" },
   { key: "sleep-efficiency", label: "Sleep efficiency", group: "sleep" },
-  { key: "total-sleep", label: "Total sleep", group: "sleep" },
+  { key: "total-sleep-minutes", label: "Total sleep", group: "sleep" },
   { key: "deep-sleep-minutes", label: "Deep sleep", group: "sleep" },
   { key: "rem-sleep-minutes", label: "REM sleep", group: "sleep" },
   { key: "hrv-rmssd", label: "HRV", group: "sleep" },
@@ -154,11 +159,14 @@ export function buildJournalView(
     dayEvents.push(event);
     daysByDate.set(event.date, dayEvents);
   }
+  const timeFormatters = new Map<string, Intl.DateTimeFormat>();
   const days = [...daysByDate.entries()]
     .sort(([left], [right]) => right.localeCompare(left))
     .map(([date, dayEvents]) => ({
       date,
-      events: dayEvents.sort(compareJournalEvents),
+      events: dayEvents.sort((left, right) =>
+        compareJournalEvents(left, right, timeFormatters),
+      ),
     }));
 
   return {
@@ -182,7 +190,7 @@ function journalCandidateFromEvent(
   if (!date || date < fromDate || date > toDate) return [];
   const occurredAt = normalizeOccurredAt(event.occurredAt ?? undefined, date);
   const presentation = journalEventPresentation(event, vocabulary);
-  const { activityKey, exerciseNames, label, observationMetric } = presentation;
+  const { activityKey, exerciseNames, label, metricValue, observationMetric } = presentation;
   const durationMinutes = readNumber(event.attributes.durationMinutes);
   const sleepType =
     event.kind === "sleep_session"
@@ -208,9 +216,7 @@ function journalCandidateFromEvent(
       kind: event.kind,
       label,
       metricKey: observationMetric?.key ?? null,
-      metricValue: observationMetric
-        ? readNumber(event.attributes.value)
-        : null,
+      metricValue,
       occurredAt,
       relatedIds: [
         ...new Set([
@@ -241,14 +247,26 @@ function journalEventPresentation(
   activityKey: string | null;
   exerciseNames: string[];
   label: string;
+  metricValue: number | null;
   observationMetric: (typeof JOURNAL_METRICS)[number] | null;
 } {
-  const observationMetric = journalObservationMetric(event);
+  const observationPoint = event.kind === "observation"
+    ? extractMetricPointsFromCanonicalEntities([event])[0] ?? null
+    : null;
+  // Recovery shares canonical units with Readiness but keeps its product label.
+  const observationMetricKey = observationPoint?.metricKey === "readiness-score"
+    && event.attributes.metric === "recovery-score"
+    ? "recovery-score"
+    : observationPoint?.metricKey;
+  const observationMetric = JOURNAL_METRICS.find(
+    (metric) => metric.key === observationMetricKey,
+  ) ?? null;
   if (event.kind !== "activity_session") {
     return {
       activityKey: null,
       exerciseNames: [],
       label: observationMetric?.label ?? eventLabel(event),
+      metricValue: observationMetric ? observationPoint?.canonicalValue ?? null : null,
       observationMetric,
     };
   }
@@ -263,6 +281,7 @@ function journalEventPresentation(
     activityKey: concept?.id ?? rawKey,
     exerciseNames: activityExerciseNames(event.attributes),
     label: concept?.label ?? humanizeFactorToken(rawKey),
+    metricValue: null,
     observationMetric,
   };
 }
@@ -344,47 +363,48 @@ function appendExperimentPhaseCandidates(input: {
   title: string;
   toDate: string;
 }): void {
-  let date = input.startDate;
+  let date = input.startDate > input.fromDate ? input.startDate : input.fromDate;
+  const endDate = input.endDate < input.toDate ? input.endDate : input.toDate;
+  if (date > endDate) return;
   const totalDays = daysBetweenInclusive(input.startDate, input.endDate);
-  if (totalDays === null) return;
+  const firstDay = daysBetweenInclusive(input.startDate, date);
+  if (totalDays === null || firstDay === null) return;
 
-  for (let day = 1; date <= input.endDate; day += 1) {
-    if (date >= input.fromDate && date <= input.toDate) {
-      const groupHint = experimentJournalGroupHint(input.title, date);
-      if (!input.explicitDays.has(groupHint)) {
-        const isCompleted = input.completedOn === date;
-        const summary = isCompleted
-          ? "Experiment completed"
-          : input.phase === "baseline"
-          ? `Baseline · day ${day}`
-          : day === 1
-          ? "Experiment started"
-          : `Running experiment · day ${day}`;
-        input.candidates.push({
-          activityKey: null,
-          date,
-          detailItems: [
-            `Status: ${isCompleted ? "Completed" : humanize(input.phase)}`,
-            `Progress: Day ${day} of ${totalDays}`,
-          ],
-          durationMinutes: null,
-          exerciseNames: [],
-          groupHint,
-          id: `${input.experiment.entityId}:${input.phase}:${date}`,
-          kind: "experiment_context",
-          label: input.title,
-          metricKey: null,
-          metricValue: null,
-          occurredAt: `${date}T12:00:00.000Z`,
-          relatedIds: [input.experiment.entityId],
-          sleepType: null,
-          source: "murph",
-          summary,
-          tags: input.experiment.tags.slice(),
-          timing: "all_day",
-          timeZone: null,
-        });
-      }
+  for (let day = firstDay; date <= endDate; day += 1) {
+    const groupHint = experimentJournalGroupHint(input.title, date);
+    if (!input.explicitDays.has(groupHint)) {
+      const isCompleted = input.completedOn === date;
+      const summary = isCompleted
+        ? "Experiment completed"
+        : input.phase === "baseline"
+        ? `Baseline · day ${day}`
+        : day === 1
+        ? "Experiment started"
+        : `Running experiment · day ${day}`;
+      input.candidates.push({
+        activityKey: null,
+        date,
+        detailItems: [
+          `Status: ${isCompleted ? "Completed" : humanize(input.phase)}`,
+          `Progress: Day ${day} of ${totalDays}`,
+        ],
+        durationMinutes: null,
+        exerciseNames: [],
+        groupHint,
+        id: `${input.experiment.entityId}:${input.phase}:${date}`,
+        kind: "experiment_context",
+        label: input.title,
+        metricKey: null,
+        metricValue: null,
+        occurredAt: `${date}T12:00:00.000Z`,
+        relatedIds: [input.experiment.entityId],
+        sleepType: null,
+        source: "murph",
+        summary,
+        tags: input.experiment.tags.slice(),
+        timing: "all_day",
+        timeZone: null,
+      });
     }
     date = addDays(date, 1);
   }
@@ -411,11 +431,19 @@ function journalMetricCandidates(
   fromDate: string,
   toDate: string,
 ): JournalCandidate[] {
+  const pointsByMetric = new Map<string, MetricPoint[]>(
+    JOURNAL_METRICS.map((metric) => [metric.key, []]),
+  );
+  for (const point of points) {
+    if (point.effectiveDate >= fromDate && point.effectiveDate <= toDate) {
+      pointsByMetric.get(point.metricKey)?.push(point);
+    }
+  }
   return JOURNAL_METRICS.flatMap((metric) =>
     selectMetricSeries({
       from: fromDate,
       metricKey: metric.key,
-      points,
+      points: pointsByMetric.get(metric.key) ?? [],
       to: toDate,
     }).rows.flatMap((row) => {
       if (row.value === null || row.confidence === "none") return [];
@@ -492,7 +520,9 @@ function normalizeSleepJournalCandidates(
       (session) => session.sleepType === "unknown",
     );
     const selectedUnknownMain =
-      unknown.slice().sort(compareSleepDuration)[0] ?? null;
+      explicitMain.length === 0
+        ? unknown.slice().sort(compareSleepDuration)[0] ?? null
+        : null;
 
     for (const session of sessions) {
       const isLongUnknownSleep =
@@ -556,7 +586,7 @@ function shouldKeepJournalCandidate(input: {
     return false;
   }
   if (
-    candidate.metricKey === "total-sleep" &&
+    candidate.metricKey === "total-sleep-minutes" &&
     input.hasSleepSession.has(candidate.date)
   ) {
     return false;
@@ -580,15 +610,6 @@ function shouldKeepJournalCandidate(input: {
     );
   }
   return true;
-}
-
-function journalObservationMetric(
-  event: CanonicalEntity,
-): (typeof JOURNAL_METRICS)[number] | null {
-  if (event.kind !== "observation") return null;
-  const metric = readString(event.attributes.metric);
-  if (!metric) return null;
-  return JOURNAL_METRICS.find((candidate) => candidate.key === metric) ?? null;
 }
 
 function groupJournalCandidates(
@@ -685,6 +706,8 @@ function isJournalEventKind(kind: string): boolean {
 }
 
 function resolveEventDate(event: CanonicalEntity): string | null {
+  if (event.kind === "observation")
+    return resolveObservationEffectiveDate(event) ?? event.occurredAt?.slice(0, 10) ?? null;
   if (event.kind === "activity_session")
     return resolveActivityEvidenceLocalDate(event);
   if (event.kind === "intervention_session")
@@ -1049,8 +1072,10 @@ function formatDetailNumber(value: number): string {
 
 function readEventSource(event: CanonicalEntity): string | null {
   const dataOrigin = readRecord(event.attributes.dataOrigin);
+  const externalRef = readRecord(event.attributes.externalRef);
   return (
     readString(dataOrigin?.sourceProviderSlug) ??
+    readString(externalRef?.system) ??
     readString(event.attributes.source) ??
     null
   );
@@ -1149,7 +1174,7 @@ function buildEventPresentation(
   ) {
     const sleepMinutes = maxNumber([
       ...sleepSessions.map((record) => record.durationMinutes),
-      metricValue(records, "total-sleep"),
+      metricValue(records, "total-sleep-minutes"),
     ]);
     const sleepScore = metricValue(records, "sleep-score");
     const summaryParts = [
@@ -1331,15 +1356,22 @@ function compareCandidates(
   );
 }
 
-function compareJournalEvents(left: JournalEvent, right: JournalEvent): number {
+function compareJournalEvents(
+  left: JournalEvent,
+  right: JournalEvent,
+  timeFormatters: Map<string, Intl.DateTimeFormat>,
+): number {
   return (
-    journalEventSortMinute(left) - journalEventSortMinute(right) ||
+    journalEventSortMinute(left, timeFormatters) - journalEventSortMinute(right, timeFormatters) ||
     left.occurredAt.localeCompare(right.occurredAt) ||
     left.id.localeCompare(right.id)
   );
 }
 
-function journalEventSortMinute(event: JournalEvent): number {
+function journalEventSortMinute(
+  event: JournalEvent,
+  timeFormatters: Map<string, Intl.DateTimeFormat>,
+): number {
   if (event.timing === "all_day") return -2;
   if (event.kind === "sleep" && event.timing === "night") return -1;
   // Period anchors order rows only. They are never shown as observed times.
@@ -1348,12 +1380,18 @@ function journalEventSortMinute(event: JournalEvent): number {
   if (event.timing === "evening") return 18 * 60;
   if (event.timing === "night") return 21 * 60;
   if (event.timing === "unknown") return 24 * 60;
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone: event.timeZone ?? "UTC",
-  }).formatToParts(new Date(event.occurredAt));
+  const timeZone = event.timeZone ?? "UTC";
+  let formatter = timeFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone,
+    });
+    timeFormatters.set(timeZone, formatter);
+  }
+  const parts = formatter.formatToParts(new Date(event.occurredAt));
   return Number(parts.find((part) => part.type === "hour")?.value ?? 0) * 60
     + Number(parts.find((part) => part.type === "minute")?.value ?? 0);
 }

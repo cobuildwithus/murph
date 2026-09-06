@@ -1,6 +1,6 @@
 # Journal
 
-Last verified: 2026-08-31
+Last verified: 2026-09-06
 
 ## Product boundary
 
@@ -102,7 +102,12 @@ The Journal projection reads canonical events and metric points from the last
 120 days. It includes notes, activities, sleep, meals, observations,
 interventions, context, symptoms, and tests. It groups linked records and
 related sleep metrics into one human event. It does not copy records or write a
-daily summary.
+daily summary. Observation dates, metric keys, and numeric units use the
+canonical metric rules before grouping; raw values never replace normalized
+minutes or other canonical units. Historical observations are filtered by date
+before numeric normalization. Metric selection scans the history once, and
+experiment phases expand only within the visible projection window while
+retaining their original progress day numbers.
 
 An accepted plan can appear when its canonical note exists. A completed
 exercise or workout appears as an activity. A suggestion, reminder, or proposed
@@ -110,8 +115,9 @@ exercise is not an event until the member accepts or completes it.
 
 Journal shows one main sleep for each local date. Main sleep has no clock time.
 Shorter sleep stays visible as a timed nap. When a provider does not label sleep
-type, the longest session becomes main sleep. A long duplicate stays with main
-sleep instead of becoming a nap.
+type and there is no explicitly labeled main sleep, the longest session becomes
+main sleep. With an explicit main sleep, a short unlabeled session stays a nap.
+A long duplicate stays with main sleep instead of becoming a nap.
 
 Repeated activities of the same kind on one day become one display event. The
 event keeps all source sessions and shows their combined time. Personal
@@ -128,19 +134,24 @@ depend on it.
 
 The projection is built during the existing Browser Vault refresh. Opening
 `/journal` shows the available projection and requests one runtime refresh.
-The page has no Refresh control. Automatic refresh does not call AI or start
-a new analysis.
+The ready timeline has no Refresh control; unavailable older projections offer
+a retry. Automatic refresh does not call AI or start a new analysis.
 
 The page waits for a different replica through the existing bounded refresh
 window. A busy runtime can delay publication beyond that window. Existing
 content stays visible after waiting stops. Reopening the page starts another
-bounded refresh. This is not continuous polling while the page remains open.
+bounded refresh. When the first device import is pending and no replica exists,
+Journal observes publication through the same 60-second bounded window. The
+import remains responsible for publication, without a competing runtime wake.
+Repeated retry clicks do not restart an active wait. This is not continuous
+polling while the page remains open.
 
 ## Web experience
 
 `/journal` shows the seven days ending on the selected day as a calm timeline.
-`Today` ends the window today. Previous and next move the full window by seven
-days, so Monday still includes the prior Tuesday through Sunday. Day bands
+`Today` ends the window on the browser local date and follows date changes while
+the page stays open. An explicitly selected historical window stays in place.
+Previous and next move the full window by seven days, so Monday still includes the prior Tuesday through Sunday. Day bands
 separate the days.
 Main sleep uses `Night`, naps use their time, and context can span a full day.
 Event text is readable without opening a detail view. Source labels stay
@@ -153,8 +164,12 @@ Period sorting anchors order rows without displaying invented clock times.
 
 The right rail shows a small calendar, seven-day sleep and activity statistics,
 and a current Personal Pattern when one is ready. A Pattern is an insight about
-the week, not a health event, so it does not appear on the daily timeline. The
-page supports loading, unavailable, empty, error, and ready states.
+the week, not a health event, so it does not appear on the daily timeline.
+Historical statistics name the selected date range. Chart weekday labels keep
+their calendar date in every browser time zone. The calendar marks its
+selected end date separately from today, including for assistive technology. The
+page supports loading, unavailable, empty, error, and ready states. Empty
+timelines retain the background refresh status while showing onboarding.
 
 The web does not provide edit or add controls. A member asks Murph to add,
 correct, or remove an entry. Calendar, email travel, Environment, private chat,

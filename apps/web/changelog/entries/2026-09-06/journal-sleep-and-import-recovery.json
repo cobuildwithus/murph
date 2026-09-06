@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 200,
+  "item": {
+    "id": "journal-sleep-and-import-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More accurate sleep in Journal",
+    "summary": "Journal keeps sleep on the right date, preserves short naps, and shows sleep durations in consistent units.",
+    "details": "The timeline does less work with long histories. Opening Journal during your first device import now checks for new entries for up to a minute, and chart weekdays stay aligned when you travel.",
+    "relevanceTags": [
+      "journal",
+      "sleep",
+      "device-sync"
+    ],
+    "sourcePullRequests": [3002],
+    "tryIt": {
+      "label": "Open Journal",
+      "href": "/journal"
+    }
+  }
+}

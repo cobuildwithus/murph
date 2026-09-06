@@ -417,9 +417,10 @@ function resolveObservationMetric(entity: CanonicalEntity): string | null {
   return sourceProviderSlug === "apple-health-kit" ? "hrv-sdnn" : metric;
 }
 
-function resolveObservationEffectiveDate(
+export function resolveObservationEffectiveDate(
   entity: CanonicalEntity,
-  observationGrain: string | null,
+  observationGrain: string | null = readString(entity.attributes.observationGrain)
+    ?? inferWearableObservationGrain(entity),
 ): string | null {
   const dayKey = readString(entity.attributes.dayKey);
   if (!isDayGrainObservation(observationGrain)) {
