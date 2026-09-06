@@ -2211,7 +2211,10 @@ describe('assistant system prompt cache stability', () => {
     // set the prior ceiling. Exact-memory and workout-output hints add 684
     // characters; existing-file attachment guidance adds 212, retaining the
     // prior 4-character margin (68,574 characters plus 4).
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_578)
+    // Journal capture adds 1,933 characters above the prior ceiling. Focused
+    // live journeys showed that shorter guidance omitted saves or repeated
+    // event names in descriptions. Keep the explicit rules within this cap.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(70_511)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

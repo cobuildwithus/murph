@@ -9995,7 +9995,7 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 4000,
-                                  "description": "For Journal, write English detail about this fact only. A separate action or symptom needs its own entry. Do not repeat or paraphrase the title. A duration can be just \"45 min\". If there is no extra detail, repeat the title exactly so the view hides it."
+                                  "description": "Journal detail only, in English. Omit the event name and synonyms: title \"Cycling\", note \"20 min\", never \"Cycling for 20 min\". Separate symptoms/actions need separate entries. With no extra detail, use the title exactly so the view hides it."
                                 },
                                 "noteType": {
                                   "description": "Optional structured note type, such as journal-factor or journal-outcome.",

@@ -3,7 +3,7 @@
 import { useId, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { JOURNAL_ICON_ASSETS, readJournalIcon } from "@murphai/contracts";
+import { JOURNAL_ICON_ASSETS, readJournalIcon } from "@murphai/contracts/journal-presentation";
 import {
   Activity,
   ArrowRight,

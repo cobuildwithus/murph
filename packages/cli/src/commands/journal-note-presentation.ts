@@ -1,12 +1,12 @@
 import {
-  isStrictIsoDate,
   JOURNAL_TIMINGS,
   journalTimingTag,
   readJournalIcon,
   readJournalTiming,
   type JournalIcon,
   type JournalTiming,
-} from '@murphai/contracts'
+} from '@murphai/contracts/journal-presentation'
+import { isStrictIsoDate } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export function journalNotePresentationTags(input: {

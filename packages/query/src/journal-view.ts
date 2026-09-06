@@ -1,8 +1,7 @@
+import { readJournalTiming, type JournalTiming } from "@murphai/contracts/journal-presentation";
 import {
   isValidIanaTimeZone,
-  readJournalTiming,
   toLocalDayKey,
-  type JournalTiming,
 } from "@murphai/contracts";
 import {
   resolveAdherenceObservationActivityKind,

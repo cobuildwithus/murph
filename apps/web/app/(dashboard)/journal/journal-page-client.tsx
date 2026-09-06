@@ -94,7 +94,7 @@ export default function JournalPageClient({
     (status === "empty" || (client !== null && !journalAvailable));
 
   if (status === "error") {
-    return <JournalErrorState onRetry={() => void refreshJournal()} />;
+    return <JournalErrorState onRetry={() => void refresh()} />;
   }
 
   if (status === "loading" || isPreparing) {

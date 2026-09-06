@@ -1,8 +1,7 @@
+import { JOURNAL_ICON_IDS, JOURNAL_TIMINGS } from '@murphai/contracts/journal-presentation'
 import { Cli, z } from 'incur'
 import {
   ADVERSE_EFFECT_SEVERITIES,
-  JOURNAL_ICON_IDS,
-  JOURNAL_TIMINGS,
   EVENT_KINDS,
   eventSourceSchema,
   publicEventImportJsonlRowPayloadSchemasByKind,
@@ -491,7 +490,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .trim()
         .min(1)
         .max(4000)
-        .describe('For Journal, write English detail about this fact only. A separate action or symptom needs its own entry. Do not repeat or paraphrase the title. A duration can be just "45 min". If there is no extra detail, repeat the title exactly so the view hides it.'),
+        .describe('Journal detail only, in English. Omit the event name and synonyms: title "Cycling", note "20 min", never "Cycling for 20 min". Separate symptoms/actions need separate entries. With no extra detail, use the title exactly so the view hides it.'),
       noteType: slugSchema
         .optional()
         .describe('Optional structured note type, such as journal-factor or journal-outcome.'),

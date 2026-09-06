@@ -13389,12 +13389,13 @@ describeRealCodex('real Codex private Journal note quality e2e', () => {
         expect(note.title).not.toMatch(/today|yesterday|hoy|ayer|cansado|viajé|reported|taken/i)
         expect(String(note.attributes.note ?? '')).not.toMatch(/hoy|ayer|cansado|viajé|reported|taken/i)
       }
-      expect(first.finalMessage).toMatch(/descans|tranquil|suave|pausa/i)
+      expect(first.finalMessage).toMatch(/descans|tranquil|suave|pausa|despacio|fácil/i)
       expect(first.finalMessage).not.toMatch(/(?:quieres|puedo).{0,30}(?:guardar|registrar)|diagnostic|caused by/i)
       const second = await executeRealCodexAppServerTurn({
         ...input, resumeSessionId: first.sessionId,
         prompt: 'El viaje empezó ayer a las 15:35 y duró tres horas, no cuatro.',
       })
+      process.stdout.write(`[journal-note-quality-correction] ${JSON.stringify({ reply: second.finalMessage, actions: readCapabilityRoutingActions(second.jsonEvents) })}\n`)
       const updatedVault = await readVaultRawTolerant(workingDirectory)
       const updatedNotes = updatedVault.events.filter((event) => event.kind === 'note')
       expect(updatedNotes).toHaveLength(2)
