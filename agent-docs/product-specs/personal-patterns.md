@@ -89,7 +89,9 @@ For a factor day, the query first uses a confirmed-absence comparison when one
 exists. Otherwise, eligible device-backed factors can use an unobserved
 weekday-matched comparison day within 35 days. Within each weekday, the query
 maximizes the number of usable pairs, then minimizes their total date distance.
-Matching uses dates and outcome availability, never outcome values. No exposed
+Both sides stay inside the factor report window; next-day outcomes may extend
+one day past its end. Matching uses dates and outcome availability, never
+outcome values. No exposed
 or comparison day is reused for the same factor and outcome. A manual or
 inferred factor that uses this weaker baseline cannot receive a grade above D.
 
@@ -102,6 +104,8 @@ A repeated-evidence grade requires at least 75% of independent cases to agree
 with the overall direction (all cases when there are two or three). The median
 paired difference must also meet the outcome's meaningful-difference threshold.
 For four or more cases, both chronological halves must retain that direction.
+Grade A requires the median paired difference to clear the larger-effect floor
+as well, so one unusual case cannot promote an otherwise modest pattern.
 Displayed means and deltas still include every matched case. These are bounded
 product evidence rules, not significance tests or causal estimates.
 

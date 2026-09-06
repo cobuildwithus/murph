@@ -1928,6 +1928,8 @@ test("Personal Patterns retains available pairs when a nearest match would stran
 });
 
 for (const scenario of [
+  { name: "one unusual case cannot inflate a typical modest effect to grade A", deltas: [27, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], grade: "B" },
+  { name: "a consistently larger effect still earns grade A", deltas: Array(12).fill(10), grade: "A" },
   { name: "two extreme cases contradict the typical case", deltas: [-1, -1, 35, -1, -1, -1, -1, -1, 35, -1, -1, -1], grade: null },
   { name: "tiny consistent changes depend on extreme cases for magnitude", deltas: [30, 0.1, 0.1, 0.1, 30, 0.1, 0.1, 0.1], grade: null },
   { name: "a minority of large changes outweigh frequent contradictions", deltas: [15, 15, -2, -2, 15, 15, -2, -2], grade: null },
@@ -1979,6 +1981,37 @@ test("Personal Patterns counts overlapping episode records as one independent ca
     assert.equal(new Set(cell?.comparisonDates).size, 3);
     assert.equal(cell?.grade, "E");
   }
+});
+
+test("Personal Patterns never treats an exposed day outside the report as a baseline", () => {
+  const entities = [
+    event("outside_run", "2026-03-03", "activity_session", { activityType: "running" }),
+    event("inside_run", "2026-03-10", "activity_session", { activityType: "running" }),
+    observation("outside_outcome", "2026-03-04", "hrv", 50, "ms"),
+    observation("inside_outcome", "2026-03-11", "hrv", 70, "ms"),
+  ];
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({ entities, vaultRoot: "test://pattern-window" }),
+    { asOf: "2026-03-31", windowDays: 28 },
+  );
+  const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
+  assert.equal(cell?.stage, "insufficient");
+  assert.equal(cell?.comparisonDays, 0);
+});
+
+test("Personal Patterns does not use tomorrow as a same-day subjective baseline", () => {
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        journalFactor("factor", "2026-03-25", "outdoor-break", "happened"),
+        journalOutcome("outcome", "2026-03-25", "energy", "4"),
+        journalOutcome("future", "2026-04-01", "energy", "1"),
+      ],
+      vaultRoot: "test://subjective-window",
+    }),
+    { asOf: "2026-03-31", windowDays: 28 },
+  );
+  assert.equal(report.cells[0]?.stage, "insufficient");
 });
 
 function event(

@@ -285,7 +285,13 @@ function buildPersonalPatternReportFromOutcomeSeries(
   const candidateFactors = collectFactors(factorAccumulators, vocabulary);
   const candidateCells = candidateFactors.flatMap((factor) =>
     outcomes.map((outcome) =>
-      buildPatternCell(factor, factorAccumulators.get(factor.id), outcome),
+      buildPatternCell(
+        factor,
+        factorAccumulators.get(factor.id),
+        outcome,
+        fromDate,
+        asOfDate,
+      ),
     ),
   );
   const factors = candidateFactors
@@ -1073,6 +1079,8 @@ function buildPatternCell(
   factor: PersonalPatternFactor,
   accumulator: FactorAccumulator | undefined,
   outcome: OutcomeSeries,
+  fromDate: string,
+  toDate: string,
 ): PersonalPatternCell {
   const factorDates = accumulator?.dates ?? new Set<string>();
   const confirmedAbsentDates = accumulator?.absentDates ?? new Set<string>();
@@ -1083,6 +1091,8 @@ function buildPatternCell(
     outcome.values,
     outcome.lagDays,
     comparisonBasis === "confirmed_absence" ? confirmedAbsentDates : null,
+    fromDate,
+    toDate,
   );
   const exposedDates = [
     ...new Set(pairs.flatMap((pair) => pair.exposedDates)),
@@ -1121,11 +1131,19 @@ function buildPatternCell(
     outcome.meaningfulAbsoluteDelta,
     Math.abs(comparisonMean) * outcome.meaningfulRelativeDelta,
   );
-  const repeatedDirection = hasRepeatedDirection(pairs, delta, meaningfulDelta);
+  const typicalDelta = median(
+    pairs.map((pair) => pair.exposedValue - pair.comparisonValue),
+  );
+  const repeatedDirection = hasRepeatedDirection(
+    pairs,
+    delta,
+    typicalDelta,
+    meaningfulDelta,
+  );
   const direction = patternDirection(delta, meaningfulDelta);
   const spanDays = daysBetween(base.firstExposedDate, base.lastExposedDate);
   const initialGrade = patternGrade({
-    delta,
+    typicalDelta,
     direction,
     meaningfulDelta,
     pairCount: pairs.length,
@@ -1193,7 +1211,7 @@ function patternDirection(
 }
 
 function patternGrade(input: {
-  delta: number;
+  typicalDelta: number;
   direction: PersonalPatternCell["direction"];
   meaningfulDelta: number;
   pairCount: number;
@@ -1205,7 +1223,7 @@ function patternGrade(input: {
     input.pairCount >= 12 &&
     input.spanDays >= 56 &&
     input.repeatedDirection &&
-    Math.abs(input.delta) >= input.meaningfulDelta * 1.5
+    Math.abs(input.typicalDelta) >= input.meaningfulDelta * 1.5
   ) {
     return "A";
   }
@@ -1250,9 +1268,12 @@ function matchComparisonDays(
   outcomeValues: ReadonlyMap<string, number>,
   lagDays: 0 | 1,
   confirmedAbsentDates: ReadonlySet<string> | null,
+  fromDate: string,
+  toDate: string,
 ): MatchedPair[] {
   const eligibleComparisonDates = [...outcomeValues.keys()]
     .map((outcomeDate) => addDays(outcomeDate, -lagDays))
+    .filter((date) => date >= fromDate && date <= toDate)
     .filter((date) => !factorDates.has(date))
     .filter(
       (date) => confirmedAbsentDates === null || confirmedAbsentDates.has(date),
@@ -1338,6 +1359,7 @@ function addEpisodeDate(
 function hasRepeatedDirection(
   pairs: readonly MatchedPair[],
   fullDelta: number,
+  typicalDelta: number,
   meaningfulDelta: number,
 ): boolean {
   if (pairs.length < 2 || fullDelta === 0) return false;
@@ -1349,12 +1371,7 @@ function hasRepeatedDirection(
   if (agreeingCases < Math.ceil(pairs.length * 0.75)) return false;
   // A large mean alone can come from a few unusual readings. The typical
   // paired difference must also clear the existing meaningful-effect floor.
-  const sorted = [...deltas].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle];
-  if (median < meaningfulDelta) return false;
+  if (typicalDelta * direction < meaningfulDelta) return false;
   if (pairs.length < 4) return agreeingCases === pairs.length;
   const midpoint = Math.floor(pairs.length / 2);
   const first = pairs.slice(0, midpoint);
@@ -1448,6 +1465,14 @@ function daysBetween(left: string, right: string): number {
       Date.parse(`${left}T00:00:00.000Z`)) /
       86400000,
   );
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
 }
 
 function mean(values: readonly number[]): number {
