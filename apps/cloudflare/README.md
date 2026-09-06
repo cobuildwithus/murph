@@ -304,6 +304,13 @@ Postgres and PgBouncer families require the provider's explicit
 `planetscale_role="primary"` label; missing role metadata makes that family
 incomplete instead of treating mixed or replica data as primary.
 
+Postgres connection-state series with empty or omitted state labels retain their
+observed counts under the empty state key. They contribute to total utilization
+without inventing a named state or discarding other states. This follows
+[Prometheus empty-label semantics](https://prometheus.io/docs/concepts/data_model/).
+An absent primary family stays unknown; PgBouncer pool labels still require a
+nonempty value.
+
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
 metric series. Both selectors are required because one organization can have
