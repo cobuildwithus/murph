@@ -62,6 +62,7 @@ export default function JournalPageClient({
   const requestedOnOpen = useRef(false);
   const refreshJournal = useCallback(
     () => {
+      if (requestedOnOpen.current && refreshPending) return;
       requestedOnOpen.current = true;
       return refresh({
         background: true,
@@ -70,12 +71,17 @@ export default function JournalPageClient({
           (ref === null || !browserVaultReplicaRefsMatch(ref, nextRef)),
       });
     },
-    [ref, refresh],
+    [ref, refresh, refreshPending],
   );
   useEffect(() => {
-    if (requestedOnOpen.current || status !== "ready" || refreshPending) return;
+    const awaitingFirstImport = status === "empty" && deviceSyncImportPending;
+    if (
+      requestedOnOpen.current ||
+      (status !== "ready" && !awaitingFirstImport) ||
+      (refreshPending && !awaitingFirstImport)
+    ) return;
     void refreshJournal();
-  }, [refreshJournal, refreshPending, status]);
+  }, [deviceSyncImportPending, refreshJournal, refreshPending, status]);
   const journal = useMemo(
     () => (client ? selectBrowserVaultJournal(client) : null),
     [client],

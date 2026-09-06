@@ -48,6 +48,15 @@ test("Journal calendar and selected-week summaries work on phone and desktop", a
       if (width < 1024) await page.getByRole("button", { name: "Return to today" }).click();
       else await ready.getByRole("button", { name: "Today", exact: true }).click();
       await expect(stats).toContainText("Last 7 days");
+      // Change zone after catalog hydration, then exercise the production chart in UTC+14.
+      const browserSession = await context.newCDPSession(page);
+      await browserSession.send("Emulation.setTimezoneOverride", { timezoneId: "Pacific/Kiritimati" });
+      await stats.getByRole("button", { name: "Show avg sleep time details" }).click();
+      const chart = page.getByRole("img", { name: "Sleep time trend for this week" });
+      await expect(chart).toBeVisible();
+      await expect(chart.locator("..")).toContainText("Sun");
+      await expect(chart.locator("..")).toContainText("Sat");
+      if (outputDir) await chart.locator("..").screenshot({ path: path.join(outputDir, `journal-sleep-chart-${width}.png`) });
       const empty = page.getByRole("region", { name: "Journal empty state", includeHidden: true });
       await expect(empty.locator('[role="status"]')).toHaveAttribute("aria-label", "Updating latest data");
       expect(await empty.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
