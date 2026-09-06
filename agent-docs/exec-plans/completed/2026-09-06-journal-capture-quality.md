@@ -1,6 +1,6 @@
 # Reliable Journal capture and presentation
 
-Status: active
+Status: completed
 Created: 2026-09-06
 Updated: 2026-09-06
 
@@ -52,9 +52,11 @@ Exclusions: group consent, legacy Journal removal, production record migration, 
 
 Deploy the Web reader before the runtime writer publishes new timing values. Existing replicas remain readable; existing notes are not rewritten. Keep the compatible reader if a writer rollback leaves new replicas in storage. Verify a new note, a correction, and page-entry refresh after deployment.
 
-## Remaining work
+## Completion
 
-1. Finish the focused real assistant journey and current preview proof.
-2. Push the reviewed correction to PR #2970.
-3. Complete round 2 and required CI on the intended candidate.
-4. Close the plan, merge after passing gates, and retire the clean task checkout.
+Implementation and parent review are complete. Round 2 passed at `b9442f16cb42` with the original retry finding resolved.
+
+CI exposed missing source aliases for the dedicated catalog export. The base and Web TypeScript maps now name the existing source entrypoint. With its generated files temporarily absent, the focused foreground-state test and Web type check both pass. The same check failed before these aliases.
+
+Final pushed-head CI, a final review of the configuration correction, and the authorized merge remain external gates. Retire the clean task checkout after merge. Production rollout still follows the consumer-first order above.
+Completed: 2026-09-06
