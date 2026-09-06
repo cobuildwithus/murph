@@ -7,6 +7,7 @@ import {
   unwrapHostedBrowserSessionKey,
   type HostedBrowserSessionKeyEnvelope,
   type HostedCipherEnvelope,
+  type HostedUserRecipientPrivateKeyJwk,
 } from "@murphai/runtime-state";
 import {
   BROWSER_VAULT_CORE_SHARD_SCHEMA,
@@ -268,6 +269,36 @@ export async function loadBrowserVaultReplica({
     };
   }
 
+  return decodeReadyBrowserVaultSession({
+    session, privateKeyJwk, expectedMemberId: responseMemberId,
+    knownReplicaRef, knownReplicaShards, requestedMetricBuckets, requestedShards, signal,
+  });
+}
+
+/** Shared authenticated replica decoding for browser and companion readers. */
+export async function decodeReadyBrowserVaultSession({
+  session,
+  privateKeyJwk,
+  expectedMemberId,
+  knownReplicaRef = null,
+  knownReplicaShards = null,
+  requestedMetricBuckets = [],
+  requestedShards = ["core"],
+  signal,
+}: {
+  session: Extract<BrowserVaultSessionResponse, { state: "ready" }>;
+  privateKeyJwk: HostedUserRecipientPrivateKeyJwk;
+  expectedMemberId: string;
+  knownReplicaRef?: HostedBrowserVaultReplicaRef | null;
+  knownReplicaShards?: BrowserVaultReplicaShardSelection | null;
+  requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
+  requestedShards?: readonly BrowserVaultReplicaShard[];
+  signal?: AbortSignal;
+}): Promise<Extract<BrowserVaultSessionLoadResult, { state: "ready" }>> {
+  const responseMemberId = getReadySessionMemberId(session);
+  if (responseMemberId !== expectedMemberId) {
+    throw new Error("Browser vault session member did not match the authorized member.");
+  }
   const replicaKey = await unwrapHostedBrowserSessionKey({
     envelope: session.replicaKeyEnvelope,
     recipientPrivateKeyJwk: privateKeyJwk,

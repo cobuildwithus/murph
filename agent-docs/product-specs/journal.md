@@ -162,6 +162,28 @@ and approved group capture all write the same canonical events that Journal
 already reads. They do not infer records from page state or store facts in the
 Journal projection.
 
+## Native iOS experience
+
+The native Journal page reads the same saved projection through
+`GET /api/device-sync/companion/journal`. The route derives the member from
+Privy bearer authentication, enforces current Browser Vault access and consent
+before and after loading the encrypted core shard, and returns only Journal
+plus freshness with `no-store`. Opening the page never wakes the runtime.
+
+The app shows newest days first, reveals earlier weeks as the member scrolls,
+and stops at the projection's bounded history window. Top controls offer Today
+and a native calendar drawer. Tapping an entry opens a native detail drawer
+with its summary, metrics, additional details, and source records. Seven-day
+summary values use main sleep and grouped activity once. Additions and
+corrections remain conversational. Home and Personal Patterns keep their
+separate presentation owners.
+
+The response remains in session memory using ephemeral networking. Sign-out,
+account changes, and consent recovery clear it; late responses cannot restore
+an old session's records. Loading, unavailable, empty, stale, and retry states
+remain distinct. Deploy the additive read endpoint before distributing the
+native app; an older server produces a retryable unavailable page.
+
 ## Ownership
 
 Canonical event and metric stores own the data. `@murphai/query` owns the
