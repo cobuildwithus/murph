@@ -1,6 +1,7 @@
 ---
 title: 'Live journey selector rejects full names truncated by Vitest it.each'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2991'
 ---
 
 ## Expected Behavior

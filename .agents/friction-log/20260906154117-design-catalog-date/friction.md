@@ -1,6 +1,7 @@
 ---
 title: 'Design catalog date hydration disrupts browser proofs in UTC+14'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3012'
 ---
 
 ## Expected Behavior

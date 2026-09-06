@@ -1,6 +1,7 @@
 ---
 title: 'Bounded daily runtime event inventories exceed the diagnostic query budget'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2996'
 ---
 
 ## Expected Behavior
