@@ -36,3 +36,10 @@ The existing container `authorizeBoundUser` reads its durable slot state at the 
 - Paired actual-controller benchmark: balanced reads 428.22 ms base / 428.73 ms candidate (no meaningful wall-time change); slow binding read 489.09 ms / 386.90 ms (102.19 ms saved). Both eliminate one immutable-binding RPC. The base fails the zero-extra-read assertion; the candidate passes. These are synthetic I/O timings, not production estimates.
 - Direct and retained starts keep the lookup fallback. Invalid member, claim, region, release, slot and retired receipts are rejected using the existing binding checks.
 - Remaining larger opportunities investigated: restore already streams authenticated decryption and native extraction; ingress crypto caching is security-scoped; startup archive recovery protects representation consistency. No unrelated cache or weaker validation was added to chase unmeasured gains.
+
+## PR preparation
+
+- Draft PR #3006 is stacked on #2999. The base PR changes are reconciled by an ordinary merge.
+- All 177 runner-alarm tests pass. The consent-withdrawal budget test now exercises the retained target, which still requires the binding read; timeout, fence clearing and exact retirement assertions are preserved.
+- Nine changelog rendering tests and Web typecheck pass; Cloudflare typecheck passes after the fixture update.
+- The first docs-drift invocation considered only the uncommitted fixture and attribution; updating this plan supplies the matching explanation for that change. ReviewGPT and final CI remain pending.
