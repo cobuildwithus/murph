@@ -5,6 +5,8 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { buildJournalView, readVault } from '@murphai/query'
+import { createBrowserVaultReplica, parseBrowserVaultReplica } from '@murphai/query/browser'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -132,7 +134,7 @@ test('typed event write schemas expose concrete fields and keep JSON input on ex
     assert.equal('input' in schema.options.properties, false)
   }
 
-  assertSchemaProperties(noteSchema, ['note', 'noteType', 'relatedId', 'tag'])
+  assertSchemaProperties(noteSchema, ['note', 'noteType', 'relatedId', 'tag', 'icon', 'timing'])
   assertRequiredOptions(noteSchema, ['vault', 'note'])
 
   assertSchemaProperties(symptomSchema, ['symptom', 'severity', 'bodyRegion', 'note', 'tag'])
@@ -324,7 +326,7 @@ test.sequential('typed event write commands persist common event records without
       targetId: 'evt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
       type: 'related_to',
     }])
-    assert.deepEqual(requireData(shownNote).entity.data.tags, ['reflection'])
+    assert.deepEqual(requireData(shownNote).entity.data.tags, ['reflection', 'timing-timed', 'journal-icon-note'])
 
     assert.equal(shownSymptom.ok, true)
     assert.equal(requireData(shownSymptom).entity.kind, 'symptom')
@@ -365,5 +367,84 @@ test.sequential('typed event write commands persist common event records without
     assert.equal(requireData(shownSupplement).entity.data.unit, 'mg')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('Journal notes preserve time precision and selected icons through canonical writes and browser replicas', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-note-presentation-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'Pacific/Kiritimati']))
+    const cases = [
+      { title: 'Daily context', timing: 'all_day', time: '2026-05-18', icon: 'note' },
+      { title: 'Early stretch', timing: 'morning', time: '2026-05-18', icon: 'mobility' },
+      { title: 'Break outside', timing: 'afternoon', time: '2026-05-18', icon: 'sunlight' },
+      { title: 'Evening reading', timing: 'evening', time: '2026-05-18', icon: 'note' },
+      { title: 'Late shift', timing: 'night', time: '2026-05-18', icon: 'work' },
+      { title: 'Unspecified period', timing: 'unknown', time: '2026-05-18', icon: 'note' },
+      { title: 'Lunch', timing: 'timed', time: '2026-05-18T12:00:00+14:00', icon: 'meal' },
+    ]
+    const ids: string[] = []
+    for (const item of cases) {
+      const result = requireData(await runSliceCli<EventAddEnvelope>([
+        'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-context',
+        '--title', item.title, '--note', item.title, '--occurred-at', item.time,
+        '--timing', item.timing, '--icon', item.icon, '--tag', 'timing-late',
+      ]))
+      ids.push(result.eventId)
+    }
+    const defaultNote = requireData(await runSliceCli<EventAddEnvelope>([
+      'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-context',
+      '--title', 'Date only', '--note', 'Date only', '--occurred-at', '2026-05-18',
+    ]))
+    const view = buildJournalView(await readVault(vault), [], { asOf: '2026-05-19' })
+    assert.equal(view.days.length, 1)
+    assert.equal(view.days[0]?.date, '2026-05-18')
+    for (const item of cases) {
+      const row = view.days[0]?.events.find((entry) => entry.title === item.title)
+      assert.equal(row?.timing, item.timing)
+      assert.equal(row?.timeZone, 'Pacific/Kiritimati')
+      assert.ok(row?.records[0]?.tags.includes(`journal-icon-${item.icon}`))
+      assert.ok(row?.records[0]?.tags.includes('timing-late'))
+    }
+    assert.equal(view.days[0]?.events.find((entry) => entry.records[0]?.id === defaultNote.eventId)?.timing, 'unknown')
+    const orderedTitles = view.days[0]?.events.map((entry) => entry.title) ?? []
+    assert.deepEqual(orderedTitles.slice(0, 2), ['Daily context', 'Early stretch'])
+    assert.deepEqual(orderedTitles.slice(2, 4).sort(), ['Break outside', 'Lunch'])
+    assert.deepEqual(orderedTitles.slice(4, 6), ['Evening reading', 'Late shift'])
+    assert.deepEqual(orderedTitles.slice(6).sort(), ['Date only', 'Unspecified period'])
+
+    const beforeEdit = view.eventCount
+    const readingId = ids[3]
+    assert.ok(readingId)
+    requireData(await runSliceCli([
+      'event', 'edit', readingId, '--vault', vault,
+      '--title', 'Reading', '--note', '25 min',
+      '--occurred-at', '2026-05-18T19:40:00+14:00', '--day-key-policy', 'recompute',
+      '--tag', 'timing-timed', '--tag', 'journal-icon-note', '--tag', 'timing-late',
+    ]))
+    const source = await readVault(vault)
+    const replica = parseBrowserVaultReplica(await createBrowserVaultReplica({
+      vault: source, metricPoints: [], sourceBundleHash: 'b'.repeat(64), generatedAt: '2026-05-19T00:00:00Z',
+    }))
+    assert.equal(replica.journal?.eventCount, beforeEdit)
+    const updated = replica.journal?.days.flatMap((day) => day.events).find((entry) => entry.records[0]?.id === ids[3])
+    assert.equal(updated?.title, 'Reading')
+    assert.equal(updated?.summary, '25 min')
+    assert.equal(updated?.timing, 'timed')
+    assert.equal(updated?.date, '2026-05-18')
+    assert.equal(Date.parse(updated?.occurredAt ?? ''), Date.parse('2026-05-18T19:40:00+14:00'))
+    for (const invalid of [
+      ['--timing', 'timed'],
+      ['--icon', 'not-a-real-icon'],
+    ]) {
+      const result = await runSliceCli([
+        'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-context',
+        '--note', 'Invalid note', '--occurred-at', '2026-05-18', ...invalid,
+      ])
+      assert.equal(result.ok, false)
+    }
+    assert.equal(buildJournalView(await readVault(vault), [], { asOf: '2026-05-19' }).eventCount, beforeEdit)
+  } finally {
+    await rm(vault, { recursive: true, force: true })
   }
 })

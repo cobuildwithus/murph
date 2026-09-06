@@ -9923,11 +9923,79 @@
                                   "minLength": 1,
                                   "maxLength": 128
                                 },
+                                "icon": {
+                                  "description": "Journal icon from existing artwork. Choose note when none fits; never guess an asset name.",
+                                  "type": "string",
+                                  "enum": [
+                                    "note",
+                                    "bath",
+                                    "shower",
+                                    "headache",
+                                    "fatigue",
+                                    "muscle-soreness",
+                                    "abdominal-pain",
+                                    "nausea",
+                                    "congestion",
+                                    "activity",
+                                    "walking",
+                                    "running",
+                                    "cycling",
+                                    "swimming",
+                                    "rowing",
+                                    "strength",
+                                    "mobility",
+                                    "mind-body",
+                                    "racket-sports",
+                                    "ball-sports",
+                                    "combat-sports",
+                                    "winter-sports",
+                                    "water-sports",
+                                    "outdoor-sports",
+                                    "golf",
+                                    "dance",
+                                    "housework",
+                                    "yardwork",
+                                    "parenting",
+                                    "dog-walking",
+                                    "travel",
+                                    "commute",
+                                    "meal",
+                                    "medication",
+                                    "alcohol",
+                                    "recovery",
+                                    "wellness",
+                                    "sleep",
+                                    "caffeine",
+                                    "hydration",
+                                    "sauna",
+                                    "cold-plunge",
+                                    "sunlight",
+                                    "red-light",
+                                    "smoking",
+                                    "temperature",
+                                    "work",
+                                    "screens",
+                                    "noise"
+                                  ]
+                                },
+                                "timing": {
+                                  "description": "Use all_day for ongoing symptoms, including symptoms continuing since morning. Use morning/afternoon/evening/night only for an event limited to that period. Use unknown when time is missing. Use timed only with an explicit clock time. Never guess a time.",
+                                  "type": "string",
+                                  "enum": [
+                                    "timed",
+                                    "all_day",
+                                    "morning",
+                                    "afternoon",
+                                    "evening",
+                                    "night",
+                                    "unknown"
+                                  ]
+                                },
                                 "note": {
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 4000,
-                                  "description": "Freeform note text to store on the event."
+                                  "description": "Journal detail only, in English. Omit the event name and synonyms: title \"Cycling\", note \"20 min\", never \"Cycling for 20 min\". Separate symptoms/actions need separate entries. With no extra detail, use the title exactly so the view hides it."
                                 },
                                 "noteType": {
                                   "description": "Optional structured note type, such as journal-factor or journal-outcome.",
@@ -9969,7 +10037,7 @@
                                   ]
                                 },
                                 "title": {
-                                  "description": "Optional event title. If omitted, the command derives a short title.",
+                                  "description": "Short event name. For Journal, use English without relative-day words or dates.",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 160
