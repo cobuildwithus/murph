@@ -240,8 +240,12 @@ const JOURNAL_STUDY_DATA: JournalView = {
 
 export function JournalStudy() {
   return (
-    <section data-design-study="journal" id="journal-study">
-      <section inert>
+    <section
+      className="mx-auto flex max-w-[1440px] flex-col gap-16 px-5 py-10 sm:px-8 lg:px-12"
+      data-design-study="journal"
+      id="journal-study"
+    >
+      <section aria-label="Journal ready state" inert>
         <JournalViewContent
           asOfDate="2026-06-13"
           insights={[
@@ -265,6 +269,7 @@ export function JournalStudy() {
         <JournalViewContent
           asOfDate="2026-06-13"
           contactOptions={[STUDY_CONTACT_OPTION]}
+          isRefreshing
           journal={{
             days: [],
             eventCount: 0,

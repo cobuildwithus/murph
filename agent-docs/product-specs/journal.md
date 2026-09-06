@@ -1,6 +1,6 @@
 # Journal
 
-Last verified: 2026-08-31
+Last verified: 2026-09-06
 
 ## Product boundary
 
@@ -139,8 +139,9 @@ bounded refresh. This is not continuous polling while the page remains open.
 ## Web experience
 
 `/journal` shows the seven days ending on the selected day as a calm timeline.
-`Today` ends the window today. Previous and next move the full window by seven
-days, so Monday still includes the prior Tuesday through Sunday. Day bands
+`Today` ends the window on the browser local date and follows date changes while
+the page stays open. An explicitly selected historical window stays in place.
+Previous and next move the full window by seven days, so Monday still includes the prior Tuesday through Sunday. Day bands
 separate the days.
 Main sleep uses `Night`, naps use their time, and context can span a full day.
 Event text is readable without opening a detail view. Source labels stay
@@ -153,8 +154,11 @@ Period sorting anchors order rows without displaying invented clock times.
 
 The right rail shows a small calendar, seven-day sleep and activity statistics,
 and a current Personal Pattern when one is ready. A Pattern is an insight about
-the week, not a health event, so it does not appear on the daily timeline. The
-page supports loading, unavailable, empty, error, and ready states.
+the week, not a health event, so it does not appear on the daily timeline.
+Historical statistics name the selected date range. The calendar marks its
+selected end date separately from today, including for assistive technology. The
+page supports loading, unavailable, empty, error, and ready states. Empty
+timelines retain the background refresh status while showing onboarding.
 
 The web does not provide edit or add controls. A member asks Murph to add,
 correct, or remove an entry. Calendar, email travel, Environment, private chat,

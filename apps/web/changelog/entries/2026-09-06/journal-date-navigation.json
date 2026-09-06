@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "journal-date-navigation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Journal keeps Today up to date",
+    "summary": "Journal follows your local date while it stays open and labels older weeks with their actual date range.",
+    "details": "The calendar has larger touch targets and a clearer selected date. Empty timelines also show when a background update is running.",
+    "relevanceTags": ["journal", "usability", "accessibility"],
+    "sourcePullRequests": [],
+    "tryIt": { "label": "Open Journal", "href": "/journal" }
+  }
+}
