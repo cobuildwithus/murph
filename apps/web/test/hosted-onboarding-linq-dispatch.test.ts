@@ -4392,6 +4392,57 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("admits a clean established home with one live discovery and one member/chat lock", async () => {
+    const { prisma, hostedMemberRouting, hostedLinqDeliveryFindMany, restoreRootMock } =
+      await createDirectPreparationTransitionFixture();
+    const record = await hostedMemberRouting.findUnique({ where: { memberId: "member_123" } });
+    if (!record) throw new Error("Expected the existing routing fixture.");
+    await hostedMemberRouting.upsert({ create: {
+      ...record,
+      linqHomeLineAssignedAt: new Date("2026-03-25T00:00:00Z"),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_123", value: "+15550000000",
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    } });
+    hostedMemberRouting.findUnique.mockClear();
+    hostedMemberRouting.upsert.mockClear();
+    hostedLinqDeliveryFindMany.mockResolvedValue([]);
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({ eventId: "evt_clean_home_count" }),
+        signature: null, timestamp: null,
+      })).resolves.toMatchObject({ reason: "wake-appended-active-member" });
+      expect(prisma.hostedMemberIdentity!.findMany).toHaveBeenCalledOnce();
+      expect(hostedMemberRouting.findMany).toHaveBeenCalledOnce();
+      expect(hostedMemberRouting.findUnique).toHaveBeenCalledTimes(2);
+      expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw.mock.calls.filter(([sql]) =>
+        sql.join(" ").toLowerCase().includes('from "hosted_member"'),
+      )).toHaveLength(1);
+      expect(prisma.$executeRaw.mock.calls.filter((args) =>
+        args.includes("hosted-linq-routing:chat"),
+      )).toHaveLength(1);
+      expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledOnce();
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+      expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledOnce();
+    } finally {
+      restoreRootMock();
+    }
+  });
+
   it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
     const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
@@ -4839,84 +4890,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
-  it("retries once and fails closed when a thread route appears under the direct chat lock", async () => {
-    mocks.enforceDirectMailboxPreparation = true;
-    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
-      "member_123",
-    );
-    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
-      linqChatIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-routing.home-linq-chat-id",
-        memberId: "member_123",
-        value: "chat_123",
-      }),
-      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
-      linqParticipantContactKind: "phone",
-      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
-        "+15551234567",
-      ),
-      linqRecipientPhoneEncrypted: null,
-      linqRecipientPhoneLookupKey: null,
-      memberId: "member_123",
-      pendingLinqChatIdEncrypted: null,
-      pendingLinqRecipientPhoneEncrypted: null,
-      telegramUserIdEncrypted: null,
-      telegramUserLookupKey: null,
-    });
-    const hostedThreadRoute = {
-      findFirst: vi.fn().mockResolvedValue({
-        containerMemberId: "member_thread_container_123",
-      }),
-      findMany: vi.fn().mockResolvedValue([]),
-    };
-    const prisma = asPrismaTransactionClient({
-      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          createdAt: new Date("2026-03-26T00:00:00.000Z"),
-          id: "member_123",
-          invites: [],
-          phoneLookupKey: "+15551234567",
-          suspendedAt: null,
-          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
-        }),
-      },
-      hostedMemberRouting,
-      hostedThreadRoute,
-      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
-    });
-    prisma.$transaction = vi.fn(async (
-      callback: (transaction: typeof prisma) => Promise<unknown>,
-    ) => callback(prisma));
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_direct_thread_route_drift",
-      }),
-      signature: null,
-      timestamp: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-      details: {
-        preparationTarget: "direct_linq_mailbox",
-        reason: "thread-route",
-      },
-      retryable: true,
-    });
-
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
-      .toHaveBeenCalledTimes(2);
-    expect(hostedThreadRoute.findFirst).toHaveBeenCalledTimes(2);
-    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledTimes(2);
-    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
-    expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-  });
-
   it("keeps an exact committed direct event canonical after group context becomes eligible", async () => {
     mocks.enforceDirectMailboxPreparation = true;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
@@ -5040,7 +5013,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
-    expect(hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
@@ -5058,7 +5031,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
-    expect(hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(2, {
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
@@ -5090,7 +5063,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedInviteCreate).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
-    expect(hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
   });
 
   it("re-prepares an explicit-null direct preflight before active group routing", async () => {
@@ -6112,7 +6085,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
       .toHaveBeenCalledTimes(2);
-    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).not.toHaveBeenCalled();
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledOnce();
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();

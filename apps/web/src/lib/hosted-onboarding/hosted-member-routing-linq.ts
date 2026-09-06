@@ -729,6 +729,42 @@ function isHostedMemberHomeLinqBindingUnchanged(input: {
   );
 }
 
+/**
+ * Retains an exact binding after the caller's live member/home/thread resolution
+ * under participant, chat, and member locks. Pending conflicts still use repair.
+ */
+export async function readUnchangedHostedMemberHomeLinqBindingTx(input: {
+  chatId: string;
+  homeLineAssignedAt: Date | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+  routingRecord: Pick<HostedMemberRouting, keyof typeof hostedMemberLinqBindingSelect> | null;
+}): Promise<HostedLinqParticipantIdentity | null> {
+  const participant = readHostedMemberHomeLinqParticipantIdentity(input.routingRecord);
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
+  if (!participant || !linqChatLookupKey || !isHostedMemberHomeLinqBindingUnchanged({
+    clearPending: true,
+    homeLineAssignedAt: input.homeLineAssignedAt,
+    linqChatLookupKey,
+    lockedHomeRoute: input.routingRecord,
+    participantContact: participant,
+    recipientPhone,
+    recipientPhoneLookupKey: createHostedPhoneLookupKey(recipientPhone),
+  })) {
+    return null;
+  }
+  const pendingConflict = await input.prisma.hostedMemberRouting.findFirst({
+    select: { memberId: true },
+    where: {
+      pendingLinqChatLookupKey: { in: createHostedLinqChatLookupKeyReadCandidates(input.chatId) },
+      NOT: { memberId: input.memberId },
+    },
+  });
+  return pendingConflict ? null : participant;
+}
+
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
   homeLineAssignedAt: Date | null;
@@ -1107,6 +1143,9 @@ async function clearHostedMemberLinqChatConflicts(input: {
       .map((route) => route.memberId)
       .filter((memberId) => memberId !== input.memberId),
   )].sort();
+  if (conflictingMemberIds.length === 0) {
+    return;
+  }
   for (const memberId of conflictingMemberIds) {
     if (!(await tryAcquireHostedMemberHomeLinqRouteLockTx({
       memberId,
@@ -1123,31 +1162,6 @@ async function clearHostedMemberLinqChatConflicts(input: {
 
   await input.tx.hostedMemberRouting.updateMany({
     where: {
-      linqChatLookupKey: null,
-      pendingLinqChatLookupKey: {
-        in: [...input.linqChatLookupKeys],
-      },
-      NOT: {
-        memberId: input.memberId,
-      },
-    },
-    data: {
-      pendingLinqChatIdEncrypted: null,
-      pendingLinqChatLookupKey: null,
-      pendingLinqParticipantContactEncrypted: null,
-      pendingLinqParticipantContactKind: null,
-      pendingLinqParticipantContactLookupKey: null,
-      pendingLinqParticipantContactObservedAt: null,
-      pendingLinqRecipientPhoneEncrypted: null,
-      pendingLinqRecipientPhoneLookupKey: null,
-    },
-  });
-
-  await input.tx.hostedMemberRouting.updateMany({
-    where: {
-      linqChatLookupKey: {
-        not: null,
-      },
       pendingLinqChatLookupKey: {
         in: [...input.linqChatLookupKeys],
       },
