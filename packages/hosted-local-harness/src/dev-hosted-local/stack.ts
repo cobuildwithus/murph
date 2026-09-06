@@ -2711,8 +2711,6 @@ async function maybeRunRunnerContainerSmoke(input: {
         ...input.env,
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: input.workerBaseUrl,
         HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS:
-          input.env.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS?.trim() || "30",
         HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS:
           input.env.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS?.trim() || "1000",
       },

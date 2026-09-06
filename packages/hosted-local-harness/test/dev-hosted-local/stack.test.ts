@@ -831,7 +831,6 @@ describe("hosted local dev stack", () => {
         cwd: expect.stringContaining("murph"),
         env: expect.objectContaining({
           HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "30",
           HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "1000",
           HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "http://127.0.0.1:8787",
         }),

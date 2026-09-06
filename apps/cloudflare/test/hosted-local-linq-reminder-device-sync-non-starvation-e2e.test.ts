@@ -726,14 +726,22 @@ async function expectPendingDirtyResourceCount(
   expectedCount: number,
 ): Promise<void> {
   const deadline = Date.now() + observationTimeoutMs;
+  const expectedPending = expectedCount > 0;
   let lastCount: number | null = null;
+  let lastConnectionPending: boolean | null = null;
+  let lastUserPending: boolean | null = null;
   while (Date.now() < deadline) {
     const status = await requireScenario()
       .readJunctionDeviceSyncReplayDrainStatus({ connectionId, memberId: userId });
     lastCount = status.pendingDirtyResourceCount;
-    if (lastCount === expectedCount) {
-      expect(status.hasPendingDirtyConnection).toBe(expectedCount > 0);
-      expect(status.hasPendingDirtyConnectionForUser).toBe(expectedCount > 0);
+    lastConnectionPending = status.hasPendingDirtyConnection;
+    lastUserPending = status.hasPendingDirtyConnectionForUser;
+    // These fields are read independently and can straddle the final dirty ack.
+    if (
+      lastCount === expectedCount
+      && lastConnectionPending === expectedPending
+      && lastUserPending === expectedPending
+    ) {
       return;
     }
     await sleep(250);
@@ -742,6 +750,9 @@ async function expectPendingDirtyResourceCount(
     "Timed out waiting for the authoritative Junction dirty-resource count.",
     `expected count: ${expectedCount}`,
     `last count: ${lastCount ?? "unread"}`,
+    `expected pending: ${expectedPending}`,
+    `last connection pending: ${lastConnectionPending ?? "unread"}`,
+    `last user pending: ${lastUserPending ?? "unread"}`,
   ]));
 }
 
