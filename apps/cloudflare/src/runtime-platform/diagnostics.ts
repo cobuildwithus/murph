@@ -243,6 +243,9 @@ export function buildHostedRuntimeSafeErrorMetadata(
           ...(fetchFailureDiagnostics.fetchCauseName
             ? { fetchCauseName: fetchFailureDiagnostics.fetchCauseName }
             : {}),
+          ...(fetchFailureDiagnostics.fetchNetworkErrorCode
+            ? { fetchNetworkErrorCode: fetchFailureDiagnostics.fetchNetworkErrorCode }
+            : {}),
           fetchRequestSignalAborted:
             fetchFailureDiagnostics.fetchRequestSignalAborted,
           fetchTimeoutMs: fetchFailureDiagnostics.fetchTimeoutMs,
