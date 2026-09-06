@@ -5,7 +5,6 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
-  ChevronDown,
   Ellipsis,
   Minus,
   Moon,
@@ -414,7 +413,6 @@ function MobilePatternCard({
   const headingId = useId();
   const measured: PatternOutcomeColumn[] = [];
   const neutral: PatternOutcomeColumn[] = [];
-  const pending: PatternOutcomeColumn[] = [];
   for (const column of outcomeColumns) {
     const entries = column.outcomes.map((outcome) => ({
       cell: findPatternCell(report, factor.id, outcome.id),
@@ -424,8 +422,6 @@ function MobilePatternCard({
       measured.push(column);
     } else if (entries.some(({ cell }) => cell && cell.stage !== "insufficient")) {
       neutral.push(column);
-    } else {
-      pending.push(column);
     }
   }
 
@@ -452,15 +448,6 @@ function MobilePatternCard({
         <ObservedDaysMeter className="min-h-11 shrink-0" days={factor.observedDays} />
       </div>
       <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
-      {pending.length > 0 ? (
-        <details className="group border-t border-border">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-5 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-            More data needed ({pending.length})
-            <ChevronDown aria-hidden="true" className="size-4 shrink-0 group-open:rotate-180" />
-          </summary>
-          <PatternCardMeasures factor={factor} outcomes={pending} report={report} />
-        </details>
-      ) : null}
       {neutral.length > 0 ? (
         <div aria-label="No clear change" role="group" className="border-t border-border px-5 pb-2 pt-3">
           <p className="text-xs text-muted-foreground">No clear change</p>

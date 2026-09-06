@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 
 test.use({ hasTouch: true });
 
-test("pattern cards show every measure on phones and retain result details", async ({ page }) => {
+test("pattern cards show available comparisons on phones and retain result details", async ({ page }) => {
   test.setTimeout(180_000);
   await page.route("**/*", (route) => {
     const host = new URL(route.request().url()).hostname;
@@ -88,15 +88,9 @@ test("pattern cards show every measure on phones and retain result details", asy
   await expect(page.getByRole("dialog")).toContainText("deep sleep");
   await page.keyboard.press("Escape");
   const sparse = mobile.locator('[data-pattern-factor-row="housework"]');
-  const pending = sparse.locator("details");
-  await expect(pending).not.toHaveAttribute("open", "");
-  await pending.locator("summary").focus();
-  await page.keyboard.press("Enter");
-  await expect(pending).toHaveAttribute("open", "");
-  await pending.getByRole("button", { name: /^Not enough comparable data/ }).first().click();
-  await expect(page.getByRole("dialog")).toContainText("No comparable days");
-  await page.keyboard.press("Escape");
-  await pending.locator("summary").click();
+  await expect(mobile.locator("details")).toHaveCount(0);
+  await expect(mobile.locator('[data-pattern-state="insufficient"]')).toHaveCount(0);
+  await expect(sparse.getByRole("button", { name: /^Your HRV/ })).toBeVisible();
   await populated.getByRole("button", { name: "Show more", exact: true }).click();
   await expect(mobile.locator("li")).toHaveCount(19);
   const neutralOnly = mobile.locator('[data-pattern-factor-row="custom-tag"]');
@@ -156,12 +150,6 @@ test("pattern cards show every measure on phones and retain result details", asy
           path: path.join(output, "patterns-phone-overview.png"),
           style: "nextjs-portal, main > .sticky { visibility: hidden !important; }",
         });
-        await pending.locator("summary").click();
-        await sparse.screenshot({
-          path: path.join(output, "patterns-expanded.png"),
-          style: "nextjs-portal, main > .sticky { visibility: hidden !important; }",
-        });
-        await pending.locator("summary").click();
         await sparse.screenshot({
           path: path.join(output, "patterns-sparse.png"),
           style: "nextjs-portal, main > .sticky { visibility: hidden !important; }",

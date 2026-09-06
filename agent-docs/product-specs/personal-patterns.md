@@ -141,10 +141,10 @@ bars and changed comparisons together. Tapping a mobile result opens a bottom
 drawer with the same comparison details and evidence dates as the desktop
 hover popover. Neutral measures appear
 as compact links under one `No clear change` label at the bottom. Measures that
-still need data remain available in a disclosure within the card. `Show more`
+still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. A recognized factor
-stays visible when it has no suitable comparison day. Its cells explain that
+stays visible when it has no suitable comparison day. Its desktop cells explain that
 Murph needs more comparable data. Observations can appear with grade E. The
 page shows the evidence count, comparison basis, date range, and the factor and
 comparison dates needed to inspect the result.
