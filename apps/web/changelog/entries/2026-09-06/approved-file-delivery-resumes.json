@@ -8,7 +8,11 @@
     "title": "Faster delivery after file approval",
     "summary": "Queued device updates no longer hold up a file you have approved Murph to send.",
     "details": "Delivery resumes after approval without waiting for another message. Your approval still applies to the specific file and destination.",
-    "relevanceTags": ["messaging"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "messaging"
+    ],
+    "sourcePullRequests": [
+      2982
+    ]
   }
 }
