@@ -403,13 +403,20 @@ function MobilePatternCard({
 }) {
   const headingId = useId();
   const measured: PatternOutcomeColumn[] = [];
+  const neutral: PatternOutcomeColumn[] = [];
   const pending: PatternOutcomeColumn[] = [];
   for (const column of outcomeColumns) {
-    const hasComparison = column.outcomes.some((outcome) => {
-      const cell = findPatternCell(report, factor.id, outcome.id);
-      return cell && cell.stage !== "insufficient";
-    });
-    (hasComparison ? measured : pending).push(column);
+    const entries = column.outcomes.map((outcome) => ({
+      cell: findPatternCell(report, factor.id, outcome.id),
+      outcome,
+    }));
+    if (entries.some(isPatternEffectEntry)) {
+      measured.push(column);
+    } else if (entries.some(({ cell }) => cell && cell.stage !== "insufficient")) {
+      neutral.push(column);
+    } else {
+      pending.push(column);
+    }
   }
 
   return (
@@ -426,17 +433,13 @@ function MobilePatternCard({
           height={44}
           className="size-11 shrink-0 object-contain"
         />
-        <div className="min-w-0 space-y-1">
-          <h2
-            id={headingId}
-            className="break-words font-serif text-xl font-semibold leading-6 tracking-tight text-foreground"
-          >
-            {factor.label}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {formatCaseCount(factor.observedDays)}
-          </p>
-        </div>
+        <h2
+          id={headingId}
+          className="min-w-0 flex-1 break-words font-serif text-xl font-semibold leading-6 tracking-tight text-foreground"
+        >
+          {factor.label}
+        </h2>
+        <ObservedDaysMeter className="min-h-11 shrink-0" days={factor.observedDays} />
       </div>
       <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
       {pending.length > 0 ? (
@@ -447,6 +450,25 @@ function MobilePatternCard({
           </summary>
           <PatternCardMeasures factor={factor} outcomes={pending} report={report} />
         </details>
+      ) : null}
+      {neutral.length > 0 ? (
+        <div aria-label="No clear change" role="group" className="border-t border-border px-5 pb-2 pt-3">
+          <p className="text-xs text-muted-foreground">No clear change</p>
+          <div className="flex flex-wrap gap-x-4">
+            {neutral.map((outcome) => (
+              <PatternOutcomeColumnCell
+                card
+                key={outcome.id}
+                neutralLabel={outcome.label}
+                factorLabel={factor.label}
+                factorObservedDays={factor.observedDays}
+                outcomes={outcome.outcomes}
+                report={report}
+                factorId={factor.id}
+              />
+            ))}
+          </div>
+        </div>
       ) : null}
     </li>
   );
@@ -663,6 +685,7 @@ function PatternOutcomeHeader({
 
 function PatternOutcomeColumnCell({
   card = false,
+  neutralLabel,
   factorId,
   factorLabel,
   factorObservedDays,
@@ -670,6 +693,7 @@ function PatternOutcomeColumnCell({
   report,
 }: {
   card?: boolean;
+  neutralLabel?: string;
   factorId: string;
   factorLabel: string;
   factorObservedDays: number;
@@ -684,7 +708,7 @@ function PatternOutcomeColumnCell({
 
   if (effects.length === 0) {
     const checked = entries.find(
-      ({ cell }) => cell !== undefined && cell.stage === "no_clear_pattern",
+      ({ cell }) => cell !== undefined && cell.stage !== "insufficient",
     );
     const outcome = checked?.outcome ?? outcomes[0];
 
@@ -692,6 +716,7 @@ function PatternOutcomeColumnCell({
       <PatternBubble
         cell={checked?.cell}
         card={card}
+        neutralLabel={neutralLabel}
         factorLabel={factorLabel}
         factorObservedDays={factorObservedDays}
         outcomeId={outcome?.id ?? "unknown"}
@@ -867,6 +892,7 @@ function PatternCompositeBubble({
 function PatternBubble({
   cell,
   card = false,
+  neutralLabel,
   factorLabel,
   factorObservedDays,
   outcomeId,
@@ -876,6 +902,7 @@ function PatternBubble({
 }: {
   cell?: PersonalPatternCell;
   card?: boolean;
+  neutralLabel?: string;
   factorLabel: string;
   factorObservedDays: number;
   outcomeId: string;
@@ -974,7 +1001,7 @@ function PatternBubble({
             className={cn(
               "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
-              cardFlat && "font-sans text-sm font-normal text-muted-foreground",
+              cardFlat && "font-sans text-xs font-normal text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-current",
             )}
             data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
             onKeyDown={pointerAnchor.onKeyDown}
@@ -989,7 +1016,7 @@ function PatternBubble({
                 tone={tone}
               />
             )}
-            {isFlat ? (card ? <span>No clear change</span> : null) : <span>{label}</span>}
+            {isFlat ? (card ? <span>{neutralLabel}</span> : null) : <span>{label}</span>}
           </button>
         }
       />

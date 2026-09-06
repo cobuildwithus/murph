@@ -32,9 +32,16 @@ test("pattern cards show every measure on phones and retain result details", asy
   await expect(mobile.locator("select")).toHaveCount(0);
   const running = mobile.locator('[data-pattern-factor-row="running"]');
   await expect(running.getByRole("heading", { name: "Running", exact: true })).toBeVisible();
+  const coverage = running.locator("[data-observed-days]");
+  await expect(coverage).toHaveAccessibleName("Good coverage: based on 14 recorded cases");
+  await expect(running.getByText("14 recorded cases", { exact: true })).toHaveCount(0);
+  await page.keyboard.press("Tab");
+  await coverage.focus();
+  await expect(page.locator('[data-slot="tooltip-content"]')).toContainText("Based on 14 recorded cases");
+  await page.keyboard.press("Escape");
   await expect(running.locator("dt")).toHaveText([
-    "HRV", "Sleep duration", "Resting heart rate", "Readiness score", "Deep sleep",
-    "Respiratory rate", "Sleep quality", "SpO₂",
+    "HRV", "Resting heart rate", "Readiness score",
+    "Sleep quality", "SpO₂",
   ]);
   const result = running.getByRole("button", { name: /^Your HRV was higher after running/ });
   await result.click();
@@ -42,7 +49,14 @@ test("pattern cards show every measure on phones and retain result details", asy
   await expect(page.getByRole("dialog")).toContainText("running");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(running.getByText("No clear change", { exact: true }).first()).toBeVisible();
+  const neutral = running.getByRole("group", { name: "No clear change", exact: true });
+  await expect(neutral.getByRole("button")).toHaveText(["Sleep duration", "Deep sleep", "Respiratory rate"]);
+  await expect(running.locator("dl [data-pattern-state='no-clear-pattern']")).toHaveCount(0);
+  expect(await neutral.evaluate((element) => element === element.parentElement?.lastElementChild)).toBe(true);
+  await neutral.getByRole("button").nth(1).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog")).toContainText("deep sleep");
+  await page.keyboard.press("Escape");
   const sparse = mobile.locator('[data-pattern-factor-row="housework"]');
   const pending = sparse.locator("details");
   await expect(pending).not.toHaveAttribute("open", "");
@@ -55,6 +69,13 @@ test("pattern cards show every measure on phones and retain result details", asy
   await pending.locator("summary").click();
   await populated.getByRole("button", { name: "Show more", exact: true }).click();
   await expect(mobile.locator("li")).toHaveCount(19);
+  const neutralOnly = mobile.locator('[data-pattern-factor-row="custom-tag"]');
+  await expect(neutralOnly.locator('[data-pattern-state="effect"]')).toHaveCount(0);
+  await expect(neutralOnly.getByRole("group", { name: "No clear change", exact: true })).toBeVisible();
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await mkdir(process.env.DESIGN_PROOF_OUTPUT_DIR, { recursive: true });
+    await neutralOnly.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-neutral-only.png") });
+  }
   await populated.getByRole("button", { name: "Show less", exact: true }).click();
   await expect(mobile.locator("li")).toHaveCount(15);
 

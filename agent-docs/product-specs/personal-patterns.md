@@ -136,10 +136,11 @@ pending and publishes a report for the newer hash.
 ## Presentation
 
 The `/patterns` page shows the first 15 factors. Desktop compares every
-supported outcome in a matrix. Phones show one card per factor, with available
-comparisons together and tappable result details. Measures that still need data
-remain available in a disclosure within the card. `Show more` reveals the
-remaining report factors. The report keeps at most 100 sorted
+supported outcome in a matrix. Phones show one card per factor, with coverage
+bars, changed comparisons together, and tappable result details. Neutral measures appear
+as compact links under one `No clear change` label at the bottom. Measures that
+still need data remain available in a disclosure within the card. `Show more`
+reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. A recognized factor
 stays visible when it has no suitable comparison day. Its cells explain that
 Murph needs more comparable data. Observations can appear with grade E. The
