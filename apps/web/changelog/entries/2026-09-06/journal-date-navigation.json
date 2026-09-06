@@ -9,7 +9,7 @@
     "summary": "Journal follows your local date while it stays open and labels older weeks with their actual date range.",
     "details": "The calendar has larger touch targets and a clearer selected date. Empty timelines also show when a background update is running.",
     "relevanceTags": ["journal", "usability", "accessibility"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3002],
     "tryIt": { "label": "Open Journal", "href": "/journal" }
   }
 }
