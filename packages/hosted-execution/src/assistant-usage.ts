@@ -174,6 +174,7 @@ export type AssistantProviderRequestOutcome =
   | "succeeded";
 export type AssistantUsageTokenPricingBasis =
   | "openai-flex"
+  | "openai-priority"
   | "standard";
 export type AssistantUsageStripeMeterSource = "murph";
 
@@ -1156,12 +1157,16 @@ export function normalizeAssistantUsageTokenPricingBasis(
     return "standard";
   }
 
-  if (normalized === "openai-flex" || normalized === "standard") {
+  if (
+    normalized === "openai-flex"
+    || normalized === "openai-priority"
+    || normalized === "standard"
+  ) {
     return normalized;
   }
 
   throw new TypeError(
-    "tokenPricingBasis must be 'standard' or 'openai-flex' when provided.",
+    "tokenPricingBasis must be 'standard', 'openai-flex', or 'openai-priority' when provided.",
   );
 }
 
