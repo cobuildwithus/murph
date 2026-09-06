@@ -15202,7 +15202,206 @@ describeRealCodex('real Codex durable follow-up e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex automation context before questions e2e', () => {
+  it('uses known answers before exact automation questions without suppressing unresolved work', async () => {
+    const scenarios = [
+      {
+        scenario: 'skips an exact question already answered',
+        scope: 'direct' as const,
+        instructions: 'Ask exactly "How long was your walk today?" Say nothing else.',
+        context: 'August 5, 2026, 08:40 America/New_York. Member: I finished my morning walk; it took 25 minutes. Assistant: Logged your 25-minute walk for today.',
+        expectedKind: 'skip', expectedText: null, forbiddenText: null,
+      },
+      {
+        scenario: 'asks only for the missing part of a broader check-in',
+        scope: 'direct' as const,
+        instructions: 'Ask how long today’s walk was and whether the new shoes felt comfortable. Only ask that question.',
+        context: 'August 5, 2026, 08:40 America/New_York. Member: My walk took 25 minutes today. Assistant: Logged. No shoe comfort information has been shared.',
+        expectedKind: 'send_message', expectedText: /shoes|comfort/iu,
+        forbiddenText: /how long|how many minutes|duration|what.*walk/iu,
+      },
+      {
+        scenario: 'preserves the current question when only yesterday is answered',
+        scope: 'direct' as const,
+        instructions: 'Ask exactly "How long was your walk today?" Say nothing else.',
+        context: 'August 4, 2026, 08:40 America/New_York. Member: My walk took 25 minutes today. There is no August 5 walk report in the available records or conversation.',
+        expectedKind: 'send_message', expectedText: /how long|how many minutes/iu,
+        forbiddenText: /logged|already|another|again/iu,
+      },
+      {
+        scenario: 'does not confuse a planned action with completion',
+        scope: 'direct' as const,
+        instructions: 'Send the agreed brief reminder to do today’s ankle mobility practice.',
+        context: 'August 5, 2026, 08:40 America/New_York. Member: I plan to do the ankle mobility practice later today. No completion has been reported.',
+        expectedKind: 'send_message', expectedText: /ankle|mobility/iu,
+        forbiddenText: /logged|completed|already done/iu,
+      },
+      {
+        scenario: 'skips an answered room decision in a group automation',
+        scope: 'group' as const,
+        instructions: 'Only ask "Which park has the group chosen for Saturday’s outing?"',
+        context: 'August 5, 2026, 08:40 America/New_York. Group organizer: We agreed on Cedar Park for this Saturday’s outing. Assistant: Cedar Park is the group’s choice for Saturday.',
+        expectedKind: 'skip', expectedText: null, forbiddenText: null,
+      },
+    ]
+    for (const { scenario, scope, instructions, context, expectedKind, expectedText, forbiddenText } of scenarios) {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-context-e2e-'))
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(scope),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          groupConversation: scope === 'group',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [instructions, 'Available recent conversation and record context:', context].join('\n\n'),
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        process.stdout.write(`[real-codex automation context ${scenario}] ${decision.kind === 'send_message' ? decision.text.replaceAll(/\s+/gu, ' ').trim() : 'skip'}\n`)
+        expect(decision.kind).toBe(expectedKind)
+        expect(result.followUpRequest).toBeNull()
+        expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+        if (decision.kind === 'send_message') {
+          if (expectedText) expect(decision.text).toMatch(expectedText)
+          if (forbiddenText) expect(decision.text).not.toMatch(forbiddenText)
+          expect((decision.text.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+          expect(decision.text.length).toBeLessThan(240)
+          expect(decision.text).not.toMatch(/automation|outbox|cron|system prompt/iu)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }
+  }, 900_000)
+})
+
 describeRealCodex('real Codex recurring reminder conversation e2e', () => {
+  it('keeps saved control notes out of routine summaries while preserving requested controls', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const temporaryPaths: string[] = []
+    const scenarios = [
+      { name: 'private legacy note', scope: 'direct' as const, note: 'The recipient can ask to adjust or pause this report whenever they want.', kind: 'send_message', footer: false },
+      { name: 'group legacy note', scope: 'group' as const, note: 'The room can change or stop these reports at any time.', kind: 'send_message', footer: false },
+      { name: 'requested footer', scope: 'direct' as const, note: 'The user explicitly requested this exact closing sentence in every report: "You can pause these reports anytime."', kind: 'send_message', footer: true },
+      { name: 'concrete stop condition', scope: 'direct' as const, note: 'Skip if the rider has ended this tracking plan. Trusted current plan state: the rider explicitly ended this tracking plan.', kind: 'skip', footer: false },
+    ]
+    try {
+      for (const scenario of scenarios) {
+        const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-control-note-e2e-'))
+        temporaryPaths.push(workingDirectory)
+        await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+        const occurrenceAt = '2026-08-05T13:00:00.000Z'
+        const created = await upsertAutomation({
+          continuityPolicy: 'fresh',
+          instructions: [
+            'Send a compact summary of the newly recorded bicycle ride to this conversation. Report the supplied duration and distance without coaching.',
+            'Trusted synthetic activity facts: bicycle ride, 42 minutes, 12 kilometers. These are the complete facts required for this update.',
+            scenario.note,
+          ].join(' '),
+          now: new Date('2026-08-05T12:00:00.000Z'),
+          route: { channel: 'linq', deliveryTarget: 'synthetic-control-note', identityId: null,
+            participantId: null, threadId: 'synthetic-control-note', threadIsDirect: scenario.scope === 'direct' },
+          schedule: { kind: 'at', at: occurrenceAt },
+          slug: 'synthetic-control-note', status: 'active', tags: [],
+          title: 'Synthetic activity summary', vaultRoot: workingDirectory,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory), created.record.automationId)
+        if (!source || source.kind !== 'automation') throw new Error('Expected synthetic automation.')
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt,
+        })
+        const instructions = buildAssistantCronExecutionInstructions({
+          job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+          kind: 'canonical', runtimeState, source,
+        }, { automationId: null, contextReferences: [] })
+        const prepared = await prepareAssistantCronNotificationInput({
+          instructions, vault: workingDirectory, workingDirectory,
+          turnTrigger: 'automation-cron', scheduledAutomationScheduleKind: 'at',
+        })
+        expect(prepared.instructions).not.toContain('Confirmed-output reminder cadence policy')
+        expect(prepared.instructions).toContain(scenario.note)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, developerInstructions: buildScheduledAutomationDeveloperInstructions(scenario.scope),
+          dynamicTools: [], env: config.env, excludeResumeTurns: true, groupConversation: scenario.scope === 'group',
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: prepared.instructions, reasoningEffort: 'medium', sandbox: 'read-only', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        process.stdout.write(`${JSON.stringify({ scenario: scenario.name, model: config.model, decision })}\n`)
+        expect(decision.kind).toBe(scenario.kind)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/42/)
+          expect(decision.text).toMatch(/12/)
+          if (scenario.footer) expect(decision.text).toContain('You can pause these reports anytime.')
+          else expect(decision.text).not.toMatch(/pause|stop|adjust|change|anytime|any time|let me know|would you like/iu)
+        }
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([...temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('authors an ongoing activity summary without generic control boilerplate', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-control-note-authoring-e2e-'))
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildMidnightLinqReminderDeveloperInstructions(),
+        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env, excludeResumeTurns: true,
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          automationTool: {
+            request: async (request) => {
+              requests.push(request)
+              if (request.action !== 'save') throw new Error('Expected exactly one automation save.')
+              return {
+                action: 'save', automationId: 'automation-synthetic-ride-summary', created: true,
+                effectiveTimeZone: null, lookupId: 'synthetic-ride-summary',
+                occurrenceProjection: { nextOccurrenceAt: null, status: 'resolved' as const },
+                routeBinding: 'current_conversation', schedule: request.schedule, status: 'active',
+                updatedAt: '2026-08-08T12:00:00.000Z',
+              }
+            },
+          },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'After each new Garmin bicycle ride recorded after 2026-08-10T12:00:00.000Z, send a compact factual summary here with its available duration and distance. Save this ongoing device-triggered summary now.',
+        reasoningEffort: 'medium', sandbox: 'read-only', workingDirectory,
+      })
+      process.stdout.write(`${JSON.stringify({ scenario: 'clean activity-summary authoring', model: config.model,
+        requests, reply: result.finalMessage })}\n`)
+      expect(requests).toHaveLength(1)
+      expect(requests[0]).toMatchObject({ action: 'save', schedule: {
+        after: '2026-08-10T12:00:00.000Z', kind: 'deviceActivity', source: 'garmin',
+      } })
+      const saved = requests[0]
+      if (saved?.action !== 'save') throw new Error('Expected saved summary.')
+      expect(saved.instructions).toMatch(/duration/iu)
+      expect(saved.instructions).toMatch(/distance/iu)
+      expect(saved.instructions).not.toMatch(/pause|opt.out|anytime|any time|whenever (?:you|they) want/iu)
+      expect(result.finalMessage).toMatch(/active|created|saved|scheduled|set(?: up)?/iu)
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('sends only the first ordinary cue from production notification composition', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
@@ -15428,6 +15627,10 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
       })
 
       const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`${JSON.stringify({ scenario, model: config.model, decision })}\n`)
+      if (scenario === 'uses a relevant reply when resuming the cue' && decision.kind === 'send_message') {
+        expect(decision.text).not.toMatch(/keep|change|pause|anytime|let me know/iu)
+      }
       expect(decision.kind).toBe(expectedKind)
       if (expectedText) {
         expect(decision.kind).toBe('send_message')

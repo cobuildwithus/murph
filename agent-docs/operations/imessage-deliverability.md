@@ -250,6 +250,12 @@ Preferred shape:
 - short, conversational, and specific to the recipient
 - one clear question when Murph needs to build trust or confirm intent
 - clear continuation of an existing user-requested thread
+- routine reminders and summaries carry their requested content; generic saved
+  change/pause notes describe controls and do not become repeated footers.
+  Explain those controls during setup when useful. Preserve explicit requested
+  copy, concrete stop conditions, bounded review decisions, and a cadence
+  question when the current engine policy requires one. A relevant reply to
+  the prior reminder rules out another silence-based cadence question.
 - full recognizable URLs only when links are necessary
 - calm, non-salesy language
 

@@ -14,6 +14,37 @@ import { buildMetricsBody } from "./helpers/database-health.ts";
 const BRANCH_ID = "branch_test";
 
 describe("PlanetScale database health metrics", () => {
+  it.each(["empty", "omitted"])(
+    "retains Postgres counts with an %s state label alongside actionable states",
+    (stateLabel) => {
+      let body = buildMetricsBody({
+        branchId: BRANCH_ID,
+        postgresStates: { "": 4, active: 40, "idle in transaction (aborted)": 1 },
+      });
+      if (stateLabel === "omitted") {
+        body = body.replace(',planetscale_connection_state=""', "");
+      }
+      const observation = parsePlanetScaleDatabaseMetricObservation(body, BRANCH_ID);
+
+      expect(observation.missingMetrics).toEqual([]);
+      expect(observation.snapshot.postgresConnectionStates).toEqual({
+        "": 4,
+        active: 40,
+        "idle in transaction (aborted)": 1,
+      });
+      expect(observation.snapshot.postgresConnections).toBe(45);
+      expect(evaluateDatabaseMetricSnapshot(observation.snapshot, null)).toEqual([
+        {
+          connections: 45,
+          kind: "postgres_connection_saturation",
+          limit: 50,
+          ratio: 0.9,
+        },
+        { count: 1, kind: "postgres_aborted_connections" },
+      ]);
+    },
+  );
+
   it("normalizes the requested connection signals for the configured branch", () => {
     const snapshot = parsePlanetScaleDatabaseMetrics(
       buildMetricsBody({
@@ -52,6 +83,48 @@ describe("PlanetScale database health metrics", () => {
         idle: 6,
       },
     });
+  });
+
+  it.each(["absent", "wrong branch", "replica", "missing role"])(
+    "keeps the Postgres-state family unknown for %s series",
+    (shape) => {
+      const body = buildMetricsBody({ branchId: BRANCH_ID })
+        .split("\n")
+        .map((line) => {
+          if (!line.startsWith("planetscale_postgres_connection_state{")) {
+            return line;
+          }
+          switch (shape) {
+            case "absent":
+              return "";
+            case "wrong branch":
+              return line.replace(BRANCH_ID, "branch_other");
+            case "replica":
+              return line.replace('planetscale_role="primary"', 'planetscale_role="replica"');
+            default:
+              return line.replace(',planetscale_role="primary"', "");
+          }
+        }).join("\n");
+      const observation = parsePlanetScaleDatabaseMetricObservation(body, BRANCH_ID);
+
+      expect(observation.missingMetrics).toEqual(["planetscale_postgres_connection_state"]);
+      expect(observation.snapshot.postgresConnections).toBeNull();
+      expect(observation.snapshot.postgresConnectionStates).toBeNull();
+    },
+  );
+
+  it.each(["empty", "omitted"])("keeps an %s PgBouncer pool label incomplete", (shape) => {
+    let body = buildMetricsBody({ branchId: BRANCH_ID }).replaceAll(
+      'planetscale_pgbouncer_pool="active"',
+      'planetscale_pgbouncer_pool=""',
+    );
+    if (shape === "omitted") {
+      body = body.replace(',planetscale_pgbouncer_pool=""', "");
+    }
+    const observation = parsePlanetScaleDatabaseMetricObservation(body, BRANCH_ID);
+
+    expect(observation.missingMetrics).toEqual(["planetscale_pgbouncer_pools_server"]);
+    expect(observation.snapshot.serverPoolStates).toBeNull();
   });
 
   it("alerts on wait, local server saturation, Postgres state, and connection-error deltas", () => {

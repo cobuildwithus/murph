@@ -1,3 +1,4 @@
+import { createCodexCliTimingReceiver, withCliTimingEnvironmentAdmission } from './assistant-codex/cli-timing.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
@@ -1053,6 +1054,7 @@ export function buildCodexAppServerArgs(
 }
 
 class CodexAppServerProcess {
+  readonly cliTiming = createCodexCliTimingReceiver()
   readonly child: ChildProcessWithoutNullStreams
   readonly coldStartReason: CodexAppServerColdStartReason
   readonly launchKey: string
@@ -1113,12 +1115,20 @@ class CodexAppServerProcess {
     // stops this process before replacing or sanitizing Codex home, while
     // threads receive the restored workspace through the explicit per-thread
     // `cwd` param.
-    this.child = spawn(input.codexCommand, [...input.args], {
-      cwd: tmpdir(),
-      detached: useProcessGroup,
-      env: input.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    const args = [...input.args]
+    // Global Codex config flags precede the existing app-server subcommand.
+    args.splice(args.length - 1, 0, ...this.cliTiming.launchArgs)
+    try {
+      this.child = spawn(input.codexCommand, args, {
+        cwd: tmpdir(),
+        detached: useProcessGroup,
+        env: input.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } catch (error) {
+      this.cliTiming.close()
+      throw error
+    }
     this.processGroupPid = useProcessGroup ? this.child.pid ?? null : null
     this.cleanupProcessExitListener = attachCodexAppServerProcessExitCleanup({
       processGroupPid: this.processGroupPid,
@@ -1128,6 +1138,7 @@ class CodexAppServerProcess {
       void this.handleStdinError(error)
     })
     this.child.on('error', (error) => {
+      this.cliTiming.close()
       this.handleProcessError(error)
     })
     this.child.stdout.on('data', (chunk) => {
@@ -1137,6 +1148,7 @@ class CodexAppServerProcess {
       this.handleStderrData(String(chunk))
     })
     this.child.on('exit', () => {
+      this.cliTiming.close()
       // `exit` precedes `close`; claim the cause and sweep the exact owned
       // group before a descendant can keep an inherited stream open forever.
       if (!this.normalShutdown) {
@@ -1145,6 +1157,7 @@ class CodexAppServerProcess {
       }
     })
     this.child.on('close', (code, signal) => {
+      this.cliTiming.close()
       this.handleClose(code, signal)
     })
   }
@@ -1701,6 +1714,7 @@ class CodexAppServerProcess {
   }
 
   private async runStop(reason: string): Promise<void> {
+    this.cliTiming.close()
     this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
@@ -3541,6 +3555,12 @@ async function runCodexAppServerTurnOnProcess(
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
+  let closeCliTiming: ((turnId: string | null) => unknown | null) | undefined
+  const finishCliTiming = () => {
+    const event = closeCliTiming?.(turnId)
+    // Diagnostics must never turn an empty startup failure into provider activity.
+    if (event && jsonEvents.length > 0) jsonEvents.push(event)
+  }
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
@@ -5945,6 +5965,7 @@ async function runCodexAppServerTurnOnProcess(
 
   try {
     codexProcess.bindTurn(activeTurnBinding)
+    closeCliTiming = codexProcess.cliTiming.begin()
     if (!codexProcess.initializedForRpc) {
       lifecycleStage = 'spawn_wait'
       await codexProcess.waitForSpawn()
@@ -5963,6 +5984,10 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('warm-reused')
     }
 
+    const threadInput = {
+      ...input,
+      threadConfig: withCliTimingEnvironmentAdmission(input.threadConfig),
+    }
     const resumeThreadId = requestedResumeThreadId
     const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
     lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
@@ -5971,11 +5996,11 @@ async function runCodexAppServerTurnOnProcess(
         ? sendRequest(
             'thread/resume',
             buildCodexThreadResumeParams({
-              input,
+              input: threadInput,
               codexThreadId: resumeThreadId,
             }),
           )
-        : sendRequest('thread/start', buildCodexThreadStartParams(input)),
+        : sendRequest('thread/start', buildCodexThreadStartParams(threadInput)),
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       resumeThreadId ? 'thread/resume' : 'thread/start',
     )
@@ -6101,6 +6126,7 @@ async function runCodexAppServerTurnOnProcess(
     } catch (settlementError) {
       turnFailure = settlementError
     }
+    finishCliTiming()
     annotateTurnFailureContext(turnFailure)
     closeLiveTurn()
     normalShutdown = true
@@ -6110,6 +6136,7 @@ async function runCodexAppServerTurnOnProcess(
     ).catch(() => undefined)
     throw turnFailure
   } finally {
+    finishCliTiming()
     closeLiveTurn()
     clearInterruptCleanupTimer()
     cleanupAbortListener()
