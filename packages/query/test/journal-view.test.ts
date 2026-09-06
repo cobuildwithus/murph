@@ -1203,3 +1203,24 @@ test("Journal retains timestamp-only observations on their canonical metric day"
   assert.equal(view.days[0]?.events[0]?.metrics.deepSleepMinutes, 90);
   assert.equal(view.recordCount, 1);
 });
+
+test("Journal preserves WHOOP Recovery when canonical normalization uses Readiness", () => {
+  const entities = [event("whoop-recovery", "observation", "2026-08-25T07:30:00.000Z", {
+    metric: "recovery-score", value: 78, unit: "%", source: "device",
+    dayKey: "2026-08-25", observationGrain: "summary",
+    externalRef: { system: "whoop", resourceType: "summary", resourceId: "recovery-day" },
+  }, "Recovery")];
+  const points = extractMetricPointsFromCanonicalEntities(entities);
+  assert.equal(points[0]?.metricKey, "readiness-score");
+  assert.equal(points[0]?.canonicalValue, 78);
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-whoop-recovery" }),
+    points,
+    { asOf: "2026-08-25" },
+  );
+  const sleep = view.days[0]?.events[0];
+  assert.equal(sleep?.metrics.recoveryScore, 78);
+  assert.equal(sleep?.metrics.readinessScore, null);
+  assert.equal(view.recordCount, 1);
+  assert.deepEqual(sleep?.records.map((record) => record.label), ["Recovery score"]);
+});

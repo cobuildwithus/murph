@@ -253,8 +253,13 @@ function journalEventPresentation(
   const observationPoint = event.kind === "observation"
     ? extractMetricPointsFromCanonicalEntities([event])[0] ?? null
     : null;
+  // Recovery shares canonical units with Readiness but keeps its product label.
+  const observationMetricKey = observationPoint?.metricKey === "readiness-score"
+    && event.attributes.metric === "recovery-score"
+    ? "recovery-score"
+    : observationPoint?.metricKey;
   const observationMetric = JOURNAL_METRICS.find(
-    (metric) => metric.key === observationPoint?.metricKey,
+    (metric) => metric.key === observationMetricKey,
   ) ?? null;
   if (event.kind !== "activity_session") {
     return {
@@ -1067,8 +1072,10 @@ function formatDetailNumber(value: number): string {
 
 function readEventSource(event: CanonicalEntity): string | null {
   const dataOrigin = readRecord(event.attributes.dataOrigin);
+  const externalRef = readRecord(event.attributes.externalRef);
   return (
     readString(dataOrigin?.sourceProviderSlug) ??
+    readString(externalRef?.system) ??
     readString(event.attributes.source) ??
     null
   );
