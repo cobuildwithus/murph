@@ -2214,7 +2214,9 @@ describe('assistant system prompt cache stability', () => {
     // Journal capture adds 1,933 characters above the prior ceiling. Focused
     // live journeys showed that shorter guidance omitted saves or repeated
     // event names in descriptions. Keep the explicit rules within this cap.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(70_511)
+    // Automation control-copy authoring adds 227 characters; reviewed Terra and
+    // Luna journeys cover clean saved instructions and retained user controls.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(70_738)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
