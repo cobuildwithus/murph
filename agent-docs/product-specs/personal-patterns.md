@@ -86,14 +86,24 @@ day outcome windows. It does not search every threshold, delay, combination, or
 context.
 
 For a factor day, the query first uses a confirmed-absence comparison when one
-exists. Otherwise, eligible device-backed factors can use the nearest unused
-weekday-matched comparison day within 35 days. A manual or inferred factor that
-uses this weaker baseline cannot receive a grade above D.
+exists. Otherwise, eligible device-backed factors can use an unobserved
+weekday-matched comparison day within 35 days. Within each weekday, the query
+maximizes the number of usable pairs, then minimizes their total date distance.
+Matching uses dates and outcome availability, never outcome values. No exposed
+or comparison day is reused for the same factor and outcome. A manual or
+inferred factor that uses this weaker baseline cannot receive a grade above D.
 
-One comparison case supports one pair for a factor and outcome. The query
-averages several matched days from one episode into one case. A result must
-keep the same direction across its independent cases before it can receive a
-repeated-evidence grade.
+The query averages several matched days from one episode into one case.
+Episode records that share a factor day are merged transitively, including
+an ordinary note that overlaps a named episode. Duplicate records therefore
+cannot inflate independent evidence or reuse the same daily outcome.
+
+A repeated-evidence grade requires at least 75% of independent cases to agree
+with the overall direction (all cases when there are two or three). The median
+paired difference must also meet the outcome's meaningful-difference threshold.
+For four or more cases, both chronological halves must retain that direction.
+Displayed means and deltas still include every matched case. These are bounded
+product evidence rules, not significance tests or causal estimates.
 
 ## Result levels and grades
 

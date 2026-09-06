@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "patterns-comparison-evidence",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable evidence for your patterns",
+    "summary": "Personal Patterns makes better use of comparable days and checks that repeated signals reflect your typical experience.",
+    "details": "A few unusual readings can no longer outweigh mostly contradictory comparisons when earning a repeated-signal grade. Overlapping records from one episode count as one case. Patterns still describe associations, not causes.",
+    "relevanceTags": ["patterns", "wearables", "journal"],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "href": "/patterns",
+      "label": "View your patterns"
+    }
+  }
+}

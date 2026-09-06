@@ -12,6 +12,7 @@ import {
   resolveInterventionSessionLocalDate,
 } from "./experiment-adherence.ts";
 import { selectMetricSeries, type MetricPoint } from "./metrics/index.ts";
+import { matchPersonalPatternDates } from "./personal-pattern-matching.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import { buildWearableSummaryBundle } from "./wearables.ts";
 import type {
@@ -162,7 +163,6 @@ interface FactorAccumulator {
   absentDates: Set<string>;
   dates: Set<string>;
   episodeDates: Map<string, Set<string>>;
-  episodeIds: Set<string>;
   implicitAbsenceAllowed: boolean;
   kinds: Set<"activity" | "intervention">;
   token: string;
@@ -356,7 +356,10 @@ function collectFactors(
 ): PersonalPatternFactor[] {
   return [...accumulators.values()].map((factor) => {
     const observedDays = factor.dates.size;
-    const episodeCount = factor.episodeIds.size;
+    const episodeCount = independentEpisodeDates(
+      factor.dates,
+      factor.episodeDates,
+    ).length;
     const presentation = vocabulary.byId.get(factor.token);
     return {
       ...(factor.absentDates.size > 0
@@ -396,7 +399,6 @@ function collectFactorAccumulators(
           existing.implicitAbsenceAllowed &&=
             candidate.implicitAbsenceAllowed;
           existing.dates.add(candidate.date);
-          existing.episodeIds.add(candidate.episodeId);
           addEpisodeDate(
             existing.episodeDates,
             candidate.episodeId,
@@ -418,9 +420,6 @@ function collectFactorAccumulators(
           candidate.state === "observed"
             ? [[candidate.episodeId, new Set([candidate.date])]]
             : [],
-        ),
-        episodeIds: new Set(
-          candidate.state === "observed" ? [candidate.episodeId] : [],
         ),
         implicitAbsenceAllowed:
           candidate.state === "absent" || candidate.implicitAbsenceAllowed,
@@ -1122,7 +1121,7 @@ function buildPatternCell(
     outcome.meaningfulAbsoluteDelta,
     Math.abs(comparisonMean) * outcome.meaningfulRelativeDelta,
   );
-  const repeatedDirection = hasRepeatedDirection(pairs, delta);
+  const repeatedDirection = hasRepeatedDirection(pairs, delta, meaningfulDelta);
   const direction = patternDirection(delta, meaningfulDelta);
   const spanDays = daysBetween(base.firstExposedDate, base.lastExposedDate);
   const initialGrade = patternGrade({
@@ -1252,24 +1251,21 @@ function matchComparisonDays(
   lagDays: 0 | 1,
   confirmedAbsentDates: ReadonlySet<string> | null,
 ): MatchedPair[] {
-  const usedComparisonDates = new Set<string>();
   const eligibleComparisonDates = [...outcomeValues.keys()]
     .map((outcomeDate) => addDays(outcomeDate, -lagDays))
     .filter((date) => !factorDates.has(date))
     .filter(
       (date) => confirmedAbsentDates === null || confirmedAbsentDates.has(date),
     );
+  const matchedDates = matchPersonalPatternDates(
+    [...factorDates].filter((date) => outcomeValues.has(addDays(date, lagDays))),
+    eligibleComparisonDates,
+    COMPARISON_SEARCH_DAYS,
+  );
   const pairs: MatchedPair[] = [];
-  const episodes =
-    episodeDates.size > 0
-      ? [...episodeDates.entries()]
-      : [...factorDates].map(
-          (date) => [`factor:${date}`, new Set([date])] as const,
-        );
+  const episodes = independentEpisodeDates(factorDates, episodeDates);
 
-  for (const [, dates] of episodes.sort((left, right) =>
-    ([...left[1]].sort()[0] ?? "").localeCompare([...right[1]].sort()[0] ?? ""),
-  )) {
+  for (const dates of episodes) {
     const episodePairs: Array<{
       comparisonDate: string;
       comparisonValue: number;
@@ -1280,26 +1276,13 @@ function matchComparisonDays(
       const exposedValue = outcomeValues.get(addDays(exposedDate, lagDays));
       if (exposedValue === undefined) continue;
 
-      const comparisonDate = eligibleComparisonDates
-        .filter((date) => !usedComparisonDates.has(date))
-        .filter((date) => weekday(date) === weekday(exposedDate))
-        .filter(
-          (date) =>
-            Math.abs(daysBetween(date, exposedDate)) <= COMPARISON_SEARCH_DAYS,
-        )
-        .sort(
-          (left, right) =>
-            Math.abs(daysBetween(left, exposedDate)) -
-              Math.abs(daysBetween(right, exposedDate)) ||
-            left.localeCompare(right),
-        )[0];
+      const comparisonDate = matchedDates.get(exposedDate);
       if (!comparisonDate) continue;
 
       const comparisonValue = outcomeValues.get(
         addDays(comparisonDate, lagDays),
       );
       if (comparisonValue === undefined) continue;
-      usedComparisonDates.add(comparisonDate);
       episodePairs.push({
         comparisonDate,
         comparisonValue,
@@ -1320,6 +1303,28 @@ function matchComparisonDays(
   return pairs;
 }
 
+function independentEpisodeDates(
+  factorDates: ReadonlySet<string>,
+  episodeDates: ReadonlyMap<string, ReadonlySet<string>>,
+): Set<string>[] {
+  const byDate = new Map<string, Set<string>>();
+  for (const dates of episodeDates.values()) {
+    const merged = new Set(dates);
+    for (const date of dates) {
+      for (const overlappingDate of byDate.get(date) ?? []) {
+        merged.add(overlappingDate);
+      }
+    }
+    for (const date of merged) byDate.set(date, merged);
+  }
+  for (const date of factorDates) {
+    if (!byDate.has(date)) byDate.set(date, new Set([date]));
+  }
+  return [...new Set(byDate.values())]
+    .map((dates) => new Set([...dates].sort()))
+    .sort((left, right) => [...left][0].localeCompare([...right][0]));
+}
+
 function addEpisodeDate(
   episodeDates: Map<string, Set<string>>,
   episodeId: string,
@@ -1333,15 +1338,24 @@ function addEpisodeDate(
 function hasRepeatedDirection(
   pairs: readonly MatchedPair[],
   fullDelta: number,
+  meaningfulDelta: number,
 ): boolean {
   if (pairs.length < 2 || fullDelta === 0) return false;
-  if (pairs.length < 4) {
-    return pairs.every(
-      (pair) =>
-        Math.sign(pair.exposedValue - pair.comparisonValue) ===
-        Math.sign(fullDelta),
-    );
-  }
+  const direction = Math.sign(fullDelta);
+  const deltas = pairs.map(
+    (pair) => (pair.exposedValue - pair.comparisonValue) * direction,
+  );
+  const agreeingCases = deltas.filter((delta) => delta > 0).length;
+  if (agreeingCases < Math.ceil(pairs.length * 0.75)) return false;
+  // A large mean alone can come from a few unusual readings. The typical
+  // paired difference must also clear the existing meaningful-effect floor.
+  const sorted = [...deltas].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+  if (median < meaningfulDelta) return false;
+  if (pairs.length < 4) return agreeingCases === pairs.length;
   const midpoint = Math.floor(pairs.length / 2);
   const first = pairs.slice(0, midpoint);
   const second = pairs.slice(midpoint);
@@ -1434,10 +1448,6 @@ function daysBetween(left: string, right: string): number {
       Date.parse(`${left}T00:00:00.000Z`)) /
       86400000,
   );
-}
-
-function weekday(value: string): number {
-  return new Date(`${value}T00:00:00.000Z`).getUTCDay();
 }
 
 function mean(values: readonly number[]): number {
