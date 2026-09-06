@@ -7,7 +7,7 @@ import {
 } from "@murphai/contracts";
 
 import type { HabitatIndicatorNotes, ResolvedCategory } from "./home-model";
-import { toFahrenheit } from "@/src/lib/environment/units";
+import { formatTemperatureTarget, toFahrenheit } from "@/src/lib/environment/units";
 
 export type CategoryGrade = {
   letter: "A" | "B" | "C" | "D" | "F" | null;
@@ -419,10 +419,12 @@ export function deriveCategoryNote(
     const evaluator = TARGET_EVALUATORS[indicator.id];
     const met = evaluateIndicatorTarget(indicator.id, value);
     const humanizedValue = humanizeValue(value, indicator, imperial);
-    const target =
+    const target = formatTemperatureTarget(
       met === null || evaluator?.showGoal === false
         ? null
-        : indicator.target ?? evaluator?.goal ?? null;
+        : indicator.target ?? evaluator?.goal ?? null,
+      imperial,
+    );
     rows.push({
       indicatorId: indicator.id,
       label,

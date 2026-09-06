@@ -10,9 +10,11 @@ describe("companion environment projection", () => {
     expect(report.categories.map((category) => category.id)).toEqual(["sleep", "air", "light", "recovery", "workspace"]);
     expect(report.grade).toMatchObject({ letter: "B", met: 13, graded: 16, eligible: 16, pct: 81 });
     expect(report.categories[0]?.rows.find((row) => row.indicatorId === "night_temp_c")?.value).toBe("24°C");
+    expect(report.categories[0]?.rows.find((row) => row.indicatorId === "night_temp_c")?.target).toBe("18-22°C");
     const imperial = projectCompanionEnvironmentReport({ ...input, imperial: true, client: environmentClient() });
     expect(imperial.grade).toEqual(report.grade);
     expect(imperial.categories[0]?.rows.find((row) => row.indicatorId === "night_temp_c")?.value).toBe("75°F");
+    expect(imperial.categories[0]?.rows.find((row) => row.indicatorId === "night_temp_c")?.target).toBe("64–72°F");
   });
   it("keeps unknown and skipped conditions ungraded", () => {
     const report = projectCompanionEnvironmentReport({ ...input, client: environmentClient({
