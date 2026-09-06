@@ -4130,8 +4130,19 @@ Gemini response text never enter operational logs, usage rows, diagnostics, or
 derived vault artifacts. The bounded, one-way-framed tool result may enter the
 authorized assistant transcript like other tool output.
 
-Hosted inbox videos use a 72-hour media-byte retention window, while inbox
-images keep the 14-day image/audio window. Encrypted workspace snapshots
+Hosted inbox videos use a 30-day media-byte retention window, while inbox
+images use 90 days and audio keeps 14 days. Existing media references keep their
+previously recorded deadlines. Message text, transcripts, derived evidence, and
+quoted content still retire after 14 days. Media-bearing input records preserve
+only attachment identity and conversation metadata through their media windows;
+runtime residue cleanup does not remove a live media reference. Late attachment
+projection cannot restore retired text. The read-only `conversation_attachments`
+tool lists up to 20 dated, frozen same-conversation references per page, without
+loading bytes or returning earlier message content. A selected image uses the
+existing image materializer and integrity checks before `view_image`; a selected
+video uses `analyze_video`. Expired or unavailable selections provide a resend
+or reselection route. Listing metadata is not proof that bytes still exist.
+Encrypted workspace snapshots
 externalize image/video bytes through owner-scoped hosted media references
 before excluding them from the archive, and hosted canonical write receipts omit
 matching image/video raw payload artifacts only when the same durable raw-write

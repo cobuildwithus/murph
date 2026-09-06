@@ -1,0 +1,24 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "longer-image-video-follow-ups",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More time to revisit photos and videos",
+    "summary": "Ask about newly shared images for up to 90 days and videos for up to 30 days in the same conversation.",
+    "details": "Murph can find an earlier attachment in private chats and supported groups even after the original message text expires. If it is unavailable, Murph can help you choose another attachment or ask you to resend it. Older uploads keep their previous expiry dates. Audio and ordinary message text still keep their 14-day window.",
+    "relevanceTags": [
+      "assistant",
+      "images",
+      "video"
+    ],
+    "sourcePullRequests": [
+      2874
+    ],
+    "tryIt": {
+      "label": "Revisit a video",
+      "prompt": "What color is the mat in the video I sent earlier?"
+    }
+  }
+}

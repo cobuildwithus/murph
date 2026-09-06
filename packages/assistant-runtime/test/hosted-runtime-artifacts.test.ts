@@ -458,7 +458,16 @@ test("hosted artifact materializer restores retained inbox media from media refe
       "workspace_media_materialization",
       "workspace_media_materialization",
     ]);
-    clock.mockReturnValue(Date.parse("2026-06-16T00:00:00.000Z"));
+    clock.mockReturnValue(Date.parse("2026-06-30T23:59:59.999Z"));
+    assert.equal((await materialize([imagePath, videoPath])).missingArtifactPaths.size, 0);
+    clock.mockReturnValue(Date.parse("2026-07-01T00:00:00.000Z"));
+    const videoExpired = await materialize([imagePath, videoPath]);
+    assert.deepEqual([...videoExpired.missingArtifactPaths], [`vault:${videoPath}`]);
+    assert.deepEqual(await readFile(path.join(vaultRoot, imagePath)), imageBytes);
+    await assert.rejects(readFile(path.join(vaultRoot, videoPath)), { code: "ENOENT" });
+    clock.mockReturnValue(Date.parse("2026-08-29T23:59:59.999Z"));
+    assert.equal((await materialize([imagePath])).missingArtifactPaths.size, 0);
+    clock.mockReturnValue(Date.parse("2026-08-30T00:00:00.000Z"));
     const expired = await materialize([imagePath, videoPath]);
     assert.equal(expired.missingArtifactPaths.size, 2);
     await assert.rejects(readFile(path.join(vaultRoot, imagePath)), { code: "ENOENT" });
@@ -891,7 +900,7 @@ test.each([
     assert.ok(snapshot);
     const snapshotHash = sha256HostedBundleHex(snapshot);
     await artifactStore.put({ bytes: snapshot, sha256: snapshotHash });
-    const afterExpiry = Date.parse(now) + 15 * 86_400_000;
+    const afterExpiry = Date.parse(now) + 91 * 86_400_000;
     if (scenario.retired) cleanupExpired(afterExpiry);
     const save = () => withHostedCanonicalWritePort({
       async persistCanonicalWrite(persistence) {

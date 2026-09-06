@@ -1,3 +1,13 @@
+import {
+  INBOX_IMAGE_RETENTION_WINDOW_MS,
+  INBOX_VIDEO_RETENTION_WINDOW_MS,
+} from "@murphai/contracts";
+export {
+  INBOX_IMAGE_RETENTION_DAYS,
+  INBOX_IMAGE_RETENTION_WINDOW_MS,
+  INBOX_VIDEO_RETENTION_DAYS,
+  INBOX_VIDEO_RETENTION_WINDOW_MS,
+} from "@murphai/contracts";
 import { promises as fs } from "node:fs";
 
 import {
@@ -35,9 +45,6 @@ import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
 export const INBOX_MEDIA_RETENTION_DAYS = 14;
 export const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-export const INBOX_VIDEO_RETENTION_DAYS = 3;
-export const INBOX_VIDEO_RETENTION_WINDOW_MS =
-  INBOX_VIDEO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE = 100;
 const MAX_PROMOTED_DOCUMENT_EVIDENCE_PATHS = 20;
@@ -121,10 +128,11 @@ export async function runInboxMediaRetention(
 
   const resolveActiveParserJobProtectionExpiresAt = async (
     attachment: InboxCaptureAttachmentRecord,
-    cutoffMs: number,
   ): Promise<string | null> => {
     activeParserJobProtector ??= await openActiveAttachmentParseJobProtector(input.vaultRoot);
-    return activeParserJobProtector.resolveProtectionExpiresAt(attachment, cutoffMs);
+    return activeParserJobProtector.resolveProtectionExpiresAt(
+      attachment, nowMs - INBOX_MEDIA_RETENTION_WINDOW_MS,
+    );
   };
 
   try {
@@ -201,7 +209,6 @@ export async function runInboxMediaRetention(
         }
         const parserJobProtectionExpiresAt = await resolveActiveParserJobProtectionExpiresAt(
           attachment,
-          cutoffMs,
         );
         if (parserJobProtectionExpiresAt) {
           nextEligibleAt = selectEarliestRetentionWake(
@@ -401,7 +408,6 @@ export async function runInboxMediaRetention(
 
           const parserJobProtectionExpiresAt = await resolveActiveParserJobProtectionExpiresAt(
             candidate.attachment,
-            candidate.cutoffMs,
           );
           if (parserJobProtectionExpiresAt) {
             nextEligibleAt = selectEarliestRetentionWake(
@@ -836,9 +842,9 @@ function isRetainableInboxMediaKind(
 function resolveInboxAttachmentRetentionWindowMs(
   kind: InboxCaptureAttachmentRecord["kind"],
 ): number {
-  return kind === "video"
-    ? INBOX_VIDEO_RETENTION_WINDOW_MS
-    : INBOX_MEDIA_RETENTION_WINDOW_MS;
+  if (kind === "image") return INBOX_IMAGE_RETENTION_WINDOW_MS;
+  if (kind === "video") return INBOX_VIDEO_RETENTION_WINDOW_MS;
+  return INBOX_MEDIA_RETENTION_WINDOW_MS;
 }
 
 function emptyRetentionResult(input: {

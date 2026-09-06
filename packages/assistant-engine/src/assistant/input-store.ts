@@ -1,3 +1,4 @@
+import { assistantInputMediaExpiresAt } from './input-media-retention.js'
 import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -614,6 +615,23 @@ export async function readAssistantInputEvent(input: {
   })
 }
 
+function redactAssistantInputAttachmentEvidence(
+  event: AssistantInputEventRecord,
+  evidence: AssistantInputAttachmentEvidence,
+  now: string,
+): AssistantInputAttachmentEvidence {
+  return {
+    ...evidence,
+    attachments: evidence.attachments.map((attachment) => ({
+      ...attachment,
+      derived: null,
+      inlineFragments: [],
+      raw: (assistantInputMediaExpiresAt(event, attachment) ?? 0) > Date.parse(now)
+        ? attachment.raw : null,
+    })),
+  }
+}
+
 export async function retireAssistantInputEventContent(input: {
   inputId: string
   now?: Date
@@ -647,17 +665,7 @@ export async function retireAssistantInputEventContent(input: {
     const retiredAt = resolveTimestamp(input.now)
     const retired = assistantInputEventRecordSchema.parse({
       ...existing,
-      attachmentEvidence: {
-        ...existing.attachmentEvidence,
-        attachments: existing.attachmentEvidence.attachments.map(
-          (attachment) => ({
-            ...attachment,
-            derived: null,
-            inlineFragments: [],
-            raw: null,
-          }),
-        ),
-      },
+      attachmentEvidence: redactAssistantInputAttachmentEvidence(existing, existing.attachmentEvidence, retiredAt),
       content: redactAssistantInputContent(existing.content),
       contentRetiredAt: retiredAt,
       sourceMetadata: redactAssistantInputSourceMetadata(
@@ -929,7 +937,8 @@ export async function updateAssistantInputAttachmentEvidence(input: {
     })
     const updated = assistantInputEventRecordSchema.parse({
       ...existing,
-      attachmentEvidence: nextEvidence,
+      attachmentEvidence: existing.contentRetiredAt
+        ? redactAssistantInputAttachmentEvidence(existing, nextEvidence, now) : nextEvidence,
       updatedAt: now,
     })
     await writeAssistantStateVersionedJson({

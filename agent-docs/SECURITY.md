@@ -359,17 +359,18 @@ Last verified: 2026-08-31
   historical attachment evidence only when source, account, thread, audience,
   and optional session match current accepted input. Direct conversations also
   match the participant; group conversations do not compare uploader and
-  requester. Missing conversation identity, future messages, and retired input
-  content grant no historical authority. Live steering freezes new accepted
+  requester. Missing conversation identity and future messages grant no historical
+  authority. Retired text grants no authority; unexpired attachment identity may
+  remain available after the separate 14-day text-retirement deadline. Live steering freezes new accepted
   input before forwarding it. Never refresh existing frozen attachment keys
-  from model-writable files. Historical video references grant only video
-  selection, never current-input authority for other tools or delivery.
+  from model-writable files. Historical image/video references grant only bounded attachment discovery and
+  selected media access, never current-input authority for other tools or delivery.
   The tool remains unavailable without a current accepted user action or for
   unverified external groups. Open the resolved file without following the final
   symlink, read its exact frozen size, probe EOF, verify SHA-256 and supported
   container signature, and fail closed on missing bytes or drift.
-  Ordinary hosted inbox videos use a 72-hour media-byte retention window while
-  inbox images keep the 14-day image/audio window. Encrypted workspace snapshots
+  Ordinary hosted inbox videos use a 30-day media-byte retention window while
+  inbox images use 90 days and audio keeps 14 days. Encrypted workspace snapshots
   and hosted canonical write receipts externalize image/video bytes through
   owner-scoped hosted media references before excluding them from the portable
   archive and receipt payload artifacts. A sparse raw receipt must carry its
@@ -379,8 +380,14 @@ Last verified: 2026-08-31
   of retired identities, and keeps retry evidence until ciphertext is purged.
   Selected local cache reads also enforce the reference deadline. The atomic
   inbox-retention owner expires unprotected bytes; explicit canonical event raw
-  references keep their separately authorized lifecycle. Existing input-history
-  pruning also bounds historical analysis references. The tool
+  references keep their separately authorized lifecycle. Media-bearing input
+  records survive residue pruning through their image/video window, while message
+  text, transcripts, derived evidence, and quoted content retain 14-day cleanup.
+  Late projection updates cannot restore retired text. Discovery returns only
+  dated media identity, at most 20 entries per page; selected image reads verify
+  frozen size and SHA-256 through the existing image resolver. Metadata listing
+  does not guarantee byte availability, and existing media deadlines are not
+  extended retroactively. The video-analysis tool
   pins Gemini 3.8 Flash and maps only `standard` to 1 FPS or
   `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
   raw FPS remains unavailable to the model and member. Both current profiles

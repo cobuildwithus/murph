@@ -24,6 +24,7 @@ import {
   walkVaultFiles,
 } from "@murphai/core";
 import {
+  INBOX_IMAGE_RETENTION_WINDOW_MS,
   INBOX_MEDIA_RETENTION_WINDOW_MS,
   INBOX_VIDEO_RETENTION_WINDOW_MS,
   listInboxAttachmentRetentionRecords,
@@ -797,10 +798,13 @@ function resolveHostedMediaReferenceExpiresAt(input: {
 }): string {
   const recordedAtMs = Date.parse(input.recordedAt);
   const baseMs = Number.isFinite(recordedAtMs) ? recordedAtMs : 0;
-  const windowMs = input.pendingProtected || input.mediaKind === "image"
-    ? INBOX_MEDIA_RETENTION_WINDOW_MS
+  const windowMs = input.mediaKind === "image"
+    ? INBOX_IMAGE_RETENTION_WINDOW_MS
     : INBOX_VIDEO_RETENTION_WINDOW_MS;
-  return new Date(baseMs + windowMs).toISOString();
+  const protectedWindowMs = input.pendingProtected
+    ? Math.max(windowMs, INBOX_MEDIA_RETENTION_WINDOW_MS)
+    : windowMs;
+  return new Date(baseMs + protectedWindowMs).toISOString();
 }
 
 function resolveUpdatedHostedMediaExpiresAt(
