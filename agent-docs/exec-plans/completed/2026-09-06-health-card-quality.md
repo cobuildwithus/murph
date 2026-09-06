@@ -58,14 +58,35 @@ to consume the existing closed card contract.
 - Query, assistant-engine, operator-config, and Web typechecks passed; focused
   Web ESLint and the complexity guard passed. Saved-view snapshot test passed.
 - Three fresh independent reviews have no unresolved actionable findings.
-- Real-assistant partial-send wording reviewed and truthful; its lexical test
-  assertions now accept ordinary equivalent phrasing. Final rerun pending.
+- Real-assistant partial-send journey passed with one read-only inspection and
+  an accurate plain-language distinction between partial sending and receipt
+  on the phone. Assertions accept equivalent ordinary phrasing.
 - Reconciled main at `835573709cb`, preserving deferred automation guidance
   and aligning its execution inspector with partial-send receipts. Receipt and
   execution inspection run concurrently; neither creates a new state store.
 - Current-base engine/query/runtime typechecks passed; 149 focused engine tests,
   57 runtime scheduling tests, and CLI startup-budget proof passed. Web artifact
-  refresh and final verification pending.
+  refresh completed; Web passed with incremental caching disabled. The normal
+  cached lane had retained outdated generated Prisma types after regeneration.
+- Current-base browser proof passed at all three widths. Cold compilation of
+  the large design route exceeded 60 seconds; the isolated study test now uses
+  the 180-second budget already verified by the passing invocation.
+  The final proof also freezes smooth scrolling and asserts every footer stays
+  inside its card; this avoids shifted screenshot crops. All widths passed.
+- Final ReviewGPT round 4 passed with no findings at `453ce2a8e66`. Exact
+  response/capture/model hashes match, and requested/observed model is
+  `gpt-6-pro`. The attached full snapshot covered all 98 changed files; the
+  recorded wait lasted over 15 minutes, above the 270-second minimum.
+- CI caught one stale mock expectation that treated an explicit optional
+  `undefined` differently from omission. The expectation is corrected and all
+  36 managed-automation tests pass. The final delta changes tests and this plan
+  only; production source remains exactly the reviewed source.
+- Parent reviewed the final delta, privacy, owner boundaries, rendered states,
+  and real-assistant outcome. Current-main mergeability passes. Required CI
+  will be verified on the final pushed head; no review rerun is required for
+  the isolated proof corrections.
+- Branch preview deployments are disabled; the PR includes an inspected
+  synthetic screenshot and explicitly states the hosted-preview evidence gap.
 - Complete initial provider input captured through real Codex and a loopback
   scripted endpoint: default-off direct 30,684 tokens / 140,723 bytes; group
   26,282 tokens / 120,640 bytes, unchanged from main in identical fixtures.
@@ -76,3 +97,6 @@ to consume the existing closed card contract.
 
 Keep wearable generation default-off. Physical Messages extension, macOS,
 app-absent recovery, and VoiceOver proof remain activation requirements.
+Status: completed
+Updated: 2026-09-06
+Completed: 2026-09-06

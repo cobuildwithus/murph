@@ -3011,7 +3011,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       );
       expect(
         mocks.getAssistantCronAutomationOccurrenceReceipt,
-      ).toHaveBeenLastCalledWith(vaultRoot, beforeInspect.automationId);
+      ).toHaveBeenLastCalledWith(vaultRoot, beforeInspect.automationId, undefined);
       await expect(showAutomation({
         slug: "daily-evening-reminder",
         vaultRoot,

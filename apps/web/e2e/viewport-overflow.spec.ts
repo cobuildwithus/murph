@@ -50,7 +50,9 @@ const WIDTHS = [320, 375, 390, 768, 1280] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
 
 test("seven-day health study fits phones and tablets with a single-line cross-year header", async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
   await page.goto("/design?tab=components#imessage-seven-day-health-card", { waitUntil: "load" });
+  await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   const study = page.locator('[data-design-component="imessage-seven-day-health-card"]');
   await expect(study).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
@@ -63,6 +65,9 @@ test("seven-day health study fits phones and tablets with a single-line cross-ye
       expect(bounds).not.toBeNull();
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + OVERFLOW_TOLERANCE_PX);
+      const footer = await card.locator('[data-wearable-trend-context="true"]').boundingBox();
+      expect(footer).not.toBeNull();
+      expect(footer!.y + footer!.height).toBeLessThan(bounds!.y + bounds!.height);
     }
     const yearCard = study.locator('[data-design-state="year-boundary"] svg[role="img"]');
     const cardBounds = await yearCard.boundingBox();
@@ -70,7 +75,10 @@ test("seven-day health study fits phones and tablets with a single-line cross-ye
     expect(titleBounds!.height).toBeLessThan(101 * cardBounds!.width / 1200);
     if (width === 320) {
       for (const state of ['complete', 'sparse', 'no-data', 'year-boundary']) {
-        await study.locator(`[data-design-state="${state}"] svg[role="img"]`).screenshot({ path: testInfo.outputPath(`health-card-${state}.png`) });
+        const card = study.locator(`[data-design-state="${state}"] svg[role="img"]`);
+        await card.scrollIntoViewIfNeeded();
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await card.screenshot({ path: testInfo.outputPath(`health-card-${state}.png`) });
       }
     }
   }
