@@ -21,7 +21,7 @@ import { GET } from "../app/api/device-sync/companion/environment/route";
 const request = () => new Request("https://example.test/api/device-sync/companion/environment?units=imperial");
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.auth.mockResolvedValue({ member: { id: "synthetic-member" } });
+  mocks.auth.mockResolvedValue({ member: { id: "synthetic-member" }, identity: { userId: "synthetic-identity" } });
   mocks.authority.mockResolvedValue(undefined);
   mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: "2026-09-06T12:00:00.000Z" } });
   mocks.session.mockResolvedValue({ state: "ready" });
@@ -73,4 +73,20 @@ test("decoder failures never expose private payload text", async () => {
   const response = await GET(request());
   expect(response.status).toBe(503);
   expect(await response.text()).not.toContain("synthetic-private-note");
+});
+
+test("bootstraps the canonical first-use voice questions with pinned native identity", async () => {
+  mocks.decode.mockResolvedValue(environmentClient({}));
+  const response = await GET(new Request("https://example.test/api/device-sync/companion/environment?view=voice", { headers: { "x-murph-companion-identity": "synthetic-identity" } }));
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.state).toBe("ready");
+  expect(body.script.topics.length).toBeGreaterThan(0);
+  expect(body).not.toHaveProperty("categories");
+  expect(mocks.authority).toHaveBeenCalledTimes(2);
+});
+test("rejects mismatched voice identity before loading the replica", async () => {
+  const response = await GET(new Request("https://example.test/api/device-sync/companion/environment?view=voice", { headers: { "x-murph-companion-identity": "previous-identity" } }));
+  expect(response.status).toBe(409);
+  expect(mocks.decode).not.toHaveBeenCalled();
 });

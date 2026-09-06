@@ -35,3 +35,10 @@ describe("companion environment projection", () => {
     expect(report.generatedAt).toBe(input.generatedAt);
   });
 });
+
+it("matches website first-use treatment for empty, declined and known answers", () => {
+  const project = (values: Parameters<typeof environmentClient>[0]) => projectCompanionEnvironmentReport({ ...input, client: environmentClient(values) });
+  expect(project({}).hasEnvironmentData).toBe(false);
+  expect(project({ "sleep-environment": { night_noise: "declined" } }).hasEnvironmentData).toBe(false);
+  expect(project({ "sleep-environment": { night_temp_c: 20 } }).hasEnvironmentData).toBe(true);
+});

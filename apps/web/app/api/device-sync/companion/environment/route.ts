@@ -1,3 +1,4 @@
+import { assertCompanionEnvironmentIdentity } from "@/src/lib/environment/request-auth";
 import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
@@ -7,7 +8,7 @@ import { assertBrowserVaultMemberAuthority } from "@/src/lib/browser-vault/autho
 import { decodeBrowserVaultCoreSession } from "@/src/lib/browser-vault/loader";
 import { prepareHomepageBrowserVaultBestEffort } from "@/src/lib/browser-vault/homepage-preparation-worker";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
-import { projectCompanionEnvironmentReport } from "@/src/lib/environment/companion-report";
+import { projectCompanionEnvironmentReport, projectCompanionEnvironmentVoice } from "@/src/lib/environment/companion-report";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
@@ -17,6 +18,8 @@ import { getPrisma } from "@/src/lib/prisma";
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const voice = new URL(request.url).searchParams.get("view") === "voice";
+  if (voice) assertCompanionEnvironmentIdentity(request, auth.identity.userId);
   const authority = { memberId: auth.member.id, prisma };
   await assertBrowserVaultMemberAuthority(authority);
   const workspace = await readHostedBrowserVaultReplicaState({
@@ -57,7 +60,7 @@ export const GET = withJsonError(async (request: Request) => {
       expectedMemberId: auth.member.id,
       signal: request.signal,
     });
-    report = projectCompanionEnvironmentReport({
+    report = voice ? projectCompanionEnvironmentVoice(client) : projectCompanionEnvironmentReport({
       client,
       generatedAt: replicaRef.generatedAt,
       freshness: freshness.freshness,

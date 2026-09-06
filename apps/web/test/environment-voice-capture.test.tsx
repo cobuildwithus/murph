@@ -623,6 +623,7 @@ test("keeps the dialog open when live voice is unsupported", async () => {
 async function startRealtimeInterview(
   script: EnvironmentVoiceScript,
   onAccepted: () => void,
+  native = false,
 ) {
   const originalPeerConnection = Reflect.get(globalThis, "RTCPeerConnection");
   const originalFetch = Reflect.get(globalThis, "fetch");
@@ -666,8 +667,12 @@ async function startRealtimeInterview(
     },
   );
   vi.stubGlobal("fetch", fetchMock);
+  const apiRequest = vi.fn(async (operation: "connect" | "save", _body: string) =>
+    new Response(operation === "connect" ? "answer-sdp" : null, { status: operation === "connect" ? 200 : 202 }));
   const rendered = await renderClientComponent(
     createElement(EnvironmentVoiceCapture, {
+      apiRequest: native ? apiRequest : undefined,
+      embedded: native,
       onAccepted,
       script,
       triggerLabel: "Start report",
@@ -679,11 +684,11 @@ async function startRealtimeInterview(
     value: { getUserMedia: vi.fn(async () => stream) },
   });
 
-  await clickButton(rendered.window, "Start report");
+  if (!native) await clickButton(rendered.window, "Start report");
   await clickButton(rendered.window, "Start recording");
   await vi.waitFor(() => {
     assert.equal(
-      fetchMock.mock.calls.some(
+      native ? apiRequest.mock.calls.some(([operation]) => operation === "connect") : fetchMock.mock.calls.some(
         ([input]) => input === "/api/environment/realtime",
       ),
       true,
@@ -714,6 +719,8 @@ async function startRealtimeInterview(
     },
     dataChannel,
     fetchMock,
+    apiRequest,
+    track,
     rendered,
   };
 }
@@ -946,4 +953,24 @@ test("reopening after a close does not ask again for an accepted detail", async 
   } finally {
     await harness.cleanup();
   }
+});
+
+test("embedded interview uses native transport for speech and accepted answers and stops its microphone", async () => {
+  const onAccepted = vi.fn();
+  const harness = await startRealtimeInterview(SCRIPT, onAccepted, true);
+  try {
+    assert.equal(harness.apiRequest.mock.calls[0]?.[0], "connect");
+    assert.equal(harness.apiRequest.mock.calls[0]?.[1], "offer-sdp");
+    await act(async () => {
+      harness.dataChannel.emit("message", JSON.stringify({
+        type: "response.function_call_arguments.done", name: "update_environment_interview", call_id: "native-call",
+        arguments: JSON.stringify({ action: "skip" }),
+      }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => assert.equal(onAccepted.mock.calls.length, 1));
+    assert.equal(harness.apiRequest.mock.calls[1]?.[0], "save");
+    assert.equal(harness.fetchMock.mock.calls.length, 0);
+  } finally { await harness.cleanup(); }
+  assert.ok(harness.track.stop.mock.calls.length > 0);
 });

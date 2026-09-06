@@ -11,8 +11,7 @@ import {
   readPendingHostedEnvironmentInterviewMailboxItem,
 } from "@/src/lib/hosted-mailbox/store";
 import { formatHostedExecutionSafeLogErrorDetails } from "@/src/lib/hosted-execution/logging";
-import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import { requireEnvironmentRequestAuth } from "@/src/lib/environment/request-auth";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   jsonOk,
@@ -25,6 +24,7 @@ import {
 } from "@/src/lib/hosted-onboarding/shared";
 import {
   signalHostedMailboxAppendRuntime,
+  signalHostedBrowserVaultRefreshRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -32,7 +32,7 @@ const BODY_LIMIT_BYTES = 24 * 1_024;
 const COMPLETION_TIME_TOLERANCE_MS = 10 * 60 * 1_000;
 
 export const GET = withJsonError(async (request: Request) => {
-  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const auth = await requireEnvironmentRequestAuth(request);
   return jsonOk({
     processing: await hasPendingHostedEnvironmentInterviewMailboxItem({
       userId: auth.member.id,
@@ -41,8 +41,7 @@ export const GET = withJsonError(async (request: Request) => {
 });
 
 export const PATCH = withJsonError(async (request: Request) => {
-  assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const auth = await requireEnvironmentRequestAuth(request);
   const pendingItem = await readPendingHostedEnvironmentInterviewMailboxItem({
     userId: auth.member.id,
   });
@@ -52,6 +51,9 @@ export const PATCH = withJsonError(async (request: Request) => {
       mailboxItemId: pendingItem.id,
     });
   }
+  if (!pendingItem && request.headers.has("authorization")) {
+    await signalHostedBrowserVaultRefreshRuntime({ userId: auth.member.id });
+  }
   return jsonOk({
     processing: pendingItem !== null,
     recheckRequested: pendingItem !== null,
@@ -59,8 +61,7 @@ export const PATCH = withJsonError(async (request: Request) => {
 });
 
 export const POST = withJsonError(async (request: Request) => {
-  assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const auth = await requireEnvironmentRequestAuth(request);
   const payload = parseHostedExecutionEnvironmentInterviewCompletedPayload(
     await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES }),
   );
