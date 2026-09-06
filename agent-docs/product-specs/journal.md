@@ -19,6 +19,43 @@ or intensity. It saves what the member reports. It does not guess a cause.
 Exact details stay in the note. Small tags also classify timing and amount for
 bounded comparisons.
 
+Clear facts remain eligible when the member asks for advice. Missing time or
+intensity does not block a save. Hypothetical questions are not events. An
+explicit no-retention request prevents capture.
+
+Journal titles and notes use English. Chat replies use the member's language.
+Titles name the event without relative-day words or dates. Notes add detail
+that the title does not contain. When no detail exists, the required note
+matches the title exactly, and the view hides the duplicate.
+
+The typed note command offers `--timing` and `--icon`. These options use the
+shared catalog in `@murphai/contracts` and persist through existing event tags.
+Timing tags are `timing-timed`, `timing-all-day`, `timing-morning`,
+`timing-afternoon`, `timing-evening`, `timing-night`, and `timing-unknown`.
+Icons use `journal-icon-<id>` tags. Unrelated tags remain intact.
+
+An exact time requires an explicit timestamp. A sustained day-level symptom
+can use `all_day`. A known period retains that period. A missing time uses
+`unknown`, which shows no clock time. A date-only timestamp remains a storage
+anchor, never evidence of an observed time. The note retains the vault time
+zone so its local date survives projection.
+
+Murph can ask for an activity's approximate time after saving its known period.
+The answer corrects the existing record. A sustained report across explicitly
+reported days can create one note per day. Corrections retain the record ID
+and unrelated tags. Existing untagged timestamps remain unchanged.
+
+Murph reads the command help for supported icons and chooses a matching asset.
+The catalog offers 49 icons, including 41 reused product icons. Examples include activity,
+walking, meals, medication, caffeine, hydration, sauna, and recovery.
+The `note` fallback keeps the existing notebook symbol when no icon fits.
+Unknown or conflicting icon tags also use the fallback.
+
+Eight Journal icons use the same Quiver SVG style: `bath`, `shower`, `headache`,
+`fatigue`, `muscle-soreness`, `abdominal-pain`, `nausea`, and `congestion`.
+Icons display their original vector artwork and colors. Use the default when
+a fact has no matching icon.
+
 The supported note types are:
 
 - `journal-factor` for an action or exposure;
@@ -90,8 +127,14 @@ The old `journal_day` surface stays untouched. The new Journal view does not
 depend on it.
 
 The projection is built during the existing Browser Vault refresh. Opening
-`/journal` only reads the current projection. It does not call AI and does not
-start a new analysis.
+`/journal` shows the available projection and requests one runtime refresh.
+The page has no Refresh control. Automatic refresh does not call AI or start
+a new analysis.
+
+The page waits for a different replica through the existing bounded refresh
+window. A busy runtime can delay publication beyond that window. Existing
+content stays visible after waiting stops. Reopening the page starts another
+bounded refresh. This is not continuous polling while the page remains open.
 
 ## Web experience
 
@@ -103,6 +146,10 @@ Main sleep uses `Night`, naps use their time, and context can span a full day.
 Event text is readable without opening a detail view. Source labels stay
 available as secondary hover and screen-reader detail. A record with a canonical
 time zone keeps its local event time during travel.
+
+Approximate periods show `Morning`, `Afternoon`, `Evening`, or `Night`.
+Full-day notes show `All day`. Unknown times leave the time column empty.
+Period sorting anchors order rows without displaying invented clock times.
 
 The right rail shows a small calendar, seven-day sleep and activity statistics,
 and a current Personal Pattern when one is ready. A Pattern is an insight about
@@ -123,3 +170,10 @@ event commands for note writes and corrections.
 
 Do not add a Journal table, `journal_day` writer, daily compaction job, or
 page-open analysis.
+
+## Deployment
+
+Deploy the Web reader before the runtime writer starts producing new timing
+values. Older replicas remain readable. Existing records are not rewritten by
+this change. After both deploys, verify a new note, a correction, and a page
+refresh through the hosted path.

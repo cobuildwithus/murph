@@ -645,7 +645,18 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain('per independent fact')
     expect(directPrompt).toContain('--related-id')
     expect(directPrompt).toContain('missing data remains unknown')
-    expect(directPrompt).toContain('Save clear facts silently')
+    expect(directPrompt).toContain('even when the member is asking for advice')
+    expect(directPrompt).toContain('An extra request to save is not required')
+    expect(directPrompt).toContain('short English event name')
+    expect(directPrompt).toContain('no relative-day words or date')
+    expect(directPrompt).toContain('include only additional detail')
+    expect(directPrompt).toContain('Do not repeat or paraphrase the event name')
+    expect(directPrompt).toContain('Use `all_day` for a symptom that continues from morning')
+    expect(directPrompt).toContain('Never invent a clock time')
+    expect(directPrompt).toContain('update the exact existing event')
+    expect(directPrompt).toContain('explicit no-retention request')
+    expect(directPrompt).toContain('hypothetical questions are not events')
+    expect(directPrompt).toContain('use `note` when none fits')
     expect(directPrompt).toContain('start one workout')
     expect(directPrompt).toContain('Check at 13:00 local')
     expect(directPrompt).toContain(
@@ -2200,7 +2211,10 @@ describe('assistant system prompt cache stability', () => {
     // set the prior ceiling. Exact-memory and workout-output hints add 684
     // characters; existing-file attachment guidance adds 212, retaining the
     // prior 4-character margin (68,574 characters plus 4).
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_578)
+    // Journal capture adds 1,933 characters above the prior ceiling. Focused
+    // live journeys showed that shorter guidance omitted saves or repeated
+    // event names in descriptions. Keep the explicit rules within this cap.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(70_511)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

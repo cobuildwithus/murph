@@ -14,6 +14,7 @@ import {
   type PersonalPatternIcon,
 } from "../personal-patterns.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
+import { parseJournalTiming } from "@murphai/contracts/journal-presentation";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -299,9 +300,7 @@ function emptyJournalEventMetrics(): JournalEventMetrics {
 }
 
 function parseJournalEventTiming(value: unknown): JournalEvent["timing"] {
-  return value === "all_day" || value === "night" || value === "timed"
-    ? value
-    : "timed";
+  return parseJournalTiming(value) ?? "unknown";
 }
 
 function parseJournalRecord(value: unknown, label: string): JournalRecord {

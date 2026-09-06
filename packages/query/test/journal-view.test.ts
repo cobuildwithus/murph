@@ -999,3 +999,26 @@ function entity(
     ...overrides,
   };
 }
+
+test("Journal keeps an explicitly assigned local day when a timestamp is corrected", () => {
+  const note = event(
+    "kept-day",
+    "note",
+    "2026-05-19T08:00:00Z",
+    {
+      note: "Travel context",
+      noteType: "journal-context",
+      timeZone: "UTC",
+      dayKey: "2026-05-18",
+    },
+    "Travel context",
+  );
+  note.date = "2026-05-18";
+  note.tags = ["timing-unknown"];
+  const view = buildJournalView(
+    createVaultReadModel({ entities: [note], vaultRoot: "test://kept-note-day" }),
+    [],
+    { asOf: "2026-05-20" },
+  );
+  assert.equal(view.days[0]?.date, "2026-05-18");
+});
