@@ -1,6 +1,7 @@
 ---
 title: 'Training summary fixture expires against the wall clock'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2971'
 ---
 
 ## Expected Behavior

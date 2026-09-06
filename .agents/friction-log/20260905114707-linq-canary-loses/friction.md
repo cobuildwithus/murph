@@ -1,6 +1,7 @@
 ---
 title: 'Linq canary loses completed-turn timing after a later reply failure'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2954'
 ---
 
 ## Expected Behavior

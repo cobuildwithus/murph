@@ -1,6 +1,7 @@
 ---
 title: 'Scripted reminder withdrawal races native Codex startup'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2958'
 ---
 
 ## Expected Behavior

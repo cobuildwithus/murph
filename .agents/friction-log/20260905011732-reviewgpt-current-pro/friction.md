@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT current Pro alias fails concrete-model response validation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2953'
 ---
 
 ## Expected Behavior

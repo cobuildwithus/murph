@@ -1,6 +1,7 @@
 ---
 title: 'Hosted integration fixtures wait for omitted writes and ignore retained warmth'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2964'
 ---
 
 ## Expected Behavior

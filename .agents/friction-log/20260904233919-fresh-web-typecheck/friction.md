@@ -1,6 +1,7 @@
 ---
 title: 'Fresh Web typecheck requires an unprepared device-syncd service entrypoint'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2936'
 ---
 
 ## Expected Behavior

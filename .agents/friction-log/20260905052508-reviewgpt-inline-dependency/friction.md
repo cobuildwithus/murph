@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT inline dependency context fails during prompt prefill'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2945'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Codex egress inventory misses Linux linker tokens during macOS upgrades'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2959'
 ---
 
 ## Expected Behavior

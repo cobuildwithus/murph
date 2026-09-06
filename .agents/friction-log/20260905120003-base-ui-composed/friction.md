@@ -1,6 +1,7 @@
 ---
 title: 'Base UI composed DOM tests need browser globals before module import'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2962'
 ---
 
 ## Expected Behavior

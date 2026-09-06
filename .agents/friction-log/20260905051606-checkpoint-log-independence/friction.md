@@ -1,6 +1,7 @@
 ---
 title: 'Checkpoint log independence test has a 250 ms wall-clock dependency'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2934'
 ---
 
 ## Expected Behavior

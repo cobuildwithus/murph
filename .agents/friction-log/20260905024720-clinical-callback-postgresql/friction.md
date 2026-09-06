@@ -1,6 +1,7 @@
 ---
 title: 'Clinical callback PostgreSQL proof uses invalid KMS project identifiers'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2943'
 ---
 
 ## Expected Behavior
