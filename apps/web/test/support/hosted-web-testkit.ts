@@ -71,9 +71,12 @@ import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistan
 import {
   parseHostedExecutionWake,
   parseHostedRuntimeLatencyTraceEvent,
+  parseHostedRuntimeUsageRecordRequest,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRuntimeLatencyPhaseBreakdown,
+import {
+  HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES,
+  type HostedRuntimeUsageRecordRequest,
+  type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedVaultShareProjectionMode,
@@ -85,6 +88,18 @@ import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
+
+// The same pre-parse body limit as usage ingestion, without callback auth or DB
+// effects. Keep cross-app contract tests on this existing public testkit seam.
+export async function readHostedUsageRecordRequestForTest(
+  request: Request,
+): Promise<HostedRuntimeUsageRecordRequest> {
+  const { readRawBodyBuffer } = await import("../../src/lib/http");
+  const bytes = await readRawBodyBuffer(request, {
+    limitBytes: HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES,
+  });
+  return parseHostedRuntimeUsageRecordRequest(JSON.parse(bytes.toString("utf8")));
+}
 
 const hostedRuntimeLogTestMigrationTable = "_murph_e2e_runtime_log_migration";
 const hostedRuntimeLogTestMigrationsRoot = new URL(

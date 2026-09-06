@@ -42,6 +42,8 @@ import {
   vi,
 } from 'vitest'
 
+export const cliTimingLaunchArgs = ['--config', expect.stringMatching(/^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="\d+:[a-f0-9]{32}"$/u)]
+
 const codexMocks: {
   fakeHome: string
   spawn: Mock
@@ -487,7 +489,7 @@ async function runCodexResponseMediaToolTurn(
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual(['app-server'])
+    expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {
@@ -607,7 +609,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
   codexMocks.spawn.mockImplementation((_command, args, options) => {
     const child = new MockChildProcess()
 
-    expect(args).toEqual(['app-server'])
+    expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
     expect(options).toMatchObject({
       cwd: tmpdir(),
       env: {

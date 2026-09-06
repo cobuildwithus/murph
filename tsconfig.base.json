@@ -183,6 +183,12 @@
       "@murphai/messaging-ingress/telegram-webhook-payload": [
         "./packages/messaging-ingress/src/telegram-webhook-payload.ts"
       ],
+      "@murphai/runtime-state/cli-timing": [
+        "./packages/runtime-state/src/cli-timing.ts"
+      ],
+      "@murphai/runtime-state/node/cli-timing": [
+        "./packages/runtime-state/src/node/cli-timing.ts"
+      ],
       "@murphai/runtime-state": [
         "./packages/runtime-state/src/index.ts"
       ],
