@@ -1,6 +1,7 @@
 ---
 title: 'Package test argument separator drops focused Vitest filters'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3001'
 ---
 
 ## Expected Behavior
