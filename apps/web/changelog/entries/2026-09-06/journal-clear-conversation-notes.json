@@ -8,8 +8,15 @@
     "title": "Clearer Journal notes from your conversations",
     "summary": "Murph saves clear health facts from private conversations with concise English names, useful details, and matching icons.",
     "details": "Journal preserves all-day events and approximate periods without inventing a time. Opening Journal requests updated entries automatically. You can ask Murph to correct an existing entry.",
-    "relevanceTags": ["journal"],
-    "sourcePullRequests": [],
-    "tryIt": { "label": "Open Journal", "href": "/journal" }
+    "relevanceTags": [
+      "journal"
+    ],
+    "sourcePullRequests": [
+      2970
+    ],
+    "tryIt": {
+      "label": "Open Journal",
+      "href": "/journal"
+    }
   }
 }
