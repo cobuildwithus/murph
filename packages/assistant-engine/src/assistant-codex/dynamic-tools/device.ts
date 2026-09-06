@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as deviceTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -101,12 +103,7 @@ export async function executeDeviceDynamicTool(input: {
   abortSignal?: AbortSignal | null
   deviceTool: AssistantHostedDeviceTool
   request: Extract<DeviceDynamicToolRequest, { kind: 'device' }>
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
   try {
     if (
       input.request.request.action === 'configure_no_data_outreach'
@@ -115,6 +112,7 @@ export async function executeDeviceDynamicTool(input: {
       return deviceTextResult(
         false,
         'no-data outreach can only be changed from current private member input',
+        'authority_rejected',
       )
     }
     const response = await input.deviceTool.request(input.request.request, {
@@ -130,11 +128,12 @@ export async function executeDeviceDynamicTool(input: {
         serializeDeviceToolError(
           projectDeviceResponseMismatch(input.request.request.action),
         ),
+        'action_result_mismatch',
       )
     }
 
     const text = serializeDeviceToolResponse(response)
-    return text
+    return typeof text === 'string'
       ? deviceTextResult(true, text)
       : deviceTextResult(
           false,
@@ -154,6 +153,7 @@ export async function executeDeviceDynamicTool(input: {
                     : 'Narrow the device request before retrying.',
                 },
           ),
+          text.failureReason,
         )
   } catch (error) {
     return deviceTextResult(
@@ -165,6 +165,7 @@ export async function executeDeviceDynamicTool(input: {
           input.abortSignal?.aborted === true,
         ),
       ),
+      'handler_exception', error,
     )
   }
 }
@@ -441,7 +442,7 @@ function serializeDeviceToolError(
 
 function serializeDeviceToolResponse(
   response: AssistantHostedDeviceToolResponse,
-): string | null {
+): string | { failureReason: 'oversized_result' | 'result_serialization_failed' } {
   const payload = response.action === 'list_accounts'
     ? {
         accounts: response.accounts.map((account) => ({
@@ -486,22 +487,8 @@ function serializeDeviceToolResponse(
     const text = JSON.stringify(payload) ?? 'null'
     return new TextEncoder().encode(text).byteLength <= DEVICE_TOOL_RESULT_MAX_BYTES
       ? text
-      : null
+      : { failureReason: 'oversized_result' }
   } catch {
-    return null
-  }
-}
-
-function deviceTextResult(success: boolean, text: string): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
+    return { failureReason: 'result_serialization_failed' }
   }
 }

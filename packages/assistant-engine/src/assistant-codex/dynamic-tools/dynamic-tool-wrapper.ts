@@ -1,3 +1,4 @@
+import { toolFailureMetadata, type ToolFailureDiagnostic } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -10,6 +11,7 @@ import {
 import type { GenerateVoiceMemoToolResult } from '../generate-voice-memo-tool.js'
 
 export interface DynamicToolResult {
+  failureDiagnostic?: ToolFailureDiagnostic
   /**
    * Runtime-authored exact text appended after semantic response text when an
    * opaque value cannot safely be copied through the model.
@@ -44,6 +46,7 @@ export function wrapVoiceMemoToolResult(
           },
         }
       : {}),
+    ...toolFailureMetadata(result),
     rpcResult: {
       success: result.rpcSuccess,
       contentItems: [

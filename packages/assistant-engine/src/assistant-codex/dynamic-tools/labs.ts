@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as labsTextResult, type ToolFailureReason } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
@@ -69,56 +71,41 @@ export async function executeLabsDynamicTool(input: {
   abortSignal?: AbortSignal | null
   labsTool: AssistantHostedLabsTool
   request: Extract<LabsDynamicToolRequest, { kind: 'labs' }>
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
+  let failureReason: ToolFailureReason = 'handler_exception'
   try {
     const rawResponse = await input.labsTool.request(input.request.request, {
       signal: input.abortSignal ?? null,
     })
+    failureReason = 'action_result_mismatch'
     const response = parseHostedRuntimeLabsToolResponse(rawResponse)
+    failureReason = 'handler_exception'
     if (response.action !== input.request.request.action) {
       return labsTextResult(
         false,
         'lab catalog discovery returned an unexpected result',
+        'action_result_mismatch',
       )
     }
 
     const text = serializeLabsToolResponse(response)
-    return text
+    return typeof text === 'string'
       ? labsTextResult(true, text)
-      : labsTextResult(false, 'lab catalog result is too large')
-  } catch {
-    return labsTextResult(false, 'lab catalog discovery is temporarily unavailable')
+      : labsTextResult(false, 'lab catalog result is too large', text.failureReason)
+  } catch (error) {
+    return labsTextResult(false, 'lab catalog discovery is temporarily unavailable', failureReason, error)
   }
 }
 
 function serializeLabsToolResponse(
   response: HostedRuntimeLabsToolResponse,
-): string | null {
+): string | { failureReason: 'oversized_result' | 'result_serialization_failed' } {
   try {
     const text = JSON.stringify(response) ?? 'null'
     return new TextEncoder().encode(text).byteLength <= LABS_TOOL_RESULT_MAX_BYTES
       ? text
-      : null
+      : { failureReason: 'oversized_result' }
   } catch {
-    return null
-  }
-}
-
-function labsTextResult(success: boolean, text: string): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
+    return { failureReason: 'result_serialization_failed' }
   }
 }

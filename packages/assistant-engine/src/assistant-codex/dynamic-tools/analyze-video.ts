@@ -1,3 +1,4 @@
+import { toolFailureMetadata } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_SAMPLING_MODES,
@@ -114,6 +115,7 @@ export async function executeAnalyzeVideoDynamicTool(input: {
   return {
     requiredFinalResponseFallback:
       result.finalResponseFallback ?? result.rpcText,
+    ...toolFailureMetadata(result),
     rpcResult: {
       success: result.rpcSuccess,
       contentItems: [{ type: 'inputText', text: result.rpcText }],

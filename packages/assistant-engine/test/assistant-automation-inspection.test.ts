@@ -37,9 +37,15 @@ describe('automation definition inspection', () => {
 
     expect(result.rpcResult.success).toBe(success)
     if (!success) {
+      expect(result.failureDiagnostic).toStrictEqual({
+        failureStage: 'result',
+        failureReason: 'oversized_result',
+      })
+      expect(result.runtimeIssueInputs).toBeUndefined()
       expect(result.rpcResult.contentItems[0]!.text).toBe('automation result is too large')
       return
     }
+    expect(result.runtimeIssueInputs).toBeUndefined()
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
       action: 'inspect', automationId: request.lookup,
       contextReferences: [], ...definition,
