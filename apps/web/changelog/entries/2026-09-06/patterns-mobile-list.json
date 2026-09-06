@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "patterns-mobile-list",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Patterns fit your phone",
+    "summary": "Choose a health measure and compare factors in a readable vertical list without swiping sideways.",
+    "details": "Sort results and tap a comparison to inspect its supporting data. Desktop keeps the full comparison table.",
+    "relevanceTags": ["patterns", "mobile"],
+    "sourcePullRequests": [],
+    "tryIt": { "href": "/patterns", "label": "View your patterns" }
+  }
+}

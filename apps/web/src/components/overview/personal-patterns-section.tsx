@@ -320,19 +320,19 @@ function PatternsLoadingState() {
       role="status"
     >
       <span className="sr-only">Preparing your patterns</span>
-      <div className="grid grid-cols-[minmax(10rem,1.2fr)_repeat(2,minmax(8rem,1fr))] border-b border-border px-6 py-5 sm:px-8">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 sm:grid-cols-[minmax(10rem,1.2fr)_repeat(2,minmax(8rem,1fr))] border-b border-border px-6 py-5 sm:px-8">
         <Skeleton className="h-4 w-24 motion-reduce:animate-none" />
         <Skeleton className="h-4 w-20 justify-self-center motion-reduce:animate-none" />
-        <Skeleton className="h-4 w-16 justify-self-center motion-reduce:animate-none" />
+        <Skeleton className="hidden h-4 w-16 justify-self-center motion-reduce:animate-none sm:block" />
       </div>
       {[0, 1, 2].map((row) => (
         <div
-          className="grid grid-cols-[minmax(10rem,1.2fr)_repeat(2,minmax(8rem,1fr))] items-center border-b border-border/70 px-6 py-5 last:border-b-0 sm:px-8"
+          className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 sm:grid-cols-[minmax(10rem,1.2fr)_repeat(2,minmax(8rem,1fr))] items-center border-b border-border/70 px-6 py-5 last:border-b-0 sm:px-8"
           key={row}
         >
           <Skeleton className="h-5 w-32 motion-reduce:animate-none" />
           <Skeleton className="size-8 justify-self-center rounded-full motion-reduce:animate-none" />
-          <Skeleton className="size-7 justify-self-center rounded-full motion-reduce:animate-none" />
+          <Skeleton className="hidden size-7 justify-self-center rounded-full motion-reduce:animate-none sm:block" />
         </div>
       ))}
     </div>
@@ -355,7 +355,7 @@ function PatternMatrix({
     <PatternPopoverContext.Provider value={popoverState}>
       <TooltipProvider>
         <div className="border-t border-border">
-          <MobilePatternMatrix onSort={onSort} report={report} sort={sort} />
+          <MobilePatternList onSort={onSort} report={report} sort={sort} />
           <DesktopPatternMatrix onSort={onSort} report={report} sort={sort} />
 
           <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
@@ -367,7 +367,7 @@ function PatternMatrix({
   );
 }
 
-function MobilePatternMatrix({
+function MobilePatternList({
   onSort,
   report,
   sort,
@@ -376,133 +376,92 @@ function MobilePatternMatrix({
   report: PersonalPatternReport;
   sort: PatternSort | null;
 }) {
+  const selectId = useId();
   const outcomeColumns = buildOutcomeColumns(report.outcomes);
-  const columns = `repeat(${outcomeColumns.length}, 7rem)`;
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [showRightFade, setShowRightFade] = useState(false);
-
-  useEffect(() => {
-    const scroller = scrollRef.current;
-    if (!scroller) return;
-    const update = () => {
-      const remaining =
-        scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft;
-      setShowRightFade(remaining > 2);
-    };
-    update();
-    scroller.addEventListener("scroll", update, { passive: true });
-    const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-    observer?.observe(scroller);
-    if (scroller.firstElementChild) {
-      observer?.observe(scroller.firstElementChild);
-    }
-    return () => {
-      scroller.removeEventListener("scroll", update);
-      observer?.disconnect();
-    };
-  }, [outcomeColumns.length]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const popover = useContext(PatternPopoverContext);
+  const selected =
+    outcomeColumns.find((outcome) => outcome.id === selectedId) ??
+    outcomeColumns[0];
+  if (!selected) return null;
+  const direction = sort?.columnId === selected.id ? sort.direction : null;
+  const SortIcon = direction === "ascending" ? ArrowUp : ArrowDown;
 
   return (
-    <div
-      className="relative grid grid-cols-[5.25rem_minmax(0,1fr)] sm:hidden"
-      data-patterns-layout="mobile"
-    >
-      <div className="relative z-20 bg-[#fffcf6] dark:bg-card">
-        <div
-          className="h-[3.75rem] border-r border-border bg-muted/20"
-          aria-hidden="true"
-        />
+    <div className="sm:hidden" data-patterns-layout="mobile">
+      <div className="space-y-3 border-b border-border bg-muted/20 px-4 py-4">
+        <label
+          className="block text-xs font-medium text-muted-foreground"
+          htmlFor={selectId}
+        >
+          Health measure
+        </label>
+        <div className="flex items-center gap-2">
+          <select
+            className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-base font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            id={selectId}
+            onChange={(event) => {
+              setSelectedId(event.target.value);
+              popover?.setActiveId(null);
+              if (sort?.columnId !== event.target.value) onSort(event.target.value);
+            }}
+            value={selected.id}
+          >
+            {outcomeColumns.map((outcome) => (
+              <option key={outcome.id} value={outcome.id}>
+                {outcome.label}
+              </option>
+            ))}
+          </select>
+          <button
+            aria-label={`Sort by ${selected.label}${direction ? `, ${direction}` : ""}`}
+            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => onSort(selected.id)}
+            type="button"
+          >
+            <SortIcon aria-hidden="true" className="size-4" />
+            Sort
+          </button>
+        </div>
+      </div>
+      <ul
+        aria-label={`${selected.label} patterns`}
+        className="divide-y divide-border"
+      >
         {report.factors.map((factor) => (
-          <div
-            className="flex h-[5.25rem] min-w-0 flex-col items-center justify-center border-r border-t border-border px-1 py-1.5 text-center"
+          <li
+            className="flex min-h-20 items-center justify-between gap-4 px-4 py-3"
             data-pattern-factor-row={factor.id}
             key={factor.id}
           >
-            <Image
-              src={resolvePatternFactorIcon(factor)}
-              alt=""
-              width={32}
-              height={32}
-              className="size-7 shrink-0 object-contain"
-            />
-            <p className="mt-0.5 max-w-full break-words text-[11px] font-medium leading-tight text-foreground">
-              {factor.label}
-            </p>
-            <ObservedDaysMeter
-              className="mt-1"
-              days={factor.observedDays}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div
-        aria-label="Pattern results. Swipe horizontally to compare health measures."
-        className="min-w-0 overflow-x-auto overscroll-x-contain"
-        ref={scrollRef}
-        tabIndex={0}
-      >
-        <div
-          className="w-max min-w-full"
-          data-pattern-outcome-group={1}
-          style={{ minWidth: `${outcomeColumns.length * 7}rem` }}
-        >
-          <div
-            className="grid h-[3.75rem] items-stretch bg-muted/20"
-            style={{ gridTemplateColumns: columns }}
-          >
-            {outcomeColumns.map((outcome) => (
-              <div
-                key={outcome.id}
-                className="flex min-w-0 items-end justify-center px-2 py-3 text-center"
-                data-pattern-outcome-column={outcome.id}
-              >
-                <PatternOutcomeHeader
-                  compact
-                  onSort={onSort}
-                  outcome={outcome}
-                  sortDirection={
-                    sort?.columnId === outcome.id ? sort.direction : null
-                  }
-                />
+            <div className="flex min-w-0 items-center gap-3">
+              <Image
+                src={resolvePatternFactorIcon(factor)}
+                alt=""
+                width={40}
+                height={40}
+                className="size-9 shrink-0 object-contain"
+              />
+              <div className="min-w-0 space-y-1.5">
+                <p className="break-words text-sm font-medium leading-5 text-foreground">
+                  {factor.label}
+                </p>
+                <ObservedDaysMeter days={factor.observedDays} />
               </div>
-            ))}
-          </div>
-
-          {report.factors.map((factor) => (
-            <div
-              key={factor.id}
-              className="grid h-[5.25rem] items-stretch border-t border-border"
-              style={{ gridTemplateColumns: columns }}
-            >
-              {outcomeColumns.map((outcome) => {
-                return (
-                  <div
-                    key={outcome.id}
-                    className="flex min-w-0 items-center justify-center px-1 py-2"
-                  >
-                    <PatternOutcomeColumnCell
-                      compact
-                      factorLabel={factor.label}
-                      factorObservedDays={factor.observedDays}
-                      outcomes={outcome.outcomes}
-                      report={report}
-                      factorId={factor.id}
-                    />
-                  </div>
-                );
-              })}
             </div>
-          ))}
-        </div>
-      </div>
-      {showRightFade ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 z-30 w-16 bg-gradient-to-r from-transparent to-[#fffcf6] dark:to-card"
-        />
-      ) : null}
+            <div className="shrink-0 [&_button]:min-h-11 [&_button]:min-w-11">
+              <PatternOutcomeColumnCell
+                key={selected.id}
+                factorLabel={factor.label}
+                factorObservedDays={factor.observedDays}
+                outcomes={selected.outcomes}
+                report={report}
+                factorId={factor.id}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

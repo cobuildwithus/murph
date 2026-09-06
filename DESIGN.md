@@ -821,7 +821,7 @@ their calculations separate and identify the metric in each result popover.
 Keep outcome headings clear without separate help controls. Keep `No clear pattern`
 descriptions to one short sentence.
 
-Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts in accessible copy instead of repeating them visually. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
+Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts in accessible copy instead of repeating them visually. On narrow screens, show one health measure at a time using a labeled native selector above a vertical factor list. Keep sorting, coverage, and result details available with touch-sized controls. Desktop keeps the full comparison matrix.
 
 ## 6. Do's and Don'ts
 

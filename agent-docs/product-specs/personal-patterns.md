@@ -135,9 +135,10 @@ pending and publishes a report for the newer hash.
 
 ## Presentation
 
-The current `/patterns` matrix remains the main view. It shows the first 15
-factors and every supported outcome present in the member's data. `Show more`
-reveals the remaining report factors. The report keeps at most 100 sorted
+The `/patterns` page shows the first 15 factors. Desktop compares every
+supported outcome in a matrix. Phones show a vertical factor list for one
+health measure at a time, with a selector, sorting, and tappable result details.
+`Show more` reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. A recognized factor
 stays visible when it has no suitable comparison day. Its cells explain that
 Murph needs more comparable data. Observations can appear with grade E. The
