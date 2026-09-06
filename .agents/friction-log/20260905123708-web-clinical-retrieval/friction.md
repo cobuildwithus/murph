@@ -1,6 +1,7 @@
 ---
 title: 'Web clinical retrieval test requires unbuilt vault-usecases declarations'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2955'
 ---
 
 ## Expected Behavior

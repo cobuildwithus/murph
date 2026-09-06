@@ -1,6 +1,7 @@
 ---
 title: 'Assistant-engine CI coverage serializes every test file'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2942'
 ---
 
 ## Expected Behavior

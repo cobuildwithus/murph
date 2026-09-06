@@ -1,6 +1,7 @@
 ---
 title: 'Required Graft command is unavailable after a fresh task checkout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2944'
 ---
 
 Expected: Repository setup provides the `graft` command required by AGENTS.md for graph-first code context.

@@ -1,6 +1,7 @@
 ---
 title: 'Web typecheck omits the vault-usecases clinical-records build prerequisite'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2961'
 ---
 
 ## Expected Behavior

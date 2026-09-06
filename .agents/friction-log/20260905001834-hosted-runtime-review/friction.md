@@ -1,6 +1,7 @@
 ---
 title: 'Hosted runtime review cannot attach both guarded repository snapshots'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2937'
 ---
 
 ## Expected Behavior

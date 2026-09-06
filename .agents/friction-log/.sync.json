@@ -649,12 +649,52 @@
       "path": ".agents/friction-log/20260828164243-committer-rejects-directory/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2561",
+      "path": ".agents/friction-log/20260829030500-viewport-overflow-playwright/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2624",
+      "path": ".agents/friction-log/20260830165335-hosted-local-setup/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2639",
+      "path": ".agents/friction-log/20260830175325-built-cli-test/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2647",
       "path": ".agents/friction-log/20260831025840-hosted-member-seed/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2677",
       "path": ".agents/friction-log/20260830174923-hosted-local-docker/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2717",
+      "path": ".agents/friction-log/20260901173517-hosted-local-no/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2729",
+      "path": ".agents/friction-log/20260829231539-real-codex-harness/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2768",
+      "path": ".agents/friction-log/20260902184741-frontend-design-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2790",
+      "path": ".agents/friction-log/20260903165242-web-typecheck-retains/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2799",
+      "path": ".agents/friction-log/20260903235348-reviewgpt-snapshot-listing/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2903",
+      "path": ".agents/friction-log/20260905003755-reviewgpt-minimum-duration/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2907",
+      "path": ".agents/friction-log/20260904202051-fresh-worktree-web/friction.md"
     }
   ],
   "version": 1

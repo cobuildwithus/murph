@@ -1,6 +1,7 @@
 ---
 title: 'Document and meal command schema proof can exceed its fixed test budget'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2930'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Unified fleet E2E still assumes one ready slot and shell prewarming'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2956'
 ---
 
 ## Expected Behavior
