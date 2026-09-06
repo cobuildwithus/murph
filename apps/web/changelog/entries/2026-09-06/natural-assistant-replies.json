@@ -9,6 +9,6 @@
     "summary": "Murph uses plainer language in setup recovery, reminder confirmations, and weekly updates.",
     "details": "Reminders focus on what was saved, setup errors explain what is blocked, and weekly updates get to the point.",
     "relevanceTags": ["messaging", "onboarding", "reminders"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2981]
   }
 }
