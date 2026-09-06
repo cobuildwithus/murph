@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -204,6 +204,49 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
+  it.each([
+    { label: "current ready inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: true },
+    { label: "missing inventory", proof: null, passes: false },
+    { label: "wrong target", proof: { ready: true, readyCount: 1, provisioningCount: 0, target: 1, releaseMatches: true }, passes: false },
+    { label: "stale release", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: false }, passes: false },
+    { label: "pending preparation", proof: { ready: true, readyCount: 2, provisioningCount: 1, target: 2, releaseMatches: true }, passes: false },
+  ])("requires $label proof in the protected standby smoke", async ({ proof, passes }) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-standby-smoke-"));
+    const manifestPath = path.join(root, "manifest.json");
+    const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
+    try {
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      const fetchImpl = async (url: RequestInfo | URL) => new Response(JSON.stringify(
+        isContainerSmokeRequest(String(url))
+          ? {
+              ok: true,
+              standbyInventory: proof,
+              runnerContainer: {
+                codexShell: createCodexShellSmokeResult(), ok: true,
+                runnerBundle: manifest, service: "cloudflare-hosted-runner-node",
+              },
+            }
+          : { ok: true, service: "cloudflare-hosted-runner", standbyMode: "shadow" },
+      ), { status: 200 });
+      const smoke = runSmokeHostedDeploy({
+        fetchImpl, log() {},
+        source: {
+          HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "shadow",
+          HOSTED_EXECUTION_STANDBY_TARGET: "2",
+          HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "1",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+      });
+      if (passes) await expect(smoke).resolves.toBeUndefined();
+      else await expect(smoke).rejects.toThrow("standby inventory");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("pins the candidate-version header and performs the authenticated status check", async () => {
     const fetchCalls: Array<{
       body: string | undefined;

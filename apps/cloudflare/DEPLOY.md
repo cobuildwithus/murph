@@ -2356,6 +2356,18 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 
 The GitHub deploy workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER` for every Worker deploy and sets a longer managed-container retry window for gradual rollouts. It enables `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT` only when `container_rollout=immediate`, and `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN` per the `live_model_turn` input (default on).
 
+When standby mode is `shadow` or `allocate`, the initial signed container smoke
+asks the current-release global coordinator to maintain inventory and reads its
+canonical state. It requires the configured number of distinct ready slots and
+no pending preparation. Incomplete inventory returns a retryable failure before
+starting the container probe. The response exposes only counts and release-match
+metadata; it never returns slot names or claims a slot. The CLI requires this
+proof when the expected mode is enabled, using `HOSTED_EXECUTION_STANDBY_TARGET`
+(default two). The separate live-model phase does not repeat this inventory
+check because foreground traffic can consume a previously verified slot. This
+proves a ready inventory snapshot; the migration checks above still own failed
+preparation recovery, drain, foreground allocation and background exclusion.
+
 Optional smoke env:
 
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` to target a non-default public Worker URL
