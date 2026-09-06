@@ -1,6 +1,6 @@
 # Drain newer device wakes behind retained retries
 
-Status: active
+Status: completed
 Created: 2026-09-06
 Updated: 2026-09-06
 
@@ -49,3 +49,8 @@ Change only runtime mailbox admission and focused proof. Do not change provider 
 - `pnpm complexity:diff` passed: changed-source complexity debt remains 20 and maximum remains 30. The existing preparation and post-checkpoint record hotspots retain their ownership; new hint eligibility is a private predicate.
 - Parent review covered the full diff, exact continuation ownership, retry and checkpoint failure paths, bounded local queue scanning, and privacy.
 - PR review, exact-head CI, merge, managed deployment, and read-only production convergence checks remain release gates.
+
+## Implementation outcome
+
+The local reproduction and fix are complete. PR #3003 owns the remaining release gates: exact-head CI, required ReviewGPT, merge, managed Cloudflare deployment, and production convergence inspection. No production state was manually rewritten. The public changelog explains the recovery behavior without private incident details.
+Completed: 2026-09-06
