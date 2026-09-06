@@ -1003,7 +1003,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
-  it("releases consent withdrawal after standby invocation binding exhausts the command budget", async () => {
+  it("releases consent withdrawal after retained standby invocation binding exhausts the command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     let consentState: "granted" | "revoked" = "granted";
@@ -1030,6 +1030,7 @@ describe("HostedUserRunner execution coordination", () => {
       binding = { ...input, state: "bound" };
       return { ...input, bound: true as const };
     });
+    const resolveRetainedStandbySlot = vi.fn(async () => binding);
     const invocationBindingRead = vi.fn(async () => {
       bindingReadStarted.resolve(undefined);
       return await new Promise<HostedStandbySlotBinding>(() => {});
@@ -1062,9 +1063,7 @@ describe("HostedUserRunner execution coordination", () => {
               state: "bound" as const,
             };
           },
-          async resolveRetainedStandbySlot() {
-            throw new Error("Retained standby resolution was not expected.");
-          },
+          resolveRetainedStandbySlot,
           retireStandbySlot,
           async smokeHealth() {
             return {
@@ -1108,6 +1107,11 @@ describe("HostedUserRunner execution coordination", () => {
       standbyCoordinatorNamespace,
     });
     await harness.runner.bindUser(TEST_USER_ID);
+    // Retained targets still require a fresh binding read during preparation.
+    harness.sql.exec(
+      "UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1",
+      slotName,
+    );
 
     const ensure = harness.runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs:
@@ -1150,8 +1154,9 @@ describe("HostedUserRunner execution coordination", () => {
       processingAllowed: false,
       runnerContainerDestroyOk: true,
     });
-    expect(claimReadyStandby).toHaveBeenCalledOnce();
-    expect(bindStandbySlot).toHaveBeenCalledOnce();
+    expect(claimReadyStandby).not.toHaveBeenCalled();
+    expect(bindStandbySlot).not.toHaveBeenCalled();
+    expect(resolveRetainedStandbySlot).toHaveBeenCalledOnce();
     expect(invocationBindingRead).toHaveBeenCalledOnce();
     expect(cleanupBindingRead).toHaveBeenCalledOnce();
     expect(retireStandbySlot).toHaveBeenCalledOnce();
