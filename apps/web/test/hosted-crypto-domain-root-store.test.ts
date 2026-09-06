@@ -2407,6 +2407,67 @@ test.each(["create", "replace", "consent_revoked", "suspended", "root_race"] as 
   },
 );
 
+test.each([true, false])("discovers a control/ingress preparation batch once (existing roots: %s)", async (existing) => {
+  const steps: string[] = [];
+  const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture(
+    () => createStepRecordingTransaction(steps),
+  );
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    prepareHostedDomainRootForWeb,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    revalidatePreparedHostedDomainRootForWebTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-batch-discovery";
+  const domains = ["control", "ingress"] as const;
+  if (existing) {
+    for (const domain of domains) {
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+        domain, prisma: tx.prisma, reason: "test.seed", userId,
+      });
+    }
+  }
+  steps.length = 0;
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const preparedCandidates = await prepareHostedCryptoDomainRootCandidates({
+      domains, maxConcurrency: 2, prisma: tx.prisma, userId,
+    });
+    const preparedRoots = await Promise.all(domains.map((domain) =>
+      prepareHostedDomainRootForWeb({
+        domain, preparedCandidates, prisma: tx.prisma, reason: "test.batch", userId,
+      }),
+    ));
+    expect(steps).toEqual(existing
+      ? ["db.read-active-domains", "db.read-active-envelope", "db.read-active-envelope"]
+      : ["db.read-active-domains"]);
+    expect(decryptMetrics.calls).toHaveLength(2);
+    for (const prepared of preparedRoots) {
+      await revalidatePreparedHostedDomainRootForWebTx({ prepared, tx: tx.prisma });
+    }
+    expect(decryptMetrics.calls).toHaveLength(2);
+    expect(tx.persistedEnvelopes).toHaveLength(2);
+  });
+  expect(decryptMetrics.returnedPlaintexts.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+});
+
+test("an empty supplied candidate map does not authorize a missing active root", async () => {
+  const { tx, signCalls, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+  const { prepareHostedDomainRootForWeb } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(prepareHostedDomainRootForWeb({
+      domain: "control", preparedCandidates: new Map(), prisma: tx.prisma,
+      reason: "test.missing-active", userId: "member-test-missing-active",
+    })).rejects.toMatchObject({ name: "HostedDomainRootEnvelopeUnavailableError" });
+  });
+  expect(signCalls).toHaveLength(0);
+  expect(decryptMetrics.calls).toHaveLength(0);
+  expect(tx.persistedEnvelopes).toHaveLength(0);
+});
+
 test("the prepared Web root token commits and reuses only its exact scoped root", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const {
@@ -3630,10 +3691,7 @@ function createStepRecordingKmsClient(input: {
   };
 }
 
-function createStepRecordingTransaction(steps: string[]): {
-  persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[];
-  prisma: Prisma.TransactionClient;
-} {
+function createStepRecordingTransaction(steps: string[]): HostedCryptoTestTransaction {
   const tx = createCapturingTransaction();
   const base = {
     $executeRaw: async (...args: Parameters<Prisma.TransactionClient["$executeRaw"]>) => {
@@ -3651,7 +3709,7 @@ function createStepRecordingTransaction(steps: string[]): {
   // plus the interactive-transaction root here.
   const recorded = base as Prisma.TransactionClient;
   return {
-    persistedEnvelopes: tx.persistedEnvelopes,
+    ...tx,
     prisma: Object.assign(recorded, {
       async $transaction<T>(
         run: (transaction: Prisma.TransactionClient) => Promise<T>,
