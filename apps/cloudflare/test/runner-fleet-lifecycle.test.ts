@@ -465,24 +465,26 @@ function allocationHarness(options: {
     env: controllerEnvironment(), stateStore: store, runnerContainerNamespace: namespace,
     runnerRuntimeEnvSource: { ...version, HOSTED_EXECUTION_STANDBY_MODE: options.mode ?? "allocate" },
     invocationService: {
-      async prepareWithFence({ input, token }) {
-        calls.prepare++;
-        if (options.failPreparation) throw new Error("simulated workspace preparation failure");
-        assert.ok(token.runnerContainerName);
-        const binding = await slots.get(token.runnerContainerName)!.container.readStandbySlotBinding();
-        assert.equal(binding.state, "bound");
-        assert.equal(binding.userId, input.userId);
-        return {
-          input, token, runnerContainerName: token.runnerContainerName,
-          workspaceCheckpointedAt: null, workspaceVersion: "0",
-          job: {
-            kind: "workspace-invocation",
-            request: {
-              attemptId: token.attemptId, idleCheckpointDelayMs: 54_000,
-              leaseGeneration: token.generation, userId: input.userId,
-              workspace: null, workspaceVersion: token.workspaceVersion ?? "0",
+      prepareForFreshStart({ input }) {
+        return async (token) => {
+          calls.prepare++;
+          if (options.failPreparation) throw new Error("simulated workspace preparation failure");
+          assert.ok(token.runnerContainerName);
+          const binding = await slots.get(token.runnerContainerName)!.container.readStandbySlotBinding();
+          assert.equal(binding.state, "bound");
+          assert.equal(binding.userId, input.userId);
+          return {
+            input, token, runnerContainerName: token.runnerContainerName,
+            workspaceCheckpointedAt: null, workspaceVersion: "0",
+            job: {
+              kind: "workspace-invocation",
+              request: {
+                attemptId: token.attemptId, idleCheckpointDelayMs: 54_000,
+                leaseGeneration: token.generation, userId: input.userId,
+                workspace: null, workspaceVersion: token.workspaceVersion ?? "0",
+              },
             },
-          },
+          };
         };
       },
       async invokePreparedWithFence({ prepared }) {
