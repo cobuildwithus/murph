@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 
 import { act, createElement } from "react";
+import type { BrowserVaultContextValue } from "@/src/lib/browser-vault/context";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -19,7 +20,7 @@ import type {
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
-  refresh: vi.fn(async () => undefined),
+  refresh: vi.fn<BrowserVaultContextValue["refresh"]>(async () => undefined),
   resolveHostedMurphContactOptions: vi.fn(),
   useBrowserVault: vi.fn(),
 }));
@@ -290,6 +291,77 @@ test("JournalPage renders the derived private health timeline", () => {
     assert.doesNotMatch(markup, /No data/u);
   } finally {
     vi.useRealTimers();
+  }
+});
+
+test("JournalPage requests one automatic refresh and keeps the refreshed page free of refresh controls", async () => {
+  const ref: NonNullable<BrowserVaultContextValue["ref"]> = {
+    byteLength: 100, dataVersion: "a".repeat(64), generatedAt: clientFixture.replica.generatedAt,
+    generation: clientFixture.replica.generation, keyId: "browser-vault-replica:test",
+    objectKey: "synthetic/replica.json", replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:test", schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash: "b".repeat(64),
+  };
+  const context = { client: clientFixture, ref, refresh: mocks.refresh, refreshPending: false, status: "ready" };
+  mocks.useBrowserVault.mockReturnValue(context);
+  const rendered = await renderClientComponent(createElement(JournalPageClient), { requireButton: false });
+  try {
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+    const options = mocks.refresh.mock.calls[0]?.[0];
+    assert.equal(options?.background, true);
+    assert.ok(options?.requestRuntimeRefreshUntil);
+    assert.equal(options.requestRuntimeRefreshUntil(clientFixture, ref), false);
+    const nextRef = { ...ref, generatedAt: "2026-04-20T12:01:00.000Z" };
+    assert.equal(options.requestRuntimeRefreshUntil(clientFixture, nextRef), true);
+    const legacyClient = createBrowserVaultQueryClient({ ...clientFixture.replica, journal: undefined });
+    assert.equal(options.requestRuntimeRefreshUntil(legacyClient, nextRef), false);
+    mocks.useBrowserVault.mockReturnValue({ ...context, ref: nextRef });
+    await rendered.rerender(createElement(JournalPageClient));
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+    const buttonText = [...rendered.container.querySelectorAll("button")].map((button) => button.textContent).join(" ");
+    assert.doesNotMatch(buttonText, /refresh/iu);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("Journal renders honest note timing, selected artwork, and non-repeating detail", async () => {
+  const client = await createFixtureClient({
+    includeHabitat: false,
+    extraEntities: [
+      createEntity("event", "evt_context", {
+        kind: "note", title: "Recovery context", occurredAt: "2026-04-20T12:00:00Z", date: "2026-04-20",
+        attributes: { note: "Recovery context", noteType: "journal-context", timeZone: "UTC" },
+        tags: ["timing-all-day", "journal-icon-note"],
+      }),
+      createEntity("event", "evt_stretch", {
+        kind: "note", title: "Stretch", occurredAt: "2026-04-20T12:00:00Z", date: "2026-04-20",
+        attributes: { note: "6 min", noteType: "journal-factor", timeZone: "UTC" },
+        tags: ["timing-evening", "journal-icon-mobility"],
+      }),
+      createEntity("event", "evt_rest", {
+        kind: "note", title: "Quiet rest", occurredAt: "2026-04-20T12:00:00Z", date: "2026-04-20",
+        attributes: { note: "Quiet rest", noteType: "journal-context", timeZone: "UTC" },
+        tags: ["timing-unknown", "journal-icon-does-not-exist"],
+      }),
+    ],
+  });
+  assert.ok(client.replica.journal);
+  const rendered = await renderClientComponent(createElement(JournalViewContent, {
+    asOfDate: "2026-04-20", journal: client.replica.journal,
+  }), { requireButton: false, location: { href: "http://localhost/journal" } });
+  try {
+    const times = [...rendered.container.querySelectorAll("time")].map((time) => time.textContent);
+    assert.ok(times.includes("All day"));
+    assert.ok(times.includes("Evening"));
+    assert.ok(rendered.container.querySelector('time[aria-label="Time not specified"]'));
+    assert.ok(rendered.container.querySelector('img[src="/design-assets/patterns/mobility.svg"]'));
+    assert.doesNotMatch(rendered.container.innerHTML, /journal-icon-does-not-exist|12:00/);
+    assert.match(rendered.container.textContent ?? "", /6 min/);
+    assert.equal((rendered.container.textContent?.match(/Recovery context/g) ?? []).length, 1);
+    assert.equal((rendered.container.textContent?.match(/Quiet rest/g) ?? []).length, 1);
+  } finally {
+    await rendered.cleanup();
   }
 });
 

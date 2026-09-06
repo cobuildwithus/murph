@@ -2,6 +2,8 @@
 
 import { useId, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { JOURNAL_ICON_ASSETS, readJournalIcon } from "@murphai/contracts";
 import {
   Activity,
   ArrowRight,
@@ -73,17 +75,13 @@ export function JournalViewContent({
   contactOptions = [],
   insights = [],
   isRefreshing = false,
-  isStale = false,
   journal,
-  onRefresh,
 }: {
   asOfDate?: string;
   contactOptions?: readonly MurphContactOption[];
   insights?: JournalInsight[];
   isRefreshing?: boolean;
-  isStale?: boolean;
   journal: JournalView;
-  onRefresh?: () => void;
 }) {
   const headingId = useId();
   const localToday = useSyncExternalStore(
@@ -157,15 +155,6 @@ export function JournalViewContent({
                   <TooltipContent>Updating latest data</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-            ) : isStale && onRefresh ? (
-              <Button
-                className="h-auto gap-1.5 px-0 text-xs"
-                onClick={onRefresh}
-                variant="link"
-              >
-                <RefreshCw className="size-3" aria-hidden="true" />
-                Refresh latest data
-              </Button>
             ) : null}
             <WeekControls
               canGoNext={selectedWindowEnd < latestWindowEnd}
@@ -767,7 +756,8 @@ function JournalEventRow({
           "text-right font-mono text-[10px] uppercase leading-[30px] text-muted-foreground",
           event.timing === "all_day" && "text-muted-foreground",
         )}
-        dateTime={event.occurredAt}
+        dateTime={event.timing === "timed" ? event.occurredAt : event.date}
+        aria-label={event.timing === "unknown" ? "Time not specified" : undefined}
       >
         {formatEventTime(event)}
       </time>
@@ -1719,6 +1709,23 @@ function formatShortDay(date: string): string {
 }
 
 function renderEventIcon(event: JournalEvent) {
+  const lead = event.records.find((record) => record.label === event.title);
+  const selected = event.kind === "note" && lead
+    ? readJournalIcon(lead.tags)
+    : null;
+  if (selected && selected !== "note") {
+    return (
+      <Image
+        alt=""
+        aria-hidden="true"
+        className="size-5"
+        height={20}
+        src={JOURNAL_ICON_ASSETS[selected]}
+        unoptimized
+        width={20}
+      />
+    );
+  }
   const Icon = resolveEventIcon(event);
   return <Icon className="size-[15px] stroke-2" aria-hidden="true" />;
 }
@@ -1742,6 +1749,10 @@ function resolveEventIcon(event: JournalEvent): LucideIcon {
 function formatEventTime(event: JournalEvent): string {
   if (event.timing === "night") return "Night";
   if (event.timing === "all_day") return "All day";
+  if (event.timing === "morning") return "Morning";
+  if (event.timing === "afternoon") return "Afternoon";
+  if (event.timing === "evening") return "Evening";
+  if (event.timing === "unknown") return "";
   return new Intl.DateTimeFormat("en", {
     hour: "numeric",
     minute: "2-digit",

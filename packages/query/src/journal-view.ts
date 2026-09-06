@@ -1,4 +1,9 @@
-import { isValidIanaTimeZone } from "@murphai/contracts";
+import {
+  isValidIanaTimeZone,
+  readJournalTiming,
+  toLocalDayKey,
+  type JournalTiming,
+} from "@murphai/contracts";
 import {
   resolveAdherenceObservationActivityKind,
   resolveActivityEvidenceLocalDate,
@@ -71,7 +76,7 @@ export interface JournalEventMetrics {
   spo2Percent: number | null;
 }
 
-export type JournalEventTiming = "all_day" | "night" | "timed";
+export type JournalEventTiming = JournalTiming;
 
 export interface JournalDay {
   date: string;
@@ -218,7 +223,9 @@ function journalCandidateFromEvent(
       source: readEventSource(event),
       summary: eventSummary(event),
       tags: event.tags.slice(),
-      timing: event.occurredAt ? "timed" : "all_day",
+      timing: event.kind === "note"
+        ? readJournalTiming(event.tags) ?? (event.occurredAt ? "timed" : "unknown")
+        : event.occurredAt ? "timed" : "all_day",
       timeZone: readEventTimeZone(event),
     },
   ];
@@ -683,6 +690,14 @@ function resolveEventDate(event: CanonicalEntity): string | null {
     return resolveActivityEvidenceLocalDate(event);
   if (event.kind === "intervention_session")
     return resolveInterventionSessionLocalDate(event);
+  if (event.kind === "note") {
+    const dayKey = readString(event.attributes.dayKey);
+    if (dayKey) return dayKey;
+  }
+  const timeZone = event.kind === "note" ? readEventTimeZone(event) : null;
+  if (timeZone && event.occurredAt) {
+    return toLocalDayKey(event.occurredAt, timeZone);
+  }
   return event.date ?? event.occurredAt?.slice(0, 10) ?? null;
 }
 
@@ -1318,16 +1333,30 @@ function compareCandidates(
 }
 
 function compareJournalEvents(left: JournalEvent, right: JournalEvent): number {
-  const timingRank: Record<JournalEventTiming, number> = {
-    all_day: 0,
-    night: 1,
-    timed: 2,
-  };
   return (
-    timingRank[left.timing] - timingRank[right.timing] ||
+    journalEventSortMinute(left) - journalEventSortMinute(right) ||
     left.occurredAt.localeCompare(right.occurredAt) ||
     left.id.localeCompare(right.id)
   );
+}
+
+function journalEventSortMinute(event: JournalEvent): number {
+  if (event.timing === "all_day") return -2;
+  if (event.kind === "sleep" && event.timing === "night") return -1;
+  // Period anchors order rows only. They are never shown as observed times.
+  if (event.timing === "morning") return 6 * 60;
+  if (event.timing === "afternoon") return 12 * 60;
+  if (event.timing === "evening") return 18 * 60;
+  if (event.timing === "night") return 21 * 60;
+  if (event.timing === "unknown") return 24 * 60;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: event.timeZone ?? "UTC",
+  }).formatToParts(new Date(event.occurredAt));
+  return Number(parts.find((part) => part.type === "hour")?.value ?? 0) * 60
+    + Number(parts.find((part) => part.type === "minute")?.value ?? 0);
 }
 
 function resolveDate(value: Date | string | undefined): string {

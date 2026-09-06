@@ -71,6 +71,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   parsePersonalPatternVocabulary,
+  buildJournalView,
   readVaultRawTolerant,
   resolveMealNutritionGoals,
   type CanonicalEntity,
@@ -13322,6 +13323,90 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
           result.finalMessage,
         )}\n`,
       )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex private Journal note quality e2e', () => {
+  it('automatically saves English facts with honest timing and corrects the same canonical note', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-note-quality-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await mkdir(binDirectory)
+      const cliPath = fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url))
+      const wrapper = path.join(binDirectory, 'vault-cli')
+      await writeFile(wrapper, [
+        '#!/usr/bin/env node',
+        "const { spawnSync } = require('node:child_process');",
+        `const result = spawnSync(process.execPath, [${JSON.stringify(cliPath)}, ...process.argv.slice(2), '--vault', ${JSON.stringify(workingDirectory)}], { stdio: 'inherit' });`,
+        'process.exit(result.status ?? 1);',
+      ].join('\n'))
+      await chmod(wrapper, 0o755)
+      const cliSchema = await promisify(execFile)(process.execPath, [wrapper, 'event', 'note', 'add', '--schema'])
+      expect(cliSchema.stdout).toContain('icon')
+      expect(cliSchema.stdout).toContain('timing')
+      const input: Omit<Parameters<typeof executeRealCodexAppServerTurn>[0], 'prompt'> = {
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-05-18T16:00:00Z'),
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
+        },
+        excludeResumeTurns: true, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      }
+      const first = await executeRealCodexAppServerTurn({
+        ...input,
+        prompt: 'Hoy me siento cansado desde la mañana. Ayer por la tarde viajé cuatro horas en tren. ¿Cómo puedo organizar un día tranquilo?',
+      })
+      process.stdout.write(`[journal-note-quality-first] ${JSON.stringify({ reply: first.finalMessage, actions: readCapabilityRoutingActions(first.jsonEvents) })}\n`)
+      const initialVault = await readVaultRawTolerant(workingDirectory)
+      const notes = initialVault.events.filter((event) => event.kind === 'note')
+      expect(notes).toHaveLength(2)
+      const fatigue = notes.find((event) => /fatigue|tired|low energy/i.test(event.title ?? ''))
+      const travel = notes.find((event) => /train|travel|journey/i.test(event.title ?? ''))
+      expect(fatigue).toBeDefined()
+      expect(travel).toBeDefined()
+      if (!fatigue || !travel) throw new Error('Expected one fatigue note and one travel note')
+      expect(fatigue.tags).toContain('timing-all-day')
+      expect(fatigue.tags).toContain('journal-icon-fatigue')
+      expect(travel.tags).toContain('timing-afternoon')
+      expect(travel.tags).toContain('journal-icon-travel')
+      expect(String(travel.attributes.note ?? '')).not.toMatch(/train|travel|journey/i)
+      const initialView = buildJournalView(initialVault, [], { asOf: '2026-05-18' })
+      expect(initialView.days.find((day) => day.events.some((event) => event.records.some((record) => record.id === fatigue.entityId)))?.date).toBe('2026-05-18')
+      expect(initialView.days.find((day) => day.events.some((event) => event.records.some((record) => record.id === travel.entityId)))?.date).toBe('2026-05-17')
+      for (const note of notes) {
+        expect(note.title).not.toMatch(/today|yesterday|hoy|ayer|cansado|viajé|reported|taken/i)
+        expect(String(note.attributes.note ?? '')).not.toMatch(/hoy|ayer|cansado|viajé|reported|taken/i)
+      }
+      expect(first.finalMessage).toMatch(/descans|tranquil|suave|pausa/i)
+      expect(first.finalMessage).not.toMatch(/(?:quieres|puedo).{0,30}(?:guardar|registrar)|diagnostic|caused by/i)
+      const second = await executeRealCodexAppServerTurn({
+        ...input, resumeSessionId: first.sessionId,
+        prompt: 'El viaje empezó ayer a las 15:35 y duró tres horas, no cuatro.',
+      })
+      const updatedVault = await readVaultRawTolerant(workingDirectory)
+      const updatedNotes = updatedVault.events.filter((event) => event.kind === 'note')
+      expect(updatedNotes).toHaveLength(2)
+      const updated = updatedNotes.find((event) => event.entityId === travel.entityId)
+      expect(updated?.tags).toContain('timing-timed')
+      expect(updated?.tags).not.toContain('timing-afternoon')
+      expect(updated?.tags).toContain('journal-icon-travel')
+      expect(Date.parse(updated?.occurredAt ?? '')).toBe(Date.parse('2026-05-17T15:35:00-04:00'))
+      expect(String(updated?.attributes.note ?? '')).toMatch(/3|three/i)
+      expect(String(updated?.attributes.note ?? '')).not.toMatch(/4|four/i)
+      expect(second.finalMessage).not.toMatch(/refreshed.{0,20}(?:page|web)|página.{0,20}actualizada/i)
+      process.stdout.write(`[journal-note-quality-e2e] ${JSON.stringify({ firstReply: first.finalMessage, correctionReply: second.finalMessage, notes: updatedNotes.length, correctedSameId: updated?.entityId === travel.entityId })}\n`)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)

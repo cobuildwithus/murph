@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   selectBrowserVaultJournal,
   type JournalView,
@@ -18,6 +18,7 @@ import {
   type JournalInsight,
 } from "@/src/components/journal/journal-view";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const EMPTY_JOURNAL: JournalView = {
@@ -53,11 +54,28 @@ export default function JournalPageClient({
   const {
     client,
     deviceSyncImportPending,
-    freshness,
+    ref,
     refresh,
     refreshPending,
     status,
   } = useBrowserVault();
+  const requestedOnOpen = useRef(false);
+  const refreshJournal = useCallback(
+    () => {
+      requestedOnOpen.current = true;
+      return refresh({
+        background: true,
+        requestRuntimeRefreshUntil: (nextClient, nextRef) =>
+          nextClient.replica.journal !== undefined &&
+          (ref === null || !browserVaultReplicaRefsMatch(ref, nextRef)),
+      });
+    },
+    [ref, refresh],
+  );
+  useEffect(() => {
+    if (requestedOnOpen.current || status !== "ready" || refreshPending) return;
+    void refreshJournal();
+  }, [refreshJournal, refreshPending, status]);
   const journal = useMemo(
     () => (client ? selectBrowserVaultJournal(client) : null),
     [client],
@@ -76,7 +94,7 @@ export default function JournalPageClient({
     (status === "empty" || (client !== null && !journalAvailable));
 
   if (status === "error") {
-    return <JournalErrorState onRetry={() => void refresh()} />;
+    return <JournalErrorState onRetry={() => void refreshJournal()} />;
   }
 
   if (status === "loading" || isPreparing) {
@@ -84,7 +102,7 @@ export default function JournalPageClient({
   }
 
   if (client && !journalAvailable) {
-    return <JournalUnavailableState onRetry={() => void refresh()} />;
+    return <JournalUnavailableState onRetry={() => void refreshJournal()} />;
   }
 
   return (
@@ -92,9 +110,7 @@ export default function JournalPageClient({
       contactOptions={contactOptions}
       insights={insights}
       isRefreshing={refreshPending}
-      isStale={freshness === "stale"}
       journal={journal ?? EMPTY_JOURNAL}
-      onRefresh={() => void refresh()}
     />
   );
 }

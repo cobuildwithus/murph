@@ -1,6 +1,8 @@
 import { Cli, z } from 'incur'
 import {
   ADVERSE_EFFECT_SEVERITIES,
+  JOURNAL_ICON_IDS,
+  JOURNAL_TIMINGS,
   EVENT_KINDS,
   eventSourceSchema,
   publicEventImportJsonlRowPayloadSchemasByKind,
@@ -9,6 +11,7 @@ import {
 } from '@murphai/contracts'
 import {
   appendHistoryEvent,
+  loadVault,
   PROCEDURE_STATUSES,
 } from '@murphai/core'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
@@ -45,6 +48,7 @@ import {
   stringOption,
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { journalNotePresentationTags } from './journal-note-presentation.js'
 import {
   createPayloadSchemaCommand,
   registerFactoryCommand,
@@ -228,6 +232,7 @@ type CommonTypedEventPayload = JsonObject & {
   title: string
   note?: string
   noteType?: string
+  timeZone?: string
   links?: Array<{ type: 'related_to'; targetId: string }>
   tags?: string[]
 }
@@ -271,11 +276,13 @@ async function buildCommonTypedEventPayload(input: {
   noteType?: string
   relatedId?: readonly string[]
   tag?: readonly string[]
+  timeZone?: string
 }): Promise<CommonTypedEventPayload> {
   const occurredAt =
     (await normalizeOccurredAtOption({
       vault: input.vault,
       occurredAt: input.occurredAt,
+      timeZone: input.timeZone,
     })) ?? new Date().toISOString()
   const source = input.source ?? 'manual'
   const note = normalizeOptionalText(input.note)
@@ -288,6 +295,7 @@ async function buildCommonTypedEventPayload(input: {
     occurredAt,
     source,
     title: input.title,
+    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
     ...(note ? { note } : {}),
     ...(noteType ? { noteType } : {}),
     ...(relatedIds.length > 0
@@ -476,12 +484,14 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
     description: 'Append one canonical note event from typed fields.',
     args: z.object({}),
     options: withBaseOptions({
+      icon: z.enum(JOURNAL_ICON_IDS).optional().describe('Journal icon from existing artwork. Choose note when none fits; never guess an asset name.'),
+      timing: z.enum(JOURNAL_TIMINGS).optional().describe('Use all_day for ongoing symptoms, including symptoms continuing since morning. Use morning/afternoon/evening/night only for an event limited to that period. Use unknown when time is missing. Use timed only with an explicit clock time. Never guess a time.'),
       note: z
         .string()
         .trim()
         .min(1)
         .max(4000)
-        .describe('Freeform note text to store on the event.'),
+        .describe('For Journal, write English detail about this fact only. A separate action or symptom needs its own entry. Do not repeat or paraphrase the title. A duration can be just "45 min". If there is no extra detail, repeat the title exactly so the view hides it.'),
       noteType: slugSchema
         .optional()
         .describe('Optional structured note type, such as journal-factor or journal-outcome.'),
@@ -492,22 +502,32 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       source: eventSourceSchema
         .optional()
         .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
-      title: eventTitleOptionSchema,
+      title: eventTitleOptionSchema.describe('Short event name. For Journal, use English without relative-day words or dates.'),
       tag: eventTagOptionSchema,
     }),
     output: eventNoteAddResultSchema,
     async run({ options }) {
       const title = deriveEventTitle(options.title, options.note)
+      const timeZone = options.noteType?.startsWith('journal-') || options.timing || options.icon
+        ? (await loadVault({ vaultRoot: options.vault })).metadata.timezone
+        : undefined
       const payload = await buildCommonTypedEventPayload({
         kind: 'note',
         vault: options.vault,
         occurredAt: options.occurredAt,
         source: options.source,
         title,
+        timeZone,
         note: options.note,
         noteType: options.noteType,
         relatedId: options.relatedId,
-        tag: options.tag,
+        tag: journalNotePresentationTags({
+          noteType: options.noteType,
+          occurredAt: options.occurredAt,
+          timing: options.timing,
+          icon: options.icon,
+          tags: normalizeEventTags(options.tag),
+        }),
       })
       const result = await upsertEventRecord({
         vault: options.vault,
