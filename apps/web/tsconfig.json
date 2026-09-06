@@ -45,6 +45,9 @@
       "@murphai/contracts/browser-vault": [
         "../../packages/contracts/src/browser-vault.ts"
       ],
+      "@murphai/contracts/journal-presentation": [
+        "../../packages/contracts/src/journal-presentation.ts"
+      ],
       "@murphai/contracts/zod-runtime": [
         "../../packages/contracts/src/zod-runtime.ts"
       ],

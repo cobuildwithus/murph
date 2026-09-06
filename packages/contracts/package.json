@@ -26,6 +26,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./journal-presentation": {
+      "types": "./dist/journal-presentation.d.ts",
+      "import": "./dist/journal-presentation.js",
+      "default": "./dist/journal-presentation.js"
+    },
     "./browser-vault": {
       "types": "./dist/browser-vault.d.ts",
       "import": "./dist/browser-vault.js",

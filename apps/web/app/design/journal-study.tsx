@@ -23,6 +23,12 @@ const STUDY_CONTACT_OPTION: MurphContactOption = {
 const JOURNAL_STUDY_DATA: JournalView = {
   days: [
     day("2026-06-13", [
+      journalEvent("low-energy", "note", "Low energy", "2026-06-13T12:00:00.000Z", {
+        source: "You",
+        summary: "Low energy",
+        tags: ["journal-icon-fatigue", "timing-all-day"],
+        timing: "all_day",
+      }),
       journalEvent("sleep-sat", "sleep", "Sleep", "2026-06-13T07:20:00.000Z", {
         metrics: {
           deepSleepMinutes: 78,
@@ -43,6 +49,14 @@ const JOURNAL_STUDY_DATA: JournalView = {
       journalEvent("sauna", "note", "Sauna", "2026-06-13T17:45:00.000Z", {
         source: "You",
         summary: "18 min · 86°C",
+        tags: ["journal-icon-sauna", "timing-evening"],
+        timing: "evening",
+      }),
+      journalEvent("screen-break", "note", "Screen break", "2026-06-13T12:00:00.000Z", {
+        source: "You",
+        summary: "Screen break",
+        tags: ["journal-icon-screens", "timing-unknown"],
+        timing: "unknown",
       }),
     ]),
     day("2026-06-12", [
@@ -209,8 +223,8 @@ const JOURNAL_STUDY_DATA: JournalView = {
       }),
     ]),
   ],
-  eventCount: 16,
-  recordCount: 32,
+  eventCount: 18,
+  recordCount: 34,
   weeks: [
     {
       activityMinutes: 264,
@@ -285,6 +299,7 @@ function journalEvent(
     source: string;
     summary: string;
     timing?: JournalEvent["timing"];
+    tags?: string[];
   },
 ): JournalEvent {
   return {
@@ -316,6 +331,7 @@ function journalEvent(
         occurredAt,
         options.source,
         options.summary,
+        options.tags,
       ),
     ],
     summary: options.summary,
@@ -332,6 +348,7 @@ function journalRecord(
   occurredAt: string,
   source: string,
   summary: string,
+  tags: string[] = [],
 ): JournalRecord {
   return {
     id: `${id}-record`,
@@ -340,7 +357,7 @@ function journalRecord(
     occurredAt,
     source,
     summary,
-    tags: [],
+    tags,
     timeZone: "Europe/Berlin",
   };
 }
