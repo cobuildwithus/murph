@@ -1,20 +1,24 @@
+import assert from "node:assert/strict";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
-import { destroyHostedExecutionContainer } from "../src/runner-container.js";
-import { StandbyRunnerContainer } from "../src/standby-runner-container.js";
+import { destroyHostedExecutionContainer, RunnerContainer } from "../src/runner-container.js";
 import {
+  HOSTED_RUNNER_REGION,
   HOSTED_STANDBY_LOCATION_HINT,
   HOSTED_STANDBY_ORPHAN_GRACE_MS,
+  HOSTED_STANDBY_READY_TIMEOUT_MS,
   HOSTED_STANDBY_REGION,
   HOSTED_STANDBY_RETRY_MS,
   createHostedRunnerContainerNamespaceRouter,
+  createHostedRunnerSlotName,
   createHostedStandbyClaimId,
   createHostedStandbySlotName,
   isHostedStandbySlotName,
   readHostedStandbyMode,
+  readHostedStandbyTarget,
   resolveHostedStandbyCoordinatorName,
   type HostedStandbyRunnerContainerStubLike,
   type HostedStandbySlotBinding,
@@ -83,7 +87,7 @@ describe("hosted standby contract", () => {
   });
 });
 
-describe("StandbyRunnerContainer", () => {
+describe("RunnerContainer slot lifecycle", () => {
   it("uses SIGTERM for the hosted-local shutdown checkpoint control", async () => {
     const stop = vi.fn(async () => undefined);
     const container: HostedLocalTestStandbyRunnerContainer = Object.create(
@@ -98,37 +102,25 @@ describe("StandbyRunnerContainer", () => {
     expect(stop).toHaveBeenCalledWith("SIGTERM");
   });
 
-  it("keeps Wrangler's synthetic region override isolated to the local test class", async () => {
-    const localHarness = createStandbyContainerHarness({
-      containerClass: HostedLocalTestStandbyRunnerContainer,
-      healthRegion: "REGN",
-      preflightReady: true,
-    });
-    await expect(localHarness.container.prepareStandbySlot({
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-      slotName: createHostedStandbySlotName(RELEASE_ID),
-      timeoutMs: 75_000,
-    })).resolves.toMatchObject({ prepared: true });
-
-    const productionHarness = createStandbyContainerHarness({
-      healthRegion: "REGN",
-      preflightReady: true,
-    });
-    await expect(productionHarness.container.prepareStandbySlot({
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-      slotName: createHostedStandbySlotName(RELEASE_ID),
-      timeoutMs: 75_000,
-    })).rejects.toThrow("failed pristine readiness proof");
-  });
+  it.each(["ENAM", "WEUR", "APAC", "REGN"])(
+    "prepares global inventory when native placement is %s",
+    async (healthRegion) => {
+      const harness = createStandbyContainerHarness({ healthRegion, preflightReady: true });
+      await expect(harness.container.prepareStandbySlot({
+        releaseId: RELEASE_ID,
+        region: HOSTED_RUNNER_REGION,
+        slotName: harness.slotName,
+        timeoutMs: 75_000,
+      })).resolves.toMatchObject({ prepared: true, region: HOSTED_RUNNER_REGION });
+    },
+  );
 
   it("proves heavy hydration and a content-free Codex initialize/stop preflight before binding once", async () => {
     const harness = createStandbyContainerHarness();
-    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    const slotName = harness.slotName;
     const prepared = await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       timeoutMs: 75_000,
     });
@@ -136,7 +128,7 @@ describe("StandbyRunnerContainer", () => {
     expect(prepared).toEqual({
       prepared: true,
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
     });
     expect(harness.codexPreflight).toHaveBeenCalledTimes(1);
@@ -146,21 +138,21 @@ describe("StandbyRunnerContainer", () => {
     await expect(harness.container.bindStandbySlot({
       claimId,
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_123",
     })).resolves.toMatchObject({ bound: true, claimId, userId: "member_123" });
     await expect(harness.container.bindStandbySlot({
       claimId,
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_123",
     })).resolves.toMatchObject({ bound: true, claimId });
     await expect(harness.container.bindStandbySlot({
       claimId: createHostedStandbyClaimId(),
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_456",
     })).rejects.toThrow("already bound to another claim");
@@ -190,7 +182,7 @@ describe("StandbyRunnerContainer", () => {
     await expect(harness.container.readStandbySlotBinding()).resolves.toEqual({
       claimId: null,
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       state: "retired",
       userId: null,
@@ -199,10 +191,10 @@ describe("StandbyRunnerContainer", () => {
 
   it("reuses a claimed slot while warm and retires it after native stop", async () => {
     const harness = createStandbyContainerHarness();
-    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    const slotName = harness.slotName;
     await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       timeoutMs: 75_000,
     });
@@ -210,7 +202,7 @@ describe("StandbyRunnerContainer", () => {
     await harness.container.bindStandbySlot({
       claimId,
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_123",
     });
@@ -218,7 +210,7 @@ describe("StandbyRunnerContainer", () => {
 
     const resolution = {
       currentReleaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_123",
     } as const;
@@ -237,10 +229,10 @@ describe("StandbyRunnerContainer", () => {
 
   it("keeps a claimed slot assigned for foreign users or ambiguous liveness", async () => {
     const harness = createStandbyContainerHarness();
-    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    const slotName = harness.slotName;
     await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       timeoutMs: 75_000,
     });
@@ -248,14 +240,14 @@ describe("StandbyRunnerContainer", () => {
     await harness.container.bindStandbySlot({
       claimId,
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_123",
     });
 
     await expect(harness.container.resolveRetainedStandbySlot({
       currentReleaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_456",
     })).rejects.toThrow("belongs to another member");
@@ -263,7 +255,7 @@ describe("StandbyRunnerContainer", () => {
 
     await expect(harness.container.resolveRetainedStandbySlot({
       currentReleaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_123",
     })).rejects.toThrow("native liveness is unsettled");
@@ -274,10 +266,10 @@ describe("StandbyRunnerContainer", () => {
 
   it("keeps an unbound ready slot alive at ordinary activity expiry", async () => {
     const harness = createStandbyContainerHarness({ preflightReady: true });
-    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    const slotName = harness.slotName;
     await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       timeoutMs: 75_000,
     });
@@ -298,10 +290,10 @@ describe("StandbyRunnerContainer", () => {
       .mockRejectedValueOnce(new Error("platform unavailable"))
       .mockResolvedValue(undefined);
     const harness = createStandbyContainerHarness({ destroy });
-    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    const slotName = harness.slotName;
     await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       timeoutMs: 75_000,
     });
@@ -321,17 +313,17 @@ describe("StandbyRunnerContainer", () => {
 
   it("refuses to retire another member's bound slot", async () => {
     const harness = createStandbyContainerHarness();
-    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    const slotName = harness.slotName;
     await harness.container.prepareStandbySlot({
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       timeoutMs: 20_000,
     });
     await harness.container.bindStandbySlot({
       claimId: createHostedStandbyClaimId(),
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
       slotName,
       userId: "member_a",
     });
@@ -352,320 +344,595 @@ describe("StandbyRunnerContainer", () => {
 });
 
 describe("StandbyRunnerCoordinatorDurableObject", () => {
-  it("warms in shadow, atomically claims one slot in allocate, and replenishes off-path", async () => {
-    const pending: Promise<unknown>[] = [];
-    const state = createDurableObjectState(new DatabaseSync(":memory:"), pending);
-    const slots = new Map<string, ReturnType<typeof createSlotStub>>();
-    const getByName = vi.fn((
-      name: string,
-      _options?: { locationHint?: string },
-    ) => {
-      let slot = slots.get(name);
-      if (!slot) {
-        slot = createSlotStub(name);
-        slots.set(name, slot);
-      }
-      return slot;
-    });
-    const environment: Record<string, unknown> & {
-      STANDBY_RUNNER_CONTAINER: { getByName: typeof getByName };
-    } = {
-      CF_VERSION_METADATA: { id: RELEASE_ID },
-      HOSTED_EXECUTION_STANDBY_MODE: "shadow",
-      STANDBY_RUNNER_CONTAINER: { getByName },
-    };
-    const coordinator = new StandbyRunnerCoordinatorDurableObject(
-      state,
-      environment,
-    );
-
-    expect(coordinator.ensureReadyStandby({
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-    })).toEqual({ accepted: true });
-    await flushBackgroundWork(pending);
-    const shadowState = coordinator.readStandbyCoordinatorState();
-    expect(shadowState.readySlotName).toMatch(/^standby--v-release_1--/u);
-    expect(slots.size).toBe(1);
-    const disabled = coordinator.claimReadyStandby({
-      claimId: createHostedStandbyClaimId(),
-      deadlineAtEpochMs: Date.now() + 250,
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-    });
-    expect(disabled.outcome).toBe("disabled");
-    await flushBackgroundWork(pending);
-
-    environment.HOSTED_EXECUTION_STANDBY_MODE = "allocate";
-    const firstClaimId = createHostedStandbyClaimId();
-    const first = coordinator.claimReadyStandby({
-      claimId: firstClaimId,
-      deadlineAtEpochMs: Date.now() + 250,
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-    });
-    const concurrent = coordinator.claimReadyStandby({
-      claimId: createHostedStandbyClaimId(),
-      deadlineAtEpochMs: Date.now() + 250,
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-    });
-    expect(first).toMatchObject({ outcome: "claimed" });
-    expect(concurrent.outcome).toBe("no_ready_slot");
-    await flushBackgroundWork(pending);
-
-    const replenished = coordinator.readStandbyCoordinatorState();
-    expect(replenished.readySlotName).not.toBeNull();
-    expect(replenished.readySlotName).not.toBe(
-      first.outcome === "claimed" ? first.slotName : null,
-    );
-    expect(slots.size).toBe(2);
-    expect(getByName.mock.calls.every(([, options]) =>
-      options?.locationHint === HOSTED_STANDBY_LOCATION_HINT
-    )).toBe(true);
-
-    environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
-    coordinator.alarm();
-    await flushBackgroundWork(pending);
-    const readyBeforeOff = replenished.readySlotName;
-    if (!readyBeforeOff) {
-      throw new Error("Expected a ready replacement before mode-off convergence.");
+  it("strictly bounds the configured target and defaults absent or blank values", () => {
+    assert.equal(readHostedStandbyTarget({}), 2);
+    for (const value of ["", " "]) {
+      assert.equal(readHostedStandbyTarget({ HOSTED_EXECUTION_STANDBY_TARGET: value }), 2);
     }
-    expect((await slots.get(readyBeforeOff)?.readStandbySlotBinding())?.state)
-      .toBe("retired");
-    expect(coordinator.readStandbyCoordinatorState().readySlotName).toBeNull();
-  });
-
-  it("withdraws a ready slot from claims while re-proving it", async () => {
-    const pending: Promise<unknown>[] = [];
-    const state = createDurableObjectState(new DatabaseSync(":memory:"), pending);
-    const reproofStarted = createDeferred<void>();
-    const releaseReproof = createDeferred<void>();
-    const prepareStandbySlot = vi.fn<
-      HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]
-    >(async (input) => {
-      if (prepareStandbySlot.mock.calls.length === 2) {
-        reproofStarted.resolve(undefined);
-        await releaseReproof.promise;
-      }
-      return { prepared: true, ...input };
-    });
-    let slot: HostedStandbyRunnerContainerStubLike | null = null;
-    const getByName = vi.fn((name: string) => {
-      slot ??= {
-        ...createSlotStub(name),
-        prepareStandbySlot,
-      };
-      return slot;
-    });
-    const coordinator = new StandbyRunnerCoordinatorDurableObject(state, {
-      CF_VERSION_METADATA: { id: RELEASE_ID },
-      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      STANDBY_RUNNER_CONTAINER: { getByName },
-    });
-
-    coordinator.ensureReadyStandby({
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-    });
-    await flushBackgroundWork(pending);
-    const readySlotName = coordinator.readStandbyCoordinatorState().readySlotName;
-    if (!readySlotName) {
-      throw new Error("Expected an initially ready standby slot.");
+    for (const value of [0, 1, 2, 32, "0", "1", "2", "32", "02", " 2", "2 "]) {
+      assert.equal(readHostedStandbyTarget({ HOSTED_EXECUTION_STANDBY_TARGET: value }), Number(value));
     }
-
-    coordinator.alarm();
-    await reproofStarted.promise;
-
-    expect(coordinator.readStandbyCoordinatorState()).toMatchObject({
-      provisioningSlotName: readySlotName,
-      readySlotName: null,
-    });
-    expect(coordinator.claimReadyStandby({
-      claimId: createHostedStandbyClaimId(),
-      deadlineAtEpochMs: Date.now() + 250,
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-    })).toEqual({ outcome: "no_ready_slot" });
-
-    releaseReproof.resolve(undefined);
-    await flushBackgroundWork(pending);
-    expect(coordinator.readStandbyCoordinatorState()).toMatchObject({
-      provisioningSlotName: null,
-      readySlotName,
-    });
-    expect(prepareStandbySlot).toHaveBeenCalledTimes(2);
+    for (const value of [null, "2.0", "2e0", "+2", -1, 33, 1.5, NaN, Infinity, true]) {
+      assert.throws(() => readHostedStandbyTarget({ HOSTED_EXECUTION_STANDBY_TARGET: value }), /integer from 0 to 32/u);
+    }
   });
 
-  it("retries the exact persisted provisioning target after preparation and cleanup fail", async () => {
-    const pending: Promise<unknown>[] = [];
-    const state = createDurableObjectState(new DatabaseSync(":memory:"), pending);
-    const requestedSlotNames: string[] = [];
-    let slot: HostedStandbyRunnerContainerStubLike | null = null;
-    const prepareStandbySlot = vi.fn<
-      HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]
-    >();
-    prepareStandbySlot
-      .mockRejectedValueOnce(new Error("preparation unavailable"))
-      .mockImplementation(async (input) => ({ prepared: true, ...input }));
-    const readStandbySlotCoordinatorState = vi.fn<
-      HostedStandbyRunnerContainerStubLike["readStandbySlotCoordinatorState"]
-    >();
-    readStandbySlotCoordinatorState
-      .mockRejectedValueOnce(new Error("cleanup unavailable"));
-    const getByName = vi.fn((name: string) => {
-      requestedSlotNames.push(name);
-      slot ??= {
-        ...createSlotStub(name),
-        prepareStandbySlot,
-        readStandbySlotCoordinatorState,
-      };
-      return slot;
-    });
-    const coordinator = new StandbyRunnerCoordinatorDurableObject(state, {
-      CF_VERSION_METADATA: { id: RELEASE_ID },
-      HOSTED_EXECUTION_STANDBY_MODE: "shadow",
-      STANDBY_RUNNER_CONTAINER: { getByName },
-    });
-
-    coordinator.ensureReadyStandby({
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-    });
-    await flushBackgroundWork(pending);
-    const provisioning = coordinator.readStandbyCoordinatorState();
-    expect(provisioning).toMatchObject({
-      provisioningSlotName: expect.stringMatching(/^standby--v-release_1--/u),
-      readySlotName: null,
-    });
-
-    coordinator.alarm();
-    await flushBackgroundWork(pending);
-
-    expect(new Set(requestedSlotNames)).toEqual(
-      new Set([provisioning.provisioningSlotName]),
-    );
-    expect(prepareStandbySlot).toHaveBeenCalledTimes(2);
-    expect(coordinator.readStandbyCoordinatorState()).toMatchObject({
-      provisioningSlotName: null,
-      readySlotName: provisioning.provisioningSlotName,
-    });
+  it("fills two GLOBAL slots in shadow without allocating or using the legacy namespace", async () => {
+    const h = createCoordinatorHarness({ mode: "shadow" });
+    h.ensure();
+    await h.flush();
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 2);
+    assert.equal(h.claim().outcome, "disabled");
+    await h.flush();
+    assert.equal(h.legacyGet.mock.calls.length, 0);
+    assert.equal(h.slots.size, 2);
+    for (const [name, options] of h.runnerGet.mock.calls) {
+      assert.match(name, /^runner--v-release_1--[a-f0-9]{32}$/u);
+      assert.equal(options, undefined);
+    }
+    for (const slot of h.slots.values()) {
+      assert.equal(slot.prepareStandbySlot.mock.calls[0]?.[0].region, HOSTED_RUNNER_REGION);
+    }
   });
 
-  it("keeps mode-off cleanup alive without retiring a claim bound during its grace period", async () => {
+  it("atomically gives two concurrent claims distinct slots, misses the third, and replays the exact handoff", async () => {
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    const claimId = createHostedStandbyClaimId();
+    const [first, second, third] = await Promise.all([
+      Promise.resolve().then(() => h.claim(claimId)),
+      Promise.resolve().then(() => h.claim()),
+      Promise.resolve().then(() => h.claim()),
+    ]);
+    assert.equal(first?.outcome, "claimed");
+    assert.equal(second?.outcome, "claimed");
+    assert.equal(third?.outcome, "no_ready_slot");
+    assert(first?.outcome === "claimed" && second?.outcome === "claimed");
+    assert.notEqual(first.slotName, second.slotName);
+    assert.deepEqual(h.claim(claimId), first);
+    await h.flush();
+    assert.equal(h.slots.size, 4);
+    assert.equal(countClaimTombstones(h.db), 2);
+    assert.deepEqual(h.claim(claimId), first);
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    h.environment.CF_VERSION_METADATA = { id: "release_2" };
+    assert.deepEqual(h.coordinator.claimReadyStandby({
+      claimId, deadlineAtEpochMs: 1, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+    }), first);
+    await h.flush();
+    assert.equal(h.slots.size, 4);
+    const facts = JSON.stringify(h.db.prepare("SELECT * FROM standby_claim_tombstone").all());
+    assert(!facts.includes("member"));
+  });
+
+  it("recovers a synchronous claim from SQLite under its already-persisted inventory alarm", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
-    const harness = await createClaimedCoordinatorHarness(CLAIMED_AT_MS);
-
-    harness.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
-    harness.setAlarm.mockClear();
-    await harness.runAlarm();
-
-    expect(countClaimTombstones(harness.db)).toBe(1);
-    expect(harness.setAlarm).toHaveBeenCalledWith(
-      CLAIMED_AT_MS + HOSTED_STANDBY_RETRY_MS,
-    );
-    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
-      state: "unbound",
-      userId: null,
-    });
-
-    await harness.claimedSlot.bindStandbySlot({
-      claimId: harness.claimId,
-      releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
-      slotName: harness.slotName,
-      userId: "member_late_bind",
-    });
+    const original = createCoordinatorHarness();
+    original.ensure();
+    await original.flush();
+    const alarmAt = original.setAlarm.mock.lastCall?.[0];
+    assert.equal(typeof alarmAt, "number");
+    assert(typeof alarmAt === "number" && alarmAt > Date.now());
+    const claimId = createHostedStandbyClaimId();
+    const claim = original.claim(claimId);
+    assert(claim.outcome === "claimed");
+    // Snapshot before any post-claim maintenance microtask runs.
+    const recovered = createCoordinatorHarness({ db: copyCoordinatorDatabase(original.db) });
+    assert.deepEqual(recovered.claim(claimId), claim);
+    assert.equal(countClaimTombstones(recovered.db), 1);
+    original.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    await original.flush();
+    await recovered.coordinator.alarm();
+    await recovered.flush();
+    assert.equal(recovered.coordinator.readStandbyCoordinatorState().readySlotNames.length, 2);
+    recovered.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
     vi.setSystemTime(CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
-    harness.setAlarm.mockClear();
-    await harness.runAlarm();
-
-    expect(countClaimTombstones(harness.db)).toBe(0);
-    expect(harness.setAlarm).not.toHaveBeenCalled();
-    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
-      state: "bound",
-      userId: "member_late_bind",
-    });
+    await recovered.coordinator.alarm();
+    await recovered.flush();
+    assert.equal(countClaimTombstones(recovered.db), 0);
+    assert.equal((await recovered.slots.get(claim.slotName)?.readStandbySlotBinding())?.state, "retired");
   });
 
-  it("keeps stale-release cleanup alive through exact-target failures until retirement converges", async () => {
+  it("keeps target zero idle and ENAM coordinators cleanup-only", async () => {
+    for (const region of [HOSTED_RUNNER_REGION, HOSTED_STANDBY_REGION]) {
+      const h = createCoordinatorHarness({ target: region === HOSTED_RUNNER_REGION ? "0" : "2" });
+      h.coordinator.ensureReadyStandby({ releaseId: RELEASE_ID, region });
+      await h.flush();
+      assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+      assert.equal(h.runnerGet.mock.calls.length, 0);
+      assert.equal(h.legacyGet.mock.calls.length, 0);
+      const result = h.coordinator.claimReadyStandby({
+        claimId: createHostedStandbyClaimId(), deadlineAtEpochMs: Date.now() + 250,
+        releaseId: RELEASE_ID, region,
+      });
+      assert.equal(result.outcome, region === HOSTED_RUNNER_REGION ? "no_ready_slot" : "stale_release");
+      await h.flush();
+    }
+  });
+
+  it("overlaps cold preparations with a maximum of two workers, including targets above two", async () => {
+    const gates: ReturnType<typeof createDeferred<void>>[] = [];
+    let active = 0;
+    let peak = 0;
+    const h = createCoordinatorHarness({ target: "5", async prepare() {
+      active += 1;
+      peak = Math.max(peak, active);
+      const gate = createDeferred<void>();
+      gates.push(gate);
+      await gate.promise;
+      active -= 1;
+    } });
+    h.ensure();
+    await until(() => gates.length === 2);
+    assert.equal(active, 2);
+    gates[0]?.resolve(undefined);
+    await until(() => gates.length === 3);
+    assert.equal(active, 2);
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
+    gates[1]?.resolve(undefined);
+    await until(() => gates.length === 4);
+    gates[2]?.resolve(undefined);
+    await until(() => gates.length === 5);
+    gates[3]?.resolve(undefined);
+    gates[4]?.resolve(undefined);
+    await h.flush();
+    assert.equal(peak, 2);
+    assert.equal(h.slots.size, 5);
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 5);
+  });
+
+  it("retains the fill owner when one worker fails before its peer finishes", async () => {
+    const gate = createDeferred<void>();
+    let active = 0;
+    let peak = 0;
+    const h = createCoordinatorHarness({ target: "5", async prepare() {
+      active += 1;
+      peak = Math.max(peak, active);
+      await gate.promise;
+      active -= 1;
+    } });
+    h.setAlarm.mockRejectedValueOnce(new Error("alarm unavailable"));
+    h.ensure();
+    await until(() => active === 1);
+    // Let the rejected worker settle while its peer remains in external I/O.
+    for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
+    h.ensure();
+    for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
+    try {
+      assert.equal(active, 1);
+    } finally {
+      gate.resolve(undefined);
+      await h.flush();
+    }
+    assert(peak <= 2);
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 5);
+  });
+
+  it("coalesces repeated ensure, claim misses and alarms without another preparation pass", async () => {
+    const gate = createDeferred<void>();
+    const h = createCoordinatorHarness({ prepare: () => gate.promise });
+    h.ensure();
+    await until(() => h.slots.size === 2);
+    const alarms: Promise<void>[] = [];
+    for (let index = 0; index < 100; index += 1) {
+      h.ensure();
+      assert.equal(h.claim().outcome, "no_ready_slot");
+      alarms.push(h.coordinator.alarm());
+    }
+    gate.resolve(undefined);
+    await Promise.all(alarms);
+    await h.flush();
+    assert.equal(h.slots.size, 2);
+    for (const slot of h.slots.values()) assert.equal(slot.prepareStandbySlot.mock.calls.length, 1);
+  });
+
+  it("persists two intents and awaits durable recovery alarms before obtaining any external stub", async () => {
+    const alarm = createDeferred<void>();
+    const h = createCoordinatorHarness();
+    h.setAlarm.mockImplementation(() => alarm.promise);
+    h.ensure();
+    await until(() => h.setAlarm.mock.calls.length >= 2);
+    const names = h.coordinator.readStandbyCoordinatorState().provisioningSlotNames;
+    assert.equal(names.length, 2);
+    assert.equal(h.runnerGet.mock.calls.length, 0);
+    alarm.resolve(undefined);
+    await h.flush();
+    assert.deepEqual(new Set(h.coordinator.readStandbyCoordinatorState().readySlotNames), new Set(names));
+  });
+
+  it("recovers the exact persisted intents after alarm persistence interrupted dispatch", async () => {
+    const h = createCoordinatorHarness();
+    h.setAlarm.mockRejectedValueOnce(new Error("alarm unavailable"))
+      .mockRejectedValueOnce(new Error("alarm unavailable"));
+    h.ensure();
+    await h.flush();
+    const names = h.coordinator.readStandbyCoordinatorState().provisioningSlotNames;
+    assert.equal(names.length, 2);
+    assert.equal(h.runnerGet.mock.calls.length, 0);
+    const recovered = new StandbyRunnerCoordinatorDurableObject(h.state, h.environment);
+    await recovered.alarm();
+    await h.flush();
+    assert.deepEqual(new Set(recovered.readStandbyCoordinatorState().readySlotNames), new Set(names));
+    assert.equal(h.slots.size, 2);
+  });
+
+  it("restarts a SQLite snapshot taken during external preparation without substituting names", async () => {
+    const gate = createDeferred<void>();
+    const original = createCoordinatorHarness({ prepare: () => gate.promise });
+    original.ensure();
+    await until(() => original.slots.size === 2);
+    const names = original.coordinator.readStandbyCoordinatorState().provisioningSlotNames;
+    // A separate SQLite snapshot models loss of the original invocation: its
+    // eventual continuations cannot mutate the recovered owner's database.
+    const recovered = createCoordinatorHarness({ db: copyCoordinatorDatabase(original.db) });
+    await recovered.coordinator.alarm();
+    await recovered.flush();
+    assert.deepEqual(new Set(recovered.coordinator.readStandbyCoordinatorState().readySlotNames), new Set(names));
+    assert.deepEqual(new Set(recovered.slots.keys()), new Set(names));
+    original.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    gate.resolve(undefined);
+    await original.flush();
+  });
+
+  for (const change of ["off", "release", "zero", "one"] as const) {
+    it(`drains surplus and late preparation completion after a ${change} change`, async () => {
+      const gate = createDeferred<void>();
+      const h = createCoordinatorHarness({ prepare: () => gate.promise });
+      h.ensure();
+      await until(() => h.slots.size === 2);
+      if (change === "off") h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+      if (change === "release") h.environment.CF_VERSION_METADATA = { id: "release_2" };
+      if (change === "zero") h.environment.HOSTED_EXECUTION_STANDBY_TARGET = "0";
+      if (change === "one") h.environment.HOSTED_EXECUTION_STANDBY_TARGET = "1";
+      h.ensure();
+      gate.resolve(undefined);
+      await h.flush();
+      const expected = change === "one" ? 1 : 0;
+      assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, expected);
+      assert.equal(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames.length, 0);
+      assert.equal(h.slots.size, 2);
+      const bindings = await Promise.all([...h.slots.values()].map((slot) => slot.readStandbySlotBinding()));
+      assert.equal(bindings.filter((binding) => binding.state === "retired").length, 2 - expected);
+    });
+  }
+
+  it("drops a fresh undispatched intent when mode changes while its alarm is pending", async () => {
+    const gate = createDeferred<void>();
+    const h = createCoordinatorHarness();
+    h.setAlarm.mockImplementation(() => gate.promise);
+    h.ensure();
+    await until(() => h.coordinator.readStandbyCoordinatorState().provisioningSlotNames.length === 2);
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    h.ensure();
+    gate.resolve(undefined);
+    await h.flush();
+    assert.equal(h.runnerGet.mock.calls.length, 0);
+    assert.equal(h.db.prepare("SELECT * FROM standby_coordinator_slot").all().length, 0);
+  });
+
+  it("reproof withdraws only one slot and keeps its healthy peer claimable", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
-    const harness = await createClaimedCoordinatorHarness(CLAIMED_AT_MS);
+    const gate = createDeferred<void>();
+    let preparing = 0;
+    const h = createCoordinatorHarness({ async prepare() {
+      preparing += 1;
+      if (preparing === 3) await gate.promise;
+    } });
+    h.ensure();
+    await h.flush();
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    const alarm = h.coordinator.alarm();
+    await until(() => preparing === 3);
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
+    assert.equal(h.coordinator.readStandbyCoordinatorState().provisioningSlotNames.length, 1);
+    const reprobing = h.coordinator.readStandbyCoordinatorState().provisioningSlotNames[0];
+    const claim = h.claim();
+    assert.equal(claim.outcome, "claimed");
+    assert(claim.outcome === "claimed");
+    assert.notEqual(claim.slotName, reprobing);
+    gate.resolve(undefined);
+    await alarm;
+    await h.flush();
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 2);
+  });
 
-    harness.environment.CF_VERSION_METADATA = { id: "release_2" };
-    harness.setAlarm.mockClear();
-    await harness.runAlarm();
+  it("staggers overdue reproofs even after downtime and repeated ensure calls", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    vi.setSystemTime(CLAIMED_AT_MS + 10 * 60_000);
+    await h.coordinator.alarm();
+    for (let index = 0; index < 10; index += 1) h.ensure();
+    await h.flush();
+    assert.equal(prepareCount(h), 3);
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 2);
+    vi.setSystemTime(Date.now() + 30_000);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(prepareCount(h), 4);
+  });
 
-    expect(countClaimTombstones(harness.db)).toBe(1);
-    expect(harness.setAlarm).toHaveBeenCalledWith(
-      CLAIMED_AT_MS + HOSTED_STANDBY_RETRY_MS,
-    );
-    expect(harness.slots.size).toBe(2);
-
+  it("migrates production singleton rows and tombstones into legacy-only drain without reviving them on reset", async () => {
+    vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
-    const readBinding = vi.spyOn(
-      harness.claimedSlot,
-      "readStandbySlotCoordinatorState",
-    ).mockRejectedValueOnce(new Error("binding unavailable"));
-    harness.setAlarm.mockClear();
-    await harness.runAlarm();
-
-    expect(readBinding).toHaveBeenCalledTimes(1);
-    expect(countClaimTombstones(harness.db)).toBe(1);
-    expect(harness.setAlarm).toHaveBeenCalledWith(
-      CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1
-        + HOSTED_STANDBY_RETRY_MS,
-    );
-
-    const retire = vi.spyOn(harness.claimedSlot, "retireStandbySlot")
-      .mockRejectedValueOnce(new Error("retirement unavailable"));
-    harness.setAlarm.mockClear();
-    await harness.runAlarm();
-
-    expect(retire).toHaveBeenCalledTimes(1);
-    expect(countClaimTombstones(harness.db)).toBe(1);
-    expect(harness.setAlarm).toHaveBeenCalledWith(
-      CLAIMED_AT_MS + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1
-        + HOSTED_STANDBY_RETRY_MS,
-    );
-
-    harness.setAlarm.mockClear();
-    await harness.runAlarm();
-
-    expect(countClaimTombstones(harness.db)).toBe(0);
-    expect(harness.setAlarm).not.toHaveBeenCalled();
-    expect(harness.slots.size).toBe(2);
-    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
-      state: "retired",
-      userId: null,
+    const db = new DatabaseSync(":memory:");
+    const ready = createHostedStandbySlotName(RELEASE_ID);
+    const pending = createHostedStandbySlotName(RELEASE_ID);
+    const claimed = createHostedStandbySlotName(RELEASE_ID);
+    seedLegacyCoordinator(db, ready, pending, claimed);
+    const h = createCoordinatorHarness({ db });
+    assert.equal(h.coordinator.readStandbyCoordinatorState().region, HOSTED_STANDBY_REGION);
+    assert.deepEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames, []);
+    const bound = h.legacyGet(claimed);
+    await bound.bindStandbySlot({
+      claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION, slotName: claimed, userId: "member_legacy",
     });
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(h.runnerGet.mock.calls.length, 0);
+    assert.equal(h.legacySlots.get(ready)?.retireStandbySlot.mock.calls.length, 1);
+    assert.equal(h.legacySlots.get(pending)?.retireStandbySlot.mock.calls.length, 1);
+    assert.equal(bound.retireStandbySlot.mock.calls.length, 0);
+    assert.equal(countClaimTombstones(db), 0);
+    assert.equal(db.prepare("SELECT * FROM standby_coordinator_slot").all().length, 0);
+    const recovered = new StandbyRunnerCoordinatorDurableObject(h.state, h.environment);
+    await recovered.alarm();
+    await h.flush();
+    assert.equal(h.legacySlots.get(ready)?.retireStandbySlot.mock.calls.length, 1);
+    for (const [, options] of h.legacyGet.mock.calls.slice(1)) {
+      assert.equal(options?.locationHint, HOSTED_STANDBY_LOCATION_HINT);
+    }
   });
 
-  it("surfaces failed stale-release alarm persistence for platform retry", async () => {
+  it("never retires a member that binds during its handoff grace period", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(CLAIMED_AT_MS);
-    const harness = await createClaimedCoordinatorHarness(CLAIMED_AT_MS);
-
-    harness.environment.CF_VERSION_METADATA = { id: "release_2" };
-    harness.setAlarm.mockClear();
-    harness.setAlarm.mockRejectedValue(new Error("alarm persistence unavailable"));
-
-    await expect(harness.runAlarm()).rejects.toThrow(
-      "alarm persistence unavailable",
-    );
-    expect(harness.setAlarm).toHaveBeenCalledTimes(2);
-    expect(countClaimTombstones(harness.db)).toBe(1);
-    await expect(harness.claimedSlot.readStandbySlotBinding()).resolves.toMatchObject({
-      state: "unbound",
-      userId: null,
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    const claimId = createHostedStandbyClaimId();
+    const claim = h.claim(claimId);
+    assert(claim.outcome === "claimed");
+    const slot = h.slots.get(claim.slotName);
+    assert(slot);
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    await h.coordinator.alarm();
+    await slot.bindStandbySlot({
+      claimId, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      slotName: claim.slotName, userId: "member_late_bind",
     });
+    vi.setSystemTime(Date.now() + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(slot.retireStandbySlot.mock.calls.length, 0);
+    assert.equal(countClaimTombstones(h.db), 0);
+    assert.equal((await slot.readStandbySlotBinding()).state, "bound");
+  });
+
+  it("lets the slot's existing fence reject a bind racing the coordinator's retirement read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    const claimId = createHostedStandbyClaimId();
+    const claim = h.claim(claimId);
+    assert(claim.outcome === "claimed");
+    const slot = h.slots.get(claim.slotName);
+    assert(slot);
+    slot.readStandbySlotCoordinatorState.mockImplementationOnce(async () => {
+      await slot.bindStandbySlot({ claimId, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+        slotName: claim.slotName, userId: "member_racing_bind" });
+      return { coordinatorOwned: true, state: "unbound", releaseId: RELEASE_ID, slotName: claim.slotName };
+    });
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    vi.setSystemTime(Date.now() + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(countClaimTombstones(h.db), 1);
+    assert.equal((await slot.readStandbySlotBinding()).state, "bound");
+    vi.setSystemTime(Date.now() + HOSTED_STANDBY_RETRY_MS);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(countClaimTombstones(h.db), 0);
+    assert.equal(slot.retireStandbySlot.mock.calls.length, 1);
+  });
+
+  it("releases retiring non-coordinator ownership, but keeps unknown exact targets", async () => {
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    const [first, second] = [...h.slots.entries()];
+    assert(first && second);
+    first[1].readStandbySlotCoordinatorState.mockResolvedValue({
+      coordinatorOwned: false, state: "retiring", releaseId: RELEASE_ID, slotName: first[0],
+    });
+    second[1].readStandbySlotCoordinatorState.mockRejectedValue(new Error("binding unavailable"));
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    h.ensure();
+    await h.flush();
+    assert.equal(first[1].retireStandbySlot.mock.calls.length, 0);
+    assert.equal(second[1].retireStandbySlot.mock.calls.length, 0);
+    const rows = h.db.prepare("SELECT slot_name FROM standby_coordinator_slot").all();
+    assert.deepEqual(rows.map((row) => row.slot_name), [second[0]]);
+  });
+
+  it("refills while a bounded indexed tombstone cleanup batch has a hanging RPC", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    const oldNames: string[] = [];
+    for (let index = 0; index < 80; index += 1) {
+      const name = createHostedRunnerSlotName(RELEASE_ID);
+      oldNames.push(name);
+      h.db.prepare(`INSERT INTO standby_claim_tombstone
+        (claim_id, slot_name, claimed_at_ms, check_at_ms) VALUES (?, ?, ?, ?)`)
+        .run(createHostedStandbyClaimId(), name, CLAIMED_AT_MS - HOSTED_STANDBY_ORPHAN_GRACE_MS, index);
+    }
+    const first = oldNames[0];
+    assert(first);
+    h.runnerGet(first).readStandbySlotCoordinatorState.mockImplementation(() => new Promise(() => {}));
+    const alarm = h.coordinator.alarm();
+    await until(() => h.slots.get(first)?.readStandbySlotCoordinatorState.mock.calls.length === 1);
+    assert.equal(h.claim().outcome, "claimed");
+    assert.equal(h.claim().outcome, "claimed");
+    await until(() => h.coordinator.readStandbyCoordinatorState().readySlotNames.length === 2);
+    // No timer has advanced: fill completed before the hanging cleanup read.
+    assert.equal(Date.now(), CLAIMED_AT_MS);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await alarm;
+    await h.flush();
+    assert(h.db.prepare("SELECT slot_name FROM standby_claim_tombstone WHERE slot_name = ?").get(first));
+    assert(countClaimTombstones(h.db) > 60);
+    const plan = h.db.prepare(`EXPLAIN QUERY PLAN SELECT claim_id, slot_name
+      FROM standby_claim_tombstone WHERE check_at_ms <= ?
+      ORDER BY check_at_ms, claim_id LIMIT 4`).all(Date.now());
+    assert(JSON.stringify(plan).includes("standby_claim_check"));
+    const reads = h.slots.get(first)?.readStandbySlotCoordinatorState.mock.calls.length;
+    const remaining = countClaimTombstones(h.db);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(h.slots.get(first)?.readStandbySlotCoordinatorState.mock.calls.length, reads);
+    assert(countClaimTombstones(h.db) < remaining);
+  });
+
+  it("retains failed retirement facts across alarms and never prepares the used slot again", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    const claim = h.claim();
+    assert(claim.outcome === "claimed");
+    const slot = h.slots.get(claim.slotName);
+    assert(slot);
+    slot.retireStandbySlot.mockRejectedValueOnce(new Error("retirement unavailable"));
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    vi.setSystemTime(Date.now() + HOSTED_STANDBY_ORPHAN_GRACE_MS + 1);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(countClaimTombstones(h.db), 1);
+    assert.equal(h.db.prepare("SELECT slot_name FROM standby_claim_tombstone").get()?.slot_name, claim.slotName);
+    vi.setSystemTime(Date.now() + HOSTED_STANDBY_RETRY_MS);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(countClaimTombstones(h.db), 0);
+    assert.equal(slot.prepareStandbySlot.mock.calls.length, 1);
+    assert.equal((await slot.readStandbySlotBinding()).state, "retired");
+  });
+
+  it("keeps a timed-out retirement until late completion is proven by a later binding read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness({ target: "1" });
+    h.ensure();
+    await h.flush();
+    const [name, slot] = [...h.slots.entries()][0] ?? [];
+    assert(name && slot);
+    const gate = createDeferred<void>();
+    const retire = slot.retireStandbySlot.getMockImplementation();
+    assert(retire);
+    slot.retireStandbySlot.mockImplementationOnce(async (input) => { await gate.promise; return retire(input); });
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    const alarm = h.coordinator.alarm();
+    await until(() => slot.retireStandbySlot.mock.calls.length === 1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await alarm;
+    await h.flush();
+    assert.equal(h.db.prepare("SELECT slot_name FROM standby_coordinator_slot").get()?.slot_name, name);
+    gate.resolve(undefined);
+    await until(async () => (await slot.readStandbySlotBinding()).state === "retired");
+    vi.setSystemTime(Date.now() + HOSTED_STANDBY_RETRY_MS);
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(h.db.prepare("SELECT * FROM standby_coordinator_slot").all().length, 0);
+    assert.equal(slot.retireStandbySlot.mock.calls.length, 1);
+  });
+
+  it("replaces a failed preparation without ever re-preparing its unresolved drain target", async () => {
+    const h = createCoordinatorHarness({ target: "1", async prepare(input) {
+      if (h.slots.size === 1) {
+        h.slots.get(input.slotName)?.readStandbySlotCoordinatorState
+          .mockRejectedValue(new Error("binding unavailable"));
+        throw new Error("preparation failed");
+      }
+    } });
+    h.ensure();
+    await h.flush();
+    const old = [...h.slots.entries()][0];
+    assert(old);
+    assert.equal(h.db.prepare("SELECT slot_name FROM standby_coordinator_slot WHERE phase = 'draining'").get()?.slot_name, old[0]);
+    h.ensure();
+    await h.flush();
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 1);
+    assert.notEqual(h.coordinator.readStandbyCoordinatorState().readySlotNames[0], old[0]);
+    assert.equal(old[1].prepareStandbySlot.mock.calls.length, 1);
+    assert.equal(h.slots.size, 2);
+  });
+
+  it("preserves inventory on a mismatched binding proof rather than retiring another target", async () => {
+    const h = createCoordinatorHarness({ target: "1" });
+    h.ensure();
+    await h.flush();
+    const entry = [...h.slots.entries()][0];
+    assert(entry);
+    entry[1].readStandbySlotCoordinatorState.mockResolvedValue({
+      coordinatorOwned: true, releaseId: RELEASE_ID,
+      slotName: createHostedRunnerSlotName(RELEASE_ID), state: "unbound",
+    });
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    await h.coordinator.alarm();
+    await h.flush();
+    assert.equal(entry[1].retireStandbySlot.mock.calls.length, 0);
+    assert.equal(h.db.prepare("SELECT slot_name FROM standby_coordinator_slot").get()?.slot_name, entry[0]);
+  });
+
+  it("surfaces failed recovery-alarm persistence for platform retry without external retirement", async () => {
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    h.environment.HOSTED_EXECUTION_STANDBY_MODE = "off";
+    h.setAlarm.mockRejectedValue(new Error("alarm persistence unavailable"));
+    await assert.rejects(h.coordinator.alarm(), /alarm persistence unavailable/u);
+    await assert.rejects(h.flush(), /alarm persistence unavailable/u);
+    assert.equal(h.db.prepare("SELECT * FROM standby_coordinator_slot").all().length, 2);
+    for (const slot of h.slots.values()) assert.equal(slot.retireStandbySlot.mock.calls.length, 0);
+  });
+
+  it("remembers a late preparation after its deadline even after an earlier cleanup settled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const gate = createDeferred<void>();
+    const h = createCoordinatorHarness({ target: "1", prepare: () => gate.promise });
+    h.ensure();
+    await until(() => h.slots.size === 1);
+    const [name, slot] = [...h.slots.entries()][0] ?? [];
+    assert(name && slot);
+    await vi.advanceTimersByTimeAsync(HOSTED_STANDBY_READY_TIMEOUT_MS);
+    await h.flush();
+    assert.equal((await slot.readStandbySlotBinding()).state, "retired");
+    assert.equal(h.db.prepare("SELECT * FROM standby_coordinator_slot").all().length, 0);
+    const reads = slot.readStandbySlotCoordinatorState.mock.calls.length;
+    gate.resolve(undefined);
+    await until(() => slot.readStandbySlotCoordinatorState.mock.calls.length > reads);
+    await h.flush();
+    assert.equal(h.coordinator.readStandbyCoordinatorState().readySlotNames.length, 0);
+    assert.equal(h.slots.size, 1);
+    assert.equal(slot.prepareStandbySlot.mock.calls.length, 1);
+    assert.equal(h.db.prepare("SELECT * FROM standby_coordinator_slot").all().length, 0);
   });
 });
 
 describe("standby scheduled bootstrap", () => {
-  it("targets the current release in ENAM and leaves convergence to the coordinator", async () => {
+  it("targets the current release in GLOBAL and leaves convergence to the coordinator", async () => {
     const ensureReadyStandby = vi.fn(async () => ({ accepted: true as const }));
     const getByName = vi.fn(() => ({
       claimReadyStandby: vi.fn(),
@@ -685,12 +952,11 @@ describe("standby scheduled bootstrap", () => {
     await Promise.all(pending);
 
     expect(getByName).toHaveBeenCalledWith(
-      "standby-coordinator--v-release_1--r-enam",
-      { locationHint: HOSTED_STANDBY_LOCATION_HINT },
+      "standby-coordinator--v-release_1--r-global",
     );
     expect(ensureReadyStandby).toHaveBeenCalledWith({
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
     });
   });
 
@@ -711,10 +977,10 @@ describe("standby scheduled bootstrap", () => {
 describe("hosted-local standby readiness route", () => {
   it("polls an in-progress slot without enqueueing duplicate maintenance", async () => {
     const state = {
-      provisioningSlotName: "standby--v-release_1--pending",
-      readySlotName: null,
+      provisioningSlotNames: [createHostedRunnerSlotName(RELEASE_ID), createHostedRunnerSlotName(RELEASE_ID)],
+      readySlotNames: [],
       releaseId: RELEASE_ID,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
     };
     const ensureReadyStandby = vi.fn(async () => ({ accepted: true as const }));
     const readStandbyCoordinatorState = vi.fn(async () => state);
@@ -740,76 +1006,172 @@ describe("hosted-local standby readiness route", () => {
     expect(ensureReadyStandby).not.toHaveBeenCalled();
     expect(readStandbyCoordinatorState).toHaveBeenCalledOnce();
   });
+  for (const [count, target, expectedEnsures] of [[1, "2", 1], [2, "1", 1], [0, "0", 0]] as const) {
+    it(`reconciles readiness count ${count} against target ${target}`, async () => {
+      const state = {
+        provisioningSlotNames: Array.from({ length: count }, () => createHostedRunnerSlotName(RELEASE_ID)),
+        readySlotNames: [], releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      };
+      const ensureReadyStandby = vi.fn(async () => ({ accepted: true as const }));
+      const getByName = vi.fn(() => ({
+        claimReadyStandby: vi.fn(), ensureReadyStandby,
+        readStandbyCoordinatorState: vi.fn(async () => state),
+      }));
+      const response = await handleTestEnsureStandbyReadyRoute({ env: {
+        CF_VERSION_METADATA: { id: RELEASE_ID }, HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+        HOSTED_EXECUTION_STANDBY_TARGET: target, MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test", STANDBY_COORDINATOR: { getByName },
+      } } as never);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), state);
+      assert.equal(ensureReadyStandby.mock.calls.length, expectedEnsures);
+      assert.deepEqual(getByName.mock.calls, [["standby-coordinator--v-release_1--r-global"]]);
+    });
+  }
+
+  it("returns the complete claimable inventory for the foreground E2E poller", async () => {
+    const h = createCoordinatorHarness();
+    h.ensure();
+    await h.flush();
+    const response = await handleTestEnsureStandbyReadyRoute({ env: {
+      ...h.environment, MURPH_HOSTED_LOCAL_TEST_ROUTES: "1", NODE_ENV: "test",
+      STANDBY_COORDINATOR: { getByName: () => ({
+        async claimReadyStandby(input: Parameters<typeof h.coordinator.claimReadyStandby>[0]) {
+          return h.coordinator.claimReadyStandby(input);
+        },
+        async ensureReadyStandby(input: Parameters<typeof h.coordinator.ensureReadyStandby>[0]) {
+          return h.coordinator.ensureReadyStandby(input);
+        },
+        async readStandbyCoordinatorState() { return h.coordinator.readStandbyCoordinatorState(); },
+      }) },
+    } } as never);
+    const body: { readySlotNames: string[] } = await response.json();
+    assert.equal(body.readySlotNames.length, 2);
+    const claim = h.claim();
+    assert(claim.outcome === "claimed");
+    assert.equal(body.readySlotNames[0], claim.slotName);
+    assert(!("readySlotName" in body));
+    await h.flush();
+  });
+
 });
 
-async function createClaimedCoordinatorHarness(claimedAtMs: number) {
+function createCoordinatorHarness(input: {
+  db?: DatabaseSync;
+  mode?: "off" | "shadow" | "allocate";
+  target?: string;
+  prepare?: (input: Parameters<HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]>[0]) => Promise<void>;
+} = {}) {
   const pending: Promise<unknown>[] = [];
-  const db = new DatabaseSync(":memory:");
-  const setAlarm = vi.fn(async (_scheduledTime: number | Date) => {});
+  const db = input.db ?? new DatabaseSync(":memory:");
+  const setAlarm = vi.fn(async (_time: number | Date) => {});
   const state = createDurableObjectState(db, pending, { setAlarm });
-  const slots = new Map<string, ReturnType<typeof createSlotStub>>();
-  const getByName = vi.fn((name: string) => {
+  const slots = new Map<string, ReturnType<typeof createCoordinatorSlot>>();
+  const legacySlots = new Map<string, ReturnType<typeof createCoordinatorSlot>>();
+  const runnerGet = vi.fn((name: string, _options?: { locationHint?: string }) => {
     let slot = slots.get(name);
     if (!slot) {
-      slot = createSlotStub(name);
+      slot = createCoordinatorSlot(name, input.prepare);
       slots.set(name, slot);
     }
     return slot;
   });
+  const legacyGet = vi.fn((name: string, _options?: { locationHint?: string }) => {
+    let slot = legacySlots.get(name);
+    if (!slot) {
+      slot = createCoordinatorSlot(name);
+      legacySlots.set(name, slot);
+    }
+    return slot;
+  });
   const environment: Record<string, unknown> & {
-    STANDBY_RUNNER_CONTAINER: { getByName: typeof getByName };
+    RUNNER_CONTAINER: { getByName: typeof runnerGet };
+    STANDBY_RUNNER_CONTAINER: { getByName: typeof legacyGet };
   } = {
     CF_VERSION_METADATA: { id: RELEASE_ID },
-    HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-    STANDBY_RUNNER_CONTAINER: { getByName },
+    HOSTED_EXECUTION_STANDBY_MODE: input.mode ?? "allocate",
+    HOSTED_EXECUTION_STANDBY_TARGET: input.target,
+    RUNNER_CONTAINER: { getByName: runnerGet },
+    STANDBY_RUNNER_CONTAINER: { getByName: legacyGet },
   };
-  const coordinator = new StandbyRunnerCoordinatorDurableObject(
-    state,
-    environment,
-  );
-
-  coordinator.ensureReadyStandby({
-    releaseId: RELEASE_ID,
-    region: HOSTED_STANDBY_REGION,
-  });
-  await flushBackgroundWork(pending);
-  const claimId = createHostedStandbyClaimId();
-  const claim = coordinator.claimReadyStandby({
-    claimId,
-    deadlineAtEpochMs: claimedAtMs + 250,
-    releaseId: RELEASE_ID,
-    region: HOSTED_STANDBY_REGION,
-  });
-  if (claim.outcome !== "claimed") {
-    throw new Error("Expected a claimed standby slot.");
-  }
-  await flushBackgroundWork(pending);
-  const claimedSlot = slots.get(claim.slotName);
-  if (!claimedSlot) {
-    throw new Error("Expected the claimed standby slot.");
-  }
-
+  const coordinator = new StandbyRunnerCoordinatorDurableObject(state, environment);
   return {
-    claimedSlot,
-    claimId,
-    db,
-    environment,
-    async runAlarm() {
-      const alarm = coordinator.alarm();
-      try {
-        await alarm;
-      } finally {
-        pending.splice(0);
-      }
+    coordinator, db, environment, legacyGet, legacySlots, pending, runnerGet, setAlarm, slots, state,
+    claim(claimId = createHostedStandbyClaimId()) {
+      return coordinator.claimReadyStandby({
+        claimId, deadlineAtEpochMs: Date.now() + 250, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      });
     },
-    setAlarm,
-    slotName: claim.slotName,
-    slots,
+    ensure() { return coordinator.ensureReadyStandby({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION }); },
+    flush() { return flushBackgroundWork(pending); },
   };
 }
 
+function createCoordinatorSlot(
+  slotName: string,
+  prepare?: (input: Parameters<HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]>[0]) => Promise<void>,
+) {
+  const base = createSlotStub(slotName);
+  return {
+    ...base,
+    prepareStandbySlot: vi.fn<HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]>(async (input) => {
+      if ((await base.readStandbySlotBinding()).state !== "unbound") throw new Error("Slot is terminal or bound.");
+      await prepare?.(input);
+      if ((await base.readStandbySlotBinding()).state !== "unbound") throw new Error("Slot became terminal or bound.");
+      return base.prepareStandbySlot(input);
+    }),
+    readStandbySlotCoordinatorState: vi.fn(base.readStandbySlotCoordinatorState),
+    retireStandbySlot: vi.fn<HostedStandbyRunnerContainerStubLike["retireStandbySlot"]>(async (input) => {
+      const binding = await base.readStandbySlotBinding();
+      if (binding.state === "bound" || (binding.state === "retiring" && binding.userId !== null)) {
+        throw new Error("Coordinator has no bound-slot retirement authority.");
+      }
+      return base.retireStandbySlot(input);
+    }),
+  };
+}
+
+function prepareCount(h: ReturnType<typeof createCoordinatorHarness>): number {
+  return [...h.slots.values()].reduce((count, slot) => count + slot.prepareStandbySlot.mock.calls.length, 0);
+}
+
+async function until(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (await predicate()) return;
+    await Promise.resolve();
+  }
+  assert.fail("Expected the asynchronous coordinator boundary to be reached.");
+}
+
+function copyCoordinatorDatabase(source: DatabaseSync): DatabaseSync {
+  const copy = new DatabaseSync(":memory:");
+  for (const table of ["standby_coordinator_meta", "standby_claim_tombstone", "standby_coordinator_slot"]) {
+    const schema = source.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)?.sql;
+    assert.equal(typeof schema, "string");
+    assert(typeof schema === "string");
+    copy.exec(schema);
+    for (const row of source.prepare(`SELECT * FROM ${table}`).all()) {
+      const values = Object.values(row);
+      copy.prepare(`INSERT INTO ${table} VALUES (${values.map(() => "?").join(", ")})`).run(...values);
+    }
+  }
+  return copy;
+}
+
+function seedLegacyCoordinator(db: DatabaseSync, ready: string, pending: string, claimed: string): void {
+  db.exec(`CREATE TABLE standby_coordinator_meta (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1), release_id TEXT NOT NULL,
+    region TEXT NOT NULL, ready_slot_name TEXT, provisioning_slot_name TEXT
+  ); CREATE TABLE standby_claim_tombstone (
+    claim_id TEXT PRIMARY KEY, slot_name TEXT NOT NULL, claimed_at_ms INTEGER NOT NULL
+  )`);
+  db.prepare("INSERT INTO standby_coordinator_meta VALUES (1, ?, ?, ?, ?)")
+    .run(RELEASE_ID, HOSTED_STANDBY_REGION, ready, pending);
+  db.prepare("INSERT INTO standby_claim_tombstone VALUES (?, ?, ?)")
+    .run(createHostedStandbyClaimId(), claimed, CLAIMED_AT_MS);
+}
+
 function createStandbyContainerHarness(input: {
-  containerClass?: typeof StandbyRunnerContainer;
   destroy?: () => Promise<void>;
   nativeStatus?: string;
   environment?: Record<string, unknown>;
@@ -824,8 +1186,8 @@ function createStandbyContainerHarness(input: {
     preflightReady = true;
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
-  const ContainerClass = input.containerClass ?? StandbyRunnerContainer;
-  const container = new ContainerClass(state, {
+  const slotName = createHostedRunnerSlotName(RELEASE_ID);
+  const container = new RunnerContainer({ ...state, id: { name: slotName } }, {
     CF_VERSION_METADATA: { id: RELEASE_ID },
     HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: BUNDLE_FINGERPRINT,
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,
@@ -872,6 +1234,7 @@ function createStandbyContainerHarness(input: {
     setNativeStatus(status: string) {
       nativeStatus = status;
     },
+    slotName,
     startAndWaitForPorts,
   };
 }

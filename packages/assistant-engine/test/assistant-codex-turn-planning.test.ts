@@ -367,14 +367,15 @@ describe('assistant Codex turn planning', () => {
 
     expect(Object.fromEntries(
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
-    )).toEqual({
-      direct: '5c77ffa3330704279d51230a30ad9414bb75144b6df169e81ef446a6c19da3b2',
-      group: 'ab6970fdcf6f4cdc55f064354953f060d171f6c3dd8571ee0c25eb0956059f16',
-      maintenance: '5abc4da7e3a77608be9324bee78a5ebadd6cfbf972827a4fe2fb05174585c250',
-      outputOnly: '22bb678775ca7810731ab679a950ed62ab787b819f322a308cd4fbfb05f46bb2',
-      scheduledEmail:
-        '621756a5791774ad4dadcbd1ecc5f372863a7f61c8b05bd417fc1312d2f647d2',
-    })
+    )).toMatchInlineSnapshot(`
+      {
+        "direct": "beedb5985aa161710fbfe74c9503ef1093fc664046dfc03c2977cb9695b24969",
+        "group": "ead4ee04f2ca83fc9dd1db3a581b0ab3afa60b612d7c9372a26833b8bb98a904",
+        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
+        "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
+        "scheduledEmail": "d0ead287d6398f30c94d6bc9ff8cc997a0c7a309fb8f7a9c3b20d70f82c261c3",
+      }
+    `)
   })
 
   it('bounds snapshot refresh inside direct provider planning and skips it for groups', async () => {
@@ -544,9 +545,9 @@ describe('assistant Codex turn planning', () => {
       resolvePlan({ configured: true, group: true }),
       resolvePlan({ configured: true, scheduled: true }),
     ])) {
-      expect(configuredPlan.systemPrompt).toContain(
-        'Configured Exa research:',
-      )
+      expect(configuredPlan.systemPrompt).toContain('Configured Exa research:')
+      expect(configuredPlan.developerInstructions).toContain('Configured Exa research:')
+      expect(configuredPlan.turnContextPrompt).not.toContain('Configured Exa research:')
       expect(configuredPlan.systemPrompt).toContain(
         '`resultIndex` maps to a result',
       )
@@ -559,6 +560,12 @@ describe('assistant Codex turn planning', () => {
       expect(configuredPlan.systemPrompt).toContain(
         'never send a mode-less single-scout request',
       )
+    }
+
+    for (const group of [false, true]) {
+      const configured = await resolvePlan({ configured: true, group })
+      const unavailable = await resolvePlan({ configured: false, group })
+      expect(configured.assistantContractFingerprint).not.toBe(unavailable.assistantContractFingerprint)
     }
 
     const directProgressPlan = await resolvePlan({
@@ -1975,10 +1982,19 @@ describe('assistant Codex turn planning', () => {
     expect(plan.turnContextPrompt).not.toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain(
-      `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+      'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
     )
     expect(plan.developerInstructions).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
+      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+    )
+    expect(plan.developerInstructions).toContain(
+      `Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+    )
+    expect(plan.developerInstructions).not.toContain(
+      `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer`,
+    )
+    expect(plan.developerInstructions).toContain(
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, later-stage persistence, generic defer and skip meaning, and completion.',
     )
     const onboardingDecisionContract = [
       'During discovery, a stated health goal is context, not an action request.',
@@ -3016,6 +3032,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3861,6 +3878,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3911,6 +3929,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -4009,6 +4028,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions:
           linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -4038,6 +4058,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -4065,6 +4086,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -4144,6 +4166,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
@@ -4501,14 +4524,10 @@ describe('assistant Codex turn planning', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
+      'For automation creation, inspection, changes, or reconciliation, discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`',
     )
-    expect(plan.developerInstructions).toContain(
-      'Patch `status` to pause, reactivate, or archive an existing automation.',
-    )
-    expect(plan.developerInstructions).toContain(
-      'Ordinary patches preserve its stored route.',
-    )
+    expect(plan.dynamicTools.find((tool) => tool.name === 'automation')?.description).toContain('On patch, inspect the current stored automation first')
+    expect(plan.developerInstructions).toContain('The tool owns exact arguments')
     expect(plan.developerInstructions).toContain(
       'A save always binds to the trusted current group room.',
     )

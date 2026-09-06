@@ -1,6 +1,6 @@
 # Personal Patterns
 
-Last verified: 2026-08-31
+Last verified: 2026-09-06
 
 ## Product boundary
 
@@ -86,14 +86,28 @@ day outcome windows. It does not search every threshold, delay, combination, or
 context.
 
 For a factor day, the query first uses a confirmed-absence comparison when one
-exists. Otherwise, eligible device-backed factors can use the nearest unused
-weekday-matched comparison day within 35 days. A manual or inferred factor that
-uses this weaker baseline cannot receive a grade above D.
+exists. Otherwise, eligible device-backed factors can use an unobserved
+weekday-matched comparison day within 35 days. Within each weekday, the query
+maximizes the number of usable pairs, then minimizes their total date distance.
+Both sides stay inside the factor report window; next-day outcomes may extend
+one day past its end. Matching uses dates and outcome availability, never
+outcome values. No exposed
+or comparison day is reused for the same factor and outcome. A manual or
+inferred factor that uses this weaker baseline cannot receive a grade above D.
 
-One comparison case supports one pair for a factor and outcome. The query
-averages several matched days from one episode into one case. A result must
-keep the same direction across its independent cases before it can receive a
-repeated-evidence grade.
+The query averages several matched days from one episode into one case.
+Episode records that share a factor day are merged transitively, including
+an ordinary note that overlaps a named episode. Duplicate records therefore
+cannot inflate independent evidence or reuse the same daily outcome.
+
+A repeated-evidence grade requires at least 75% of independent cases to agree
+with the overall direction (all cases when there are two or three). The median
+paired difference must also meet the outcome's meaningful-difference threshold.
+For four or more cases, both chronological halves must retain that direction.
+Grade A requires the median paired difference to clear the larger-effect floor
+as well, so one unusual case cannot promote an otherwise modest pattern.
+Displayed means and deltas still include every matched case. These are bounded
+product evidence rules, not significance tests or causal estimates.
 
 ## Result levels and grades
 
@@ -162,9 +176,16 @@ uses the existing operational email channel and does not change the member's
 message. A complete platform outage requires an external uptime monitor,
 because the runtime cannot report while it is offline.
 
-Only a new grade A-D identity can trigger that daily message. Murph describes D
-as an Early signal and A-C as a Pattern. Grade E Observations remain visible on
-the page but stay quiet. A saved private ledger deduplicates result identities.
+Only a new grade A-D identity can trigger that daily message. Letter grades and
+report classifications stay internal to selection and bookkeeping. Messages
+lead with the finding in a short conversational paragraph, with a light qualifier
+where evidence is limited and supporting counts in the report's actual unit.
+Uncertainty belongs within the finding, without repeated caveats or a standalone
+causation disclaimer. Messages preserve comparison and outcome timing without
+implying cause or prescribing habit changes. Links use the full
+`https://www.withmurph.ai/patterns` URL on its own final line; a bare route is
+never a message link. Grade E Observations remain visible on the page but stay
+quiet. A saved private ledger deduplicates result identities.
 It also stores factor or result mutes requested in conversation. Grade changes
 do not create separate messages. The weekly health insight can mention a useful
 strengthening, weakening, or removed result.

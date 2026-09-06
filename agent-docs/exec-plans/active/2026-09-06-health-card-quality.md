@@ -21,7 +21,7 @@ The current task owns the existing feature branch after the requested handoff.
 - Recovery: never call accepted partial dispatch unsent or claim handset
   delivery. Preserve known nap and unfinished-sleep exclusions.
 - Exclusions: no new scheduler, state store, dependency, provider dispatch,
-  rollout activation, merge, or deployment.
+  rollout activation, merge to main, or deployment.
 
 ## Architecture and proof
 
@@ -58,9 +58,19 @@ to consume the existing closed card contract.
 - Query, assistant-engine, operator-config, and Web typechecks passed; focused
   Web ESLint and the complexity guard passed. Saved-view snapshot test passed.
 - Three fresh independent reviews have no unresolved actionable findings.
-- Focused real-assistant partial-send journey and final PR verification pending.
-- Current-base merge proof found conflicts with newer main; reconcile once
-  after preserving this tested implementation, then verify affected owners.
+- Real-assistant partial-send wording reviewed and truthful; its lexical test
+  assertions now accept ordinary equivalent phrasing. Final rerun pending.
+- Reconciled main at `835573709cb`, preserving deferred automation guidance
+  and aligning its execution inspector with partial-send receipts. Receipt and
+  execution inspection run concurrently; neither creates a new state store.
+- Current-base engine/query/runtime typechecks passed; 149 focused engine tests,
+  57 runtime scheduling tests, and CLI startup-budget proof passed. Web artifact
+  refresh and final verification pending.
+- Complete initial provider input captured through real Codex and a loopback
+  scripted endpoint: default-off direct 30,684 tokens / 140,723 bytes; group
+  26,282 tokens / 120,640 bytes, unchanged from main in identical fixtures.
+  Production prompt and automation descriptor were loaded from each revision;
+  other setup stayed fixed. Tokenizer: gpt-tokenizer 3.4.0 o200k_harmony.
 
 ## Remaining delivery boundary
 

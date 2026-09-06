@@ -1,3 +1,4 @@
+import { assistantFollowUpContextChangedCanRetry } from '../follow-ups.js'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
   assistantCronJobSchema,
@@ -526,6 +527,10 @@ function assistantCronTerminalDeliveryConsumesOccurrence(
     return true
   }
 
+  if (terminal.failureStatus === 'failed' && assistantFollowUpContextChangedCanRetry({
+    code: terminal.error.code, source, at: terminal.at,
+  })) return false
+
   if (
     terminal.error.code === 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE' &&
     source?.kind === 'automation' &&
@@ -623,7 +628,7 @@ async function archiveCanonicalAssistantCronSourceAfterDelivery(input: {
 }): Promise<void> {
   if (input.source.kind === 'automation') {
     await upsertAutomation(
-      buildCanonicalAutomationUpsertInput({
+      { ...buildCanonicalAutomationUpsertInput({
         vault: input.vault,
         automationId: input.source.automationId,
         automation: input.source,
@@ -632,7 +637,7 @@ async function archiveCanonicalAssistantCronSourceAfterDelivery(input: {
         schedule: input.source.schedule,
         route: input.source.route,
         instructions: input.source.instructions,
-      }),
+      }), completedOccurrence: true },
     )
     return
   }

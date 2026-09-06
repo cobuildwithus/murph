@@ -14,7 +14,10 @@ import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
-  createBrowserVaultLoadedQueryClients,
+  createBrowserVaultCoreQueryClient,
+  createBrowserVaultInteractiveMetricsQueryClient,
+  createBrowserVaultInteractiveQueryClient,
+  createBrowserVaultQueryClient,
   getBrowserVaultMetricBucketId,
   parseBrowserVaultCoreShard,
   parseBrowserVaultLabsShard,
@@ -213,20 +216,18 @@ test("browser vault assembly requires hash-verified buckets and exact partial in
 
   assert.throws(
     () =>
-      createBrowserVaultLoadedQueryClients({
-        core: shards.core,
-        metricBuckets: { [stepsBucketId]: unverifiedBucket },
-        metrics: shards.metrics,
-      }),
+      createBrowserVaultInteractiveMetricsQueryClient(
+        shards.core, shards.metrics, { [stepsBucketId]: unverifiedBucket },
+      ),
     /must come from the bucket parser or replica splitter/u,
   );
   assert.throws(
     () =>
-      createBrowserVaultLoadedQueryClients({
-        core: shards.core,
-        metricBuckets: { [stepsBucketId]: shards.metricBuckets[stepsBucketId] },
-        metrics: { ...shards.metrics, metricDirectory: [] },
-      }),
+      createBrowserVaultInteractiveMetricsQueryClient(
+        shards.core,
+        { ...shards.metrics, metricDirectory: [] },
+        { [stepsBucketId]: shards.metricBuckets[stepsBucketId] },
+      ),
     /does not match the metrics index directory/u,
   );
 });
@@ -256,56 +257,46 @@ test("browser vault loaded clients distinguish unloaded, loaded-empty, and loade
   });
   const shards = await splitBrowserVaultReplica(replica);
   const stepsBucketId = await getBrowserVaultMetricBucketId("steps");
-  const coreOnly = createBrowserVaultLoadedQueryClients({ core: shards.core });
+  const coreOnly = createBrowserVaultCoreQueryClient(shards.core);
+  assert.equal(coreOnly.capability, "core");
+  assert.equal("metricRows" in coreOnly.replica, false);
 
-  assert.equal(coreOnly.core.capability, "core");
-  assert.equal(coreOnly.metrics, null);
-  assert.equal(coreOnly.labs, null);
-  assert.equal(coreOnly.full, null);
-  assert.equal(coreOnly.interactiveMetrics, null);
-  assert.equal("metricRows" in coreOnly.core.replica, false);
-
-  const withMetrics = createBrowserVaultLoadedQueryClients({
-    core: shards.core,
-    metrics: shards.metrics,
-  });
-  assert.equal(withMetrics.metrics, null);
+  const withMetrics = createBrowserVaultInteractiveMetricsQueryClient(
+    shards.core, shards.metrics,
+  );
   assert.equal(
-    withMetrics.interactiveMetrics?.metricCoverage.get("steps").status,
+    withMetrics.metricCoverage.get("steps").status,
     "unloaded",
   );
   assert.equal(
-    withMetrics.interactiveMetrics?.metricCoverage.get("unknown-metric").status,
+    withMetrics.metricCoverage.get("unknown-metric").status,
     "loaded-empty",
   );
   assert.throws(
     () =>
-      withMetrics.interactiveMetrics?.metrics.series({ metricKey: "steps" }),
+      withMetrics.metrics.series({ metricKey: "steps" }),
     /is not loaded for steps/u,
   );
-  assert.equal(withMetrics.labs, null);
-  assert.equal(withMetrics.full, null);
-
-  const withSteps = createBrowserVaultLoadedQueryClients({
-    core: shards.core,
-    metricBuckets: { [stepsBucketId]: shards.metricBuckets[stepsBucketId] },
-    metrics: shards.metrics,
-  });
+  const withSteps = createBrowserVaultInteractiveQueryClient(
+    shards.core, shards.metrics, shards.labs,
+    { [stepsBucketId]: shards.metricBuckets[stepsBucketId] },
+  );
+  assert.equal(withSteps.capability, "core+metrics-partial+labs");
   assert.equal(
-    withSteps.interactiveMetrics?.metricCoverage.get("steps").status,
+    withSteps.metricCoverage.get("steps").status,
     "loaded",
   );
   assert.deepEqual(
-    withSteps.interactiveMetrics?.metrics.series({ metricKey: "steps" }),
+    withSteps.metrics.series({ metricKey: "steps" }),
     replica.metricRows,
   );
   assert.equal(
-    "metricRows" in (withSteps.interactiveMetrics?.replica ?? {}),
+    "metricRows" in withSteps.replica,
     false,
   );
 
-  const all = createBrowserVaultLoadedQueryClients(shards);
-  assert.equal(all.full?.capability, "core+metrics+labs");
+  const all = createBrowserVaultQueryClient(assembleBrowserVaultReplicaShards(shards));
+  assert.equal(all.capability, "core+metrics+labs");
 });
 
 test("browser vault shard parsers validate schemas, bucket placement, and generation metadata", async () => {

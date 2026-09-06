@@ -15,7 +15,10 @@ import {
   BROWSER_VAULT_METRICS_SHARD_SCHEMA,
   buildBrowserVaultExperimentRunCards,
   createBrowserVaultQueryClient,
-  createBrowserVaultLoadedQueryClients,
+  createBrowserVaultCoreQueryClient,
+  createBrowserVaultInteractiveMetricsQueryClient,
+  createBrowserVaultInteractiveQueryClient,
+  createBrowserVaultLabsQueryClient,
   parseBrowserVaultCoreShard,
   parseBrowserVaultLabsShard,
   parseBrowserVaultMetricBucketShard,
@@ -628,31 +631,30 @@ export function createBrowserVaultRouteQueryClient(
   requestedShards: readonly BrowserVaultReplicaShard[],
   requestedMetricBuckets: readonly BrowserVaultMetricBucketId[] = [],
 ): BrowserVaultAnyQueryClient {
-  const clients = createBrowserVaultLoadedQueryClients(shards);
-  if (requestedShards.includes("metricsIndex") && requestedShards.includes("labs")) {
-    if (!clients.interactive) {
-      throw new Error("Browser vault session did not provide all requested shards.");
-    }
-    assertBrowserVaultClientCoversMetricBuckets(clients.interactive, requestedMetricBuckets);
-    return clients.interactive;
-  }
   if (requestedShards.includes("metricsIndex")) {
-    if (!clients.interactiveMetrics) {
+    if (!shards.metrics) {
       throw new Error("Browser vault session did not provide the requested metrics index shard.");
     }
-    assertBrowserVaultClientCoversMetricBuckets(
-      clients.interactiveMetrics,
-      requestedMetricBuckets,
-    );
-    return clients.interactiveMetrics;
+    if (requestedShards.includes("labs") && !shards.labs) {
+      throw new Error("Browser vault session did not provide all requested shards.");
+    }
+    const client = requestedShards.includes("labs") && shards.labs
+      ? createBrowserVaultInteractiveQueryClient(
+          shards.core, shards.metrics, shards.labs, shards.metricBuckets,
+        )
+      : createBrowserVaultInteractiveMetricsQueryClient(
+          shards.core, shards.metrics, shards.metricBuckets,
+        );
+    assertBrowserVaultClientCoversMetricBuckets(client, requestedMetricBuckets);
+    return client;
   }
   if (requestedShards.includes("labs")) {
-    if (!clients.labs) {
+    if (!shards.labs) {
       throw new Error("Browser vault session did not provide the requested labs shard.");
     }
-    return clients.labs;
+    return createBrowserVaultLabsQueryClient(shards.core, shards.labs);
   }
-  return clients.core;
+  return createBrowserVaultCoreQueryClient(shards.core);
 }
 
 function listLoadedBrowserVaultShards(

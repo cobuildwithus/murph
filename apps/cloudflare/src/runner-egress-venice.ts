@@ -53,6 +53,9 @@ export function buildHostedVeniceResponsesRequestBody(input: {
     return null;
   }
   const upstreamModel = HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[record.model];
+  if (!upstreamModel) {
+    return null;
+  }
   const providerRecord = adaptHostedVeniceResponsesLiteRequest(
     record,
     input.pathnameSuffix,

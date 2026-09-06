@@ -22,7 +22,6 @@ import {
   runInboxMediaRetention,
   runInboxTextRetention,
 } from "../src/index.ts";
-import { listTransientInboxVideoStoredPaths } from "../src/retention.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -144,7 +143,7 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
     vaultRoot,
     captureId: "cap_retention_fresh_media",
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W4",
-    storedAt: "2026-07-04T00:00:00.000Z",
+    storedAt: "2026-09-04T00:00:00.000Z",
     input: {
       source: "telegram",
       externalId: "msg-fresh-media",
@@ -155,7 +154,7 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
       actor: {
         isSelf: false,
       },
-      occurredAt: "2026-07-04T00:00:00.000Z",
+      occurredAt: "2026-09-04T00:00:00.000Z",
       text: "fresh media",
       attachments: [
         {
@@ -204,13 +203,13 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   assert.ok(tamperedPath);
   await writeVaultFile(vaultRoot, tamperedPath, "mutated-image");
   await archiveClosedEventLedgerShards({
-    now: new Date("2026-07-05T00:00:00.000Z"),
+    now: new Date("2026-09-05T00:00:00.000Z"),
     vaultRoot,
   });
 
   const result = await runInboxMediaRetention({
     vaultRoot,
-    now: "2026-07-05T00:00:00.000Z",
+    now: "2026-09-05T00:00:00.000Z",
     protectedAttachmentIds: [protectedAttachmentId],
   });
 
@@ -233,14 +232,14 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
 
   const retentionRecords = await readJsonlRecords({
     vaultRoot,
-    relativePath: buildInboxAttachmentRetentionLedgerPath("2026-07-05T00:00:00.000Z"),
+    relativePath: buildInboxAttachmentRetentionLedgerPath("2026-09-05T00:00:00.000Z"),
   });
   assert.equal(retentionRecords.length, 2);
   assert.equal(
     (
       await runInboxMediaRetention({
         vaultRoot,
-        now: "2026-07-05T00:00:00.000Z",
+        now: "2026-09-05T00:00:00.000Z",
         protectedAttachmentIds: [protectedAttachmentId],
       })
     ).expiredAttachments,
@@ -249,7 +248,7 @@ test("runInboxMediaRetention expires old raw inbox media and preserves descripto
   await writeVaultBytes(vaultRoot, audioPath, Buffer.from("audio-bytes"));
   const cleanupResult = await runInboxMediaRetention({
     vaultRoot,
-    now: "2026-07-05T00:00:00.000Z",
+    now: "2026-09-05T00:00:00.000Z",
     protectedAttachmentIds: [protectedAttachmentId],
   });
   assert.equal(cleanupResult.expiredAttachments, 0);
@@ -882,7 +881,7 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-cutoff");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const imageBytes = await createPngBytes();
-  const now = "2026-07-05T00:00:00.000Z";
+  const now = "2026-09-19T00:00:00.000Z";
 
   const fresh = await persistCanonicalInboxCapture({
     vaultRoot,
@@ -978,7 +977,7 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
       kind: "note",
       occurredAt: now,
       recordedAt: now,
-      dayKey: "2026-07-05",
+      dayKey: "2026-09-19",
       source: "manual",
       title: "Promoted inbox media",
       note: "Durable event keeps one exact raw path.",
@@ -1006,7 +1005,7 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
 
   assert.equal(result.expiredAttachments, 1);
   assert.equal(result.hasMoreEligibleAttachments, false);
-  assert.equal(result.nextEligibleAt, "2026-07-05T00:00:00.001Z");
+  assert.equal(result.nextEligibleAt, "2026-09-19T00:00:00.001Z");
   assert.deepEqual(result.records.map((record) => record.storedPath), [duplicatePath]);
   assert.equal(await fileExists(vaultRoot, freshPath), true);
   assert.equal(await fileExists(vaultRoot, durablePath), true);
@@ -1015,7 +1014,7 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   assert.equal(await fileExists(vaultRoot, duplicatePath), false);
 });
 
-test("hosted retention can expire unprotected videos immediately without changing image or audio windows", async () => {
+test("media expires at 14 days for audio, 30 for video, and 90 for images while saved video stays durable", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-video-transient-retention");
   const now = "2026-07-05T00:00:00.000Z";
   await initializeVault({ vaultRoot, createdAt: now });
@@ -1091,60 +1090,31 @@ test("hosted retention can expire unprotected videos immediately without changin
       rawRefs: [savedVideoPath],
     },
   });
-  assert.deepEqual(
-    await listTransientInboxVideoStoredPaths({ vaultRoot }),
-    [videoPath],
-  );
 
-  const result = await runInboxMediaRetention({
-    now,
-    vaultRoot,
-    videoRetentionWindowMs: 0,
-  });
-
-  assert.equal(result.expiredAttachments, 1);
-  assert.deepEqual(result.records.map((record) => record.storedPath), [videoPath]);
-  assert.equal(result.nextEligibleAt, "2026-07-19T00:00:00.000Z");
-  assert.equal(await fileExists(vaultRoot, videoPath), false);
-  assert.equal(await fileExists(vaultRoot, imagePath), true);
-  assert.equal(await fileExists(vaultRoot, audioPath), true);
-  assert.equal(await fileExists(vaultRoot, savedVideoPath), true);
-});
-
-test("transient video snapshot exclusion fails closed on an invalid capture record", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-video-snapshot-fail-closed");
-  await initializeVault({ vaultRoot, createdAt: "2026-07-05T00:00:00.000Z" });
-  await appendJsonlRecord({
-    vaultRoot,
-    relativePath: "ledger/inbox-captures/2026/2026-07.jsonl",
-    record: {
-      schemaVersion: "murph.inbox-capture.v2",
-      attachments: "invalid",
-    },
-  });
-
-  await assert.rejects(
-    listTransientInboxVideoStoredPaths({ vaultRoot }),
-    /Invalid inbox capture record prevents safe hosted snapshot construction/,
-  );
-});
-
-test("transient video snapshot exclusion fails closed on an invalid durable event record", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-video-event-fail-closed");
-  await initializeVault({ vaultRoot, createdAt: "2026-07-05T00:00:00.000Z" });
-  await appendJsonlRecord({
-    vaultRoot,
-    relativePath: "ledger/events/2026/2026-07.jsonl",
-    record: {
-      schemaVersion: "murph.event.v1",
-      rawRefs: ["raw/inbox/telegram/unclassified-video.mp4"],
-    },
-  });
-
-  await assert.rejects(
-    listTransientInboxVideoStoredPaths({ vaultRoot }),
-    /Invalid event record prevents safe hosted snapshot construction/,
-  );
+  const start = Date.parse(now);
+  for (const [days, expectedExpired, paths] of [
+    [0, 0, [videoPath, imagePath, audioPath]],
+    [14, 1, [videoPath, imagePath]],
+    [30, 1, [imagePath]],
+    [90, 1, []],
+  ] as const) {
+    if (days > 0) {
+      const before = await runInboxMediaRetention({
+        now: new Date(start + days * 86_400_000 - 1).toISOString(),
+        vaultRoot,
+      });
+      assert.equal(before.expiredAttachments, 0);
+    }
+    const result = await runInboxMediaRetention({
+      now: new Date(start + days * 86_400_000).toISOString(),
+      vaultRoot,
+    });
+    assert.equal(result.expiredAttachments, expectedExpired);
+    for (const mediaPath of [videoPath, imagePath, audioPath]) {
+      assert.equal(await fileExists(vaultRoot, mediaPath), paths.some((p) => p === mediaPath));
+    }
+    assert.equal(await fileExists(vaultRoot, savedVideoPath), true);
+  }
 });
 
 test("runInboxMediaRetention protects every attachment in an active pending capture", async () => {
@@ -1204,7 +1174,6 @@ test("runInboxMediaRetention protects every attachment in an active pending capt
     now: "2026-07-05T00:00:00.000Z",
     protectedCaptureIds: [captureId],
     vaultRoot,
-    videoRetentionWindowMs: 0,
   });
 
   assert.equal(result.expiredAttachments, 0);
@@ -1260,7 +1229,7 @@ test("runInboxMediaRetention materializes bounded missing candidates before hash
       assert.deepEqual([...storedPaths], [imagePath]);
       await writeVaultBytes(vaultRoot, imagePath, storedImageBytes);
     },
-    now: "2026-07-05T00:00:00.000Z",
+    now: "2026-09-05T00:00:00.000Z",
     vaultRoot,
   });
 
@@ -1502,11 +1471,11 @@ test("runInboxMediaRetention reschedules when parser work appears before the loc
   }
 });
 
-test("runInboxMediaRetention ignores stale and unclaimable legacy parser rows", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-legacy-parser-row");
+test("runInboxMediaRetention protects image media while parser work is fresh and nonterminal", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-image-parser-row");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const imageBytes = await createPngBytes();
-  const captureId = "cap_retention_legacy_parser_row";
+  const captureId = "cap_retention_image_parser_row";
 
   const persisted = await persistCanonicalInboxCapture({
     vaultRoot,
@@ -1514,10 +1483,10 @@ test("runInboxMediaRetention ignores stale and unclaimable legacy parser rows", 
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VJ",
     storedAt: "2026-06-01T00:00:00.000Z",
     input: buildOldImageCaptureInput({
-      externalId: "msg-legacy-parser-row",
+      externalId: "msg-image-parser-row",
       imageBytes,
-      text: "old image with legacy parser row",
-      threadId: "thread-legacy-parser-row",
+      text: "old image with parser row",
+      threadId: "thread-image-parser-row",
     }),
   });
   const imageAttachment = persisted.stored.attachments[0];
@@ -1531,14 +1500,69 @@ test("runInboxMediaRetention ignores stale and unclaimable legacy parser rows", 
     await insertLegacyAttachmentParseJob({
       attachmentId: imageAttachment.attachmentId,
       captureId,
-      createdAt: "2026-07-04T00:00:00.000Z",
+      createdAt: "2026-09-04T00:00:00.000Z",
       databasePath: runtime.databasePath,
-      jobId: "job_legacy_image_parser_row",
+      jobId: "job_image_parser_row",
+      state: "pending",
+    });
+
+    const protectedResult = await runInboxMediaRetention({
+      now: "2026-09-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(protectedResult.expiredAttachments, 0);
+    assert.equal(protectedResult.nextEligibleAt, "2026-09-18T00:00:00.000Z");
+    assert.equal(await fileExists(vaultRoot, imagePath), true);
+
+    const result = await runInboxMediaRetention({
+      now: "2026-09-18T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(result.expiredAttachments, 1);
+    assert.equal(result.records[0]?.attachmentId, imageAttachment.attachmentId);
+    assert.equal(await fileExists(vaultRoot, imagePath), false);
+  } finally {
+    runtime.close();
+  }
+});
+
+test("runInboxMediaRetention ignores stale unclaimable legacy image parser rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-stale-image-parser-row");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+  const captureId = "cap_retention_stale_image_parser_row";
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VQ",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-stale-image-parser-row",
+      imageBytes,
+      text: "old image with stale parser row",
+      threadId: "thread-stale-image-parser-row",
+    }),
+  });
+  const imageAttachment = persisted.stored.attachments[0];
+  assert.ok(imageAttachment);
+  const imagePath = imageAttachment.storedPath ?? "";
+  assert.ok(imagePath);
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    await insertLegacyAttachmentParseJob({
+      attachmentId: imageAttachment.attachmentId,
+      captureId,
+      createdAt: "2026-06-01T00:00:00.000Z",
+      databasePath: runtime.databasePath,
+      jobId: "job_stale_image_parser_row",
       state: "pending",
     });
 
     const result = await runInboxMediaRetention({
-      now: "2026-07-05T00:00:00.000Z",
+      now: "2026-09-05T00:00:00.000Z",
       vaultRoot,
     });
     assert.equal(result.expiredAttachments, 1);
@@ -1580,7 +1604,7 @@ test.skipIf(process.platform === "win32")(
     await fs.symlink(externalDirectory, attachmentDirectory, "dir");
 
     const result = await runInboxMediaRetention({
-      now: "2026-07-05T00:00:00.000Z",
+      now: "2026-09-05T00:00:00.000Z",
       vaultRoot,
     });
 
@@ -1636,7 +1660,7 @@ test("runInboxMediaRetention honors the per-pass attachment limit", async () => 
 
   const firstPass = await runInboxMediaRetention({
     maxAttachments: 1,
-    now: "2026-07-05T00:00:00.000Z",
+    now: "2026-09-05T00:00:00.000Z",
     vaultRoot,
   });
   assert.equal(firstPass.expiredAttachments, 1);
@@ -1647,7 +1671,7 @@ test("runInboxMediaRetention honors the per-pass attachment limit", async () => 
 
   const secondPass = await runInboxMediaRetention({
     maxAttachments: 1,
-    now: "2026-07-05T00:00:00.000Z",
+    now: "2026-09-05T00:00:00.000Z",
     vaultRoot,
   });
   assert.equal(secondPass.expiredAttachments, 1);
@@ -1712,7 +1736,7 @@ test("runInboxMediaRetention checks the batch limit before hashing another eligi
   try {
     const result = await runInboxMediaRetention({
       maxAttachments: 1,
-      now: "2026-07-05T00:00:00.000Z",
+      now: "2026-09-05T00:00:00.000Z",
       vaultRoot,
     });
 
@@ -1731,7 +1755,7 @@ test("runInboxMediaRetention skips missing already-tombstoned media before batch
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-tombstoned-missing");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const imageBytes = await createPngBytes();
-  const now = "2026-07-05T00:00:00.000Z";
+  const now = "2026-09-05T00:00:00.000Z";
 
   await persistCanonicalInboxCapture({
     vaultRoot,
@@ -1800,7 +1824,7 @@ test("runInboxMediaRetention does not let unmaterializable media consume the bat
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-missing-materialize");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const imageBytes = await createPngBytes();
-  const now = "2026-07-05T00:00:00.000Z";
+  const now = "2026-09-05T00:00:00.000Z";
 
   const first = await persistCanonicalInboxCapture({
     vaultRoot,
@@ -1886,7 +1910,7 @@ test("runInboxMediaRetention bounds missing legacy materialization and tombstone
       return { missingStoredPaths: storedPaths };
     },
     maxAttachments: 1,
-    now: "2026-07-05T00:00:00.000Z",
+    now: "2026-09-05T00:00:00.000Z",
     vaultRoot,
   });
 
@@ -1973,7 +1997,7 @@ test("runInboxMediaRetention finishes guarded deletes after wake aborts", async 
 
   try {
     const result = await runInboxMediaRetention({
-      now: "2026-07-05T00:00:00.000Z",
+      now: "2026-09-05T00:00:00.000Z",
       signal: controller.signal,
       vaultRoot,
     });
@@ -2396,7 +2420,7 @@ test("processCapture preserves retention-expired attachment state on dedupe repl
     const imagePath = persisted.stored.attachments[0]?.storedPath ?? "";
     assert.ok(imagePath);
     const result = await runInboxMediaRetention({
-      now: "2026-07-05T00:00:00.000Z",
+      now: "2026-09-05T00:00:00.000Z",
       vaultRoot,
     });
     assert.equal(result.expiredAttachments, 1);
@@ -2452,7 +2476,7 @@ test.skipIf(process.platform === "win32")(
     let threw = false;
     try {
       await runInboxMediaRetention({
-        now: "2026-07-05T00:00:00.000Z",
+        now: "2026-09-05T00:00:00.000Z",
         vaultRoot,
       });
     } catch {
@@ -2472,7 +2496,7 @@ test.skipIf(process.platform === "win32")(
       retentionRecords = await readJsonlRecords({
         vaultRoot,
         relativePath: buildInboxAttachmentRetentionLedgerPath(
-          "2026-07-05T00:00:00.000Z",
+          "2026-09-05T00:00:00.000Z",
         ),
       });
     } catch {

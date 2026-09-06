@@ -122,6 +122,24 @@ export async function readHostedWorkspace(input: {
   return row ? projectHostedWorkspace(row) : null;
 }
 
+/** Read only the published replica pointer and version needed by dashboard sessions. */
+export async function readHostedBrowserVaultReplicaState(input: {
+  prisma?: HostedWorkspaceStoreClient;
+  userId: string;
+}): Promise<Pick<HostedWorkspaceRecord, "browserVaultReplicaRef" | "version"> | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const row = await prisma.hostedWorkspace.findUnique({
+    where: {
+      userId: requireNonEmptyString(input.userId, "Hosted workspace userId"),
+    },
+    select: { browserVaultReplicaRef: true, version: true },
+  });
+  return row ? {
+    browserVaultReplicaRef: row.browserVaultReplicaRef,
+    version: row.version.toString(),
+  } : null;
+}
+
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;

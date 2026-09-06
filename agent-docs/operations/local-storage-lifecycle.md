@@ -171,6 +171,13 @@ terminal gate is satisfied. A standalone legacy clone needs explicit operator
 authorization plus immediate Git, PR, active-work, and process-CWD proof before
 exact-path removal.
 
+If non-force removal fails after deleting tracked files, the helper attempts
+immediate missing-only restoration from the unchanged original Git index and
+HEAD. Existing files, replacement symlink parents, and changed or missing Git
+metadata are never overwritten or rebuilt. The command still fails and reports
+the bounded removal error; a clean quarantine can be retried through the same
+helper. Unproved or incomplete recovery remains a manual inspection blocker.
+
 ## Package stores
 
 Use the ordinary machine pnpm store. Do not pass a temp directory through

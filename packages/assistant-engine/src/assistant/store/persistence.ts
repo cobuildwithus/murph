@@ -582,8 +582,7 @@ function normalizeAssistantSessionForWrite(
   return serializeAssistantConversationForPersistence(normalized)
 }
 
-export async function persistResolvedSession(
-  paths: AssistantStatePaths,
+function resolveAssistantSessionBinding(
   session: AssistantSession,
   input: {
     allowBindingRebind?: boolean
@@ -591,7 +590,7 @@ export async function persistResolvedSession(
     bindingPatch: AssistantBindingPatch
     lookupSource: 'alias' | 'conversation-key' | 'session-id'
   },
-): Promise<AssistantSession> {
+): AssistantSession {
   const routingConflicts = getAssistantBindingIsolationConflicts(
     session.binding,
     input.bindingPatch,
@@ -655,7 +654,7 @@ export async function persistResolvedSession(
     return session
   }
 
-  const updated = normalizeAssistantConversationSnapshot(
+  return normalizeAssistantConversationSnapshot(
     parseAssistantSessionRecord(
       normalizeAssistantSessionForWrite({
         ...session,
@@ -665,8 +664,18 @@ export async function persistResolvedSession(
       }),
     ),
   )
-  await writeAssistantSession(paths, updated)
-  await synchronizeAssistantIndexes(paths, updated, session)
+}
+
+export async function persistResolvedSession(
+  paths: AssistantStatePaths,
+  session: AssistantSession,
+  input: Parameters<typeof resolveAssistantSessionBinding>[1],
+): Promise<AssistantSession> {
+  const updated = resolveAssistantSessionBinding(session, input)
+  if (updated !== session) {
+    await writeAssistantSession(paths, updated)
+    await synchronizeAssistantIndexes(paths, updated, session)
+  }
   return updated
 }
 
@@ -678,7 +687,8 @@ function normalizeAssistantConversationSnapshot(
   )
 }
 
-export async function loadAndPersistResolvedSession(input: {
+export async function loadResolvedSession(input: {
+  persistBinding?: boolean
   paths: AssistantStatePaths
   sessionId: string
   persistenceInput: {
@@ -723,11 +733,13 @@ export async function loadAndPersistResolvedSession(input: {
     return null
   }
 
-  const updated = await persistResolvedSession(
-    input.paths,
-    existing,
-    input.persistenceInput,
-  )
+  const updated = input.persistBinding === false
+    ? resolveAssistantSessionBinding(existing, input.persistenceInput)
+    : await persistResolvedSession(
+        input.paths,
+        existing,
+        input.persistenceInput,
+      )
   return {
     created: false,
     paths: input.paths,

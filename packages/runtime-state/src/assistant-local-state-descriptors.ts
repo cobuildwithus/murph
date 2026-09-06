@@ -124,6 +124,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     "Hosted mailbox import watermarks and compact quarantine status that must move with hosted runtime continuity.",
   ),
   definePortableAssistantFile(
+    ".runtime/operations/assistant/hosted-media-refs.json",
+    "Hosted media reference catalogue that lets workspace snapshots externalize bounded image and video bytes while preserving lazy materialization.",
+  ),
+  definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-system-mailbox.json",
     "Hosted system mailbox pending item state that must move with hosted runtime continuity.",
   ),
@@ -162,6 +166,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   definePortableRebuildableAssistantFile(
     ".runtime/operations/assistant/state/group-participant-display-names.json",
     "Bounded presentation-only group participant display-name cache that moves with hosted workspace continuity.",
+  ),
+  definePortableAssistantFile(
+    ".runtime/operations/assistant/state/hosted-mailbox-inputs.sqlite",
+    "Durable hosted mailbox acknowledgement identities and private input context, retained with their assistant input events.",
   ),
   definePortableRebuildableAssistantFile(
     ".runtime/operations/assistant/state/outbox-dedupe.sqlite",

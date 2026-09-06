@@ -83,6 +83,8 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 function expectRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
   expectedElapsedMs?: number;
+  expectedOrchestrationAttemptId?: string;
+  expectedTimeoutMs?: number;
   forbiddenValues?: readonly string[];
   stage: RunnerContainerLocalStartupFailureStage;
 }): void {
@@ -100,6 +102,10 @@ function expectRunnerContainerStartupFailureObservation(input: {
   expect(observation).toEqual({
     component: "container",
     details: {
+      ...(input.expectedOrchestrationAttemptId === undefined
+        ? {}
+        : { orchestrationAttemptId: input.expectedOrchestrationAttemptId }),
+      runtimeStartupConfirmTimeoutMs: input.expectedTimeoutMs ?? expect.any(Number),
       runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
       runtimeStartupFailureElapsedMs: expect.any(Number),
       runtimeStartupFailureStage: input.stage,
@@ -121,6 +127,12 @@ function expectRunnerContainerStartupFailureObservation(input: {
   expect(elapsedMs).toBeLessThanOrEqual(
     RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   );
+  const timeoutMs = details.runtimeStartupConfirmTimeoutMs;
+  expect(typeof timeoutMs).toBe("number");
+  if (typeof timeoutMs !== "number") {
+    throw new Error("Expected numeric startup confirmation timeout milliseconds.");
+  }
+  expect(timeoutMs).toBeGreaterThan(0);
   if (input.expectedElapsedMs !== undefined) {
     expect(elapsedMs).toBe(input.expectedElapsedMs);
   }
@@ -2370,6 +2382,7 @@ describe("RunnerContainer", () => {
   });
 
   it("classifies cold start and port-readiness failures", async () => {
+    const orchestrationAttemptId = "test-cold-start-timeout-correlation";
     const privateErrorText = "port wait failed with token=private-start-token";
     const startFailure = new Error(privateErrorText);
     const { container } = createContainerDouble({
@@ -2379,12 +2392,15 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.ensureReadyForProcessing({
+      orchestrationAttemptId,
       timeoutMs: 15_000,
       userId: "member_private_cold_start",
     })).rejects.toBe(startFailure);
 
     expectRunnerContainerStartupFailureObservation({
       cleanupUnsettled: false,
+      expectedOrchestrationAttemptId: orchestrationAttemptId,
+      expectedTimeoutMs: 15_000,
       forbiddenValues: [privateErrorText, "member_private_cold_start"],
       stage: "cold_start_or_ports",
     });
@@ -3493,359 +3509,40 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("prewarmShell issues startup without waiting for ports or invoking workspace work", async () => {
-    const neverSettlingStateRead = new Promise<never>(() => undefined);
-    const getState = vi.fn(() => neverSettlingStateRead);
-    const { container, containerFetch, start, startAndWaitForPorts } =
-      createContainerDouble({ getState });
+  it.each(["stopped", "running"] as const)(
+    "accepts legacy shell hints without allocating or probing a %s container",
+    async (initialStatus) => {
+      const { container, containerFetch, getState, start, startAndWaitForPorts } =
+        createContainerDouble({ initialStatus });
+      const input = { timeoutMs: 7_500, userId: "member_123" };
 
-    await expect(container.prewarmShell({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({
-      action: "start_issued",
-      kind: "started",
-    });
+      await expect(container.prewarmShell(input)).resolves.toEqual({
+        action: "superseded",
+        kind: "superseded",
+      });
+      for (const source of ["linq-message-routing", "linq-typing-started"] as const) {
+        await expect(container.beginShellPrewarm({ ...input, source }))
+          .resolves.toEqual({ accepted: true });
+      }
 
-    expect(start).toHaveBeenCalledOnce();
-    expect(start.mock.calls[0]?.[1]).toMatchObject({
-      portToCheck: 8080,
-      portProbeTimeoutMS: 1_500,
-      signal: expect.any(AbortSignal),
-    });
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(containerFetch).not.toHaveBeenCalled();
-    expect(getState).not.toHaveBeenCalled();
-  });
+      expect(start).not.toHaveBeenCalled();
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(getState).not.toHaveBeenCalled();
+    },
+  );
 
-  it("prewarmShell delegates the already-running fast path to Container.start", async () => {
-    const { container, getState, start, startAndWaitForPorts } =
-      createContainerDouble({ initialStatus: "running" });
-
-    await expect(container.prewarmShell({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({
-      action: "start_issued",
-      kind: "started",
-    });
-
-    expect(start).toHaveBeenCalledOnce();
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(getState).not.toHaveBeenCalled();
-  });
-
-  it("acknowledges repeated shell hints before startup and reports one causal observation", async () => {
-    const releaseStart = createDeferred<void>();
-    const start = vi.fn(async () => {
-      await releaseStart.promise;
-    });
-    const { container, containerFetch, getState } = createContainerDouble({
-      initialStatus: "running",
-      start,
-    });
-
-    await expect(container.beginShellPrewarm({
-      orchestration: {
-        shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_788_000_000_030,
-        shellPrewarmOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
-      },
-      source: "linq-message-routing",
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({ accepted: true });
-    await expect(container.beginShellPrewarm({
-      source: "linq-typing-started",
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({ accepted: true });
-
-    expect(start).toHaveBeenCalledOnce();
-    expect(getState).not.toHaveBeenCalled();
-    expect(containerFetch).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted runner shell prewarm operation completed.",
-      }),
-    );
-
-    container.onStart();
-    releaseStart.resolve(undefined);
-    await vi.waitFor(() =>
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          details: expect.objectContaining({
-            shellPrewarmColdStartObserved: true,
-            shellPrewarmHintCountAtCompletion: 2,
-            orchestrationAttemptId:
-              "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-            shellPrewarmOutcome: "start_issued",
-            shellPrewarmSource: "linq-message-routing",
-          }),
-          message: "Hosted runner shell prewarm operation completed.",
-        }),
-      )
-    );
-
-    await expect(container.beginShellPrewarm({
-      source: "linq-typing-started",
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({ accepted: true });
-    expect(start).toHaveBeenCalledOnce();
-
-    const readiness = await container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    });
-    expect(readiness).toMatchObject({
-      action: "already_warm",
-      kind: "ready",
-      shellPrewarmObservation: {
-        firstHintAtEpochMs: expect.any(Number),
-        finishedAtEpochMs: expect.any(Number),
-        hintCount: 3,
-        orchestration: {
-          shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_788_000_000_030,
-          shellPrewarmOrchestrationAttemptId:
-            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-          shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
-        },
-        operationElapsedMs: expect.any(Number),
-        outcome: "cold_start_observed",
-        source: "linq-message-routing",
-      },
-    });
-    expect(JSON.stringify(readiness.shellPrewarmObservation))
-      .not.toContain("member_123");
-
-    const completionInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([input]) => input)
-      .filter((input) =>
-        input.message === "Hosted runner shell prewarm operation completed."
-      );
-    expect(completionInputs).toHaveLength(1);
-    expect(JSON.stringify(
-      completionInputs.map((input) => buildHostedExecutionStructuredLogRecord(input)),
-    )).not.toContain("member_123");
-  });
-
-  it("reuses a completed shell prewarm through ordinary health readiness", async () => {
+  it("starts through authoritative readiness after an inert legacy hint", async () => {
     const { container, start, startAndWaitForPorts } = createContainerDouble();
+    const input = { timeoutMs: 7_500, userId: "member_123" };
+    await container.beginShellPrewarm(input);
 
-    await expect(container.prewarmShell({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({
-      action: "start_issued",
-      kind: "started",
-    });
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({
-      action: "already_warm",
-      kind: "ready",
-    });
-
-    expect(start).toHaveBeenCalledOnce();
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-  });
-
-  it("finishes canonical readiness after an uncertain shell prewarm failure", async () => {
-    const start = vi.fn(async () => {
-      throw new Error("platform start wait failed after command issue");
-    });
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      initialStatus: "running",
-      start,
-    });
-
-    await expect(container.beginShellPrewarm({
-      source: "linq-typing-started",
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({ accepted: true });
-    await vi.waitFor(() =>
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          details: expect.objectContaining({
-            shellPrewarmOutcome: "failed",
-            shellPrewarmSource: "linq-typing-started",
-          }),
-          message: "Hosted runner shell prewarm failed after acceptance.",
-        }),
-      )
-    );
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-      shellPrewarmObservation: {
-        hintCount: 1,
-        outcome: "failed",
-        source: "linq-typing-started",
-      },
-    });
-
-    expect(start).toHaveBeenCalledOnce();
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-  });
-
-  it("lets authoritative readiness supersede a stalled shell prewarm", async () => {
-    const startEntered = createDeferred<void>();
-    const start = vi.fn(async (
-      _startOptions: unknown,
-      waitOptions?: { signal?: AbortSignal },
-    ) => {
-      const signal = waitOptions?.signal;
-      if (!signal) {
-        throw new Error("Expected shell prewarm to carry an abort signal.");
-      }
-      startEntered.resolve();
-      await new Promise<void>((_resolve, reject) => {
-        if (signal.aborted) {
-          reject(signal.reason);
-          return;
-        }
-        signal.addEventListener("abort", () => reject(signal.reason), {
-          once: true,
-        });
-      });
-    });
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      initialStatus: "running",
-      start,
-    });
-
-    const firstPrewarm = container.prewarmShell({
-      timeoutMs: 20_000,
-      userId: "member_123",
-    });
-    await startEntered.promise;
-    const duplicatePrewarm = container.prewarmShell({
-      timeoutMs: 20_000,
-      userId: "member_123",
-    });
-    const authoritativeReadiness = container.ensureReadyForProcessing({
-      timeoutMs: 8_000,
-      userId: "member_123",
-    });
-
-    await expect(firstPrewarm).resolves.toEqual({
-      action: "superseded",
-      kind: "superseded",
-    });
-    await expect(duplicatePrewarm).resolves.toEqual({
-      action: "superseded",
-      kind: "superseded",
-    });
-    await expect(authoritativeReadiness).resolves.toMatchObject({
+    await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({
       action: "started",
       kind: "ready",
     });
-    expect(start).toHaveBeenCalledOnce();
+    expect(start).not.toHaveBeenCalled();
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-  });
-
-  it("attributes a superseded accepted hint to the authoritative readiness trace", async () => {
-    const startEntered = createDeferred<void>();
-    const start = vi.fn(async (
-      _startOptions: unknown,
-      waitOptions?: { signal?: AbortSignal },
-    ) => {
-      const signal = waitOptions?.signal;
-      if (!signal) {
-        throw new Error("Expected shell prewarm to carry an abort signal.");
-      }
-      startEntered.resolve(undefined);
-      await new Promise<void>((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), {
-          once: true,
-        });
-      });
-    });
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      initialStatus: "running",
-      start,
-    });
-
-    await expect(container.beginShellPrewarm({
-      source: "linq-typing-started",
-      timeoutMs: 20_000,
-      userId: "member_123",
-    })).resolves.toEqual({ accepted: true });
-    await startEntered.promise;
-
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 8_000,
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-      shellPrewarmObservation: {
-        hintCount: 1,
-        outcome: "superseded",
-        source: "linq-typing-started",
-      },
-    });
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-    await vi.waitFor(() =>
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          details: expect.objectContaining({
-            shellPrewarmColdStartObserved: false,
-            shellPrewarmOutcome: "superseded",
-            shellPrewarmSource: "linq-typing-started",
-          }),
-        }),
-      )
-    );
-  });
-
-  it("acknowledges shell registration before exact-target destruction supersedes it", async () => {
-    const startEntered = createDeferred<void>();
-    const startAborted = createDeferred<void>();
-    const start = vi.fn(async (
-      _startOptions: unknown,
-      waitOptions?: { signal?: AbortSignal },
-    ) => {
-      const signal = waitOptions?.signal;
-      if (!signal) {
-        throw new Error("Expected shell prewarm to carry an abort signal.");
-      }
-      startEntered.resolve();
-      await new Promise<void>((_resolve, reject) => {
-        if (signal.aborted) {
-          reject(signal.reason);
-          return;
-        }
-        signal.addEventListener("abort", () => {
-          startAborted.resolve(undefined);
-          reject(signal.reason);
-        }, { once: true });
-      });
-    });
-    const { container, destroy } = createContainerDouble({
-      initialStatus: "running",
-      start,
-    });
-
-    await expect(container.beginShellPrewarm({
-      timeoutMs: 20_000,
-      userId: "member_123",
-    })).resolves.toEqual({ accepted: true });
-    await startEntered.promise;
-    const destruction = container.destroyInstance();
-
-    await startAborted.promise;
-    await expect(destruction).resolves.toBeUndefined();
-    expect(start).toHaveBeenCalledOnce();
-    expect(destroy).toHaveBeenCalledOnce();
   });
 
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
@@ -4661,6 +4358,24 @@ describe("RunnerContainer", () => {
     expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Codex shell diagnostic budget separate from runtime readiness", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const { container } = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+        },
+      });
+
+      await container.smokeHealth();
+
+      expect(timeoutSpy).toHaveBeenCalledWith(20_000);
+      expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it("can extend deploy smoke to run a direct R2 presigned PUT probe", async () => {

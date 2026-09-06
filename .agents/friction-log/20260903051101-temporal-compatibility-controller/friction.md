@@ -1,6 +1,7 @@
 ---
 title: 'Temporal compatibility controller changes require a manual bootstrap PR'
 severity: 'major'
+issue: 'cobuildwithus/murph#2775'
 ---
 
 ## Expected Behavior

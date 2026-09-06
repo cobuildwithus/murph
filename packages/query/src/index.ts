@@ -707,3 +707,5 @@ export async function summarizeWearableSourceHealthRuntime(
 }
 
 export * from "./scheduled-logs.ts";
+
+export { resolveMealNutritionGoals, type MealNutritionGoalContext, type NutritionTargetResolution } from "./meal-nutrition-goals.ts";

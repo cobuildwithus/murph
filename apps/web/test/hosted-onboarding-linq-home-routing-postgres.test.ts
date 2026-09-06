@@ -2058,8 +2058,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         const telegramRouteUpserted = createDeferred();
         const releaseTelegramUpsert = createDeferred();
-        const linqRouteUpsertReached = createDeferred();
-        const releaseLinqUpsert = createDeferred();
+        const linqRouteLockAcquired = createDeferred();
+        const releaseLinqRouteLock = createDeferred();
         const activationUpdated = createDeferred();
         const releaseActivation = createDeferred();
         const telegramPid = createDeferred<number>();
@@ -2080,14 +2080,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         const linqClient = linqBase.$extends({
           query: {
-            hostedMemberRouting: {
-              async upsert({ args, query }) {
-                if (startOrder === "linq-first") {
-                  linqRouteUpsertReached.resolve();
-                  await releaseLinqUpsert.promise;
-                }
-                return query(args);
-              },
+            async $queryRaw({ args, query }) {
+              const result = await query(args);
+              // An unchanged home route skips its upsert. Hold the actual
+              // member-row lock before the planner reaches mailbox writes.
+              if (
+                startOrder === "linq-first"
+                && args.sql.includes("FOR NO KEY UPDATE")
+              ) {
+                linqRouteLockAcquired.resolve();
+                await releaseLinqRouteLock.promise;
+              }
+              return result;
             },
           },
         });
@@ -2140,7 +2144,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const runLinq = () => {
             linqTransaction = linqClient.$transaction(async (tx) => {
               // Keep production planners on their ordinary transaction type;
-              // the extension changes only this test's routing-upsert timing.
+              // the extension changes only this test's route-lock timing.
               const prisma = tx as Prisma.TransactionClient;
               linqPid.resolve(await readBackendPid(prisma));
               const plan = await planHostedOnboardingLinqWebhook({
@@ -2183,7 +2187,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               });
               releaseActivation.resolve();
               await activationTransaction;
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
           }
 
@@ -2201,14 +2205,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           } else {
             if (memberState === "active") {
               runLinq();
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
             runTelegram();
             await waitForBlockedBackend({
               observer,
               pid: await telegramPid.promise,
             });
-            releaseLinqUpsert.resolve();
+            releaseLinqRouteLock.resolve();
           }
 
           await expect(
@@ -2249,7 +2253,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         } finally {
           releaseTelegramUpsert.resolve();
-          releaseLinqUpsert.resolve();
+          releaseLinqRouteLock.resolve();
           releaseActivation.resolve();
           await Promise.allSettled([
             activationTransaction,

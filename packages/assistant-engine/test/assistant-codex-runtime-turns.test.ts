@@ -1,4 +1,5 @@
 import {
+  cliTimingLaunchArgs,
   CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   MockChildProcess,
   asRecord,
@@ -315,7 +316,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(secondPersistCanonicalWrite).toHaveBeenCalled()
   })
 
-  it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
+  it('trusts tagged starts and retains first notification timing across duplicates', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-tagged-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-tagged-home-')
     const realDateNow = Date.now.bind(Date)
@@ -406,6 +407,16 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
               },
             },
           }))
+          controlledNowMs = secondProviderStartedAtMs + 60
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-local-prestart-tagged-2',
+                status: 'completed',
+              },
+            },
+          }))
         })()
       })
 
@@ -456,7 +467,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       .at(-1)
     expect(secondTurnCompletedTiming).toEqual(expect.objectContaining({
       codexTimingProviderRequestOrdinal: 7,
-      codexTimingTurnCompleteElapsedMs: 50,
+      codexTimingTurnCompleteElapsedMs: 60,
       codexTimingTurnCompletedNotificationElapsedMs: 50,
       codexTimingTurnStartAckElapsedMs: 30,
       codexTimingTurnStartedNotificationElapsedMs: 10,
@@ -3622,7 +3633,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.objectContaining({
         cwd: tmpdir(),
         env: expect.objectContaining({
@@ -3643,7 +3654,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const child = new MockChildProcess()
 
       expect(command).toBe(codexCommand)
-      expect(args).toEqual(['app-server'])
+      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         env: expect.objectContaining({
           CODEX_HOME: explicitCodexHome,
@@ -3712,7 +3723,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })
@@ -3764,7 +3775,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       expect(codexMocks.spawn).toHaveBeenCalledWith(
         '/tmp/attacker-controlled-codex',
-        ['app-server'],
+        [...cliTimingLaunchArgs, 'app-server'],
         expect.any(Object),
       )
     } finally {
@@ -3817,7 +3828,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })

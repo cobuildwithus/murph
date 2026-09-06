@@ -3,66 +3,45 @@ description: On-demand review guidance for prompt changes
 action: on-demand prompt review
 ---
 
-Use this review-only guidance when the user explicitly requests prompt review or
-when the parent wants a checklist for its own final review.
+Use this for an explicitly requested review or as the parent's own checklist.
+A review-only handoff does not authorize edits. Using this checklist during an
+implementation does not end that task or create a separate review gate.
 
-Outcome:
-Determine whether the changed prompt stack gives GPT-5.6 the smallest clear contract that reliably produces the intended result while preserving product, safety, privacy, evidence, and authorization invariants.
+Judge whether the assembled prompt gives its actual target model a clear,
+proportional contract for the requested outcome.
 
-Mode:
-- Review only. Do not edit files.
-- Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
-- Do not claim to have implemented, landed, or committed changes. Report findings only.
-- Follow the invoking review's evidence, finding, output, and stop contract.
+## Evidence
 
-Required source:
-- Before every review, read the current official GPT-5.6 prompt guidance:
-  - `https://developers.openai.com/api/docs/guides/prompt-guidance-gpt-5p6.md`
-- If the change concerns model selection, API migration, reasoning effort, or
-  optional GPT-5.6 features, also read:
-  - `https://developers.openai.com/api/docs/guides/latest-model.md`
-  - `https://developers.openai.com/api/docs/guides/upgrading-to-gpt-5p6-sol.md`
-- Prefer the OpenAI docs MCP fetch/search tools when available. If those are unavailable or return only a stub, use official OpenAI web docs. If current official guidance cannot be fetched, report that source gap and do not claim the pass fully completed. Do not rely only on memory or this prompt's summary.
-- Apply the current guidance; do not copy large passages into your response.
+Inspect the complete changed prompt, assembled layers, tools, and regression
+proof. Verify current official guidance for the model the prompt actually targets;
+do not substitute the reviewer's model or force a historical model family.
+Use the OpenAI Docs tools or official documentation. When source access fails,
+report the gap and continue source-independent inspection without claiming
+model-specific validation. Fetch migration/API guidance only when that is in scope.
 
-Preflight:
-- Inspect the complete candidate diff, the assembled prompt layers affected by
-  it, and any changed tool descriptions. Distinguish stable reusable prefixes
-  from per-turn context.
+For GPT-6 Astra, the current [prompting guidance](https://developers.openai.com/api/docs/guides/latest-model/gpt-6-astra.md#prompting-best-practices)
+emphasizes instruction conflicts, clear authority, follow-through, and
+proportional testing. Apply relevant advice without copying a second generic
+agent workflow into the prompt.
 
-Review for:
-- outcome-first instructions rather than process-heavy scripts
-- explicit success, evidence, validation, output, and stop conditions where the task needs them
-- prompt length and concept count proportional to the job; identify deletion or merge candidates before proposing additions
-- absolute rules reserved for true invariants, with judgment calls written as decision rules
-- clear precedence and scope when multiple instruction sources or prompt sections could apply
-- user-, tool-, provider-, attachment-, and runtime-supplied content stays clearly delimited as untrusted data rather than being promoted into developer authority
-- one compact action/permission policy instead of repeated approval language; review-only prompts must not imply write authority
-- no conflicting, circular, ambiguous, repeated, generic, or legacy instructions that leave the agent without a stable next action
-- concrete completeness priorities instead of generic `be concise`, `be thorough`, or step-by-step exhortations; preserve required artifacts, facts, evidence, caveats, and next actions before trimming introductions or repetition
-- only task-relevant tools and examples; tool rules should explain purpose, prerequisite evidence, important returns/errors, and meaningful fallback or stopping behavior without forcing loops
-- dynamic values placed after stable reusable prefixes; no cache churn without measured benefit
-- reasoning effort, structured output, persisted state, programmatic tool calling, or multi-agent features introduced only as separately evaluated runtime choices rather than prompt folklore
-- grounded-answer prompts state what evidence is sufficient, how citations or
-  provenance are attached, and what to do when the required evidence is missing
-- long-running agent prompts keep the current layer visible and request only
-  meaningful milestone, decision, and blocker updates rather than routine tool narration
-- personality and collaboration guidance stays brief and separate from the task
-  contract so it does not compete with outcome, authority, evidence, or output rules
-- explicit user-provided values and proven product behavior preserved unless the change intentionally replaces them
-- no prompt text that invents product, safety, medical, security, pricing, or capability claims
-- no prompt text that leaks secrets, private context, local paths, direct identifiers, transcripts, or implementation-only details into reusable instructions
-- no automated-outreach framing that violates repo prompt guardrails
+## Review
 
-Output requirements:
-- Return findings ordered by severity (`high`, `medium`, `low`).
-- For each finding include: `severity`, `file:line`, `evidence`, `failed behavior or invariant`, and `smallest recommended fix`.
-- Include `Open questions / assumptions` when uncertainty remains.
-- If no evidence-backed findings remain, state that explicitly and list only material residual prompt-behavior or evaluation risk.
+- State the outcome, needed evidence, allowed effects, output, and stopping rule.
+- Remove conflicting, duplicate, obsolete, and unnecessarily procedural rules.
+  Keep hard privacy, safety, authority, and canonical-write boundaries explicit.
+- Keep untrusted content distinct from instructions and preserve user constraints.
+- Make sufficient evidence and useful recovery clear; avoid repeated approval
+  gates or loops caused only by incomplete generic checklists.
+- Keep tools, examples, and personality guidance relevant and proportional.
+  Preserve stable prefixes; change caching/runtime features only for a demonstrated need.
+- Preserve actual product behavior and supported claims. Check the relevant
+  messaging/delivery contract for member-facing prompts.
+- Review the actual composed result and focused model evidence; authored text
+  alone does not prove tool effects, delivery, or reply quality.
 
-Response format:
-- Return a normal text review, not follow-on prompts for more agents.
-- Keep the focus on concrete prompt behavior risks and the smallest wording, deletion, merge, or structure change that fixes each one.
+## Result
 
-Stop rule:
-- Stop after every scoped prompt seam has an evidence-backed disposition. Zero findings is valid. Do not keep searching or add rules merely to make the review look thorough.
+Report evidence-backed issues with severity, file/line, failed behavior or
+invariant, and the smallest correction. State material evidence gaps separately.
+Zero findings is valid. Do not add speculative rules or more review passes to
+make the result appear thorough.

@@ -51,3 +51,13 @@ Assistant runtime state also has a single filesystem permission policy. The `@mu
 - legacy hosted-bundle snapshots may externalize large raw artifacts under `vault/raw/**` into separate encrypted content-addressed objects. Direct-R2 v2 snapshots include restored workspace bytes in the encrypted archive instead of producing artifact sidecars.
 - hosted per-user env overrides live in a separate encrypted object and are not folded into the workspace snapshot
 - downstream packages should consume these helpers instead of inventing their own per-package runtime path conventions or versioning schemes
+
+Hosted mailbox input metadata is durable operational state in
+`.runtime/operations/assistant/state/hosted-mailbox-inputs.sqlite`, separate from
+sanitized assistant input events. It uses the existing runtime SQLite migration
+and lock owners, DELETE journaling, secure deletion, and one closed private file
+per checkpoint. The assistant-engine owner migrates legacy per-input JSON files
+during residue maintenance and retains rows only while their input events
+survive. This database is not a disposable projection: loss or corruption fails
+closed. The first database write establishes a SQLite-capable runner rollback
+floor; old runners cannot consume converted workspace metadata.

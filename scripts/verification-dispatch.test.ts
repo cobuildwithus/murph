@@ -7,7 +7,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -32,10 +31,9 @@ afterEach(() => {
 });
 
 describe("verification dispatcher", () => {
-  it("keeps automatic verification local when the removed opt-in flag remains set", () => {
+  it("keeps automatic verification local", () => {
     expect(resolveExecutor({
       CODEX_THREAD_ID: "thread-1",
-      MURPH_CRABBOX_BLACKSMITH: "1",
     }, true)).toMatchObject({
       executor: "local",
       reason: "auto",
@@ -52,10 +50,9 @@ describe("verification dispatcher", () => {
     }, true)).toMatchObject({ executor: "local", reason: "already-remote" });
   });
 
-  it("does not probe Blacksmith availability in automatic mode", () => {
+  it("does not probe remote executor availability in automatic mode", () => {
     expect(resolveExecutor({
       CODEX_THREAD_ID: "thread-1",
-      MURPH_CRABBOX_BLACKSMITH: "1",
     }, false)).toMatchObject({ executor: "local", reason: "auto" });
 
     expect(resolveExecutor({
@@ -64,17 +61,17 @@ describe("verification dispatcher", () => {
     }, true)).toMatchObject({ executor: "local", reason: "explicit" });
   });
 
+  it("rejects unsupported executors before probing availability", () => {
+    expect(resolveExecutorFailure({
+      MURPH_VERIFY_EXECUTOR: "paid",
+    }, true)).toContain("must be auto, local, or ssh");
+  });
+
   it("forces Vercel-development-environment work to stay local", () => {
     expect(resolveExecutor({
       CODEX_THREAD_ID: "thread-1",
       MURPH_VERIFY_REQUIRES_VERCEL_ENV: "1",
     }, true)).toMatchObject({ executor: "local", reason: "vercel-development-env" });
-
-    const result = resolveExecutorFailure({
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-      MURPH_VERIFY_REQUIRES_VERCEL_ENV: "1",
-    }, true);
-    expect(result).toContain("never forwards Vercel development credentials");
 
     expect(resolveExecutorFailure({
       MURPH_VERIFY_EXECUTOR: "ssh",
@@ -82,53 +79,7 @@ describe("verification dispatcher", () => {
     }, true)).toContain("never forwards Vercel development credentials");
   });
 
-  it("disables paid Blacksmith Testbox spend unless a single run opts in", () => {
-    expect(resolveExecutorFailure({
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-    }, true)).toContain("creates paid Blacksmith Testbox spend and is disabled by default");
-
-    expect(resolveExecutorFailure({
-      MURPH_ALLOW_TESTBOX_SPEND: "0",
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-    }, true)).toContain("creates paid Blacksmith Testbox spend and is disabled by default");
-
-    expect(resolveExecutorFailure({
-      MURPH_ALLOW_TESTBOX_SPEND: "yes",
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-    }, true)).toContain("MURPH_ALLOW_TESTBOX_SPEND must be 0 or 1.");
-
-    // The opt-in is scoped to the paid lane; it never widens the free executors.
-    expect(resolveExecutor({
-      MURPH_ALLOW_TESTBOX_SPEND: "1",
-      MURPH_VERIFY_EXECUTOR: "local",
-    }, true)).toMatchObject({ executor: "local", reason: "explicit" });
-
-    expect(resolveExecutor({
-      MURPH_ALLOW_TESTBOX_SPEND: "1",
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-    }, true)).toMatchObject({ executor: "crabbox", reason: "explicit" });
-  });
-
-  it("rejects coordinator pools and fails closed when an explicit remote stack is unavailable", () => {
-    expect(resolveExecutorFailure({
-      MURPH_ALLOW_TESTBOX_SPEND: "1",
-      MURPH_CRABBOX_POOL: "pool",
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-    }, true)).toContain("does not use Crabbox pools");
-
-    expect(resolveExecutor({
-      MURPH_ALLOW_TESTBOX_SPEND: "1",
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-    }, true)).toMatchObject({
-      executor: "crabbox",
-      reason: "explicit",
-    });
-
-    expect(resolveExecutorFailure({
-      MURPH_ALLOW_TESTBOX_SPEND: "1",
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-    }, false)).toContain("Crabbox and Blacksmith CLIs are unavailable");
-
+  it("fails closed when the explicit remote stack is unavailable", () => {
     expect(resolveExecutorFailure({
       MURPH_VERIFY_EXECUTOR: "ssh",
       ...validSshRoutingEnvironment,
@@ -216,423 +167,6 @@ describe("verification dispatcher", () => {
     });
   });
 
-  it("uses the direct Blacksmith provider without environment forwarding", () => {
-    const tempRoot = makeTempRoot();
-    const binDir = path.join(tempRoot, "bin");
-    const capturePath = path.join(tempRoot, "args.txt");
-    const crabboxProbeCapturePath = path.join(tempRoot, "crabbox-probe-env.txt");
-    const blacksmithProbeCapturePath = path.join(tempRoot, "blacksmith-probe-env.txt");
-    const envCapturePath = path.join(tempRoot, "env-allow.txt");
-    const secretCapturePath = path.join(tempRoot, "secret-env.txt");
-    const sentinelCapturePath = path.join(tempRoot, "sentinel.txt");
-    const expectedSanitizedProbeEnvironment = "unset\n".repeat(10);
-    const fakeCrabboxPath = path.join(binDir, "crabbox");
-    const fakeBlacksmithPath = path.join(binDir, "blacksmith");
-    const testRepoDir = path.join(tempRoot, "repo");
-    const testScriptsDir = path.join(testRepoDir, "scripts");
-    mkdirSync(testScriptsDir, { recursive: true });
-    writeFileSync(
-      path.join(testScriptsDir, "verification-dispatch.mjs"),
-      readFileSync(dispatcherPath, "utf8"),
-      "utf8",
-    );
-    runGit(testRepoDir, ["init", "--quiet"]);
-    runGit(testRepoDir, ["add", "scripts"]);
-    runGit(testRepoDir, [
-      "-c",
-      "user.name=Crabbox Test",
-      "-c",
-      "user.email=crabbox-test@users.noreply.github.com",
-      "commit",
-      "--quiet",
-      "-m",
-      "initial",
-    ]);
-    const dispatcherUnderTest = realpathSync(
-      path.join(testScriptsDir, "verification-dispatch.mjs"),
-    );
-    writeExecutable(
-      fakeCrabboxPath,
-      [
-        "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then',
-        `  printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" "\${CRABBOX_ENV_ALLOW-unset}" "\${CRABBOX_CONFIG-unset}" "\${MURPH_CRABBOX_PROFILE-unset}" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(crabboxProbeCapturePath)}`,
-        "  exit 0",
-        "fi",
-        'for arg in "$@"; do',
-        '  if [ "$arg" = "--stop-after" ]; then',
-        '    printf "%s\\n" "blacksmith-testbox delegates run execution; --stop-after is not supported" >&2',
-        "    exit 2",
-        "  fi",
-        "done",
-        `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
-        `printf "%s" "\${CRABBOX_ENV_ALLOW-unset}" > ${shellQuote(envCapturePath)}`,
-        `printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(secretCapturePath)}`,
-        `printf "%s" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(sentinelCapturePath)}`,
-      ].join("\n"),
-    );
-    writeExecutable(
-      fakeBlacksmithPath,
-      [
-        "#!/bin/sh",
-        `printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" "\${CRABBOX_ENV_ALLOW-unset}" "\${CRABBOX_CONFIG-unset}" "\${MURPH_CRABBOX_PROFILE-unset}" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(blacksmithProbeCapturePath)}`,
-        "exit 0",
-      ].join("\n"),
-    );
-    const result = spawnSync(
-      process.execPath,
-      [dispatcherUnderTest, "test:diff", "packages/assistant-engine"],
-      {
-        cwd: testRepoDir,
-        encoding: "utf8",
-        env: {
-          ...withoutVerificationRoutingEnvironment(process.env),
-          CODEX_THREAD_ID: "thread-1",
-          CI: "",
-          CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
-          CRABBOX_CONFIG: "/tmp/attacker-controlled-crabbox.yaml",
-          CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
-          GITHUB_TOKEN: "must-not-reach-crabbox",
-          MURPH_ALLOW_TESTBOX_SPEND: "1",
-          MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
-          MURPH_CRABBOX_PROFILE: "attacker-controlled-profile",
-          MURPH_VERIFY_EXECUTOR: "crabbox",
-          MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
-          NODE_OPTIONS: "--trace-warnings",
-          OPENAI_API_KEY: "must-not-reach-crabbox",
-          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-          STRIPE_SECRET_KEY: "must-not-reach-crabbox",
-        },
-      },
-    );
-
-    expect(result.status, result.stderr).toBe(0);
-    const args = readFileSync(capturePath, "utf8").trim().split("\n");
-    expect(readFileSync(crabboxProbeCapturePath, "utf8")).toBe(
-      expectedSanitizedProbeEnvironment,
-    );
-    expect(readFileSync(blacksmithProbeCapturePath, "utf8")).toBe(
-      expectedSanitizedProbeEnvironment,
-    );
-    expect(readFileSync(envCapturePath, "utf8")).toBe("unset");
-    expect(readFileSync(secretCapturePath, "utf8")).toBe(
-      "unset\nunset\nunset\nunset\nunset\nunset\n",
-    );
-    expect(readFileSync(sentinelCapturePath, "utf8")).toBe("unset");
-    const providerIndex = args.indexOf("--provider");
-    expect(providerIndex).toBeGreaterThan(-1);
-    expect(args[providerIndex + 1]).toBe("blacksmith-testbox");
-    expect(flagValue(args, "--profile")).toBe("murph-verification");
-    expect(flagValue(args, "--blacksmith-org")).toBe("cobuildwithus");
-    expect(flagValue(args, "--blacksmith-ref")).toBe("main");
-    expect(flagValue(args, "--blacksmith-workflow")).toBe(
-      ".github/workflows/crabbox-bounded.yml",
-    );
-    expect(flagValue(args, "--blacksmith-job")).toBe("hydrate");
-    expect(flagValue(args, "--idle-timeout")).toBe("10m");
-    expect(args).not.toContain("--ttl");
-    expect(args).not.toContain("--stop-after");
-    expect(args).not.toContain("--keep");
-    expect(args).not.toContain("--keep-on-failure");
-    expect(args).not.toContain("--id");
-    expect(args).not.toContain("--pool");
-    expect(args).not.toContain("--pool-return");
-    expect(args).not.toContain("--allow-env");
-    expect(args).not.toContain("--env-from-profile");
-    expect(args.slice(-3)).toEqual([
-      "/usr/local/bin/murph-crabbox-verify",
-      "test:diff",
-      "packages/assistant-engine",
-    ]);
-
-    const leaseResult = spawnSync(
-      process.execPath,
-      [dispatcherUnderTest, "verify:acceptance"],
-      {
-        cwd: testRepoDir,
-        encoding: "utf8",
-        env: {
-          ...withoutVerificationRoutingEnvironment(process.env),
-          CODEX_THREAD_ID: "thread-1",
-          CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
-          CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
-          GITHUB_TOKEN: "must-not-reach-crabbox",
-          MURPH_ALLOW_TESTBOX_SPEND: "1",
-          MURPH_CRABBOX_LEASE_ID: "lease-1",
-          MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
-          MURPH_VERIFY_EXECUTOR: "crabbox",
-          NODE_OPTIONS: "--trace-warnings",
-          OPENAI_API_KEY: "must-not-reach-crabbox",
-          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-          STRIPE_SECRET_KEY: "must-not-reach-crabbox",
-        },
-      },
-    );
-
-    expect(leaseResult.status).toBe(1);
-    expect(leaseResult.stderr).toContain(
-      "an arbitrary existing lease cannot prove the organization",
-    );
-  });
-
-  it("retains the last failed Testbox transcript and clears it after success", () => {
-    const tempRoot = makeTempRoot();
-    const binDir = path.join(tempRoot, "bin");
-    const fakeCrabboxPath = path.join(binDir, "crabbox");
-    const testRepoDir = path.join(tempRoot, "repo");
-    const testScriptsDir = path.join(testRepoDir, "scripts");
-    const failureArtifactPath = path.join(
-      testRepoDir,
-      ".artifacts",
-      "verification",
-      "crabbox-last-failure",
-    );
-    mkdirSync(testScriptsDir, { recursive: true });
-    writeFileSync(
-      path.join(testScriptsDir, "verification-dispatch.mjs"),
-      readFileSync(dispatcherPath, "utf8"),
-      "utf8",
-    );
-    writeFileSync(path.join(testRepoDir, ".gitignore"), "/.artifacts/\n", "utf8");
-    runGit(testRepoDir, ["init", "--quiet"]);
-    runGit(testRepoDir, ["add", ".gitignore", "scripts"]);
-    runGit(testRepoDir, [
-      "-c",
-      "user.name=Crabbox Test",
-      "-c",
-      "user.email=crabbox-test@users.noreply.github.com",
-      "commit",
-      "--quiet",
-      "-m",
-      "initial",
-    ]);
-    writeExecutable(
-      fakeCrabboxPath,
-      [
-        "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        'printf "%s\\n" "delegated exact failing test"',
-        'printf "%s\\n" "delegated exact stderr" >&2',
-        "exit 37",
-      ].join("\n"),
-    );
-    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
-    const dispatcherUnderTest = realpathSync(
-      path.join(testScriptsDir, "verification-dispatch.mjs"),
-    );
-    const environment = {
-      ...withoutVerificationRoutingEnvironment(process.env),
-      MURPH_ALLOW_TESTBOX_SPEND: "1",
-      MURPH_VERIFY_EXECUTOR: "crabbox",
-      MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
-      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-    };
-
-    const failed = spawnSync(
-      process.execPath,
-      [dispatcherUnderTest, "test:diff", "scripts/verification-dispatch.mjs"],
-      { cwd: testRepoDir, encoding: "utf8", env: environment },
-    );
-
-    expect(failed.status).toBe(37);
-    expect(failed.stdout).toContain("delegated exact failing test");
-    expect(failed.stderr).toContain("delegated exact stderr");
-    expect(failed.stderr).toContain(
-      "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
-    );
-    expect(readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8")).toContain(
-      "delegated exact failing test",
-    );
-    expect(readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8")).toContain(
-      "delegated exact stderr",
-    );
-    const runMetadataLines = readFileSync(
-      path.join(failureArtifactPath, "run.txt"),
-      "utf8",
-    ).trimEnd().split("\n");
-    expect(runMetadataLines).toEqual([
-      expect.stringMatching(/^command-argv-json=/u),
-      "executor=crabbox",
-      expect.stringMatching(/^candidate-tree=[a-f0-9]{40}$/u),
-    ]);
-    expect(
-      JSON.parse(
-        runMetadataLines[0]?.slice("command-argv-json=".length) ?? "null",
-      ),
-    ).toEqual(["test:diff", "scripts/verification-dispatch.mjs"]);
-    expect(statSync(failureArtifactPath).mode & 0o777).toBe(0o700);
-    for (const fileName of ["run.txt", "stdout.log", "stderr.log"]) {
-      expect(statSync(path.join(failureArtifactPath, fileName)).mode & 0o777).toBe(
-        0o600,
-      );
-    }
-
-    writeExecutable(
-      fakeCrabboxPath,
-      [
-        "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        'printf "%s\\n" "delegated success"',
-      ].join("\n"),
-    );
-    const succeeded = spawnSync(
-      process.execPath,
-      [dispatcherUnderTest, "test:diff", "scripts/verification-dispatch.mjs"],
-      { cwd: testRepoDir, encoding: "utf8", env: environment },
-    );
-
-    expect(succeeded.status, succeeded.stderr).toBe(0);
-    expect(succeeded.stdout).toContain("delegated success");
-    expect(existsSync(failureArtifactPath)).toBe(false);
-  });
-
-  it.each([
-    { closedDestination: "stdout", delegatedStatus: 0 },
-    { closedDestination: "stdout", delegatedStatus: 37 },
-    { closedDestination: "stderr", delegatedStatus: 0 },
-    { closedDestination: "stderr", delegatedStatus: 37 },
-  ] as const)(
-    "reaps Testbox with status $delegatedStatus after a queued $closedDestination EPIPE",
-    async ({ closedDestination, delegatedStatus }) => {
-      const tempRoot = makeTempRoot();
-      const binDir = path.join(tempRoot, "bin");
-      const fakeCrabboxPath = path.join(binDir, "crabbox");
-      const delayedOutputErrorPath = path.join(
-        tempRoot,
-        "delay-output-error.cjs",
-      );
-      const testRepoDir = path.join(tempRoot, "repo");
-      const testScriptsDir = path.join(testRepoDir, "scripts");
-      const childCompletedPath = path.join(tempRoot, "child-completed.txt");
-      const failureArtifactPath = path.join(
-        testRepoDir,
-        ".artifacts",
-        "verification",
-        "crabbox-last-failure",
-      );
-      mkdirSync(testScriptsDir, { recursive: true });
-      writeFileSync(
-        path.join(testScriptsDir, "verification-dispatch.mjs"),
-        readFileSync(dispatcherPath, "utf8"),
-        "utf8",
-      );
-      writeFileSync(
-        path.join(testRepoDir, ".gitignore"),
-        "/.artifacts/\n",
-        "utf8",
-      );
-      writeFileSync(
-        delayedOutputErrorPath,
-        [
-          "const destination = process[process.env.MURPH_TEST_DELAY_OUTPUT_ERROR];",
-          "const originalEmit = destination.emit;",
-          "let delayed = false;",
-          "destination.emit = function (event, ...args) {",
-          "  const error = args[0];",
-          '  if (!delayed && event === "error" && error?.code === "EPIPE") {',
-          "    delayed = true;",
-          "    setTimeout(() => originalEmit.call(destination, event, ...args), 100);",
-          "    return false;",
-          "  }",
-          "  return originalEmit.call(destination, event, ...args);",
-          "};",
-        ].join("\n"),
-        "utf8",
-      );
-      runGit(testRepoDir, ["init", "--quiet"]);
-      runGit(testRepoDir, ["add", ".gitignore", "scripts"]);
-      runGit(testRepoDir, [
-        "-c",
-        "user.name=Crabbox Test",
-        "-c",
-        "user.email=crabbox-test@users.noreply.github.com",
-        "commit",
-        "--quiet",
-        "-m",
-        "initial",
-      ]);
-      writeExecutable(
-        fakeCrabboxPath,
-        [
-          "#!/bin/sh",
-          'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-          'printf "%s\\n" "delegated stdout before close"',
-          'printf "%s\\n" "delegated stderr before close" >&2',
-          "sleep 0.1",
-          'printf "%s\\n" "delegated stdout after close"',
-          'printf "%s\\n" "delegated stderr after close" >&2',
-          `printf "%s\\n" "completed" > ${shellQuote(childCompletedPath)}`,
-          'printf "%s\\n" "delegated stderr after close" >&2',
-          `exit ${delegatedStatus}`,
-        ].join("\n"),
-      );
-      writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
-      const dispatcher = spawn(
-        process.execPath,
-        [
-          realpathSync(path.join(testScriptsDir, "verification-dispatch.mjs")),
-          "test:diff",
-          "scripts/verification-dispatch.mjs",
-        ],
-        {
-          cwd: testRepoDir,
-          env: {
-            ...withoutVerificationRoutingEnvironment(process.env),
-            MURPH_ALLOW_TESTBOX_SPEND: "1",
-            MURPH_TEST_DELAY_OUTPUT_ERROR: closedDestination,
-            MURPH_VERIFY_EXECUTOR: "crabbox",
-            MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
-            NODE_OPTIONS: `--require=${delayedOutputErrorPath}`,
-            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-          },
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-      const stderrChunks: Buffer[] = [];
-      const stdoutChunks: Buffer[] = [];
-      dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-      dispatcher.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-      const closedChunks = closedDestination === "stdout"
-        ? stdoutChunks
-        : stderrChunks;
-      try {
-        await waitForCondition(
-          () => Buffer.concat(closedChunks).toString("utf8").includes(
-            `delegated ${closedDestination} before close`,
-          ),
-          `delegated ${closedDestination} output before destination close`,
-          15_000,
-        );
-      } catch (error) {
-        throw new Error(
-          `${error instanceof Error ? error.message : String(error)}\n${Buffer.concat(stderrChunks).toString("utf8")}`,
-        );
-      }
-      dispatcher[closedDestination].destroy();
-
-      const result = await waitForChild(dispatcher);
-
-      expect(result).toEqual({ code: delegatedStatus, signal: null });
-      expect(readFileSync(childCompletedPath, "utf8")).toBe("completed\n");
-      if (delegatedStatus === 0) {
-        expect(existsSync(failureArtifactPath)).toBe(false);
-      } else {
-        expect(
-          readFileSync(path.join(failureArtifactPath, "stdout.log"), "utf8"),
-        ).toContain("delegated stdout after close");
-        expect(
-          readFileSync(path.join(failureArtifactPath, "stderr.log"), "utf8"),
-        ).toContain("delegated stderr after close");
-        const survivingChunks = closedDestination === "stdout"
-          ? stderrChunks
-          : stdoutChunks;
-        expect(Buffer.concat(survivingChunks).toString("utf8")).toContain(
-          "[verification-dispatch] failure-artifact=.artifacts/verification/crabbox-last-failure",
-        );
-      }
-    },
-  );
-
   it("uses one isolated, secret-free static macOS workspace per local worktree", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
@@ -667,7 +201,7 @@ describe("verification dispatcher", () => {
         "#!/bin/sh",
         'if [ "${1:-}" = "--version" ]; then exit 0; fi',
         `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
-        `printf "CRABBOX_STATIC_ID=%s\\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nMURPH_VERIFY_SSH_USER=%s\\nMURPH_VERIFY_SSH_PORT=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${MURPH_VERIFY_SSH_USER-unset}" "\${MURPH_VERIFY_SSH_PORT-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
+        `printf "CRABBOX_STATIC_ID=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nMURPH_VERIFY_SSH_USER=%s\\nMURPH_VERIFY_SSH_PORT=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${MURPH_VERIFY_SSH_USER-unset}" "\${MURPH_VERIFY_SSH_PORT-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
       ].join("\n"),
     );
     const result = spawnSync(
@@ -680,7 +214,6 @@ describe("verification dispatcher", () => {
           ...withoutVerificationRoutingEnvironment(process.env),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
-          MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
           NODE_OPTIONS: "--trace-warnings",
           OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -714,7 +247,7 @@ describe("verification dispatcher", () => {
       "packages/assistant-engine",
     ]);
     expect(readFileSync(environmentPath, "utf8")).toMatch(
-      /^CRABBOX_STATIC_ID=static_murph_[a-f0-9]{16}\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=unset\nMURPH_VERIFY_SSH_HOST=unset\nMURPH_VERIFY_SSH_USER=unset\nMURPH_VERIFY_SSH_PORT=unset\nOPENAI_API_KEY=unset\nNODE_OPTIONS=unset\n$/u,
+      /^CRABBOX_STATIC_ID=static_murph_[a-f0-9]{16}\nMURPH_VERIFY_SSH_HOST=unset\nMURPH_VERIFY_SSH_USER=unset\nMURPH_VERIFY_SSH_PORT=unset\nOPENAI_API_KEY=unset\nNODE_OPTIONS=unset\n$/u,
     );
 
     const firstIdentity = callDispatcherExport<Record<string, string>>(
@@ -734,154 +267,6 @@ describe("verification dispatcher", () => {
     expect(secondIdentity.staticId).not.toBe(firstIdentity.staticId);
     expect(secondIdentity.workRoot).not.toBe(firstIdentity.workRoot);
     expect(Object.values(firstIdentity).join(" ")).not.toContain("/workspace/one");
-
-    expect(callDispatcherExport<Record<string, unknown>>(
-      "buildLockedRemoteDispatcherInvocation",
-      {
-        request: {
-          commandArgs: [],
-          verificationCommand: "verify:acceptance",
-        },
-        argv: ["verify:acceptance"],
-      },
-    )).toMatchObject({
-      command: "node",
-      args: [
-        "scripts/run-with-workspace-artifact-lock.mjs",
-        "remote verify:acceptance",
-        "--",
-        "node",
-        "scripts/verification-dispatch.mjs",
-        "verify:acceptance",
-      ],
-    });
-  });
-
-  it("checks the remote sync candidate only after acquiring the workspace lock", async () => {
-    const tempRoot = makeTempRoot();
-    const repoDir = path.join(tempRoot, "repo");
-    const scriptsDir = path.join(repoDir, "scripts");
-    const binDir = path.join(tempRoot, "bin");
-    const lockReadyPath = path.join(tempRoot, "lock-ready");
-    const lockReleasePath = path.join(tempRoot, "lock-release");
-    const providerMarkerPath = path.join(tempRoot, "provider-called");
-    mkdirSync(scriptsDir, { recursive: true });
-    writeFileSync(
-      path.join(scriptsDir, "verification-dispatch.mjs"),
-      readFileSync(dispatcherPath, "utf8"),
-      "utf8",
-    );
-    writeFileSync(
-      path.join(scriptsDir, "run-with-workspace-artifact-lock.mjs"),
-      readFileSync(
-        path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs"),
-        "utf8",
-      ),
-      "utf8",
-    );
-    writeExecutable(
-      path.join(scriptsDir, "hold-lock.sh"),
-      [
-        "#!/bin/sh",
-        `: > ${shellQuote(lockReadyPath)}`,
-        `while [ ! -f ${shellQuote(lockReleasePath)} ]; do sleep 0.05; done`,
-      ].join("\n"),
-    );
-    writeExecutable(
-      path.join(binDir, "crabbox"),
-      [
-        "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        `: > ${shellQuote(providerMarkerPath)}`,
-      ].join("\n"),
-    );
-    runGit(repoDir, ["init", "--quiet"]);
-    runGit(repoDir, ["add", "scripts"]);
-    runGit(repoDir, [
-      "-c",
-      "user.name=Crabbox Test",
-      "-c",
-      "user.email=crabbox-test@users.noreply.github.com",
-      "commit",
-      "--quiet",
-      "-m",
-      "initial",
-    ]);
-
-    const baseEnvironment: NodeJS.ProcessEnv = {
-      ...withoutVerificationRoutingEnvironment(process.env),
-      HOME: path.join(tempRoot, "home"),
-      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-    };
-    const lockHolder = spawn(
-      process.execPath,
-      [
-        path.join(scriptsDir, "run-with-workspace-artifact-lock.mjs"),
-        "test lock holder",
-        "--",
-        path.join(scriptsDir, "hold-lock.sh"),
-      ],
-      {
-        cwd: repoDir,
-        env: baseEnvironment,
-        stdio: "ignore",
-      },
-    );
-    await waitForFile(lockReadyPath);
-
-    const dispatcher = spawn(
-      process.execPath,
-      [
-        realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
-        "test:diff",
-        "scripts/verification-dispatch.mjs",
-      ],
-      {
-        cwd: repoDir,
-        env: {
-          ...baseEnvironment,
-          MURPH_VERIFY_EXECUTOR: "ssh",
-          ...validSshRoutingEnvironment,
-        },
-        stdio: ["ignore", "ignore", "pipe"],
-      },
-    );
-    const stderrChunks: Buffer[] = [];
-    dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-    try {
-      await waitForCondition(
-        () => Buffer.concat(stderrChunks).toString("utf8").includes(
-          "state=waiting-for-workspace-lock",
-        ) || dispatcher.exitCode !== null,
-        "dispatcher to enter or reject the workspace lock",
-      );
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(
-        Buffer.concat(stderrChunks).toString("utf8"),
-        `dispatcher exited with code ${dispatcher.exitCode} before waiting for the workspace lock`,
-      ).toContain("state=waiting-for-workspace-lock");
-      writeFileSync(path.join(repoDir, "raced.txt"), "changed while waiting\n", "utf8");
-      writeFileSync(lockReleasePath, "release\n", "utf8");
-
-      const [lockResult, dispatcherResult] = await Promise.all([
-        waitForChild(lockHolder),
-        waitForChild(dispatcher),
-      ]);
-      expect(lockResult).toEqual({ code: 0, signal: null });
-      expect(dispatcherResult).toEqual({ code: 1, signal: null });
-      expect(Buffer.concat(stderrChunks).toString("utf8")).toContain(
-        "unauthorized Git state (untracked=1)",
-      );
-      expect(existsSync(providerMarkerPath)).toBe(false);
-    } finally {
-      if (!existsSync(lockReleasePath)) {
-        writeFileSync(lockReleasePath, "release\n", "utf8");
-      }
-      await Promise.allSettled([
-        waitForChild(lockHolder),
-        waitForChild(dispatcher),
-      ]);
-    }
   });
 
   it("freezes one candidate before provider sync and preserves implicit diff scope", async () => {
@@ -952,7 +337,7 @@ describe("verification dispatcher", () => {
       {
         cwd: repoDir,
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
@@ -1062,7 +447,7 @@ describe("verification dispatcher", () => {
       {
         cwd: repoDir,
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
@@ -1086,76 +471,6 @@ describe("verification dispatcher", () => {
     expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(
       false,
     );
-  });
-
-  it("keeps a clean Blacksmith candidate in the no-change verification scope", () => {
-    const tempRoot = makeTempRoot();
-    const repoDir = path.join(tempRoot, "repo");
-    const scriptsDir = path.join(repoDir, "scripts");
-    const binDir = path.join(tempRoot, "bin");
-    const providerStatusPath = path.join(tempRoot, "provider-status");
-    const providerScopePath = path.join(tempRoot, "provider-scope");
-    mkdirSync(scriptsDir, { recursive: true });
-    for (const scriptName of [
-      "check-workspace-package-cycles.mjs",
-      "verification-dispatch.mjs",
-      "workspace-diff-scope.mjs",
-    ]) {
-      writeFileSync(
-        path.join(scriptsDir, scriptName),
-        readFileSync(path.join(repoRoot, "scripts", scriptName), "utf8"),
-        "utf8",
-      );
-    }
-    writeExecutable(
-      path.join(binDir, "crabbox"),
-      [
-        "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        `git status --porcelain > ${shellQuote(providerStatusPath)}`,
-        `node scripts/workspace-diff-scope.mjs > ${shellQuote(providerScopePath)}`,
-      ].join("\n"),
-    );
-    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
-    runGit(repoDir, ["init", "--quiet"]);
-    runGit(repoDir, ["add", "scripts"]);
-    runGit(repoDir, [
-      "-c",
-      "user.name=Crabbox Test",
-      "-c",
-      "user.email=crabbox-test@users.noreply.github.com",
-      "commit",
-      "--quiet",
-      "-m",
-      "initial",
-    ]);
-
-    const result = spawnSync(
-      process.execPath,
-      [
-        realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
-        "test:diff",
-      ],
-      {
-        cwd: repoDir,
-        encoding: "utf8",
-        env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
-          HOME: path.join(tempRoot, "home"),
-          MURPH_ALLOW_TESTBOX_SPEND: "1",
-          MURPH_VERIFY_EXECUTOR: "crabbox",
-          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-        },
-      },
-    );
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(providerStatusPath, "utf8")).toBe("");
-    expect(JSON.parse(readFileSync(providerScopePath, "utf8"))).toMatchObject({
-      changedFiles: [],
-      noChanges: true,
-      summary: "no changed files detected",
-    });
   });
 
   it("rejects a staged addition changed while the frozen candidate is captured", async () => {
@@ -1220,7 +535,7 @@ describe("verification dispatcher", () => {
       {
         cwd: repoDir,
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
@@ -1285,16 +600,11 @@ describe("verification dispatcher", () => {
       const overlapPath = path.join(tempRoot, "overlap");
       const retryPath = path.join(tempRoot, "retry-complete");
       mkdirSync(scriptsDir, { recursive: true });
-      for (const scriptName of [
-        "verification-dispatch.mjs",
-        "run-with-workspace-artifact-lock.mjs",
-      ]) {
-        writeFileSync(
-          path.join(scriptsDir, scriptName),
-          readFileSync(path.join(repoRoot, "scripts", scriptName), "utf8"),
-          "utf8",
-        );
-      }
+      writeFileSync(
+        path.join(scriptsDir, "verification-dispatch.mjs"),
+        readFileSync(dispatcherPath, "utf8"),
+        "utf8",
+      );
       const sshWrapperSource = readFileSync(
         path.join(
           repoRoot,
@@ -1386,20 +696,12 @@ describe("verification dispatcher", () => {
         ...validSshRoutingEnvironment,
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
       };
-      const lockWrapperPath = path.join(
-        scriptsDir,
-        "run-with-workspace-artifact-lock.mjs",
-      );
       const dispatcherPathInRepo = realpathSync(
         path.join(scriptsDir, "verification-dispatch.mjs"),
       );
       const runRemoteDiff = () => spawn(
         process.execPath,
         [
-          lockWrapperPath,
-          "remote test:diff",
-          "--",
-          process.execPath,
           dispatcherPathInRepo,
           "test:diff",
           "scripts/verification-dispatch.mjs",
@@ -1409,12 +711,6 @@ describe("verification dispatcher", () => {
           env: baseEnvironment,
           stdio: "ignore",
         },
-      );
-      const lockPath = path.join(
-        repoDir,
-        ".git",
-        "murph-locks",
-        "workspace-artifacts.lock",
       );
       try {
         const firstRun = runRemoteDiff();
@@ -1428,7 +724,6 @@ describe("verification dispatcher", () => {
         );
         expect(Number.isInteger(remotePid)).toBe(true);
         expect(isProcessRunning(remotePid)).toBe(true);
-        expect(existsSync(lockPath)).toBe(false);
         expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(
           false,
         );
@@ -1437,7 +732,6 @@ describe("verification dispatcher", () => {
         expect(existsSync(blockedPath)).toBe(true);
         expect(existsSync(overlapPath)).toBe(false);
         expect(existsSync(retryPath)).toBe(false);
-        expect(existsSync(lockPath)).toBe(false);
 
         writeFileSync(remoteReleasePath, "release\n", "utf8");
         await waitForFile(remoteDonePath);
@@ -1451,7 +745,6 @@ describe("verification dispatcher", () => {
           signal: null,
         });
         expect(existsSync(retryPath)).toBe(true);
-        expect(existsSync(lockPath)).toBe(false);
       } finally {
         if (!existsSync(remoteReleasePath)) {
           writeFileSync(remoteReleasePath, "release\n", "utf8");
@@ -1544,7 +837,6 @@ describe("verification dispatcher", () => {
         `: > ${shellQuote(delegationMarkerPath)}`,
       ].join("\n"),
     );
-    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
     const fakeGitPath = path.join(binDir, "git");
 
     for (const [status, reason] of [
@@ -1582,9 +874,9 @@ describe("verification dispatcher", () => {
           cwd: repoRoot,
           encoding: "utf8",
           env: {
-            ...insideWorkspaceArtifactLockEnvironment(process.env),
-            MURPH_ALLOW_TESTBOX_SPEND: "1",
-            MURPH_VERIFY_EXECUTOR: "crabbox",
+            ...withoutVerificationRoutingEnvironment(process.env),
+            MURPH_VERIFY_EXECUTOR: "ssh",
+            ...validSshRoutingEnvironment,
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
         },
@@ -1614,9 +906,9 @@ describe("verification dispatcher", () => {
         cwd: repoRoot,
         encoding: "utf8",
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
-          MURPH_ALLOW_TESTBOX_SPEND: "1",
-          MURPH_VERIFY_EXECUTOR: "crabbox",
+          ...withoutVerificationRoutingEnvironment(process.env),
+          MURPH_VERIFY_EXECUTOR: "ssh",
+          ...validSshRoutingEnvironment,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       },
@@ -1641,7 +933,6 @@ describe("verification dispatcher", () => {
         `: > ${shellQuote(delegationMarkerPath)}`,
       ].join("\n"),
     );
-    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
     writeExecutable(
       path.join(binDir, "git"),
       [
@@ -1660,9 +951,9 @@ describe("verification dispatcher", () => {
         cwd: repoRoot,
         encoding: "utf8",
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
-          MURPH_ALLOW_TESTBOX_SPEND: "1",
-          MURPH_VERIFY_EXECUTOR: "crabbox",
+          ...withoutVerificationRoutingEnvironment(process.env),
+          MURPH_VERIFY_EXECUTOR: "ssh",
+          ...validSshRoutingEnvironment,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       },
@@ -1958,27 +1249,13 @@ function withoutVerificationRoutingEnvironment(
   const sanitized = { ...environment };
   delete sanitized.CI;
   delete sanitized.CODEX_THREAD_ID;
-  delete sanitized.MURPH_ALLOW_TESTBOX_SPEND;
-  delete sanitized.MURPH_CRABBOX_BLACKSMITH;
-  delete sanitized.MURPH_CRABBOX_LEASE_ID;
-  delete sanitized.MURPH_CRABBOX_POOL;
   delete sanitized.MURPH_CRABBOX_REMOTE;
   delete sanitized.MURPH_VERIFY_EXECUTOR;
   delete sanitized.MURPH_VERIFY_REQUIRES_VERCEL_ENV;
   delete sanitized.MURPH_VERIFY_SSH_HOST;
   delete sanitized.MURPH_VERIFY_SSH_PORT;
   delete sanitized.MURPH_VERIFY_SSH_USER;
-  delete sanitized.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD;
   return sanitized;
-}
-
-function insideWorkspaceArtifactLockEnvironment(
-  environment: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  return {
-    ...withoutVerificationRoutingEnvironment(environment),
-    MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
-  };
 }
 
 function runGit(

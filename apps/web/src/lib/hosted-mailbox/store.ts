@@ -842,9 +842,8 @@ export async function appendHostedMailboxEnvelopeTx(input: {
 
 /**
  * Scheduled v3 device-sync wakes retain one stable identity while their
- * runtime-owned retry is pending. Once retention removes the imported payload,
- * the runtime checkpoint must identify this row as its exact first pending
- * system item before Web can reuse that owner.
+ * runtime-owned continuation remains active. Once retention removes the
+ * imported payload, Web reuses only the runtime's exact sequence owner.
  */
 export async function appendHostedScheduledDeviceSyncWakeEnvelopeTx(input: {
   envelope: HostedExecutionDeviceSyncWake;
@@ -1452,34 +1451,6 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
   userId: string;
 }): Promise<FetchHostedRuntimeMailboxProjectionResult> {
   const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-
-  if (isHostedMailboxRootClient(prisma)) {
-    return prisma.$transaction((tx) =>
-      fetchHostedRuntimeMailboxProjectionTx({
-        ...input,
-        now,
-        tx,
-      })
-    );
-  }
-
-  return fetchHostedRuntimeMailboxProjectionTx({
-    ...input,
-    now,
-    tx: prisma,
-  });
-}
-
-async function fetchHostedRuntimeMailboxProjectionTx(input: {
-  cursorMode?: HostedMailboxFetchCursorMode | null;
-  lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
-  limitPerLane: number;
-  now: Date | string;
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<FetchHostedRuntimeMailboxProjectionResult> {
-  const prisma = input.tx;
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const limitPerLane = normalizeHostedMailboxFetchLimit(input.limitPerLane);
   const fetchedAt = normalizeHostedMailboxDate(
@@ -1820,6 +1791,10 @@ export async function readHostedMailboxMaxSeqByLane(input: {
     const row = await prisma.hostedMailboxItem.findFirst({
       orderBy: {
         laneSeq: "desc",
+      },
+      select: {
+        laneSeq: true,
+        updatedAt: true,
       },
       where: {
         ...buildHostedMailboxLiveItemWhere(now),
@@ -3624,10 +3599,24 @@ async function hasHostedMailboxRuntimeImportedRetiredDuplicateTx(input: {
         AND item."payload_hash" IS NULL
         AND item."content_retired_at" IS NOT NULL
         AND item."retention_disposition" IS NULL
-        AND item."lane_seq" = lane_counter."consumed_seq" + 1::bigint
-        AND workspace."redacted_status_json"
-          -> 'hostedMailboxSystemFirstPendingSeq'
-          = to_jsonb(item."lane_seq"::text)
+        AND (
+          (
+            item."lane_seq" = lane_counter."consumed_seq" + 1::bigint
+            AND workspace."redacted_status_json"
+              -> 'hostedMailboxSystemFirstPendingSeq'
+              = to_jsonb(item."lane_seq"::text)
+          )
+          OR (
+            jsonb_typeof(
+              workspace."redacted_status_json"
+                -> 'hostedMailboxSystemDeviceSyncContinuationSeqs'
+            ) = 'array'
+            AND (
+              workspace."redacted_status_json"
+                -> 'hostedMailboxSystemDeviceSyncContinuationSeqs'
+            ) ? item."lane_seq"::text
+          )
+        )
         AND NOT EXISTS (
           SELECT 1
           FROM "hosted_mailbox_payload" AS payload

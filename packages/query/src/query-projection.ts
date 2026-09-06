@@ -1,4 +1,7 @@
-import { isValidIanaTimeZone } from "@murphai/contracts";
+import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
+import {
+  isValidIanaTimeZone,
+} from "@murphai/contracts";
 import {
   selectMetricGoalProgress,
   selectMetricValue,
@@ -486,35 +489,40 @@ async function ensureFreshQueryProjection(
   vaultRoot: string,
   readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
 ): Promise<QueryProjectionLocation> {
-  const location = currentQueryProjectionLocation(vaultRoot);
-  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
-  const status = await readProjectionStatus(location, currentManifest);
+  const endFreshness = startCliPhase("query-freshness");
+  try {
+    const location = currentQueryProjectionLocation(vaultRoot);
+    const currentManifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    const status = await timeCliPhase("query-status", () => readProjectionStatus(location, currentManifest));
 
-  if (!status?.fresh) {
-    await rebuildQueryProjectionWithManifestOnce({
-      currentManifest,
-      location,
-      readSource,
-      vaultRoot,
-    });
-    const rebuiltStatus = await readProjectionStatus(location, currentManifest);
+    if (!status?.fresh) {
+      await rebuildQueryProjectionWithManifestOnce({
+        currentManifest,
+        location,
+        readSource,
+        vaultRoot,
+      });
+      const rebuiltStatus = await timeCliPhase("query-status", () => readProjectionStatus(location, currentManifest));
 
-    if (!rebuiltStatus?.fresh) {
-      const refreshedManifest = await listCanonicalSourceManifest(vaultRoot);
-      const refreshedStatus = await readProjectionStatus(location, refreshedManifest);
+      if (!rebuiltStatus?.fresh) {
+        const refreshedManifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+        const refreshedStatus = await timeCliPhase("query-status", () => readProjectionStatus(location, refreshedManifest));
 
-      if (!refreshedStatus?.fresh) {
-        await rebuildQueryProjectionWithManifestOnce({
-          currentManifest: refreshedManifest,
-          location,
-          readSource,
-          vaultRoot,
-        });
+        if (!refreshedStatus?.fresh) {
+          await rebuildQueryProjectionWithManifestOnce({
+            currentManifest: refreshedManifest,
+            location,
+            readSource,
+            vaultRoot,
+          });
+        }
       }
     }
-  }
 
-  return location;
+    return location;
+  } finally {
+    endFreshness();
+  }
 }
 
 async function rebuildQueryProjectionWithManifestOnce(input: {
@@ -527,10 +535,11 @@ async function rebuildQueryProjectionWithManifestOnce(input: {
   const pending = pendingQueryProjectionRebuilds.get(key);
 
   if (pending) {
-    await pending;
+    await timeCliPhase("query-wait", () => pending);
     return;
   }
 
+  const endRebuild = startCliPhase("query-rebuild");
   const rebuild = rebuildQueryProjectionWithManifest(
     input.vaultRoot,
     input.currentManifest,
@@ -543,6 +552,7 @@ async function rebuildQueryProjectionWithManifestOnce(input: {
   try {
     await rebuild;
   } finally {
+    endRebuild();
     if (pendingQueryProjectionRebuilds.get(key) === rebuild) {
       pendingQueryProjectionRebuilds.delete(key);
     }

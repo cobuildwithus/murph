@@ -27,6 +27,11 @@ Everyone's got something they want from their health. My job is to help you actu
 
 Ready to get started?`;
 
+export const MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS = {
+  casual: "hey — what should i call you? also, how old are you, and are you a guy or a girl?",
+  formal: "What should I call you? How old are you and what's your gender?",
+} as const;
+
 export const assistantReasoningEffortValues = [
   "low",
   "medium",

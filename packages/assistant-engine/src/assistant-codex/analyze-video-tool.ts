@@ -21,6 +21,7 @@ import {
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
+import { assistantInputMediaExpiresAt } from '../assistant/input-media-retention.js'
 import {
   normalizeAssistantRawAttachmentArtifactPath,
 } from '../assistant/attachment-artifact-paths.js'
@@ -28,8 +29,11 @@ import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
-  readAssistantInputEvent,
+  listAssistantInputEvents,
+  resolveAssistantInputEventReferenceAt,
   type AssistantInputAttachmentEvidenceItem,
+  type AssistantInputConversationRef,
+  type AssistantInputEventRecord,
 } from '../assistant/input-store.js'
 
 export interface AnalyzeVideoToolArgs {
@@ -51,12 +55,20 @@ export interface AnalyzeVideoToolRuntime {
 }
 
 export interface AnalyzeVideoAttachmentAuthority {
+  expiresAt?: string
   byteSize: number
   messageRef: string
   mimeType: string | null
   ordinal: number
   rawPath: string
   sha256: string | null
+}
+
+export interface ConversationAttachmentAuthority extends AnalyzeVideoAttachmentAuthority {
+  capturedAt: string
+  expiresAt: string
+  fileName: string | null
+  kind: 'image' | 'video'
 }
 
 interface AnalyzeVideoProviderRequest {
@@ -109,55 +121,95 @@ export function createAnalyzeVideoTurnState(): AnalyzeVideoTurnState {
   }
 }
 
-export async function snapshotAnalyzeVideoAttachmentAuthorities(input: {
-  acceptedInputIds: readonly string[]
-  vaultRoot?: string | null
-}): Promise<AnalyzeVideoAttachmentAuthority[]> {
-  const vaultRoot = normalizeNullableString(input.vaultRoot)
-  if (!vaultRoot) return []
+export function snapshotAnalyzeVideoAttachmentAuthorities(
+  events: readonly AssistantInputEventRecord[],
+): AnalyzeVideoAttachmentAuthority[] {
+  return snapshotConversationAttachmentAuthorities(events)
+    .filter((attachment) => attachment.kind === 'video')
+}
 
-  const authorities: AnalyzeVideoAttachmentAuthority[] = []
-  for (const messageRef of input.acceptedInputIds) {
-    try {
-      const event = await readAssistantInputEvent({ inputId: messageRef, vault: vaultRoot })
-      if (
-        !event
-        || event.inputId !== messageRef
-        || (event.attachmentEvidence.status !== 'available'
-          && event.attachmentEvidence.status !== 'partial')
-      ) {
-        continue
-      }
-      for (const attachment of event.attachmentEvidence.attachments) {
-        if (attachment.kind !== 'video') continue
-        const rawPath = normalizeAssistantRawAttachmentArtifactPath(
-          attachment.raw?.path ?? null,
-        )
-        const byteSize = attachment.raw?.byteSize ?? null
-        const sha256 = attachment.raw?.sha256 ?? null
-        const mimeType = normalizeVideoMimeType(attachment)
-        if (
-          !rawPath
-          || typeof byteSize !== 'number'
-          || !Number.isSafeInteger(byteSize)
-          || byteSize <= 0
-        ) {
-          continue
-        }
-        authorities.push({
-          byteSize,
-          messageRef,
-          mimeType,
-          ordinal: attachment.ordinal,
-          rawPath,
-          sha256,
-        })
-      }
-    } catch {
-      // Invalid or unavailable evidence cannot grant cross-provider egress.
+export function snapshotConversationAttachmentAuthorities(
+  events: readonly AssistantInputEventRecord[],
+  now = Date.now(),
+): ConversationAttachmentAuthority[] {
+  const authorities: ConversationAttachmentAuthority[] = []
+  for (const event of events) {
+    if (event.attachmentEvidence.status !== 'available'
+      && event.attachmentEvidence.status !== 'partial') continue
+    for (const attachment of event.attachmentEvidence.attachments) {
+      const authority = snapshotConversationAttachment(event, attachment, now)
+      if (authority) authorities.push(authority)
     }
   }
   return authorities
+}
+
+function snapshotConversationAttachment(
+  event: AssistantInputEventRecord,
+  attachment: AssistantInputAttachmentEvidenceItem,
+  now: number,
+): ConversationAttachmentAuthority | null {
+  if (attachment.kind !== 'image' && attachment.kind !== 'video') return null
+  const expiresAt = assistantInputMediaExpiresAt(event, attachment)
+  const rawPath = normalizeAssistantRawAttachmentArtifactPath(attachment.raw?.path ?? null)
+  const byteSize = attachment.raw?.byteSize ?? null
+  const sha256 = attachment.raw?.sha256 ?? null
+  if (!expiresAt || expiresAt <= now || !rawPath
+    || typeof byteSize !== 'number' || !Number.isSafeInteger(byteSize) || byteSize <= 0) return null
+  return {
+    byteSize,
+    capturedAt: resolveAssistantInputEventReferenceAt(event),
+    expiresAt: new Date(expiresAt).toISOString(),
+    fileName: attachment.fileName,
+    kind: attachment.kind,
+    messageRef: event.inputId,
+    mimeType: attachment.kind === 'video' ? normalizeVideoMimeType(attachment)
+      : attachment.mime ?? attachment.raw?.mediaType ?? null,
+    ordinal: attachment.ordinal,
+    rawPath,
+    sha256,
+  }
+}
+
+export async function readAnalyzeVideoConversationEvents(input: {
+  acceptedEvents: readonly AssistantInputEventRecord[]
+  vaultRoot: string
+}): Promise<AssistantInputEventRecord[]> {
+  const vaultRoot = input.vaultRoot
+  const currentEvents = input.acceptedEvents
+  const events = new Map(currentEvents.map((event) => [event.inputId, event]))
+  if (events.size > 0) {
+    const history = await listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER,
+      skipInvalidRecords: true,
+      vault: vaultRoot,
+    }).catch(() => ({ events: [] }))
+    for (const event of history.events) {
+      if (currentEvents.some((current) =>
+        resolveAssistantInputEventReferenceAt(event) <= resolveAssistantInputEventReferenceAt(current)
+        && sameVideoConversation(event.conversation, current.conversation)
+      )) {
+        events.set(event.inputId, event)
+      }
+    }
+  }
+
+  return [...events.values()]
+}
+
+function sameVideoConversation(
+  earlier: AssistantInputConversationRef | null,
+  current: AssistantInputConversationRef | null,
+): boolean {
+  if (!earlier || !current || !current.source || !current.threadId) return false
+  return earlier.source === current.source
+    && earlier.accountId === current.accountId
+    && earlier.threadId === current.threadId
+    && earlier.threadIsDirect === current.threadIsDirect
+    && (earlier.sessionId ?? null) === (current.sessionId ?? null)
+    && !earlier.actorIsSelf
+    && (current.threadIsDirect === false
+      || (current.threadIsDirect === true && earlier.actorId === current.actorId))
 }
 
 export const ANALYZE_VIDEO_GEMINI_URL =
@@ -203,7 +255,7 @@ export async function executeAnalyzeVideoTool(input: {
   }
   if (turnState.providerCallCount >= ANALYZE_VIDEO_MAX_PROVIDER_CALLS_PER_TURN) {
     if (!input.acceptedInputIds.includes(input.args.messageRef)) {
-      return failure('The selected video message is not available for this action')
+      return failure('The selected video message is unavailable. Use murph.conversation_attachments to select a retained video from this conversation, or ask the participant to resend it.')
     }
     const selection = selectVideoAttachment({
       attachmentOrdinal: input.args.attachmentOrdinal,
@@ -224,7 +276,7 @@ export async function executeAnalyzeVideoTool(input: {
     return failure('Video analysis is not configured; no analysis ran')
   }
   if (!input.acceptedInputIds.includes(input.args.messageRef)) {
-    return failure('The selected video message is not available for this action')
+    return failure('The selected video message is unavailable. Use murph.conversation_attachments to select a retained video from this conversation, or ask the participant to resend it.')
   }
 
   const vaultRoot = normalizeNullableString(input.vaultRoot)
@@ -458,7 +510,10 @@ async function readVideoAttachmentBestEffort(input: {
   | { ok: true; bytes: Buffer; mimeType: string }
   | { ok: false; message: string }
 > {
-  const { byteSize, mimeType, rawPath, sha256 } = input.attachment
+  const { byteSize, mimeType, rawPath, sha256, expiresAt } = input.attachment
+  if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+    return { ok: false, message: 'This video has expired. Ask the participant to resend it.' }
+  }
   if (byteSize > ANALYZE_VIDEO_MAX_VIDEO_BYTES) {
     return { ok: false, message: 'The video is too large for inline analysis' }
   }
@@ -474,7 +529,7 @@ async function readVideoAttachmentBestEffort(input: {
       maxFileBytes: ANALYZE_VIDEO_MAX_VIDEO_BYTES,
     })
     if (materialization?.missingArtifactPaths.has(rawPath)) {
-      return { ok: false, message: 'The video bytes are no longer available' }
+      return { ok: false, message: 'The video bytes are no longer available. Ask the participant to resend the video.' }
     }
     const absolutePath = await resolveAssistantVaultPath(
       input.vaultRoot,
@@ -491,7 +546,7 @@ async function readVideoAttachmentBestEffort(input: {
     }
     return { ok: true, bytes, mimeType: sniffedMimeType }
   } catch {
-    return { ok: false, message: 'The video bytes could not be loaded' }
+    return { ok: false, message: 'The video could not be loaded. Try again in a later turn, or ask the participant to resend it.' }
   }
 }
 

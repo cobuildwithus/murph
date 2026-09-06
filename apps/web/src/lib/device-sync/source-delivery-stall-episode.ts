@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import {
-  isPushPrimarySourceRecoveryNoticeEligible,
+  isSourceRecoveryNoticeEligible,
 } from "@murphai/device-syncd/source-staleness";
 
 import { readHostedSourceNoDataOutreachPolicy } from "./source-no-data-outreach-policy";
@@ -22,6 +22,7 @@ export interface HostedSourceDeliveryStallNoticeCandidate {
 export function resolveHostedSourceDeliveryStallNoticeCandidate(input: {
   connectionId: string;
   lastDataAt: string | null;
+  lastErrorCode?: string | null;
   lifecycleEpoch: number | null;
   now: string;
   sourceId: string;
@@ -31,7 +32,7 @@ export function resolveHostedSourceDeliveryStallNoticeCandidate(input: {
 }): HostedSourceDeliveryStallNoticeCandidate | null {
   if (
     !SOURCE_ID_PATTERN.test(input.sourceId)
-    || !isPushPrimarySourceRecoveryNoticeEligible(input)
+    || !isSourceRecoveryNoticeEligible(input)
     || input.lastDataAt === null
   ) {
     return null;
@@ -99,6 +100,7 @@ export async function isHostedSourceDeliveryStallEpisodeCurrentTx(input: {
       connectionId: true,
       id: true,
       lastDataAt: true,
+      lastErrorCode: true,
       lifecycleEpoch: true,
       sourceInstanceKey: true,
       sourceProviderSlug: true,
@@ -117,11 +119,11 @@ export async function isHostedSourceDeliveryStallEpisodeCurrentTx(input: {
     !source
     || source.connection.userId !== input.memberId
     || source.connection.status !== "active"
-    || source.status !== "connected"
     || source.lastDataAt === null
     || !outreachPolicy?.enabled
-    || !isPushPrimarySourceRecoveryNoticeEligible({
+    || !isSourceRecoveryNoticeEligible({
       lastDataAt: source.lastDataAt.toISOString(),
+      lastErrorCode: source.lastErrorCode,
       now: input.now,
       silentHours: outreachPolicy.silentHours,
       sourceProviderSlug: source.sourceProviderSlug,

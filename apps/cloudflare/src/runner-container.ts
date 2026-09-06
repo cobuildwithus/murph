@@ -31,9 +31,25 @@ import {
   buildHostedRunnerContainerCaEnv,
 } from "./runner-container-ca-env.ts";
 import {
+  hostedRunnerSlotBindingMatchesTarget,
+  isHostedRunnerSlotName,
+  isHostedRunnerTargetName,
   isHostedStandbySlotName,
+  readHostedStandbyReleaseId,
+  readHostedRunnerTargetIdentity,
+  resolveHostedRunnerReleaseId,
+  type HostedRunnerRegion,
+  type HostedRunnerSlotLifecycle,
   type HostedStandbySlotBinding,
+  type HostedStandbySlotCoordinatorState,
 } from "./standby-runner-contract.js";
+import {
+  RunnerSlotBindingStore,
+  assertRetainedRunnerBinding,
+  assertRetiredRunnerBinding,
+  requireRetainedRunnerRequest,
+  requireRunnerSlotUserId,
+} from "./runner-slot-binding.js";
 import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
 } from "./runner-container-error-codes.ts";
@@ -71,6 +87,10 @@ const RUNNER_LIVE_MODEL_TURN_SMOKE_URL =
   "http://container/internal/deploy-live-model-turn-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
+// Covers the container-side 45s app-server probe plus request/response margin.
+// This diagnostic grew beyond the ordinary member-runtime readiness budget;
+// keeping the budgets separate avoids changing hot-path admission semantics.
+const RUNNER_CODEX_SHELL_SMOKE_MIN_TIMEOUT_MS = 60_000;
 // Covers the container-side 60s codex exec budget plus boot/dispatch margin.
 const RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS = 90_000;
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
@@ -194,13 +214,6 @@ class HostedRunnerContainerShuttingDownError extends Error {
   }
 }
 
-class RunnerContainerShellPrewarmSupersededError extends Error {
-  constructor() {
-    super("Hosted runner shell prewarm was superseded by authoritative readiness.");
-    this.name = "RunnerContainerShellPrewarmSupersededError";
-  }
-}
-
 class RunnerContainerCleanupUnsettledError extends Error {
   constructor(cause: unknown) {
     super("Hosted runner container cleanup did not settle before its deadline.", { cause });
@@ -218,6 +231,7 @@ export interface HostedExecutionContainerInvokeRequest {
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
 export interface RunnerContainerEnsureReadyForProcessingInput {
+  orchestrationAttemptId?: string;
   timeoutMs: number;
   userId: string;
 }
@@ -326,7 +340,7 @@ interface HostedExecutionContainerRunnerInput {
   userId: string;
 }
 
-export interface HostedExecutionContainerStubLike {
+export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
   abortWorkspaceInvocation?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -348,8 +362,6 @@ export interface HostedExecutionContainerStubLike {
     input: RunnerContainerRuntimeCompletionRecordedInput,
   ): Promise<void>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
-  readStandbySlotBinding?(): Promise<HostedStandbySlotBinding>;
-  retireStandbySlot?(input: { claimId?: string }): Promise<{ retired: true }>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
   wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
@@ -365,14 +377,6 @@ type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
   userId: string;
-}
-
-interface RunnerContainerShellPrewarmOperation {
-  abortController: AbortController;
-  coldStartAlreadyObserved: boolean;
-  observed: boolean;
-  result: Promise<RunnerContainerPrewarmShellResult>;
-  startedAtMs: number;
 }
 
 interface RunnerContainerReadinessProof {
@@ -657,6 +661,10 @@ export class RunnerContainer extends Container {
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
 
   protected readonly environment: RunnerContainerEnvironmentSource;
+  // This discriminator is namespace identity, not a second lifecycle owner.
+  protected readonly slotNamespace: "runner" | "standby" = "runner";
+  private slotStore: RunnerSlotBindingStore | null = null;
+  private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
   private currentContainerStart: RunnerContainerCurrentStart | null = null;
@@ -666,8 +674,6 @@ export class RunnerContainer extends Container {
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
-  private shellPrewarmObservation: RunnerContainerShellPrewarmObservation | null = null;
-  private shellPrewarmOperation: RunnerContainerShellPrewarmOperation | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
@@ -682,15 +688,305 @@ export class RunnerContainer extends Container {
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
+    this.durableObjectName = readRunnerDurableObjectName(state);
     this.envVars = buildRunnerContainerEnvVars();
+    const releaseId = readHostedStandbyReleaseId(env);
+    if (releaseId) this.envVars.HOSTED_EXECUTION_WORKER_RELEASE_ID = releaseId;
     this.sleepAfter = formatRunnerSleepAfter(
       readRunnerContainerLifecycleReevaluationMs(env),
     );
   }
 
+  async prepareStandbySlot(input: {
+    releaseId: string;
+    region: HostedRunnerRegion;
+    slotName: string;
+    timeoutMs: number;
+  }): Promise<{
+    prepared: true;
+    releaseId: string;
+    region: HostedRunnerRegion;
+    slotName: string;
+  }> {
+    this.assertRunnerSlotAllocationIdentity(input);
+    if (this.slotNamespace === "standby") {
+      throw new Error("Legacy standby inventory is drain-only.");
+    }
+    const timeoutMs = requireRunnerSlotTimeout(input.timeoutMs);
+    const deadlineAtEpochMs = Date.now() + timeoutMs;
+    const signal = AbortSignal.timeout(timeoutMs);
+    return await this.withLifecycleLock(async () => {
+      throwIfRunnerContainerOperationAborted(signal);
+      const store = this.requireRunnerSlotStore();
+      store.initialize(input);
+      if (store.read().state !== "unbound") {
+        throw new Error("Hosted standby slot is not eligible for preparation.");
+      }
+      await this.ensureContainerReady({
+        timeoutMs: requireRunnerSlotRemainingTime(deadlineAtEpochMs),
+        userId: "standby-unbound",
+      }, signal, { surfaceCleanupUnsettled: true });
+      let health = await this.readStandbyHealth(deadlineAtEpochMs);
+      if (health.codexShellPreflightStatus !== "ready") {
+        const response = await this.containerFetch(RUNNER_CODEX_SHELL_SMOKE_URL, {
+          method: "POST",
+          signal: AbortSignal.timeout(requireRunnerSlotRemainingTime(deadlineAtEpochMs)),
+        });
+        await response.body?.cancel().catch(() => undefined);
+        if (!response.ok) throw new Error("Hosted standby Codex CLI preflight failed.");
+        health = await this.readStandbyHealth(deadlineAtEpochMs);
+      }
+      this.assertPristineStandbyHealth(health, input);
+      const after = store.read();
+      if (after.state !== "unbound") {
+        throw new Error("Hosted standby slot binding changed during preparation.");
+      }
+      return {
+        prepared: true,
+        releaseId: after.releaseId,
+        region: after.region,
+        slotName: after.slotName,
+      };
+    });
+  }
+
+  async bindStandbySlot(input: {
+    claimId: string;
+    releaseId: string;
+    region: HostedRunnerRegion;
+    slotName: string;
+    userId: string;
+  }): Promise<{
+    bound: true;
+    claimId: string;
+    releaseId: string;
+    region: HostedRunnerRegion;
+    slotName: string;
+    userId: string;
+  }> {
+    this.assertRunnerSlotAllocationIdentity(input);
+    return await this.withLifecycleLock(async () => {
+      const store = this.requireRunnerSlotStore();
+      if (this.slotNamespace === "standby" && store.readOptional()?.state !== "bound") {
+        throw new Error("Legacy standby allocation is drain-only.");
+      }
+      // Cold allocation is initialize-and-bind, not a pristine warm preflight.
+      // The immutable row is also the owner used by prepared inventory.
+      store.initialize(input);
+      const binding = store.bind(input);
+      return {
+        bound: true,
+        claimId: binding.claimId,
+        releaseId: binding.releaseId,
+        region: binding.region,
+        slotName: binding.slotName,
+        userId: binding.userId,
+      };
+    });
+  }
+
+  async readStandbySlotBinding(): Promise<HostedStandbySlotBinding> {
+    return this.requireRunnerSlotStore().read();
+  }
+
+  async readStandbySlotCoordinatorState(): Promise<HostedStandbySlotCoordinatorState> {
+    const store = this.requireRunnerSlotStore();
+    if (!store.readOptional() && this.durableObjectName !== null) {
+      this.assertRunnerSlotNamespace(this.durableObjectName);
+      const identity = readHostedRunnerTargetIdentity(this.durableObjectName);
+      if (!identity) throw new Error("Hosted runner coordinator target is invalid.");
+      // A prepare RPC may never have arrived. The addressed name is enough to
+      // establish pristine identity so exact orphan retirement can fence late work.
+      store.initialize({ ...identity, slotName: this.durableObjectName });
+    }
+    const binding = store.read();
+    return {
+      coordinatorOwned: binding.userId === null,
+      releaseId: binding.releaseId,
+      slotName: binding.slotName,
+      state: binding.state,
+    };
+  }
+
+  async resolveRetainedStandbySlot(input: {
+    currentReleaseId: string;
+    region: HostedRunnerRegion;
+    slotName: string;
+    userId: string;
+  }): Promise<HostedStandbySlotBinding> {
+    this.assertRunnerSlotNamespace(input.slotName);
+    const identity = readHostedRunnerTargetIdentity(input.slotName);
+    if (
+      !identity || identity.region !== input.region
+      || input.currentReleaseId !== resolveHostedRunnerReleaseId(this.environment)
+    ) {
+      throw new Error("Hosted runner retained-slot identity or release authority is stale.");
+    }
+    const store = this.requireRunnerSlotStore();
+    // A lost bind RPC may never have initialized the reserved target. Establish
+    // only its content-free identity so a late bind cannot race its retirement.
+    store.initialize({ ...identity, slotName: input.slotName });
+    const binding = store.read();
+    const request = requireRetainedRunnerRequest(this.environment, binding, input);
+    if (binding.state === "bound" && binding.releaseId === request.currentReleaseId) {
+      const liveness = await this.retainNativeContainerIfWarm("standby-retained-handoff");
+      if (liveness === "unsettled") {
+        throw new Error("Hosted standby retained-slot native liveness is unsettled.");
+      }
+      if (liveness === "warm") {
+        const retained = store.read();
+        assertRetainedRunnerBinding(retained, binding, request);
+        return retained;
+      }
+    }
+    if (binding.state !== "retired") {
+      await this.retireStandbySlot(binding.claimId === null ? {} : { claimId: binding.claimId });
+    }
+    const retired = store.read();
+    assertRetiredRunnerBinding(retired, request);
+    return retired;
+  }
+
+  async retireStandbySlot(
+    input: Parameters<HostedRunnerSlotLifecycle["retireStandbySlot"]>[0],
+  ): Promise<{ retired: true }> {
+    const store = this.requireRunnerSlotStore();
+    let claimId = input.claimId;
+    if (input.target) {
+      this.assertRunnerSlotNamespace(input.target.slotName);
+      const identity = readHostedRunnerTargetIdentity(input.target.slotName);
+      if (!identity) throw new Error("Hosted runner retirement target is invalid.");
+      const userId = requireRunnerSlotUserId(input.target.userId);
+      // Initialize identity only, then retire: a delayed bind cannot resurrect
+      // a reservation whose bind RPC never reached this Durable Object.
+      store.initialize({ ...identity, slotName: input.target.slotName });
+      const binding = store.read();
+      if (binding.userId !== null && binding.userId !== userId) {
+        throw new Error("Hosted runner retirement target belongs to another member.");
+      }
+      claimId ??= binding.claimId ?? undefined;
+    }
+    // Fence new member admissions synchronously, before the stop joins the
+    // lifecycle queue. A failed/unknown native stop leaves this durable row retiring.
+    if (store.beginRetirement(claimId === undefined ? {} : { claimId }) === "retired") {
+      return { retired: true };
+    }
+    await this.destroyRunnerInstance();
+    store.finishRetirement();
+    return { retired: true };
+  }
+
+  private requireRunnerSlotStore(): RunnerSlotBindingStore {
+    if (!this.slotStore) {
+      if (!this.ctx.storage.sql) {
+        throw new Error("Hosted runner slot requires Durable Object SQLite storage.");
+      }
+      this.slotStore = new RunnerSlotBindingStore(this.ctx.storage.sql);
+    }
+    this.envVars.HOSTED_EXECUTION_WORKER_RELEASE_ID = resolveHostedRunnerReleaseId(this.environment);
+    return this.slotStore;
+  }
+
+  private readRunnerSlotBindingOptional(): HostedStandbySlotBinding | null {
+    return this.ctx.storage.sql ? this.requireRunnerSlotStore().readOptional() : null;
+  }
+
+  private authorizeBoundUser(userId: string): void {
+    const binding = this.readRunnerSlotBindingOptional();
+    if (!binding && this.slotNamespace === "runner" && !isHostedRunnerTargetName(this.durableObjectName)) {
+      // Old exact-member instances have no slot row and are drain-only callers.
+      return;
+    }
+    if (binding?.state !== "bound" || binding.userId !== requireRunnerSlotUserId(userId)) {
+      throw new Error("Hosted standby slot is not bound to the runtime user.");
+    }
+  }
+
+  private assertRunnerSlotNamespace(slotName: string): void {
+    const valid = this.slotNamespace === "standby"
+      ? isHostedStandbySlotName(slotName)
+      : isHostedRunnerSlotName(slotName);
+    if (!valid) throw new Error("Hosted runner slot belongs to a different namespace.");
+    if (this.durableObjectName !== null && this.durableObjectName !== slotName) {
+      throw new Error("Hosted runner slot does not match the addressed Durable Object.");
+    }
+  }
+
+  private assertRunnerSlotAllocationIdentity(input: { releaseId: string; slotName: string }): void {
+    this.assertRunnerSlotNamespace(input.slotName);
+    if (input.releaseId !== resolveHostedRunnerReleaseId(this.environment)) {
+      throw new Error("Hosted runner slot allocation release is stale.");
+    }
+  }
+
+  private async readStandbyHealth(
+    deadlineAtEpochMs: number,
+  ): Promise<Record<string, unknown>> {
+    const response = await this.containerFetch(RUNNER_HEALTH_URL, {
+      method: "GET",
+      signal: AbortSignal.timeout(requireRunnerSlotRemainingTime(deadlineAtEpochMs)),
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRunnerSlotHealthRecord(payload)) {
+      throw new Error("Hosted standby health proof was unavailable.");
+    }
+    return payload;
+  }
+
+  private assertPristineStandbyHealth(
+    payload: Record<string, unknown>,
+    input: {
+      releaseId: string;
+      region: HostedRunnerRegion;
+    },
+  ): void {
+    const expectedBundleFingerprint = readRunnerSlotRequiredEnvironmentString(
+      this.environment.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT,
+      "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT",
+    );
+    const expectedSourceFingerprint = readRunnerSlotRequiredEnvironmentString(
+      this.environment.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT,
+      "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT",
+    );
+    const runnerBundle = isRunnerSlotHealthRecord(payload.runnerBundle) ? payload.runnerBundle : null;
+    const failedChecks: string[] = [];
+    if (payload.activeJobCount !== 0) failedChecks.push("active_job_count");
+    if (payload.codexShellPreflightStatus !== "ready") {
+      failedChecks.push("codex_shell_preflight_status");
+    }
+    if (typeof payload.codexShellPreflightCompletedAtEpochMs !== "number") {
+      failedChecks.push("codex_shell_preflight_completed_at");
+    }
+    if (payload.heavyRuntimeHydrationStatus !== "ready") {
+      failedChecks.push("heavy_runtime_hydration_status");
+    }
+    if (payload.hostedRuntimeArchitectureVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION) {
+      failedChecks.push("hosted_runtime_architecture_version");
+    }
+    if (payload.hostedWorkerReleaseId !== input.releaseId) {
+      failedChecks.push("hosted_worker_release_id");
+    }
+    if (payload.poisoned !== false) failedChecks.push("poisoned");
+    if (payload.workspaceInvocationAcceptedCount !== 0) {
+      failedChecks.push("workspace_invocation_accepted_count");
+    }
+    if (runnerBundle?.bundleFingerprint !== expectedBundleFingerprint) {
+      failedChecks.push("runner_bundle_fingerprint");
+    }
+    if (runnerBundle?.sourceFingerprint !== expectedSourceFingerprint) {
+      failedChecks.push("runner_source_fingerprint");
+    }
+    if (failedChecks.length > 0) {
+      throw new Error(
+        `Hosted standby slot failed pristine readiness proof: ${failedChecks.join(", ")}.`,
+      );
+    }
+  }
+
   async invoke(
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<HostedExecutionRunnerJobResult> {
+    this.authorizeBoundUser(payload.userId);
     this.noteContainerInteraction();
     const invocationInteractionGeneration = this.containerInteractionGeneration;
     const input = parseHostedExecutionContainerInvokeInput(payload);
@@ -741,6 +1037,7 @@ export class RunnerContainer extends Container {
           "Hosted runner container still has an active workspace invocation.",
         );
       }
+      this.authorizeBoundUser(routeUserId);
       return await this.invokeHostedExecution(input, operation);
     }, {
       // The exact operation is registered synchronously before lifecycle
@@ -784,7 +1081,9 @@ export class RunnerContainer extends Container {
   async onRuntimeCompletionRecorded(
     input: RunnerContainerRuntimeCompletionRecordedInput,
   ): Promise<void> {
+    this.authorizeBoundUser(input.userId);
     await this.withLifecycleLock(async () => {
+      this.authorizeBoundUser(input.userId);
       const pending = this.pendingCompletionCleanup;
       if (!pending || !runnerCompletionCleanupMatches(pending, input)) {
         this.recordedCompletionCleanup = { ...input };
@@ -802,11 +1101,18 @@ export class RunnerContainer extends Container {
   }
 
   async destroyInstance(): Promise<void> {
+    const binding = this.readRunnerSlotBindingOptional();
+    if (binding) {
+      await this.retireStandbySlot(binding.claimId === null ? {} : { claimId: binding.claimId });
+      return;
+    }
+    await this.destroyRunnerInstance();
+  }
+
+  private async destroyRunnerInstance(): Promise<void> {
     this.noteContainerInteraction();
     this.pendingCompletionCleanup = null;
     this.recordedCompletionCleanup = null;
-    this.shellPrewarmObservation = null;
-    this.supersedeShellPrewarm();
     const operationsAtDestroy = [...this.workspaceInvocationOperations];
     for (const operation of operationsAtDestroy) {
       if (!operation.abortController.signal.aborted) {
@@ -896,11 +1202,9 @@ export class RunnerContainer extends Container {
   async ensureReadyForProcessing(
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
+    this.authorizeBoundUser(payload.userId);
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    const shellPrewarmObservation = this.shellPrewarmObservation;
-    this.shellPrewarmObservation = null;
-    const supersededShellPrewarm = this.supersedeShellPrewarm();
     const readinessRequestedAtEpochMs = Date.now();
     // Start the wall-clock deadline before lifecycle-lock admission. A queued
     // readiness request must not receive a fresh timeout after its caller-side
@@ -912,6 +1216,7 @@ export class RunnerContainer extends Container {
       stage: "lifecycle_lock_or_state_read",
     };
     const readiness = this.withLifecycleLock(async () => {
+      this.authorizeBoundUser(input.userId);
       lifecycleLockAcquired = true;
       const lifecycleLockAcquiredAtEpochMs = Date.now();
       throwIfRunnerContainerOperationAborted(readinessSignal);
@@ -926,7 +1231,6 @@ export class RunnerContainer extends Container {
             input,
             readinessSignal,
             {
-              completeSupersededShellPrewarm: supersededShellPrewarm,
               startupFailureObservation,
               surfaceCleanupUnsettled: true,
             },
@@ -947,9 +1251,6 @@ export class RunnerContainer extends Container {
             },
           }),
           kind: "ready" as const,
-          ...(shellPrewarmObservation === null
-            ? {}
-            : { shellPrewarmObservation: { ...shellPrewarmObservation } }),
         };
       } finally {
         if (this.currentLogContext === logContext) {
@@ -980,16 +1281,20 @@ export class RunnerContainer extends Container {
       if (result.kind === "cleanup_unsettled") {
         emitRunnerContainerStartupFailureObservation({
           cleanupUnsettled: true,
+          orchestrationAttemptId: input.orchestrationAttemptId,
           readinessRequestedAtEpochMs,
           stage: startupFailureObservation.stage,
+          timeoutMs: input.timeoutMs,
         });
       }
       return result;
     } catch (error) {
       emitRunnerContainerStartupFailureObservation({
         cleanupUnsettled: cleanupSettlementTimedOut,
+        orchestrationAttemptId: input.orchestrationAttemptId,
         readinessRequestedAtEpochMs,
         stage: startupFailureObservation.stage,
+        timeoutMs: input.timeoutMs,
       });
       if (cleanupSettlementTimedOut) {
         return { kind: "cleanup_unsettled" };
@@ -998,116 +1303,21 @@ export class RunnerContainer extends Container {
     }
   }
 
-  /**
-   * Issues only the platform container start command. The ordinary processing
-   * owner later performs port and health readiness before invoking workspace
-   * work; this hint never reads a workspace or creates a runtime fence.
-   */
+  // Accept queued calls from older workers without allocating member-specific shells.
   async beginShellPrewarm(
     payload: RunnerContainerBeginShellPrewarmInput,
   ): Promise<RunnerContainerBeginShellPrewarmResult> {
-    this.noteContainerInteraction();
     const input = parseRunnerContainerBeginShellPrewarmInput(payload);
-    const existingObservation = this.shellPrewarmObservation;
-    if (existingObservation) {
-      existingObservation.hintCount = Math.min(
-        Number.MAX_SAFE_INTEGER,
-        existingObservation.hintCount + 1,
-      );
-      return { accepted: true };
-    }
-    const observation = this.recordShellPrewarmHint(
-      input.source,
-      input.orchestration,
-    );
-    const operation = this.getOrBeginShellPrewarm(input);
-    this.observeShellPrewarmOperation({
-      observation,
-      operation,
-      userId: input.userId,
-    });
+    this.authorizeBoundUser(input.userId);
     return { accepted: true };
   }
 
   async prewarmShell(
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerPrewarmShellResult> {
-    this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    return await this.getOrBeginShellPrewarm(input).result;
-  }
-
-  private getOrBeginShellPrewarm(
-    input: RunnerContainerEnsureReadyForProcessingInput,
-  ): RunnerContainerShellPrewarmOperation {
-    const existing = this.shellPrewarmOperation;
-    if (existing) {
-      return existing;
-    }
-
-    const abortController = new AbortController();
-    const startedAtMs = Date.now();
-    const coldStartAlreadyObserved = this.currentContainerStart !== null;
-    let retainForAuthoritativeReadiness = false;
-    const result = this.withLifecycleLock(
-      async (): Promise<RunnerContainerPrewarmShellResult> => {
-        const signal = combineRunnerContainerAbortSignals(
-          abortController.signal,
-          AbortSignal.timeout(input.timeoutMs),
-        );
-        try {
-          throwIfRunnerContainerOperationAborted(signal);
-          const logContext: RunnerContainerLogContext = {
-            userId: input.userId,
-          };
-          this.currentLogContext = logContext;
-          try {
-            await this.start(undefined, {
-              portToCheck: RUNNER_PORT,
-              signal,
-              portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
-            });
-            return { action: "start_issued", kind: "started" };
-          } finally {
-            if (this.currentLogContext === logContext) {
-              this.currentLogContext = null;
-            }
-          }
-        } catch (error) {
-          if (
-            abortController.signal.reason
-              instanceof RunnerContainerShellPrewarmSupersededError
-          ) {
-            return { action: "superseded", kind: "superseded" };
-          }
-          // start() can issue the platform command before a later wait fails.
-          // Preserve that uncertain attempt so authoritative readiness finishes
-          // the canonical lifecycle path instead of trusting warm health alone.
-          retainForAuthoritativeReadiness = true;
-          throw error;
-        }
-      },
-      {
-        blockPointerlessWake: false,
-      },
-    );
-    const operation: RunnerContainerShellPrewarmOperation = {
-      abortController,
-      coldStartAlreadyObserved,
-      observed: false,
-      result,
-      startedAtMs,
-    };
-    this.shellPrewarmOperation = operation;
-    void result.finally(() => {
-      if (
-        this.shellPrewarmOperation === operation
-        && !retainForAuthoritativeReadiness
-      ) {
-        this.shellPrewarmOperation = null;
-      }
-    }).catch(() => undefined);
-    return operation;
+    this.authorizeBoundUser(input.userId);
+    return { action: "superseded", kind: "superseded" };
   }
 
   async abortWorkspaceInvocation(input: {
@@ -1115,6 +1325,7 @@ export class RunnerContainer extends Container {
     leaseGeneration: string;
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus> {
+    this.authorizeBoundUser(input.userId);
     this.noteContainerInteraction();
     const existingAbort = this.workspaceInvocationNoPointerAbort;
     if (existingAbort) {
@@ -1235,6 +1446,7 @@ export class RunnerContainer extends Container {
   }
 
   async ensureProcessing(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult> {
+    this.authorizeBoundUser(input.userId);
     this.noteContainerInteraction();
     assertRunnerContainerEnsureProcessingUserIds(input);
     let startAction: Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>["action"] = "started";
@@ -1295,6 +1507,7 @@ export class RunnerContainer extends Container {
   }
 
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
+    this.authorizeBoundUser(input.userId);
     this.noteContainerInteraction();
     const interactionGeneration = this.containerInteractionGeneration;
     const destroyRequestAtWakeStart = this.lastDestroyRequest;
@@ -1532,7 +1745,7 @@ export class RunnerContainer extends Container {
     // lock so idle expiry cannot stop the container between them.
     return await this.withLifecycleLock(async () => {
       const status = await readRunnerContainerStatus(this);
-      if (isRunnerContainerStopped(status)) {
+      if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {
         return "stopped";
       }
       if (
@@ -1648,7 +1861,10 @@ export class RunnerContainer extends Container {
   private async smokeCodexShell(
     readyTimeoutMs: number,
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["codexShell"]>> {
-    const smokeSignal = AbortSignal.timeout(readyTimeoutMs);
+    const smokeSignal = AbortSignal.timeout(Math.max(
+      readyTimeoutMs,
+      RUNNER_CODEX_SHELL_SMOKE_MIN_TIMEOUT_MS,
+    ));
     const response = await this.containerFetch(
       RUNNER_CODEX_SHELL_SMOKE_URL,
       {
@@ -1748,6 +1964,10 @@ export class RunnerContainer extends Container {
   override async onActivityExpired(): Promise<void> {
     const interactionGenerationAtExpiry = this.containerInteractionGeneration;
     await this.withLifecycleLock(async () => {
+      if (this.readRunnerSlotBindingOptional()?.state === "unbound") {
+        this.renewPlatformActivityTimeout("standby-unbound-ready");
+        return;
+      }
       await this.evaluateWarmContainerLifecycle({
         expectedInteractionGeneration: interactionGenerationAtExpiry,
         trigger: "activity-expired",
@@ -2471,7 +2691,6 @@ export class RunnerContainer extends Container {
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
     options: {
-      completeSupersededShellPrewarm?: boolean;
       startupFailureObservation?: RunnerContainerStartupFailureObservation;
       surfaceCleanupUnsettled?: boolean;
     } = {},
@@ -2519,10 +2738,7 @@ export class RunnerContainer extends Container {
           reason: "warm-invalidated",
         });
       }
-    } else if (
-      !isRunnerContainerStopped(status)
-      && !options.completeSupersededShellPrewarm
-    ) {
+    } else {
       if (options.startupFailureObservation) {
         options.startupFailureObservation.stage = "warm_health_or_cleanup";
       }
@@ -3585,7 +3801,6 @@ export class RunnerContainer extends Container {
     this.currentContainerStart = null;
     this.clearRecentReadinessProof();
     this.warmShellInvalidatedByUnsettledDestroy = false;
-    this.shellPrewarmObservation = null;
     this.lastActivityExpiryAtMs = null;
     this.lastActivityObservedAtMs = null;
     this.lastActivityObservedStage = null;
@@ -3676,123 +3891,6 @@ export class RunnerContainer extends Container {
       () => undefined,
     );
     return next;
-  }
-
-  private supersedeShellPrewarm(): boolean {
-    const operation = this.shellPrewarmOperation;
-    if (!operation) {
-      return false;
-    }
-    this.shellPrewarmOperation = null;
-    if (!operation.abortController.signal.aborted) {
-      operation.abortController.abort(
-        new RunnerContainerShellPrewarmSupersededError(),
-      );
-    }
-    return true;
-  }
-
-  private recordShellPrewarmHint(
-    source: CloudflareHostedControlRuntimeShellPrewarmSource | undefined,
-    orchestration: HostedRuntimeShellPrewarmOrchestrationDiagnostics | undefined,
-  ): RunnerContainerShellPrewarmObservation {
-    const hintedAtMs = Date.now();
-    const observation: RunnerContainerShellPrewarmObservation = {
-      firstHintAtEpochMs: hintedAtMs,
-      hintCount: 1,
-      ...(orchestration === undefined ? {} : { orchestration }),
-      source: source ?? "unknown",
-    };
-    this.shellPrewarmObservation = observation;
-    return observation;
-  }
-
-  private observeShellPrewarmOperation(input: {
-    observation: RunnerContainerShellPrewarmObservation;
-    operation: RunnerContainerShellPrewarmOperation;
-    userId: string;
-  }): void {
-    if (input.operation.observed) {
-      return;
-    }
-    input.operation.observed = true;
-    void input.operation.result.then(
-      (result) => {
-        const finishedAtMs = Date.now();
-        const coldStartObserved = result.action === "start_issued"
-          && !input.operation.coldStartAlreadyObserved
-          && this.currentContainerStart !== null;
-        input.observation.outcome = result.action === "superseded"
-          ? "superseded"
-          : coldStartObserved
-          ? "cold_start_observed"
-          : "start_issued_warm";
-        input.observation.finishedAtEpochMs = finishedAtMs;
-        const elapsedMs = Math.max(
-          0,
-          finishedAtMs - input.operation.startedAtMs,
-        );
-        input.observation.operationElapsedMs = elapsedMs;
-        queueMicrotask(() => {
-          emitHostedExecutionStructuredLog({
-            component: "runner.container",
-            details: {
-              shellPrewarmColdStartObserved: coldStartObserved,
-              shellPrewarmElapsedMs: elapsedMs,
-              shellPrewarmHintCountAtCompletion: input.observation.hintCount,
-              ...(input.observation.orchestration
-                ?.shellPrewarmOrchestrationAttemptId === undefined
-                ? {}
-                : {
-                    orchestrationAttemptId:
-                      input.observation.orchestration
-                        .shellPrewarmOrchestrationAttemptId,
-                  }),
-              shellPrewarmOutcome: result.action,
-              shellPrewarmSource: input.observation.source,
-            },
-            message: "Hosted runner shell prewarm operation completed.",
-            phase: "container.starting",
-            userId: input.userId,
-          });
-        });
-      },
-      (error: unknown) => {
-        const finishedAtMs = Date.now();
-        input.observation.outcome = "failed";
-        input.observation.finishedAtEpochMs = finishedAtMs;
-        const elapsedMs = Math.max(
-          0,
-          finishedAtMs - input.operation.startedAtMs,
-        );
-        input.observation.operationElapsedMs = elapsedMs;
-        queueMicrotask(() => {
-          emitHostedExecutionStructuredLog({
-            component: "runner.container",
-            details: {
-              ...buildHostedExecutionSafeErrorDiagnostics(error),
-              shellPrewarmElapsedMs: elapsedMs,
-              shellPrewarmHintCountAtCompletion: input.observation.hintCount,
-              ...(input.observation.orchestration
-                ?.shellPrewarmOrchestrationAttemptId === undefined
-                ? {}
-                : {
-                    orchestrationAttemptId:
-                      input.observation.orchestration
-                        .shellPrewarmOrchestrationAttemptId,
-                  }),
-              shellPrewarmOutcome: "failed",
-              shellPrewarmSource: input.observation.source,
-            },
-            error,
-            level: "warn",
-            message: "Hosted runner shell prewarm failed after acceptance.",
-            phase: "failed",
-            userId: input.userId,
-          });
-        });
-      },
-    );
   }
 
   private recordRecentReadinessProof(
@@ -4547,8 +4645,10 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
 
 function emitRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
+  orchestrationAttemptId?: string;
   readinessRequestedAtEpochMs: number;
   stage: RunnerContainerLocalStartupFailureStage;
+  timeoutMs: number;
 }): void {
   try {
     const rawElapsedMs = Date.now() - input.readinessRequestedAtEpochMs;
@@ -4561,6 +4661,10 @@ function emitRunnerContainerStartupFailureObservation(input: {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
+        ...(input.orchestrationAttemptId === undefined
+          ? {}
+          : { orchestrationAttemptId: input.orchestrationAttemptId }),
+        runtimeStartupConfirmTimeoutMs: input.timeoutMs,
         runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
         runtimeStartupFailureElapsedMs: elapsedMs,
         runtimeStartupFailureStage: input.stage,
@@ -4656,25 +4760,20 @@ export async function destroyHostedExecutionContainer(input: {
   try {
     const runnerContainerName = input.runnerContainerName ?? input.userId;
     const container = input.runnerContainerNamespace.getByName(runnerContainerName);
-    if (isHostedStandbySlotName(runnerContainerName)) {
+    if (isHostedRunnerTargetName(runnerContainerName)) {
       if (!container.readStandbySlotBinding || !container.retireStandbySlot) {
         throw new Error("Hosted standby runner cleanup RPC is unavailable.");
       }
-      const binding = await container.readStandbySlotBinding();
-      if (binding.slotName !== runnerContainerName) {
-        throw new Error("Hosted standby runner cleanup target did not match its binding.");
-      }
+      await container.retireStandbySlot({
+        target: { slotName: runnerContainerName, userId: input.userId },
+      });
+      const retired = await container.readStandbySlotBinding();
       if (
-        (binding.state === "bound" || binding.state === "retiring")
-        && binding.userId !== null
-        && binding.userId !== input.userId
+        !hostedRunnerSlotBindingMatchesTarget(retired, runnerContainerName)
+        || retired.state !== "retired"
+        || retired.claimId !== null || retired.userId !== null
       ) {
-        throw new Error("Hosted standby runner cleanup user did not match its binding.");
-      }
-      if (binding.state !== "retired") {
-        await container.retireStandbySlot({
-          ...(binding.claimId === null ? {} : { claimId: binding.claimId }),
-        });
+        throw new Error("Hosted runner cleanup did not prove exact terminal retirement.");
       }
     } else {
       await container.destroyInstance();
@@ -4742,6 +4841,14 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
   payload: RunnerContainerEnsureReadyForProcessingInput,
 ): RunnerContainerEnsureReadyForProcessingInput {
   return {
+    ...(payload.orchestrationAttemptId === undefined
+      ? {}
+      : {
+          orchestrationAttemptId: requireString(
+            payload.orchestrationAttemptId,
+            "payload.orchestrationAttemptId",
+          ),
+        }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
@@ -5533,4 +5640,37 @@ function readHostedExecutionErrorNameForCode(code: string | null): string | null
     default:
       return null;
   }
+}
+
+function requireRunnerSlotTimeout(value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > 120_000) {
+    throw new TypeError("Hosted standby readiness timeout is invalid.");
+  }
+  return value;
+}
+
+function requireRunnerSlotRemainingTime(deadlineAtEpochMs: number): number {
+  const remainingMs = deadlineAtEpochMs - Date.now();
+  if (remainingMs <= 0) {
+    throw new DOMException("Hosted standby readiness timed out.", "TimeoutError");
+  }
+  return remainingMs;
+}
+
+function readRunnerSlotRequiredEnvironmentString(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`${name} is required for hosted standby readiness.`);
+  }
+  return value.trim();
+}
+
+function isRunnerSlotHealthRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readRunnerDurableObjectName(state: unknown): string | null {
+  if (typeof state !== "object" || state === null || !("id" in state)) return null;
+  const id = state.id;
+  return typeof id === "object" && id !== null && "name" in id && typeof id.name === "string"
+    ? id.name : null;
 }

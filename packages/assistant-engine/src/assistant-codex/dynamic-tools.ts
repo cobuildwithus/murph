@@ -1,3 +1,10 @@
+import {
+  MURPH_CONVERSATION_ATTACHMENTS_TOOL,
+  readConversationAttachmentsToolRequest,
+  currentConversationMediaScope,
+  executeConversationAttachmentsTool,
+  type ConversationAttachmentsArgs,
+} from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   compactTableGenericResponseCardV1Schema,
@@ -217,6 +224,7 @@ import {
 } from './dynamic-tools/assistant-style.js'
 import {
   executeAutomationDynamicTool,
+  executeFollowUpAttachmentDynamicTool,
   readAutomationDynamicToolRequest,
   type AutomationDynamicToolRequest,
 } from './dynamic-tools/automation.js'
@@ -1187,6 +1195,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  followUpRequestPatch?: import("@murphai/contracts").AutomationFollowUpRequest
   externallyVisibleOutput?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
@@ -1413,6 +1422,10 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
+      kind: 'conversation-attachments'
+      args: ConversationAttachmentsArgs
+    }
+  | {
       kind: 'analyze-video'
       args: AnalyzeVideoToolArgs
     }
@@ -1471,6 +1484,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-song-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-conversation-attachments-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1688,86 +1705,22 @@ export function readMurphDynamicToolRequest(
     return automationRequest
   }
 
-  const deviceRequest = readDeviceDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (deviceRequest) {
-    return deviceRequest
-  }
-
-  const labsRequest = readLabsDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (labsRequest) {
-    return labsRequest
-  }
-
-  const pendingVaultFilesRequest = readPendingVaultFilesDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (pendingVaultFilesRequest) {
-    return pendingVaultFilesRequest
-  }
-
-  const groupRoomModelRequest = readGroupRoomModelDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (groupRoomModelRequest) {
-    return groupRoomModelRequest
-  }
-
-  const memberMemoryRequest = readMemberMemoryDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (memberMemoryRequest) {
-    return memberMemoryRequest
-  }
-
-  const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (connectedAppsRequest) {
-    return connectedAppsRequest
-  }
-
-  const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-    toolCallId: request.toolCallId,
-  })
-  if (assistantStyleRequest) {
-    return assistantStyleRequest
-  }
-
-  const phoneCallRequest = readPhoneCallDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (phoneCallRequest) {
-    return phoneCallRequest
-  }
-
-  const physicalNoteRequest = readPhysicalNoteDynamicToolRequest({
-    arguments: request.arguments,
-    tool: request.tool,
-  })
-  if (physicalNoteRequest) {
-    return physicalNoteRequest
-  }
-
-  const clinicalRecordsConnectLinkRequest =
-    readClinicalRecordsConnectLinkDynamicToolRequest({
-      arguments: request.arguments,
-      tool: request.tool,
-    })
-  if (clinicalRecordsConnectLinkRequest) {
-    return clinicalRecordsConnectLinkRequest
+  for (const readRequest of [
+    readDeviceDynamicToolRequest,
+    readLabsDynamicToolRequest,
+    readPendingVaultFilesDynamicToolRequest,
+    readGroupRoomModelDynamicToolRequest,
+    readMemberMemoryDynamicToolRequest,
+    readConnectedAppsDynamicToolRequest,
+    readAssistantStyleDynamicToolRequest,
+    readPhoneCallDynamicToolRequest,
+    readPhysicalNoteDynamicToolRequest,
+    readClinicalRecordsConnectLinkDynamicToolRequest,
+  ]) {
+    const parsed = readRequest(request)
+    if (parsed) {
+      return parsed
+    }
   }
 
   switch (request.tool) {
@@ -1913,20 +1866,10 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
-    case MURPH_ANALYZE_VIDEO_TOOL.name: {
-      const parsed = parseAnalyzeVideoArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-analyze-video-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-
-      return {
-        kind: 'analyze-video',
-        args: parsed.args,
-      }
-    }
+    case MURPH_CONVERSATION_ATTACHMENTS_TOOL.name:
+      return readConversationAttachmentsToolRequest(request.arguments)
+    case MURPH_ANALYZE_VIDEO_TOOL.name:
+      return readAnalyzeVideoDynamicToolRequest(request.arguments)
     case MURPH_CREATE_CALENDAR_LINK_TOOL.name: {
       const parsed = parseCreateCalendarLinkArguments(request.arguments)
       if (!parsed.ok) {
@@ -2280,6 +2223,7 @@ type ExecuteMurphDynamicToolRequestInput = {
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   groupChallengeResponseCardAllowed?: boolean | null
   knowledgePageReadTextFile?: KnowledgeServiceDependencies['readTextFile'] | null
+  followUpAttachmentAllowed?: boolean | null
   privateDirectResponseCardAllowed?: boolean | null
   telegramPresentationResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
@@ -3506,14 +3450,12 @@ export async function executeMurphDynamicToolRequest(
         false,
         'local-time recovery dismissal is unavailable outside the active root turn',
       )
+    case 'attach-follow-up':
+      return executeFollowUpAttachmentDynamicTool({
+        allowed: input.followUpAttachmentAllowed, request: input.request.request,
+      })
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
-      if (!automationTool) {
-        return toolTextResult(
-          false,
-          'automation management is unavailable for this turn',
-        )
-      }
       return await executeAutomationDynamicTool({
         abortSignal: input.abortSignal ?? null,
         automationTool,
@@ -3736,24 +3678,27 @@ export async function executeMurphDynamicToolRequest(
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
+    case 'conversation-attachments': {
+      return executeConversationAttachmentsTool({
+        args: input.request.args,
+        hostedToolContext: input.hostedToolContext,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        vaultRoot: input.vaultRoot,
+      })
+    }
     case 'analyze-video': {
-      const userActionScope =
-        input.hostedToolContext?.currentUserActionScope?.() ?? null
-      if (
-        userActionScope?.conversationScope === 'unverified-external'
-        || !userActionScope
-      ) {
+      if (!currentConversationMediaScope(input.hostedToolContext)) {
         return toolTextResult(
           false,
           'video analysis requires a verified direct or authenticated group conversation',
         )
       }
+      const attachmentAuthorities = input.hostedToolContext
+        ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
       return await executeAnalyzeVideoDynamicTool({
         abortSignal: input.abortSignal ?? null,
-        acceptedInputIds: userActionScope.acceptedInputIds,
-        attachmentAuthorities:
-          input.hostedToolContext
-            ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? null,
+        acceptedInputIds: attachmentAuthorities.map((authority) => authority.messageRef),
+        attachmentAuthorities,
         args: input.request.args,
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
@@ -5295,123 +5240,90 @@ async function executeGroupTool(
       input.request,
       repostOriginAssistantInputId,
     );
-  } else if (isPreparedContactCardRequest(input.request)) {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null;
-    if (
-      userActionScope?.conversationScope !== "direct" ||
-      userActionScope.acceptedInputIds.length === 0
-    ) {
-      return toolTextResult(
-        false,
-        "personalized contact cards require a fresh user request in a personal direct conversation",
-      );
-    }
-    // Refuse a route that can never carry the attachment before paying for
-    // generation, capture, and publication. The post-generation binding below
-    // still owns the authoritative thread.
-    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null;
-    if (routeStatus && routeStatus.status !== "ok") {
-      return toolTextResult(
-        true,
-        safeToolPayloadText({
-          action: "share_contact_card",
-          result: routeStatus,
-        }),
-      );
-    }
-    const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null;
-    if (!contactCardShareKey) {
-      return toolTextResult(
-        false,
-        "personalized contact cards require fresh user-sourced input for this turn",
-      );
-    }
-    const prepared = await prepareGroupAvatarRuntimeRequest({
-      abortSignal: input.abortSignal,
-      // The accepted request, not the tool call: a replay must reuse this
-      // capture rather than pay for a second stochastic generation.
-      captureRequestId: contactCardShareKey,
-      captureScope: "contact-card-avatar",
-      env: input.env,
-      fetchImpl: input.fetchImpl,
-      hostedToolContext: input.hostedToolContext,
-      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-      nextUsageOrdinal: input.nextUsageOrdinal,
-      request: {
-        action: "set_chat_avatar",
-        avatar: input.request.avatar,
-      },
-      vaultRoot: input.vaultRoot,
-    });
-    if (!prepared.rpcSuccess) {
-      return {
-        rpcResult: {
-          contentItems: [{ text: prepared.rpcText, type: "inputText" }],
-          success: false,
-        },
-        usageDraft: prepared.usageDraft ?? null,
-      };
-    }
-    request = {
-      action: "share_contact_card",
-      contactCardImageUrl: prepared.request.groupChatIconUrl,
-      // Trusted-host request identity, so a retried or replayed turn collapses
-      // to one card while a genuinely new accepted request has its own send
-      // identity. Deliberately not the tool call id: a retry re-emits the
-      // call with a new id but keeps the same accepted input.
-      contactCardShareKey,
-    };
-    usageDraft = prepared.usageDraft ?? null;
-    generatedAvatarCapture = prepared.savedImageRef
-      ? {
-          savedCaptureId: prepared.savedCaptureId ?? null,
-          savedImageRef: prepared.savedImageRef,
+  } else if (
+    isPreparedContactCardRequest(input.request) ||
+    isPreparedGroupAvatarRequest(input.request)
+  ) {
+    let contactCardShareKey: string | null = null;
+    if (input.request.action === "share_contact_card") {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null;
+      if (
+        userActionScope?.conversationScope !== "direct" ||
+        userActionScope.acceptedInputIds.length === 0
+      ) {
+        return toolTextResult(
+          false,
+          "personalized contact cards require a fresh user request in a personal direct conversation",
+        );
+      }
+      // Refuse a route that can never carry the attachment before paying for
+      // generation, capture, and publication. The post-generation binding below
+      // still owns the authoritative thread.
+      const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null;
+      if (routeStatus && routeStatus.status !== "ok") {
+        return toolTextResult(
+          true,
+          safeToolPayloadText({
+            action: "share_contact_card",
+            result: routeStatus,
+          }),
+        );
+      }
+      contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null;
+      if (!contactCardShareKey) {
+        return toolTextResult(
+          false,
+          "personalized contact cards require fresh user-sourced input for this turn",
+        );
+      }
+    } else {
+      let preflight: Extract<
+        HostedRuntimeGroupToolResponse,
+        { action: "preflight_set_chat_avatar" }
+      >;
+      try {
+        const preflightRequest = { action: "preflight_set_chat_avatar" } as const;
+        const preflightResult = input.abortSignal
+          ? await groupTool.request(preflightRequest, {
+              signal: input.abortSignal,
+            })
+          : await groupTool.request(preflightRequest);
+        if (preflightResult.action !== "preflight_set_chat_avatar") {
+          return groupAvatarUnavailableToolResult(
+            "group_avatar_preflight_unavailable",
+          );
         }
-      : null;
-  } else if (isPreparedGroupAvatarRequest(input.request)) {
-    let preflight: Extract<
-      HostedRuntimeGroupToolResponse,
-      { action: "preflight_set_chat_avatar" }
-    >;
-    try {
-      const preflightRequest = { action: "preflight_set_chat_avatar" } as const;
-      const preflightResult = input.abortSignal
-        ? await groupTool.request(preflightRequest, {
-            signal: input.abortSignal,
-          })
-        : await groupTool.request(preflightRequest);
-      if (preflightResult.action !== "preflight_set_chat_avatar") {
+        preflight = preflightResult;
+      } catch {
         return groupAvatarUnavailableToolResult(
           "group_avatar_preflight_unavailable",
         );
       }
-      preflight = preflightResult;
-    } catch {
-      return groupAvatarUnavailableToolResult(
-        "group_avatar_preflight_unavailable",
-      );
+      if (preflight.result.status !== "ok") {
+        return toolTextResult(
+          true,
+          safeToolPayloadText({
+            action: "set_chat_avatar",
+            result: preflight.result,
+          }),
+        );
+      }
     }
-    if (preflight.result.status !== "ok") {
-      return toolTextResult(
-        true,
-        safeToolPayloadText({
-          action: "set_chat_avatar",
-          result: preflight.result,
-        }),
-      );
-    }
-
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
-      captureRequestId: input.toolCallId,
-      captureScope: "group-avatar",
+      // Contact-card replays keep the accepted-input identity; group avatar
+      // requests retain their tool-call identity.
+      captureRequestId: contactCardShareKey ?? input.toolCallId,
+      captureScope: contactCardShareKey !== null
+        ? "contact-card-avatar"
+        : "group-avatar",
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedToolContext: input.hostedToolContext,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       nextUsageOrdinal: input.nextUsageOrdinal,
-      request: input.request,
+      request: { action: "set_chat_avatar", avatar: input.request.avatar },
       vaultRoot: input.vaultRoot,
     });
     if (!prepared.rpcSuccess) {
@@ -5423,7 +5335,13 @@ async function executeGroupTool(
         usageDraft: prepared.usageDraft ?? null,
       };
     }
-    request = prepared.request;
+    request = contactCardShareKey !== null
+      ? {
+          action: "share_contact_card",
+          contactCardImageUrl: prepared.request.groupChatIconUrl,
+          contactCardShareKey,
+        }
+      : prepared.request;
     usageDraft = prepared.usageDraft ?? null;
     generatedAvatarCapture = prepared.savedImageRef
       ? {
@@ -5431,13 +5349,15 @@ async function executeGroupTool(
           savedImageRef: prepared.savedImageRef,
         }
       : null;
-  } else if (input.request.action === "ask") {
+  } else if (
+    input.request.action === "ask" || input.request.action === "handoff"
+  ) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null;
     if (userActionScope?.conversationScope !== "direct") {
       return toolTextResult(
         false,
-        "group ask requires a fresh user request in a personal direct conversation",
+        `group ${input.request.action} requires a fresh user request in a personal direct conversation`,
       );
     }
     const originAssistantInputId =
@@ -5445,39 +5365,23 @@ async function executeGroupTool(
     if (!originAssistantInputId) {
       return toolTextResult(
         false,
-        "group ask requires fresh user-sourced input for this turn",
+        `group ${input.request.action} requires fresh user-sourced input for this turn`,
       );
     }
-    request = {
-      action: "ask",
-      membershipId: input.request.membershipId,
-      originAssistantInputId,
-      originSessionId: userActionScope.originSessionId,
-      question: input.request.question,
-    };
-  } else if (input.request.action === "handoff") {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null;
-    if (userActionScope?.conversationScope !== "direct") {
-      return toolTextResult(
-        false,
-        "group handoff requires a fresh user request in a personal direct conversation",
-      );
-    }
-    const originAssistantInputId =
-      userActionScope.acceptedInputIds.at(-1) ?? null;
-    if (!originAssistantInputId) {
-      return toolTextResult(
-        false,
-        "group handoff requires fresh user-sourced input for this turn",
-      );
-    }
-    request = {
-      action: "handoff",
-      context: input.request.context,
-      membershipId: input.request.membershipId,
-      originAssistantInputId,
-    };
+    request = input.request.action === "ask"
+      ? {
+          action: "ask",
+          membershipId: input.request.membershipId,
+          originAssistantInputId,
+          originSessionId: userActionScope.originSessionId,
+          question: input.request.question,
+        }
+      : {
+          action: "handoff",
+          context: input.request.context,
+          membershipId: input.request.membershipId,
+          originAssistantInputId,
+        };
   } else if (input.request.action === "ask_current_sender") {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null;
@@ -8394,4 +8298,10 @@ function readZodObjectRootKeys(schema: { shape?: Record<string, unknown> }): str
 
 function normalizeNullableStringValue(value: unknown): string | null {
   return typeof value === 'string' ? normalizeNullableString(value) : null
+}
+
+function readAnalyzeVideoDynamicToolRequest(value: unknown): MurphDynamicToolRequest {
+  const parsed = parseAnalyzeVideoArguments(value)
+  return parsed.ok ? { kind: 'analyze-video', args: parsed.args }
+    : { kind: 'invalid-analyze-video-arguments', validationDigest: parsed.validationDigest }
 }

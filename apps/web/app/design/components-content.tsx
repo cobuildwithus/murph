@@ -13,6 +13,8 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
+import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
+import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero-card";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -698,6 +700,31 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div data-design-component="experiment-library-cards" id="experiment-library-cards" inert>
+          <Section title="Experiment library cards">
+            <div className="grid items-start gap-6 md:grid-cols-2">
+              <ExperimentHeroCard
+                id="design-featured"
+                title="Featured experiment"
+                category="Movement"
+                image="/design-assets/hero-daily-step-floor.jpeg"
+                metadata="Featured card study"
+                href={null}
+              />
+              <ExperimentBrowseCard
+                id="design-browse"
+                title="Browse experiment"
+                category="Movement"
+                image="/design-assets/hero-daily-step-floor.jpeg"
+                metadata="Browse card study"
+                href={null}
+              />
+            </div>
+          </Section>
+        </div>
+
+        <Separator />
+
         <Section title="Dashboard primary navigation">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Production dashboard destinations in their standard visual hierarchy.
@@ -789,11 +816,10 @@ export function ComponentsContent() {
                   </HostedInlineAuthButton>
                 </div>
               </DialogPreviewFrame>
-              <DialogPreviewFrame label="Telegram ready handoff">
+              <DialogPreviewFrame label="Telegram authorization available">
                 <HostedTelegramAuthButtonPresentation
                   active
                   onClick={() => {}}
-                  readyToContinue
                 />
               </DialogPreviewFrame>
             </div>
@@ -1527,7 +1553,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Dialog">
+        <Section id="dialog" title="Dialog">
           <Dialog>
             <div className="flex"><DialogTrigger render={<Button>Open Dialog</Button>} /></div>
             <DialogContent>

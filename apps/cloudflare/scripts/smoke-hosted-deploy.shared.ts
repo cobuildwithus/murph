@@ -39,6 +39,7 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 import {
   readHostedStandbyMode,
+  readHostedStandbyTarget,
 } from "../src/standby-runner-contract.ts";
 import type {
   HostedStandbyMode,
@@ -343,23 +344,19 @@ async function assertRunnerContainerSmoke(input: {
       Math.max(1, retryPolicy.maxWaitMs - elapsedBeforeAttemptMs),
     );
     try {
-      assertSmokeRunnerBundleManifest(
-        // Each attempt addresses its own smoke Durable Object, so a retry gets a
-        // fresh container-provisioning decision instead of re-reading the one
-        // instance this run already pinned. Worker code updates immediately while
-        // containers roll out gradually, so the first instance can legitimately be
-        // pre-rollout, and polling it keeps it below the idle TTL that would
-        // otherwise replace it.
-        await readRunnerContainerSmoke({
-          ...input,
-          attempt,
-          signal: requestDeadline,
-        }),
+      // Each attempt addresses its own smoke Durable Object, so a retry gets a
+      // fresh container-provisioning decision instead of re-reading the one
+      // instance this run already pinned. Worker code updates immediately while
+      // containers roll out gradually, so the first instance can legitimately be
+      // pre-rollout, and polling it keeps it below the idle TTL that would
+      // otherwise replace it.
+      await readRunnerContainerSmoke({
+        ...input,
+        attempt,
         expectedManifest,
-        {
-          retryable: retryableFailures,
-        },
-      );
+        retryableManifestMismatch: retryableFailures,
+        signal: requestDeadline,
+      });
       return attempt;
     } catch (error) {
       const elapsedMs = Date.now() - startedAtMs;
@@ -396,11 +393,34 @@ async function assertRunnerContainerSmoke(input: {
   throw new Error("runner container smoke exhausted its attempts without a verdict.");
 }
 
+type SmokeStandbyInventory = {
+  ready?: unknown;
+  readyCount?: unknown;
+  provisioningCount?: unknown;
+  target?: unknown;
+  releaseMatches?: unknown;
+};
+
+function assertSmokeStandbyInventory(
+  inventory: SmokeStandbyInventory | null | undefined,
+  source: Record<string, string | undefined>,
+): void {
+  const mode = resolveSmokeExpectedStandbyMode(source);
+  if (mode === null || mode === "off") return;
+  const target = readHostedStandbyTarget(source);
+  if (!inventory || inventory.ready !== true || inventory.releaseMatches !== true
+    || inventory.target !== target || inventory.readyCount !== target || inventory.provisioningCount !== 0) {
+    throw new RunnerContainerSmokeRetryableError("Deploy standby inventory proof is missing or does not match the configured target.");
+  }
+}
+
 async function readRunnerContainerSmoke(input: {
   attempt: number;
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
+  expectedManifest: SmokeRunnerBundleManifest;
+  retryableManifestMismatch: boolean;
   signal: AbortSignal;
   source: EnvSource;
   url: string;
@@ -444,6 +464,7 @@ async function readRunnerContainerSmoke(input: {
 
   const responsePayload = await response.json() as {
     ok?: unknown;
+    standbyInventory?: SmokeStandbyInventory | null;
     runnerContainer?: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
@@ -465,6 +486,16 @@ async function readRunnerContainerSmoke(input: {
     throw new Error("runner container smoke did not return the expected service id.");
   }
 
+  const runnerBundle = responsePayload.runnerContainer.runnerBundle ?? null;
+  // A pre-rollout container can implement an older smoke response schema. Check
+  // provenance before asserting current schema fields so that expected rollout
+  // skew remains retryable instead of failing the deployment immediately.
+  assertSmokeRunnerBundleManifest(runnerBundle, input.expectedManifest, {
+    retryable: input.retryableManifestMismatch,
+  });
+  if (input.expectLiveModelTurnModel === null) {
+    assertSmokeStandbyInventory(responsePayload.standbyInventory, input.source);
+  }
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
@@ -476,7 +507,7 @@ async function readRunnerContainerSmoke(input: {
     );
   }
 
-  return responsePayload.runnerContainer.runnerBundle ?? null;
+  return runnerBundle;
 }
 
 async function readSmokeFailureBody(response: Response): Promise<string | null> {

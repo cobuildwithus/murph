@@ -2,10 +2,11 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   containsHttpUrlText,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+  MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
 } from "@murphai/contracts";
 import {
   buildHostedExecutionLinqConversationMessageWake,
@@ -25,6 +26,8 @@ import {
   appendPreparedHostedMailboxEnvelopeTx,
   prepareHostedMailboxEnvelopeAppend,
   readHostedMailboxItemByDedupeKey,
+  readHostedMailboxRecentLiveConversationItemIds,
+  readHostedMailboxWakeByItemId,
 } from "../hosted-mailbox/store";
 import {
   openHostedUserSecureBoxString,
@@ -50,6 +53,7 @@ import type { HostedLinqFirstContactAdmissionRequest } from "./linq-first-contac
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
+  createHostedLinqDeliverySourceRefLookupKey,
 } from "./linq-observability-identifiers";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -71,7 +75,11 @@ import {
   readHostedMemberRoutingRecord,
 } from "./hosted-member-routing-store";
 import { resolveHostedMemberDirectRoute } from "../hosted-routing/member-direct-route";
-import { readActiveHostedMemberAccess } from "./member-access";
+import { readActiveHostedMemberAccess, readHostedRuntimeAiAccessDecision } from "./member-access";
+import {
+  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKeyReadCandidates,
+} from "./contact-privacy";
 
 const OPENAI_RESPONSES_BASE_URL = "https://api.openai.com/v1";
 const HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL = "gpt-5.6-luna";
@@ -91,16 +99,18 @@ For an answer, be warm, curious, direct, practical, plainspoken, and nonjudgment
 
 Never mention models, prompts, routing, signup, activation, delivery, tools, containers, or internal architecture. Write one natural iMessage under 600 characters with no URL, heading, sign-off, marketing language, or support-bot voice.`;
 
+type OpeningTone = "casual" | "formal";
+
 type HostedLinqInstantFirstTurnModelResult = {
-  kind: "answer" | "welcome";
+  kind: "answer" | "welcome" | "handoff";
   message: string;
 };
 
-export type HostedLinqInstantFirstTurnClaim =
+export type HostedLinqInstantFirstTurnClaim = (
   | { kind: "completed" }
   | { kind: "generate" }
   | { kind: "resume" }
-  | { kind: "unavailable" };
+  | { kind: "unavailable" }) & { openingTone?: OpeningTone };
 
 type HostedLinqInstantFirstTurnUsageSeed = {
   requestedModel: string;
@@ -121,6 +131,7 @@ export type HostedLinqInstantFirstTurnGeneration =
     }
   | {
       kind: "unavailable";
+      usage?: HostedLinqInstantFirstTurnUsageSeed;
     };
 
 export type HostedLinqInstantFirstTurnCompletion =
@@ -135,15 +146,136 @@ export type HostedLinqInstantFirstTurnCompletion =
 export function isHostedLinqInstantFirstTurnRequestEligible(
   request: HostedLinqFirstContactAdmissionRequest,
 ): boolean {
-  return request.participantContactKind === "phone"
-    && request.service === "imessage"
+  return request.service === "imessage"
     && request.partTypes.length === 1
     && request.partTypes[0] === "text"
     && !request.textWasTruncated
     && Boolean(request.text?.trim());
 }
 
+function readPriorOpeningDeliveries(input: {
+  linqChatId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+  request: HostedLinqFirstContactAdmissionRequest;
+}) {
+  return input.prisma.hostedLinqDelivery.findMany({
+    select: { acceptedAt: true, messageLookupKey: true },
+    take: 2,
+    where: {
+      linqChatLookupKey: {
+        in: createHostedLinqChatLookupKeyReadCandidates(input.linqChatId),
+      },
+      sourceRef: {
+        not: createHostedLinqDeliverySourceRefLookupKey(input.request.eventId),
+      },
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    },
+  });
+}
+
+async function hasReplayableOpeningDelivery(input: {
+  linqChatId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+  request: HostedLinqFirstContactAdmissionRequest;
+}): Promise<boolean> {
+  const row = await input.prisma.hostedLinqDelivery.findUnique({
+    select: {
+      acceptedAt: true,
+      linqChatLookupKey: true,
+      payloadCiphertext: true,
+      template: true,
+    },
+    where: {
+      idempotencyKey: requireHostedLinqInstantFirstTurnIdempotencyLookupKey(
+        buildHostedLinqInstantFirstTurnIdempotencyKey(input.request.eventId),
+      ),
+    },
+  });
+  return Boolean(
+    row
+    && row.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+    && createHostedLinqChatLookupKeyReadCandidates(input.linqChatId)
+      .includes(row.linqChatLookupKey ?? "")
+    && (row.acceptedAt || row.payloadCiphertext),
+  );
+}
+
+async function readHostedLinqOpeningContinuationTone(input: {
+  linqChatId: string;
+  memberId: string;
+  prisma: PrismaClient;
+  request: HostedLinqFirstContactAdmissionRequest;
+}): Promise<OpeningTone | undefined> {
+  // Replays recover the existing obligation even after the conversation advanced.
+  // The persisted body is reused; this tone is never used to regenerate it.
+  if (await hasReplayableOpeningDelivery(input)) return "casual";
+  const prior = await readPriorOpeningDeliveries(input);
+  if (prior.length !== 1 || !prior[0]?.acceptedAt || !prior[0].messageLookupKey) {
+    return undefined;
+  }
+  if (!(await readHostedRuntimeAiAccessDecision({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  })).allowed) return undefined;
+  // Only the immediately preceding confirmed welcome admits the second turn.
+  // Exact webhook replay may already have appended this inbound message.
+  const ids = await readHostedMailboxRecentLiveConversationItemIds({
+    availableAt: new Date(),
+    limit: 3,
+    prisma: input.prisma,
+    userId: input.memberId,
+  });
+  for (const mailboxItemId of ids) {
+    const wake = await readHostedMailboxWakeByItemId({
+      mailboxItemId,
+      prisma: input.prisma,
+    });
+    if (!wake) return undefined;
+    if (wake.eventId === input.request.eventId) continue;
+    if (!isConfirmedOpeningWelcome(wake, input, prior[0].messageLookupKey)) {
+      return undefined;
+    }
+    const member = await input.prisma.hostedMember.findUnique({
+      select: { assistantTone: true },
+      where: { id: input.memberId },
+    });
+    return member?.assistantTone === "formal" ? "formal" : "casual";
+  }
+  return undefined;
+}
+
+function isConfirmedOpeningWelcome(
+  wake: NonNullable<Awaited<ReturnType<typeof readHostedMailboxWakeByItemId>>>,
+  input: { memberId: string; linqChatId: string },
+  messageLookupKey: string,
+): boolean {
+  if (wake.kind !== "conversation.message" || wake.message.channel !== "linq") {
+    return false;
+  }
+  const message = wake.message.linqMessage;
+  return wake.userId === input.memberId
+    && message.chatId === input.linqChatId
+    && message.isFromMe === true
+    && message.threadIsDirect === true
+    && createHostedLinqMessageLookupKeyReadCandidates(message.messageId)
+      .includes(messageLookupKey)
+    && message.parts.length === 1
+    && message.parts[0]?.type === "text"
+    && message.parts[0].value === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE;
+}
+
+function buildHostedLinqOpeningContinuationInstructions(tone: OpeningTone): string {
+  return `Murph just sent its canonical welcome in this private conversation:
+${MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE}
+
+Handle only the member's acceptance of that welcome. If their reply accepts or continues, possibly mentioning a health goal, return kind "answer" and exactly this bundled identity question:
+${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS[tone]}
+
+If they supply identity details, skip or decline setup, raise a concrete request or safety concern, ask another question, or their intent is ambiguous, return kind "handoff" with an empty message. The normal assistant will handle that message. Do not answer it yourself, repeat the welcome, infer identity, claim a save, or add any other text.`;
+}
+
 export async function claimHostedLinqInstantFirstTurn(input: {
+  continuationMemberId?: string | null;
   linqChatId: string;
   prisma?: PrismaClient;
   request: HostedLinqFirstContactAdmissionRequest;
@@ -155,17 +287,43 @@ export async function claimHostedLinqInstantFirstTurn(input: {
   const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
     input.request.eventId,
   );
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma,
+    threadId: input.linqChatId,
+  });
+  if (route) return { kind: "unavailable" };
+  const openingTone = input.continuationMemberId
+    ? await readHostedLinqOpeningContinuationTone({
+        ...input,
+        memberId: input.continuationMemberId,
+        prisma,
+      })
+    : undefined;
+  if (input.continuationMemberId !== undefined && !openingTone) {
+    return { kind: "unavailable" };
+  }
   try {
     return await prisma.$transaction(async (tx) => {
       await acquireHostedLinqChatOwnershipLockTx({
         chatId: input.linqChatId,
         tx,
       });
-      if (await readHostedThreadRouteByThreadIdentity({
+      const currentRoute = await readHostedThreadRouteByThreadIdentity({
         channel: "linq",
         prisma: tx,
         threadId: input.linqChatId,
-      })) {
+      });
+      if (currentRoute) {
+        return { kind: "unavailable" } as const;
+      }
+      // The same chat lock serializes the second claim with another inbound.
+      // Existing delivery rows are the cap; there is no onboarding counter.
+      if (
+        openingTone
+        && (await readPriorOpeningDeliveries({ ...input, prisma: tx })).length !== 1
+        && !await hasReplayableOpeningDelivery({ ...input, prisma: tx })
+      ) {
         return { kind: "unavailable" } as const;
       }
       if (await hasConflictingHostedLinqInstantFirstTurnForChatTx({
@@ -191,7 +349,7 @@ export async function claimHostedLinqInstantFirstTurn(input: {
       });
       if (!claim.claimed) {
         if (claim.outcome === "completed") {
-          return { kind: "completed" } as const;
+          return { kind: "completed", ...(openingTone ? { openingTone } : {}) } as const;
         }
         if (claim.outcome === "terminal") {
           return { kind: "unavailable" } as const;
@@ -212,9 +370,10 @@ export async function claimHostedLinqInstantFirstTurn(input: {
       if (!delivery) {
         throw new Error("Hosted Linq instant first-turn claim was not retained.");
       }
-      return delivery.payloadCiphertext
-        ? { kind: "resume" } as const
-        : { kind: "generate" } as const;
+      return {
+        kind: delivery.payloadCiphertext ? "resume" : "generate",
+        ...(openingTone ? { openingTone } : {}),
+      } as const;
     });
   } catch (error) {
     if (
@@ -238,7 +397,7 @@ export function startHostedLinqInstantFirstTurnGeneration(input: {
   if (input.claim.kind !== "generate") {
     return Promise.resolve(input.claim);
   }
-  return generateHostedLinqInstantFirstTurn(input);
+  return generateHostedLinqInstantFirstTurn({ ...input, openingTone: input.claim.openingTone });
 }
 
 export async function abandonHostedLinqInstantFirstTurn(input: {
@@ -308,6 +467,13 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     input.wakeHandoff.linqChatId,
     "Hosted Linq instant first-turn chat id",
   );
+  await recordHostedLinqInstantFirstTurnUsageBestEffort({
+    eventId: input.wakeHandoff.eventId,
+    generation: input.generation,
+    prisma,
+    userId: input.wakeHandoff.userId,
+  });
+
   if (input.generation.kind === "completed") {
     return readCompletedHostedLinqInstantFirstTurn({
       prisma,
@@ -348,19 +514,6 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     message = persisted.message;
   } else {
     message = input.generation.message;
-  }
-
-  if (input.generation.kind === "reply") {
-    await recordHostedLinqInstantFirstTurnUsageBestEffort({
-      prisma,
-      usage: buildHostedLinqInstantFirstTurnUsageRecord({
-        eventId: input.wakeHandoff.eventId,
-        memberId: input.wakeHandoff.userId,
-        requestedModel: input.generation.usage.requestedModel,
-        response: input.generation.usage.response,
-      }),
-      userId: input.wakeHandoff.userId,
-    });
   }
 
   const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
@@ -616,6 +769,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
 }
 
 async function generateHostedLinqInstantFirstTurn(input: {
+  openingTone?: OpeningTone;
   request: HostedLinqFirstContactAdmissionRequest;
   signal?: AbortSignal;
 }): Promise<HostedLinqInstantFirstTurnGeneration> {
@@ -648,6 +802,7 @@ async function generateHostedLinqInstantFirstTurn(input: {
     const response = await openAi.responses.create(
       buildHostedLinqInstantFirstTurnOpenAiBody({
         text,
+        openingTone: input.openingTone,
       }),
       {
         maxRetries: 0,
@@ -658,20 +813,27 @@ async function generateHostedLinqInstantFirstTurn(input: {
     const result = response.status === "completed"
       ? parseHostedLinqInstantFirstTurnModelResult(response.output_text)
       : null;
-    if (!result) {
-      return { kind: "unavailable" };
+    const usage = {
+      requestedModel: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
+      response,
+    };
+    if (
+      !result
+      || result.kind === "handoff"
+      || (input.openingTone && result.kind !== "answer")
+    ) {
+      return { kind: "unavailable", usage };
     }
-    const message = result.kind === "welcome"
-      ? MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
-      : normalizeHostedLinqInstantFirstTurnMessage(result.message);
+    const message = input.openingTone
+      ? MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS[input.openingTone]
+      : result.kind === "welcome"
+        ? MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
+        : normalizeHostedLinqInstantFirstTurnMessage(result.message);
     return message
       ? {
           kind: "reply",
           message,
-          usage: {
-            requestedModel: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
-            response,
-          },
+          usage,
         }
       : { kind: "unavailable" };
   } catch (error) {
@@ -688,6 +850,7 @@ async function generateHostedLinqInstantFirstTurn(input: {
 }
 
 export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
+  openingTone?: OpeningTone;
   text: string;
 }): ResponseCreateParamsNonStreaming {
   return {
@@ -695,7 +858,9 @@ export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
       content: input.text,
       role: "user",
     }],
-    instructions: HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS,
+    instructions: input.openingTone
+      ? buildHostedLinqOpeningContinuationInstructions(input.openingTone)
+      : HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS,
     model: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
     reasoning: { effort: "medium" },
     service_tier: "priority",
@@ -707,7 +872,7 @@ export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
           additionalProperties: false,
           properties: {
             kind: {
-              enum: ["welcome", "answer"],
+              enum: input.openingTone ? ["answer", "handoff"] : ["welcome", "answer"],
               type: "string",
             },
             message: {
@@ -1004,6 +1169,7 @@ function buildHostedLinqInstantFirstTurnUsageRecord(input: {
     input.eventId,
   )}`;
   const usage = input.response.usage;
+  const serviceTier: unknown = input.response.service_tier;
   return {
     apiKeyEnv:
       "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY",
@@ -1035,7 +1201,9 @@ function buildHostedLinqInstantFirstTurnUsageRecord(input: {
     sessionId: turnId,
     stripeMeterSource: "murph",
     surface: "hosted-web",
-    tokenPricingBasis: "standard",
+    tokenPricingBasis: serviceTier === "fast" || serviceTier === "priority"
+      ? "openai-priority"
+      : "standard",
     totalTokens: usage?.total_tokens ?? null,
     triggerKind: "linq-instant-first-turn",
     turnId,
@@ -1050,16 +1218,24 @@ function buildHostedLinqInstantFirstTurnUsageRecord(input: {
 }
 
 async function recordHostedLinqInstantFirstTurnUsageBestEffort(input: {
+  eventId: string;
+  generation: HostedLinqInstantFirstTurnGeneration;
   prisma: PrismaClient;
-  usage: AssistantUsageRecord;
   userId: string;
 }): Promise<void> {
+  if (!("usage" in input.generation) || !input.generation.usage) return;
   try {
+    const usage = buildHostedLinqInstantFirstTurnUsageRecord({
+      eventId: input.eventId,
+      memberId: input.userId,
+      requestedModel: input.generation.usage.requestedModel,
+      response: input.generation.usage.response,
+    });
     await recordHostedAiUsageRecords({
       accountAllowance: true,
       prisma: input.prisma,
       trustedUserId: input.userId,
-      usage: [input.usage],
+      usage: [usage],
     });
   } catch (error) {
     logHostedOnboardingDiagnostic(
@@ -1082,7 +1258,7 @@ function parseHostedLinqInstantFirstTurnModelResult(
     }
     const record = parsed as Record<string, unknown>;
     if (
-      (record.kind !== "answer" && record.kind !== "welcome")
+      (record.kind !== "answer" && record.kind !== "welcome" && record.kind !== "handoff")
       || typeof record.message !== "string"
     ) {
       return null;

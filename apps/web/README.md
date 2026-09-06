@@ -132,6 +132,16 @@ a revoked Web webhook/sync admission, and a revoked grantor shared-data read.
 Missing legacy grants remain compatible within those current artifacts; they
 are not a reason to restore pre-consent readers.
 
+## Browser-vault dashboard loading
+
+Browser-vault dashboard sessions and public-homepage preparation read only the
+published replica ref and workspace version. Refresh orchestration is imported
+only when the existing after-response refresh path needs it. The browser loader
+constructs one query client for the route's requested capability; the combined
+metrics/labs client reuses its metrics client's core access. Patterns reads its
+precomputed report directly. Session reauthorization, exact replica identity,
+route-scoped shard retention, and encrypted transport remain unchanged.
+
 ## Browser-vault member-proof rollback floor
 
 Successful browser-vault session responses in the `empty` and `not_modified`
@@ -941,7 +951,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
-- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. The fixed identity configured by `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER` is skipped before that gate and is also omitted from operator Growth member reporting. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. The fixed identity configured by `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER` is skipped before that gate and is also omitted from operator Growth member reporting and reply-latency email alerts; the protected postdeploy canary workflow remains the owner of its latency SLO. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
@@ -1129,6 +1139,16 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
+- GPT-6 Astra is an optional managed OpenAI model for active paid individual Edge/Max
+  and active Family Edge/Max seats. The existing assistant preference owner enforces
+  eligibility on writes and runtime reads; losing Edge/Max access retains the preference
+  while using Terra until access returns. Group rooms retain Luna/Terra/Sol.
+  Astra uses $10 input, $1 cache reads, $12.50 cache writes, and $50 output per
+  million tokens; OpenAI Flex uses half those rates. Exact requests above 272K
+  input use twice the input/cache rates and 1.5 times the output rate. Hosted
+  Codex keeps Astra context at 272K, so cumulative turn/subagent usage is charged
+  at ordinary rates even when several requests together exceed that threshold.
+  Rates: https://developers.openai.com/api/docs/models/gpt-6-astra
 - Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI and Venice GPT-5.6 usage therefore use their respective documented input, cache-read, cache-write, and output rates. Settings discloses Venice's higher provider-rate capacity use both while it is selected as a pending choice and after it is saved. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
@@ -1917,7 +1937,7 @@ production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
 The production runner first performs route type generation and an explicit
-app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
+app-local generated-contract TypeScript check with a 6 GiB limit. It marks
 only that prepared check complete before starting Webpack. The Next CLI parent
 uses a 1 GiB old-space limit and the isolated Webpack worker uses 3 GiB. The
 worker exits and releases compiler memory before static-generation workers

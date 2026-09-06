@@ -225,7 +225,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     // Establish that real precondition before starting the deliberately heavy
     // system-mailbox runtime so the local machine does not provision both
     // container roles concurrently.
-    const readyStandbySlotName = await waitForReadyStandbySlot();
+    const readyStandbySlotNames = await waitForReadyStandbySlots();
     await seedProbe(systemMailboxProbe);
     const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
     const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
@@ -284,12 +284,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       latestAppend.wake.seq,
       systemWakes.length,
     );
-    // The coordinator periodically re-proves its single ready slot. The wake
-    // storm intentionally runs long enough to overlap that interval, so wait
-    // for the same real slot to finish any in-flight reprobe before ingress.
-    await expect(waitForReadyStandbySlot()).resolves.toBe(
-      readyStandbySlotName,
-    );
+    // Background work must leave every observed pristine slot unclaimed.
+    await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
+      .toEqual(expect.arrayContaining(readyStandbySlotNames));
     const inboundText = "Reply while the full system mailbox is active.";
     const replyText = "Foreground reply won over the full system mailbox.";
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
@@ -348,10 +345,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemAttemptId: systemFence.attemptId,
         userId: systemMailboxProbe.userId,
       });
-      // Releasing the exact-user owner lets it finish and shut down before the
-      // foreground provider starts on the claimed standby. The provider-start
-      // callback therefore uses durable handoff evidence below instead of
-      // reaching back into volatile instrumentation on the retired owner.
+      // The foreground starts under a new fence after the background owner
+      // settles. It may retain the same member-bound warm target or claim an
+      // observed pristine slot; durable handoff evidence covers either path.
       await expect(releaseForegroundPriorityOrderingBarrier({
         scenario: requireScenario(),
         userId: systemMailboxProbe.userId,
@@ -372,9 +368,13 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       expect(providerStart.activeFence.attemptId).not.toBe(
         systemFence.attemptId,
       );
-      expect(providerStart.activeFence.runnerContainerName).toBe(
-        readyStandbySlotName,
+      expect([systemFence.runnerContainerName, ...readyStandbySlotNames]).toContain(
+        providerStart.activeFence.runnerContainerName,
       );
+      if (providerStart.activeFence.runnerContainerName === systemFence.runnerContainerName) {
+        await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
+          .toEqual(expect.arrayContaining(readyStandbySlotNames));
+      }
       if (!providerStart.systemLane) {
         throw new Error(await requireScenario().buildFailureMessage(
           systemMailboxProbe.userId,
@@ -2579,7 +2579,7 @@ async function waitForSystemWakeStormCanonicalCommit(
   userId: string,
   expectedImportedSeq: string,
   expectedFetchedCount: number,
-): Promise<{ attemptId: string }> {
+): Promise<NonNullable<Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>>> {
   const deadlineAt = Date.now() + 60_000;
   let lastStatus = await requireScenario().harness.readUserStatus(userId);
 
@@ -2603,7 +2603,7 @@ async function waitForSystemWakeStormCanonicalCommit(
       && importLog
       && fence?.processingMode === "system_mailbox"
     ) {
-      return { attemptId: fence.attemptId };
+      return fence;
     }
     await sleep(250);
   }
@@ -2759,11 +2759,11 @@ async function readActiveRuntimeFenceForTest(userId: string): Promise<{
   );
 }
 
-async function waitForReadyStandbySlot(): Promise<string> {
+async function waitForReadyStandbySlots(expectedSlotNames: readonly string[] = []): Promise<string[]> {
   const deadlineAt = Date.now() + 90_000;
   type StandbyState = {
-    provisioningSlotName: string | null;
-    readySlotName: string | null;
+    provisioningSlotNames: string[];
+    readySlotNames: string[];
   };
   let lastState: StandbyState | null = null;
 
@@ -2773,8 +2773,9 @@ async function waitForReadyStandbySlot(): Promise<string> {
       { method: "POST" },
     );
     lastState = state;
-    if (state.readySlotName) {
-      return state.readySlotName;
+    if (state.readySlotNames.length === 2
+      && expectedSlotNames.every((slotName) => state.readySlotNames.includes(slotName))) {
+      return state.readySlotNames;
     }
     await sleep(250);
   }

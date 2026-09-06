@@ -30,15 +30,10 @@ import {
   assembleBrowserVaultLoadedMetricRows,
   assembleBrowserVaultMetricsIndexReplica,
   assembleBrowserVaultMetricsReplica,
-  assembleBrowserVaultReplicaShards,
-  hasAllBrowserVaultMetricBuckets,
   type BrowserVaultCoreShard,
   type BrowserVaultLabsShard,
   type BrowserVaultMetricsShard,
   type BrowserVaultMetricBucketShard,
-  type BrowserVaultReplicaShardSelection,
-  type BrowserVaultReplicaShardSet,
-  BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
 } from "./shards.ts";
 import {
   BROWSER_VAULT_METRIC_BUCKET_IDS,
@@ -187,19 +182,15 @@ export function createBrowserVaultInteractiveQueryClient(
     metricBuckets,
   );
   const labsReplica = assembleBrowserVaultLabsReplica(core, labs);
-  const replica = deepFreezeBrowserVaultValue({
+  // The metrics client already deeply froze the shared core and metrics graph.
+  const replica = Object.freeze({
     ...metricsClient.replica,
-    labResultRows: labsReplica.labResultRows,
+    labResultRows: deepFreezeBrowserVaultValue(labsReplica.labResultRows),
   });
   return {
+    ...metricsClient,
     capability: "core+metrics-partial+labs",
-    ...createCoreQueryAccess(replica),
     labResults: createLabsQueryAccess(labsReplica).labResults,
-    loadedMetricBuckets: metricsClient.loadedMetricBuckets,
-    metricCoverage: metricsClient.metricCoverage,
-    metricGoals: metricsClient.metricGoals,
-    metrics: metricsClient.metrics,
-    metricSelections: metricsClient.metricSelections,
     replica,
   };
 }
@@ -214,52 +205,6 @@ export function createBrowserVaultLabsQueryClient(
     ...createCoreQueryAccess(replica),
     ...createLabsQueryAccess(replica),
     replica,
-  };
-}
-
-export interface BrowserVaultLoadedQueryClients {
-  core: BrowserVaultCoreQueryClient;
-  full: BrowserVaultQueryClient | null;
-  interactiveMetrics: BrowserVaultInteractiveMetricsQueryClient | null;
-  interactive: BrowserVaultInteractiveQueryClient | null;
-  labs: BrowserVaultLabsQueryClient | null;
-  metrics: BrowserVaultMetricsQueryClient | null;
-}
-
-export function createBrowserVaultLoadedQueryClients(
-  shards: BrowserVaultReplicaShardSelection,
-): BrowserVaultLoadedQueryClients {
-  return {
-    core: createBrowserVaultCoreQueryClient(shards.core),
-    full: shards.metrics && shards.labs && hasAllBrowserVaultMetricBuckets(shards.metricBuckets)
-      ? createBrowserVaultQueryClient(
-          assembleBrowserVaultReplicaShards(toShardSet(
-            shards.core,
-            shards.metrics,
-            shards.labs,
-            shards.metricBuckets,
-          )),
-        )
-      : null,
-    interactiveMetrics: shards.metrics
-      ? createBrowserVaultInteractiveMetricsQueryClient(
-          shards.core,
-          shards.metrics,
-          shards.metricBuckets,
-        )
-      : null,
-    interactive: shards.metrics && shards.labs
-      ? createBrowserVaultInteractiveQueryClient(
-          shards.core,
-          shards.metrics,
-          shards.labs,
-          shards.metricBuckets,
-        )
-      : null,
-    labs: shards.labs ? createBrowserVaultLabsQueryClient(shards.core, shards.labs) : null,
-    metrics: shards.metrics && hasAllBrowserVaultMetricBuckets(shards.metricBuckets)
-      ? createBrowserVaultMetricsQueryClient(shards.core, shards.metrics, shards.metricBuckets)
-      : null,
   };
 }
 
@@ -440,21 +385,6 @@ function createLabsQueryAccess(replica: BrowserVaultLabsReplica): BrowserVaultLa
         );
       },
     },
-  };
-}
-
-function toShardSet(
-  core: BrowserVaultCoreShard,
-  metrics: BrowserVaultMetricsShard,
-  labs: BrowserVaultLabsShard,
-  metricBuckets: Record<BrowserVaultMetricBucketId, BrowserVaultMetricBucketShard>,
-): BrowserVaultReplicaShardSet {
-  return {
-    core,
-    labs,
-    metricBuckets,
-    metrics,
-    schema: BROWSER_VAULT_REPLICA_SHARD_SET_SCHEMA,
   };
 }
 

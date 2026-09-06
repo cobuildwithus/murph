@@ -189,7 +189,8 @@ function findMutableActionRefs(workflow: string): Array<{ line: number; ref: str
 describe("hosted deploy automation helpers", () => {
   it("exports the exact deploy-only contract inputs", () => {
     expect(HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES).toEqual([
-      "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+      "CF_CONTAINER_MAX_INSTANCES",
+      "CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES",
       "HOSTED_EXECUTION_DEPLOY_TAG",
     ]);
   });
@@ -207,10 +208,10 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
-      CF_CONTAINER_MAX_INSTANCES: "648",
+      CF_CONTAINER_MAX_INSTANCES: "748",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
-      CF_STANDBY_CONTAINER_MAX_INSTANCES: "100",
+      CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "100",
       CF_WORKER_NAME: "hosted-worker",
       HOSTED_EXECUTION_DEPLOY_TAG: "run-123-2",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
@@ -433,6 +434,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
       "containers_pid_namespace",
+      "enable_request_signal",
     ]);
     expect(config.placement).toEqual({ mode: "smart" });
     expect(config.r2_buckets).toEqual([
@@ -487,6 +489,9 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
     expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
+    expect(config.vars.HOSTED_EXECUTION_STANDBY_TARGET).toBe("2");
+    expect(config.vars.CF_CONTAINER_MAX_INSTANCES).toBeUndefined();
+    expect(config.vars.CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES).toBeUndefined();
     expect(config.vars.CF_STANDBY_CONTAINER_MAX_INSTANCES).toBeUndefined();
     expect(config.vars.HOSTED_EXECUTION_DEPLOY_TAG).toBeUndefined();
     expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
@@ -552,29 +557,113 @@ describe("hosted deploy automation helpers", () => {
     }
   });
 
-  it("defaults the standby container ceiling to the ordinary runner ceiling", () => {
+  it("does not give the legacy application a second default capacity budget", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_MAX_INSTANCES: "250",
+      CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "0",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
 
     expect(environment.containerMaxInstances).toBe(250);
-    expect(environment.standbyContainerMaxInstances).toBe(250);
+    expect(environment.legacyStandbyContainerMaxInstances).toBe(0);
   });
 
-  it("rejects an invalid standby container ceiling", () => {
-    expect(() =>
-      readHostedDeployAutomationEnvironment({
+  it.each(["100", "0", "100x", "", " "])(
+    "rejects the obsolete independent standby capacity input %j",
+    (obsoleteValue) => {
+      expect(() => readHostedDeployAutomationEnvironment({
         CF_BUNDLES_BUCKET: "hosted-bundles",
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_STANDBY_CONTAINER_MAX_INSTANCES: "100x",
+        CF_CONTAINER_MAX_INSTANCES: "748",
+        CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "100",
+        CF_STANDBY_CONTAINER_MAX_INSTANCES: obsoleteValue,
         CF_WORKER_NAME: "hosted-worker",
         ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      }),
-    ).toThrow(/CF_STANDBY_CONTAINER_MAX_INSTANCES must be a positive integer/u);
+      })).toThrow(/CF_STANDBY_CONTAINER_MAX_INSTANCES is obsolete.*CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES/u);
+    },
+  );
+
+  it.each([
+    { CF_CONTAINER_MAX_INSTANCES: "0" },
+    { CF_CONTAINER_MAX_INSTANCES: "-1" },
+    { CF_CONTAINER_MAX_INSTANCES: "1.5" },
+    { CF_CONTAINER_MAX_INSTANCES: "748x" },
+    { CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "-1" },
+    { CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "1.5" },
+    { CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "100x" },
+    { CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "748" },
+    { CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "749" },
+  ])("rejects invalid member capacity inputs %j", (capacity) => {
+    expect(() => readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      CF_CONTAINER_MAX_INSTANCES: "748",
+      CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "100",
+      ...capacity,
+    })).toThrow(/CF_(?:LEGACY_STANDBY_)?CONTAINER_MAX_INSTANCES/u);
+  });
+
+  it.each(["off", "shadow", "allocate"])("forwards %s mode and the ready inventory target", (mode) => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_EXECUTION_STANDBY_MODE: mode,
+      HOSTED_EXECUTION_STANDBY_TARGET: " 03 ",
+    });
+    expect(buildHostedWranglerDeployConfig(environment).vars).toMatchObject({
+      HOSTED_EXECUTION_STANDBY_MODE: mode,
+      HOSTED_EXECUTION_STANDBY_TARGET: "3",
+    });
+  });
+
+  it("requires an explicit legacy reservation when migrating a configured total", () => {
+    expect(() => readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      CF_CONTAINER_MAX_INSTANCES: "748",
+    })).toThrow(/CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES must be explicit/u);
+  });
+
+  it.each(["-1", "1.5", "33", "2x", "9007199254740992"])(
+    "rejects invalid ready inventory target %j", (target) => {
+      expect(() => readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        HOSTED_EXECUTION_STANDBY_TARGET: target,
+      })).toThrow(/HOSTED_EXECUTION_STANDBY_TARGET/u);
+    },
+  );
+
+  it("bounds ready inventory by the unified application capacity after legacy reservation", () => {
+    const source = {
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      CF_CONTAINER_MAX_INSTANCES: "3",
+      CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "1",
+    };
+    expect(() => readHostedDeployAutomationEnvironment({
+      ...source,
+      HOSTED_EXECUTION_STANDBY_TARGET: "3",
+    })).toThrow(/HOSTED_EXECUTION_STANDBY_TARGET must not exceed/u);
+    for (const target of ["0", "2"]) {
+      expect(readHostedDeployAutomationEnvironment({
+        ...source,
+        HOSTED_EXECUTION_STANDBY_TARGET: target,
+      }).workerVars.HOSTED_EXECUTION_STANDBY_TARGET).toBe(target);
+    }
   });
 
   it("binds generated deploy config to the prepared runner fingerprints", () => {
@@ -721,9 +810,18 @@ describe("hosted deploy automation helpers", () => {
         instance_type: generatedContainer.instance_type,
         max_instances: generatedContainer.max_instances,
         rollout_active_grace_period: generatedContainer.rollout_active_grace_period,
-        rollout_step_percentage: generatedContainer.rollout_step_percentage,
+        ...(generatedContainer.rollout_step_percentage
+          ? { rollout_step_percentage: generatedContainer.rollout_step_percentage }
+          : {}),
         ssh: generatedContainer.ssh,
       });
+      if (!("constraints" in generatedContainer)) {
+        expect(checkedInConfig.containers[index]).not.toHaveProperty("constraints");
+      }
+      if (generatedContainer.max_instances === 0) {
+        expect(generatedContainer).not.toHaveProperty("rollout_step_percentage");
+        expect(checkedInConfig.containers[index]).not.toHaveProperty("rollout_step_percentage");
+      }
     }
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.analytics_engine_datasets).toEqual(
@@ -785,6 +883,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
       HOSTED_EXECUTION_STANDBY_MODE: "off",
+      HOSTED_EXECUTION_STANDBY_TARGET: "2",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });
   });
@@ -886,6 +985,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
       "containers_pid_namespace",
+      "enable_request_signal",
     ]);
     expect(config.containers).toHaveLength(3);
     for (const container of config.containers) {

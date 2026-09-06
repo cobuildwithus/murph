@@ -3738,9 +3738,12 @@ describe("hosted device-sync runtime", () => {
       `hosted-device-sync-artifact-write-${retryable ? "retryable" : "terminal"}-`,
     );
     await mkdir(vaultRoot, { recursive: true });
+    let providerCalls = 0;
+    let importCalls = 0;
     const provider = createFakeProvider({
       jobExecutor: {
         async executeJob(context) {
+          providerCalls += 1;
           await context.importSnapshot({ provider: "demo" });
           return {};
         },
@@ -3754,6 +3757,7 @@ describe("hosted device-sync runtime", () => {
       },
       importer: {
         async importDeviceProviderSnapshot() {
+          importCalls += 1;
           throw new HostedRuntimeArtifactWriteError({
             cause: new Error("Hosted artifact upload failed."),
             retryable,
@@ -3782,6 +3786,13 @@ describe("hosted device-sync runtime", () => {
       await service.runWorkerOnce();
 
       assert.equal(getStore(service).getJobById(job.id)?.status, expectedStatus);
+      assert.equal(providerCalls, 1);
+      assert.equal(importCalls, 1);
+      // Recovery remains the durable job's bounded backoff, not an immediate
+      // second provider collection/import inside this worker invocation.
+      await service.runWorkerOnce();
+      assert.equal(providerCalls, 1);
+      assert.equal(importCalls, 1);
       assert.deepEqual(
         service.listJobFailureDiagnostics().map((diagnostic) => ({
           code: diagnostic.code,

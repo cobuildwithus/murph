@@ -53,6 +53,9 @@ import type {
 } from "./vault-share-projection.ts";
 
 import {
+  HostedRuntimeBridgeCheckpointLeaseError,
+} from "./checkpoint-bridge.ts";
+import {
   buildHostedMailboxImportRedactedStatus,
   HostedMailboxImportCheckpointConflictError,
   HostedMailboxImportCheckpointUserMismatchError,
@@ -113,6 +116,9 @@ import {
   hostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
 } from "./canonical-write-receipt-log.ts";
+import {
+  externalizeHostedCanonicalWriteMediaPayloads,
+} from "./canonical-write-media.ts";
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
@@ -2776,6 +2782,7 @@ async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {
         failureNames: failure.name ? [failure.name] : [],
         failureSummaries: failure.summary ? [failure.summary] : [],
         nestedErrorCode: failure.errorCode,
+        ...failure.checkpointLeaseDiagnostics,
       },
     },
     now: context.input.now,
@@ -3019,11 +3026,17 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.checkpointRequestBuilder.markRuntimeStateDirty();
           input.onAssistantContextSnapshotDirty?.();
         }
+        const canonicalWritePersistence =
+          await externalizeHostedCanonicalWriteMediaPayloads({
+            mediaStore: input.input.platform.mediaStore ?? null,
+            persistence: writeInput,
+            vaultRoot: input.input.vaultRoot,
+          });
         const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
           artifactStore: input.input.platform.artifactStore,
-          payloads: writeInput.payloads,
+          payloads: canonicalWritePersistence.payloads,
           previousStatus: input.readPreviousRedactedStatus(),
-          receipt: writeInput.receipt,
+          receipt: canonicalWritePersistence.receipt,
         });
         const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
         if (input.deferRuntimeStatusCheckpoint === true) {
@@ -3660,13 +3673,35 @@ async function runHostedMailboxPostCheckpointEffectBestEffort(
 }
 
 function buildHostedMailboxPostCheckpointEffectFailureLog(error: unknown): {
+  checkpointLeaseDiagnostics?: {
+    checkpointResponseCheckpointed: boolean;
+    checkpointLeaseMatchesResponse: boolean;
+  };
   codeDetail: string | null;
   errorCode: string;
   name: string | null;
   summary: string | null;
 } {
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  // The shared sanitizer intentionally drops arbitrary error properties. Project
+  // only these booleans from the local lease error, never spread its metadata.
+  const postWebCheckpoint = error instanceof HostedRuntimeBridgeCheckpointLeaseError
+    && error.code === "stale_workspace_version"
+    && error.stage === "after_web_checkpoint"
+    ? error.postWebCheckpoint
+    : undefined;
+  const responseCheckpointed = postWebCheckpoint?.responseCheckpointed;
+  const leaseMatchesResponse = postWebCheckpoint?.leaseMatchesResponse;
   return {
+    ...(typeof responseCheckpointed === "boolean"
+      && typeof leaseMatchesResponse === "boolean"
+      ? {
+          checkpointLeaseDiagnostics: {
+            checkpointResponseCheckpointed: responseCheckpointed,
+            checkpointLeaseMatchesResponse: leaseMatchesResponse,
+          },
+        }
+      : {}),
     codeDetail: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorCodeDetail),
     errorCode: typeof diagnostics?.errorCode === "string" ? diagnostics.errorCode : "runtime_error",
     name: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorName),

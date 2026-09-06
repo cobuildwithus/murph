@@ -131,6 +131,7 @@ describe('assistant codex image helpers', () => {
     ['gpt-5.6-luna', 'openai'],
     ['gpt-5.6-terra', 'hosted-openai'],
     ['gpt-5.6-sol', 'hosted-chatgpt-openai'],
+    ['gpt-6-astra', 'hosted-openai'],
   ] as const)(
     'keeps original detail for %s on the %s route',
     (model, modelProvider) => {

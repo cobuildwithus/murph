@@ -1,4 +1,5 @@
 import {
+  cliTimingLaunchArgs,
   MURPH_DYNAMIC_TOOLS,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
@@ -203,6 +204,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      experimentalRawEvents: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -435,6 +437,7 @@ describe('assistant codex runtime', () => {
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       ephemeral: true,
+      experimentalRawEvents: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       permissions: 'murph-group-read',
@@ -595,6 +598,7 @@ describe('assistant codex runtime', () => {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
               dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+              experimentalRawEvents: true,
               model,
               modelProvider,
               sandbox: 'workspace-write',
@@ -899,6 +903,7 @@ describe('assistant codex runtime', () => {
         `model="${model}"`,
         '--config',
         'model_catalog_json="/opt/murph/codex-model-catalog.openai-flex.json"',
+        ...cliTimingLaunchArgs,
         'app-server',
       ],
       expect.objectContaining({

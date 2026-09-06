@@ -1,3 +1,4 @@
+import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
 import {
@@ -56,7 +57,6 @@ import {
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
 import {
-  buildAssistantResearchScoutCapabilityText,
   resolveAssistantModelBehaviorProfile,
 } from '../model-behavior.js'
 import {
@@ -150,6 +150,8 @@ import {
 const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
+  followUpAttachmentAllowed?: boolean
+  followUpInvocation?: boolean
   assistantContractFingerprint: string
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
@@ -543,17 +545,24 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'system-notification' ||
     input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn
+  const conversationProviderTurn =
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const privateInteractiveProviderTurn =
-    privateInteractiveAudience &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    privateInteractiveAudience && conversationProviderTurn
+  const followUp = await resolveAssistantFollowUpTurnContext({
+    message: input.input, session: input.session, privateConversation: privateInteractiveAudience,
+    interactiveConversation: conversationProviderTurn, systemNotification: systemNotificationTurn,
+    outputOnly: outputOnlyTurn, providerTools: input.profile.toolProfile === 'provider-turn',
+    onboardingGoalCheckin: onboardingGoalCheckinTurn,
+    supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
+  })
+  const followUpInvocation = followUp.invocation
+  const followUpAttachmentAllowed = followUp.attachmentAllowed
   const authenticatedGroupProviderTurn =
-    authenticatedGroupChatRuntime &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    authenticatedGroupChatRuntime && conversationProviderTurn
   const ordinaryInboundTurn =
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn' &&
+    conversationProviderTurn &&
     input.input.scheduledOccurrenceAt == null &&
     (
       input.input.turnTrigger == null ||
@@ -576,9 +585,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     (
       responseCardsAvailable ||
       (
-        authenticatedGroupChatRuntime &&
-        input.profile.promptProfile === 'conversation' &&
-        input.profile.toolProfile === 'provider-turn' &&
+        authenticatedGroupProviderTurn &&
         (
           scheduledInvocationScope !== null ||
           (
@@ -593,11 +600,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const telegramRichContentResponseCardsAvailable =
     telegramPresentationResponseCardsAvailable
   const groupChallengeResponseCardsAvailable =
-    authenticatedGroupChatRuntime &&
+    authenticatedGroupProviderTurn &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
     input.hostedToolContext?.groupSharedReader != null &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn' &&
     (scheduledInvocationScope !== null ||
       (ordinaryInboundTurn &&
         input.input.scheduledInvocationAuthority == null))
@@ -607,10 +612,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn ||
-    onboardingGoalCheckinTurn
+    followUp.requiresExplicitHistory
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
+          markUnavailableHistory: followUpInvocation,
           currentUserPrompt: input.input.prompt,
           includeTimestamps:
             privateInteractiveAudience
@@ -631,12 +637,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       )
       || hostedGroupStyleSettingsAvailable
     ) &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    conversationProviderTurn
   const groupAssistantStylePreferencesApply =
-    hostedGroupRuntime &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    hostedGroupRuntime && conversationProviderTurn
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
   const explicitAssistantPersona =
@@ -726,14 +729,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
             ? [pendingHostedImageContextPrompt]
             : []),
         ]
-  const groupRoomModelPrompt =
-    authenticatedGroupChatRuntime &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
-      ? await readAssistantGroupRoomModelPrompt({
-          vaultRoot: input.input.vault,
-        })
-      : null
+  const groupRoomModelPrompt = authenticatedGroupProviderTurn
+    ? await readAssistantGroupRoomModelPrompt({
+        vaultRoot: input.input.vault,
+      })
+    : null
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -745,9 +745,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
-    ...(assistantResearchAvailable
-      ? [buildAssistantResearchScoutCapabilityText()]
-      : []),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
@@ -889,6 +886,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,
+      assistantResearchAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
@@ -1005,6 +1003,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           authenticatedGroupChatRuntime &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.assistantConfigurationTool != null,
+        followUpAttachmentAvailable: followUpAttachmentAllowed,
         automationAvailable: input.hostedToolContext?.automationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&
@@ -1094,9 +1093,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           currentAudienceDeliveryFields.channel === 'linq' &&
           currentAudienceDeliveryFields.threadIsDirect === true &&
           userActionAcceptedInputIds.length > 0,
+        conversationAttachmentsAvailable:
+          isConversationMediaTurn(privateInteractiveProviderTurn, authenticatedGroupProviderTurn, userActionAcceptedInputIds) &&
+          input.hostedToolContext?.currentConversationAttachmentAuthorities !== undefined,
         analyzeVideoAvailable:
-          (privateInteractiveProviderTurn || authenticatedGroupProviderTurn) &&
-          userActionAcceptedInputIds.length > 0 &&
+          isConversationMediaTurn(privateInteractiveProviderTurn, authenticatedGroupProviderTurn, userActionAcceptedInputIds) &&
           normalizeNullableString(
             input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],
           ) !== null,
@@ -1143,9 +1144,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
-  const candidateResumeCodexThreadId =
+  const resumeCodexThreadId =
     nativeResumeEnabled &&
-    routeProviderCapabilities.supportsNativeResume &&
+    followUp.supportsNativeResume &&
     resumeBinding !== null &&
     assistantContractMatches
       ? resolveAssistantEffectiveCodexResumeThreadId({
@@ -1154,20 +1155,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }),
         })
       : null
-  const resumeCodexThreadId = candidateResumeCodexThreadId
   const conversationHistoryMessages = resumeCodexThreadId === null
     ? await resolveCommittedTranscriptHistoryMessages()
     : []
-  const shouldInjectBootstrapContext = resumeCodexThreadId === null
-  const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const actualAssistantCliContract = shouldPrepareBootstrapContext
-    ? bootstrapAssistantCliContract
-    : null
+  const shouldPrepareBootstrapContext = resumeCodexThreadId === null
   const turnContextPrompt = normalizeNullableString(
     [
       normalizeNullableString(
         threadStartPromptResult.layers.dynamicTurnContextPrompt,
       ),
+      followUp.context,
       normalizeNullableString(input.input.turnContext),
     ].filter((section): section is string => section !== null).join('\n\n'),
   )
@@ -1176,18 +1173,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
         codexThreadId: resumeCodexThreadId,
       }
     : null
-  const systemPromptResult = threadStartPromptResult
   const systemPrompt = onboardingGoalCheckinTurn
     ? [
-        systemPromptResult.prompt,
+        threadStartPromptResult.prompt,
         MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
       ].join('\n\n')
     : contextHandoffNotificationTurn
       ? [
-          systemPromptResult.prompt,
+          threadStartPromptResult.prompt,
           ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_OUTPUT_CONTRACT,
         ].join('\n\n')
-      : systemPromptResult.prompt
+      : threadStartPromptResult.prompt
   const developerInstructions =
     resumeCodexThreadId === null
       ? threadStartDeveloperInstructions
@@ -1204,8 +1200,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
     resolveRoutePlanningSlowestSpan(routePlanningSpans)
 
   return {
+    followUpInvocation,
+    followUpAttachmentAllowed,
     assistantContractFingerprint,
-    assistantCliContract: actualAssistantCliContract,
+    assistantCliContract: shouldPrepareBootstrapContext
+      ? bootstrapAssistantCliContract
+      : null,
     cliEnv: {
       ...input.sharedPlan.cliAccess.env,
     },
@@ -1253,7 +1253,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : undefined,
     promptCacheMetadata: contextHandoffNotificationTurn
       ? null
-      : systemPromptResult.cacheMetadata,
+      : threadStartPromptResult.cacheMetadata,
     assistantPreferredElevenLabsVoiceId:
       assistantVoicePreferenceApplies
         ? resolveAssistantVoiceOptionElevenLabsVoiceId(assistantVoice)
@@ -1273,6 +1273,7 @@ type TranscriptHistoryCandidate = {
 }
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
+  markUnavailableHistory?: boolean
   currentUserPrompt: string
   includeTimestamps: boolean
   sessionId: string
@@ -1282,7 +1283,12 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   try {
     entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
   } catch {
-    return []
+    return input.markUnavailableHistory
+      ? [{ role: 'assistant', content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT }]
+      : []
+  }
+  if (input.markUnavailableHistory && entries.length === 0) {
+    return [{ role: 'assistant', content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT }]
   }
 
   let historyIncomplete =
@@ -1672,4 +1678,12 @@ function resolveAssistantEffectiveCodexResumeThreadId(input: {
   resumeCodexThreadId: string | null
 }): string | null {
   return normalizeNullableString(input.resumeCodexThreadId)
+}
+
+function isConversationMediaTurn(
+  privateTurn: boolean,
+  groupTurn: boolean,
+  acceptedInputIds: readonly string[],
+): boolean {
+  return (privateTurn || groupTurn) && acceptedInputIds.length > 0
 }

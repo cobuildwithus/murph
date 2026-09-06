@@ -121,9 +121,12 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // contract joined the public @murphai/contracts barrel.
     // Remeasured 300 modules on 2026-09-01 after Incur 0.5.1 added nine
     // modules to its deliberate scoped import graph without adding a package.
-    // Remeasured 301 modules after the canonical wearable saved-view contract
-    // joined the same public contracts barrel; no new CLI dependency was added.
-    maxResolvedModules: 301,
+    // PR #2872 CI measured 303: runtime-state/dist/{cli-timing,node/cli-timing}.js
+    // and node:dgram are the complete added timing subtree. node:async_hooks
+    // was already loaded by vault-cli-vault-context. Admit only those three;
+    // the package allowlist and startup-byte budgets remain unchanged.
+    // The wearable saved-view contract adds one module to that same barrel.
+    maxResolvedModules: 304,
   },
 ]
 

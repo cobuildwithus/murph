@@ -221,7 +221,8 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
-vi.mock("../src/hosted-runtime/channel-activity.ts", () => ({
+vi.mock("../src/hosted-runtime/channel-activity.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/hosted-runtime/channel-activity.ts")>()),
   buildHostedLinqChannelEnv: mocks.buildHostedLinqChannelEnv,
   createHostedAssistantChannelTypingDependencies:
     mocks.createHostedAssistantChannelTypingDependencies,

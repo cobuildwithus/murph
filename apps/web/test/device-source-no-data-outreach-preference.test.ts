@@ -138,7 +138,11 @@ describe("hosted source no-data outreach policy", () => {
     })).resolves.toEqual({ enabled: false, setting: "off" });
   });
 
-  it("saves, disables, and restores the default through one canonical row", async () => {
+  it.each([
+    { sourceProviderSlug: "garmin", defaultDays: 5 },
+    { sourceProviderSlug: "apple_health_kit", defaultDays: 3 },
+    { sourceProviderSlug: "whoop_v2", defaultDays: 5 },
+  ])("saves, disables, and restores $sourceProviderSlug through one canonical row", async ({ sourceProviderSlug, defaultDays }) => {
     const store = createPreferenceStore();
     mocks.getPrisma.mockReturnValue(store.prisma);
 
@@ -148,7 +152,7 @@ describe("hosted source no-data outreach policy", () => {
         afterDays: 10,
         assistantInputId: ASSISTANT_INPUT_ID,
         mode: "after_days",
-        sourceProviderSlug: "garmin",
+        sourceProviderSlug,
       },
     })).resolves.toMatchObject({
       effectiveAfterDays: 10,
@@ -162,7 +166,7 @@ describe("hosted source no-data outreach policy", () => {
       request: {
         assistantInputId: ASSISTANT_INPUT_ID,
         mode: "off",
-        sourceProviderSlug: "garmin",
+        sourceProviderSlug,
       },
     })).resolves.toMatchObject({
       effectiveAfterDays: null,
@@ -176,10 +180,10 @@ describe("hosted source no-data outreach policy", () => {
       request: {
         assistantInputId: ASSISTANT_INPUT_ID,
         mode: "default",
-        sourceProviderSlug: "garmin",
+        sourceProviderSlug,
       },
     })).resolves.toMatchObject({
-      effectiveAfterDays: 5,
+      effectiveAfterDays: defaultDays,
       setting: "default",
       status: "saved",
     });

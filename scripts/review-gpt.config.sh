@@ -271,7 +271,7 @@ package_script="scripts/package-audit-context-full.sh"
 # composer to have no app connector selected before auto-send because review
 # context must come from the guarded codebase ZIP.
 app_connector="current"
-model="gpt-5.6-sol"
+model="gpt-6-pro"
 thinking="current"
 response_timeout_ms="${response_timeout_ms:-$((250 * 60 * 1000))}"
 
@@ -328,7 +328,7 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "hard-cut" \
   "greenfield-hard-cut"
 review_gpt_register_dir_preset "pr-review" "$review_gpt_pr_review_prompt_file" \
-  "Deep PR review for serious bugs, invariant drift, and material simplification using the guarded codebase ZIP." \
+  "PR review for realistic serious bugs and material Complexity Collapse using the guarded codebase ZIP." \
   "pr-deep-review" \
   "deep-pr-review" \
   "pr-bugs-and-architecture"

@@ -2855,6 +2855,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         lookup: "recurring-interval-reminder",
       })).resolves.toEqual(expect.objectContaining({
         action: "inspect",
+        executionInspection: expect.objectContaining({
+          status: "available",
+          current: expect.objectContaining({ phase: "idle" }),
+          recentRuns: [],
+        }),
         occurrenceProjection: {
           issues: ["stale_recurring_occurrence"],
           status: "unavailable",
@@ -2966,7 +2971,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       })).resolves.toEqual({
         action: "inspect",
         automationId: beforeInspect.automationId,
+        executionInspection: expect.objectContaining({
+          status: "available",
+          current: { phase: "idle", occurrenceAt: null, startedAt: null, retryAt: null, error: null },
+          delivery: null,
+          recentRuns: [],
+        }),
         contextReferences: [],
+        instructions: beforeInspect.instructions,
+        title: beforeInspect.title,
         effectiveTimeZone: "America/Chicago",
         latestOccurrence: {
           delivered: "unconfirmed",

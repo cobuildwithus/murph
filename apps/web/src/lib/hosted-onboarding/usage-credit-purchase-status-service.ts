@@ -34,6 +34,8 @@ import {
 } from "./usage-credit-purchase-stripe";
 import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
+  readHostedUsageCreditPurchaseMemberLockOrder,
+  readHostedUsageCreditTargetMemberLockOrder,
 } from "./usage-credit-purchase-reservation-lock";
 import { normalizeHostedGroupUsageFundingLocator } from "../hosted-groups/group-usage-funding";
 import { getPrisma } from "../prisma";
@@ -399,8 +401,11 @@ export async function expireHostedUsageCreditCheckout(input: {
   if (canCancelHostedUsageCreditDirectPayment(purchase)) {
     const target = projectHostedUsageCreditPurchaseTarget(purchase);
     const reconciled = await cancelHostedUsageCreditDirectPayment({
-      ...(target.kind === "group"
-        ? { groupBeneficiaryMemberId: target.beneficiaryMemberId }
+      ...(target.kind !== "personal"
+        ? {
+            memberLockOrder:
+              readHostedUsageCreditTargetMemberLockOrder(target.kind),
+          }
         : {}),
       now,
       prisma,
@@ -438,6 +443,11 @@ export async function expireHostedUsageCreditCheckout(input: {
     if (providerState === "expired") {
       await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: purchase.beneficiaryMemberId,
+        memberLockOrder: readHostedUsageCreditPurchaseMemberLockOrder({
+          beneficiaryMemberId: purchase.beneficiaryMemberId,
+          checkoutSuccessUrl: purchase.checkoutSuccessUrl,
+          payerMemberId: input.payerMemberId,
+        }),
         payerMemberId: input.payerMemberId,
         tx,
       });

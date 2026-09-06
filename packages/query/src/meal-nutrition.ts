@@ -1,3 +1,4 @@
+import { resolveMealNutritionGoals, type MealNutritionGoalContext } from "./meal-nutrition-goals.ts";
 import {
   extractIsoDatePrefix,
   MEAL_MICRONUTRIENT_DEFINITIONS,
@@ -32,11 +33,13 @@ export interface MealNutritionDayTotal {
 }
 
 export interface MealNutritionTotalsOptions {
+  resolveGoals?: boolean;
   from?: string;
   to?: string;
 }
 
 export interface MealNutritionTotalsResult {
+  goalContext?: MealNutritionGoalContext;
   from: string | null;
   to: string | null;
   mealCount: number;
@@ -473,8 +476,17 @@ export async function readMealNutritionTotals(
   vaultRoot: string,
   options: MealNutritionTotalsOptions = {},
 ): Promise<MealNutritionTotalsResult> {
-  const readModel = await readMealNutritionModel(vaultRoot);
-  return summarizeMealNutritionTotals(readModel, options);
+  if (options.resolveGoals && (!options.from || options.from !== options.to)) {
+    throw new Error("Goal resolution requires identical explicit from and to dates.");
+  }
+  const [readModel, goals] = await Promise.all([
+    readMealNutritionModel(vaultRoot),
+    options.resolveGoals ? readCanonicalEntityFamilySource(vaultRoot, "goal") : Promise.resolve(null),
+  ]);
+  return {
+    ...summarizeMealNutritionTotals(readModel, options),
+    ...(goals && options.from ? { goalContext: resolveMealNutritionGoals(goals, options.from) } : {}),
+  };
 }
 
 export async function readMealNutrientTotals(

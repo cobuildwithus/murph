@@ -208,6 +208,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   gemini: "generativelanguage.googleapis.com",
   linq: "api.linqapp.com",
   mapbox: "api.mapbox.com",
+  mediaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore,
   openAi: "api.openai.com",
   runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   telegram: "api.telegram.org",
@@ -508,6 +509,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini]: handleHostedRunnerGeminiOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mediaStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi]: handleHostedRunnerOpenAiOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.runnerControl]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram]: handleHostedRunnerTelegramOutbound,
@@ -4445,6 +4447,7 @@ function readTelegramSentinelFilePath(pathname: string): string | null {
 function isAllowedTelegramOperation(operation: string): boolean {
   return operation === "sendMessage"
     || operation === "sendPhoto"
+    || operation === "sendDocument"
     || operation === "sendRichMessage"
     || operation === "sendVoice"
     || operation === "sendChatAction"

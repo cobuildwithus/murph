@@ -119,6 +119,7 @@ import EnvironmentPageClient from "../app/(dashboard)/environment/environment-pa
 import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
+import JournalPageClient from "../app/(dashboard)/journal/journal-page-client";
 
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
@@ -1770,6 +1771,72 @@ test("browser-vault provider preserves readable stale data when bounded observat
   assert.equal(focusBody.refreshObservationOnly, true);
 
   await rendered.cleanup();
+});
+
+test("Journal retry admits the recovered session and renders its timeline", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
+  mocks.usePathname.mockReturnValue("/journal");
+  const occurredAt = "2026-04-30T09:15:00.000Z";
+  const replica = createReplica({
+    journal: {
+      days: [{ date: "2026-04-30", events: [{
+        date: "2026-04-30", details: [], id: "stretching-note", kind: "note",
+        metrics: {
+          activityMinutes: 0, deepSleepMinutes: null, hrvMs: null,
+          readinessScore: null, recoveryScore: null, remSleepMinutes: null,
+          respiratoryRate: null, restingHeartRateBpm: null,
+          sleepEfficiencyPercent: null, sleepMinutes: null, sleepScore: null,
+          spo2Percent: null,
+        },
+        occurredAt,
+        records: [{
+          id: "stretching-note", kind: "note", label: "Stretching",
+          occurredAt, source: "manual", summary: "10 min", tags: [], timeZone: "UTC",
+        }],
+        summary: "10 min", timing: "timed", timeZone: "UTC", title: "Stretching",
+      }] }],
+      eventCount: 1, recordCount: 1, weeks: [], windowDays: 120,
+    },
+  });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      error: { message: "Temporarily unavailable." },
+    }), { status: 503 }))
+    .mockImplementation(async () => jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef({
+        byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
+      }),
+      state: "ready",
+    }));
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockResolvedValue(
+    new TextEncoder().encode(JSON.stringify(replica)),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(JournalPageClient)),
+    { requireButton: false },
+  );
+  try {
+    await waitForText(rendered.container, "Try again");
+    assert.equal(rendered.container.textContent?.includes("Stretching"), false);
+    const retry = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Try again");
+    assert.ok(retry);
+    await act(async () => {
+      retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    await waitForText(rendered.container, "Stretching");
+    assert.match(rendered.container.textContent ?? "", /10 min/);
+    assert.equal(rendered.container.textContent?.includes("Try again"), false);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("current endpoint denial never adopts a matching warm snapshot", async () => {

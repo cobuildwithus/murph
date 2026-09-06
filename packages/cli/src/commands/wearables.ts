@@ -37,6 +37,9 @@ import {
 import type { VaultServices } from '@murphai/vault-usecases'
 import { publicValidationIssue } from './public-validation-issue.js'
 
+export const wearablesActivityListHint =
+  'One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Choose first; never probe and retry.'
+
 const nullableTimestampSchema = z.string().min(1).nullable()
 const nullableTextSchema = z.string().min(1).nullable()
 const wearableConfidenceLevelSchema = z.enum(['none', 'low', 'medium', 'high'])
@@ -212,7 +215,12 @@ const wearableActivitySummarySchema = z.object({
   totalCalories: wearableResolvedMetricSchema.optional(),
   totalElevationGainMeters: wearableResolvedMetricSchema.optional(),
   walkingAverageHeartRate: wearableResolvedMetricSchema.optional(),
-  workoutFeatures: z.array(wearableWorkoutFeatureSchema).max(32).optional(),
+  workoutFeatures: z.array(z.union([
+    wearableWorkoutFeatureSchema,
+    wearableWorkoutFeatureSchema.omit({ splits: true }).extend({
+      splitsOmitted: z.literal(true),
+    }),
+  ])).max(32).optional(),
   workoutStrain: wearableResolvedMetricSchema.optional(),
 })
 
@@ -875,7 +883,7 @@ export function registerWearablesCommands(
       },
     ],
     hint:
-      'Use `wearables day` as the first read for date-specific wearable questions except workout activity questions; use `wearables activity list` for those. Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit workout detail only when the answer is entirely available from day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes`; include it whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits. Use the other list subcommands for longer windows and provider/source freshness checks.',
+      'Use `wearables day` first for date-specific questions except workouts; use `wearables activity list` for workouts. Choose the output before the first and only data read: day totals omit both detail options; individual workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Never probe with smaller output and retry. Use the other list subcommands for longer windows and provider/source freshness checks.',
     output: wearablesDayResultSchema,
     async run({ args, options }) {
       const result = await services.query.showWearableDay({
@@ -1048,15 +1056,17 @@ export function registerWearablesCommands(
       'List semantic daily activity summaries instead of raw activity-session and sample rows.',
     args: emptyArgsSchema,
     options: withWearableListOptions().extend({
+      includeWorkoutSummaries: z.boolean().default(false).describe(
+        'Include bounded per-workout facts without lap/split rows. Use for workout counts, types, start times, duration, distance, heart rate, cadence, power, or speed. Each workout marks splitsOmitted true; this never proves splits are absent. Use --include-workout-details instead when the question needs splits; full detail wins if both options are true.',
+      ),
       includeWorkoutDetails: z
         .boolean()
         .default(false)
         .describe(
-          'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.',
+          'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.',
         ),
     }),
-    hint:
-      'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.',
+    hint: wearablesActivityListHint,
     output: wearablesActivityListResultSchema,
     async run({ options }) {
       assertWearableDateRangeOrdered(options)
@@ -1069,6 +1079,7 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
         includeWorkoutDetails: options.includeWorkoutDetails,
+        includeWorkoutSummaries: options.includeWorkoutSummaries,
       })
 
       return wearablesActivityListResultSchema.parse(withoutWearableVaultPath(result))

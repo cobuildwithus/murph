@@ -70,6 +70,8 @@ import {
 } from "../src/hosted-runtime.ts";
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
+  checkpointHostedRuntimeBridgeWebWorkspace,
+  checkpointHostedRuntimeBridgeWorkspace,
   type HostedRuntimeBridgeCheckpointLease,
   type HostedRuntimeBridgeCheckpointLeaseErrorCode,
   type HostedRuntimeBridgeCheckpointLeaseStage,
@@ -109,6 +111,155 @@ afterEach(async () => {
   await Promise.all(cleanupPaths.splice(0).map(async (target) => {
     await rm(target, { force: true, recursive: true });
   }));
+});
+
+describe("checkpoint bridge post-Web lease diagnostics", () => {
+  const request = {
+    attemptId: "attempt_synthetic_lease_diagnostic",
+    expectedWorkspaceVersion: "930000000000000001",
+    leaseGeneration: "940000000000000001",
+    reason: "active_turn_input",
+    snapshotRef: null,
+  } satisfies HostedWorkspaceCheckpointRequest;
+  const lease = {
+    attemptId: request.attemptId,
+    leaseGeneration: request.leaseGeneration,
+    providerEgressToken: "synthetic-private-egress-token",
+    userId: "member_synthetic_lease_diagnostic",
+    workspaceVersion: request.expectedWorkspaceVersion,
+  } satisfies HostedRuntimeBridgeCheckpointLease;
+  const responseVersion = "930000000000000002";
+  const differentVersion = "930000000000000003";
+  const response = createCheckpointResponse({
+    snapshotRef: null,
+    userId: lease.userId,
+    version: responseVersion,
+  });
+
+  for (const checkpointed of [true, false]) {
+    for (const matchesResponse of [true, false]) {
+      it(`projects checkpointed=${checkpointed}, matchesResponse=${matchesResponse} without new effects`, async () => {
+        let liveLease: HostedRuntimeBridgeCheckpointLease = lease;
+        const readCurrentLease = vi.fn(async () => liveLease);
+        const snapshotWorkspace = vi.fn(async () => new Uint8Array([1, 2, 3]));
+        const writeBundle = vi.fn(async () => null);
+        const checkpointWorkspace = vi.fn(async () => {
+          liveLease = {
+            ...lease,
+            workspaceVersion: matchesResponse ? responseVersion : differentVersion,
+          };
+          return { ...response, checkpointed };
+        });
+
+        const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWorkspace({
+          checkpointWorkspace,
+          readCurrentLease,
+          request,
+          snapshotWorkspace,
+          userId: lease.userId,
+          writeBundle,
+        }), { code: "stale_workspace_version", stage: "after_web_checkpoint" });
+
+        expect(error.postWebCheckpoint).toEqual({
+          responseCheckpointed: checkpointed,
+          leaseMatchesResponse: matchesResponse,
+        });
+        expect(error.message).toBe(
+          "Hosted runtime bridge checkpoint lease validation failed after_web_checkpoint.",
+        );
+        expect(readCurrentLease).toHaveBeenCalledTimes(4);
+        expect(snapshotWorkspace).toHaveBeenCalledOnce();
+        expect(writeBundle).toHaveBeenCalledOnce();
+        expect(checkpointWorkspace).toHaveBeenCalledExactlyOnceWith(request);
+        for (const sensitive of [
+          ...Object.values(lease), responseVersion, differentVersion,
+        ]) {
+          expect(JSON.stringify(error)).not.toContain(sensitive);
+        }
+      });
+    }
+
+    it(`returns checkpointed=${checkpointed} responses unchanged when the lease has not drifted`, async () => {
+      const checkpointResponse = { ...response, checkpointed };
+      const checkpointWorkspace = vi.fn(async () => checkpointResponse);
+      const readCurrentLease = vi.fn(async () => lease);
+      await expect(checkpointHostedRuntimeBridgeWebWorkspace({
+        checkpointWorkspace, readCurrentLease, request, userId: lease.userId,
+      })).resolves.toBe(checkpointResponse);
+      expect(checkpointResponse).not.toHaveProperty("postWebCheckpoint");
+      expect(checkpointWorkspace).toHaveBeenCalledExactlyOnceWith(request);
+      expect(readCurrentLease).toHaveBeenCalledTimes(2);
+    });
+  }
+
+  it.each([
+    [1, "before_snapshot"],
+    [2, "before_bundle_write"],
+    [3, "before_web_checkpoint"],
+  ] as const)("omits response metadata on lease read %i at %s", async (staleRead, stage) => {
+    let leaseReads = 0;
+    const readCurrentLease = vi.fn(async () => {
+      leaseReads += 1;
+      return leaseReads === staleRead
+        ? { ...lease, workspaceVersion: responseVersion }
+        : lease;
+    });
+    const snapshotWorkspace = vi.fn(async () => new Uint8Array([1]));
+    const writeBundle = vi.fn(async () => null);
+    const checkpointWorkspace = vi.fn(async () => response);
+    const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWorkspace({
+      checkpointWorkspace, readCurrentLease, request, snapshotWorkspace,
+      userId: lease.userId, writeBundle,
+    }), { code: "stale_workspace_version", stage });
+    expect(error.postWebCheckpoint).toBeUndefined();
+    expect(readCurrentLease).toHaveBeenCalledTimes(staleRead);
+    expect(snapshotWorkspace).toHaveBeenCalledTimes(staleRead > 1 ? 1 : 0);
+    expect(writeBundle).toHaveBeenCalledTimes(staleRead > 2 ? 1 : 0);
+    expect(checkpointWorkspace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing_lease", null],
+    ["stale_user", { ...lease, userId: "member_synthetic_other" }],
+    ["stale_attempt", { ...lease, attemptId: "attempt_synthetic_other" }],
+    ["stale_lease_generation", { ...lease, leaseGeneration: "940000000000000002" }],
+  ] as const)("omits response metadata for post-Web %s", async (code, liveLease) => {
+    const readCurrentLease = vi.fn<() => Promise<HostedRuntimeBridgeCheckpointLease | null>>()
+      .mockResolvedValueOnce(lease)
+      .mockResolvedValueOnce(liveLease);
+    const checkpointWorkspace = vi.fn(async () => response);
+    const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWebWorkspace({
+      checkpointWorkspace, readCurrentLease, request, userId: lease.userId,
+    }), { code, stage: "after_web_checkpoint" });
+    expect(error.postWebCheckpoint).toBeUndefined();
+    expect(readCurrentLease).toHaveBeenCalledTimes(2);
+    expect(checkpointWorkspace).toHaveBeenCalledExactlyOnceWith(request);
+  });
+
+  it("preserves the response user check before the post-Web lease read", async () => {
+    const readCurrentLease = vi.fn(async () => lease);
+    const checkpointWorkspace = vi.fn(async () => ({
+      ...response, workspace: { ...response.workspace, userId: "member_synthetic_other" },
+    }));
+    const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWebWorkspace({
+      checkpointWorkspace, readCurrentLease, request, userId: lease.userId,
+    }), { code: "workspace_user_mismatch", stage: "after_web_checkpoint" });
+    expect(error.postWebCheckpoint).toBeUndefined();
+    expect(readCurrentLease).toHaveBeenCalledOnce();
+    expect(checkpointWorkspace).toHaveBeenCalledExactlyOnceWith(request);
+  });
+
+  it("rethrows a callback failure unchanged without a post-Web lease read", async () => {
+    const failure = new Error("Synthetic Web checkpoint failure.");
+    const readCurrentLease = vi.fn(async () => lease);
+    const checkpointWorkspace = vi.fn(async () => { throw failure; });
+    await expect(checkpointHostedRuntimeBridgeWebWorkspace({
+      checkpointWorkspace, readCurrentLease, request, userId: lease.userId,
+    })).rejects.toBe(failure);
+    expect(failure).not.toHaveProperty("postWebCheckpoint");
+    expect(readCurrentLease).toHaveBeenCalledOnce();
+    expect(checkpointWorkspace).toHaveBeenCalledExactlyOnceWith(request);
+  });
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
@@ -384,7 +535,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           vaultRoot,
         });
 
-        await expectLeaseFailure(
+        const error = await expectLeaseFailure(
           options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")),
           {
             code: staleMutation.code,
@@ -392,6 +543,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           },
         );
 
+        expect(error.postWebCheckpoint).toBeUndefined();
         expect(calls.startSnapshotSession).toHaveBeenCalledTimes(
           stageCase.expectedStartCount,
         );
@@ -564,8 +716,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const finishedLogGate = new Promise<void>((resolve) => {
       releaseFinishedLog = resolve;
     });
+    let signalFinishedLogStarted!: () => void;
+    const finishedLogStarted = new Promise<void>((resolve) => {
+      signalFinishedLogStarted = resolve;
+    });
     let finishedLogSettled = false;
     calls.logWrite.mockImplementationOnce(async (request) => {
+      signalFinishedLogStarted();
       await finishedLogGate;
       finishedLogSettled = true;
       return { loggedCount: request.entries.length };
@@ -574,23 +731,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       platform,
       vaultRoot,
     });
-    let checkpointSettled = false;
     const checkpoint = Promise.resolve(options.createCheckpointSnapshot(
       createCheckpointInput("idle_shutdown"),
-    )).then((result) => {
-      checkpointSettled = true;
-      return result;
-    });
+    ));
 
     let pendingLogDrain: Promise<void> | null = null;
     try {
-      await vi.waitFor(() => {
-        expect(checkpointSettled).toBe(true);
-      }, { timeout: 250 });
+      await expect(Promise.race([
+        checkpoint.then(() => "checkpoint"),
+        finishedLogStarted.then(() => "log write"),
+      ])).resolves.toBe("checkpoint");
       pendingLogDrain = drainHostedRuntimeLogWritesBestEffort();
-      await vi.waitFor(() => {
-        expect(calls.logWrite).toHaveBeenCalledOnce();
-      });
+      await expect(Promise.race([
+        finishedLogStarted.then(() => "log write"),
+        pendingLogDrain.then(() => "drain"),
+      ])).resolves.toBe("log write");
+      expect(calls.logWrite).toHaveBeenCalledOnce();
       expect(finishedLogSettled).toBe(false);
       await expect(checkpoint).resolves.toMatchObject({
         snapshotRef: {
@@ -603,9 +759,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       await checkpoint;
     }
 
-    await vi.waitFor(() => {
-      expect(finishedLogSettled).toBe(true);
-    });
+    expect(finishedLogSettled).toBe(true);
   });
 
   it("keeps snapshot outcomes independent from an unavailable log port", async () => {
@@ -1216,6 +1370,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       {
         ...createCheckpointInput("idle_shutdown"),
         handledConversationFrontierSelected: true,
+        nextDefaultProcessingWakeAt: "invalid synthetic wake value",
+        nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "1",
       },
     )).rejects.toThrow("HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON");
 
@@ -1225,10 +1382,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const redactedJson = failureEntry?.redactedJson ?? {};
     expect(redactedJson).toMatchObject({
       handledConversationFrontierSelected: true,
+      nextDefaultProcessingWakeState: "invalid",
+      nextDefaultProcessingWakeOffsetMs: null,
     });
     expect(redactedJson).not.toHaveProperty("webCheckpointAccepted");
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(JSON.stringify(redactedJson)).not.toContain(rawPath);
+    expect(JSON.stringify(redactedJson)).not.toContain("invalid synthetic wake value");
     expect(JSON.stringify(redactedJson)).toContain("<redacted-path>");
   });
 
@@ -1354,6 +1514,49 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await snapshot;
     await canonicalWrite;
     expect(canonicalWriterEntered).toBe(true);
+  });
+
+  it.each([
+    { label: "legacy omitted", wakeAt: undefined, state: "omitted", offsetMs: null },
+    { label: "explicitly absent", wakeAt: null, state: "none", offsetMs: null },
+    { label: "overdue", wakeAt: "2026-04-08T12:00:00.000Z", state: "due", offsetMs: -3_600_000 },
+    { label: "due now", wakeAt: "2026-04-08T13:00:00.000Z", state: "due", offsetMs: 0 },
+    { label: "future", wakeAt: "2026-04-08T14:00:00.000Z", state: "future", offsetMs: 3_600_000 },
+  ])("records a $label default wake alongside a future system wake", async ({ wakeAt, state, offsetMs }) => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-04-08T13:00:00.000Z"));
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const options = createBridgeOptions({ platform, vaultRoot });
+    await options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"),
+      nextWakeAt: "2026-04-08T13:01:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      ...(wakeAt === undefined ? {} : {
+        nextDefaultProcessingWakeAt: wakeAt,
+        nextDefaultProcessingWakeReason: wakeAt === null ? null : "assistant",
+        systemMailboxProgressGeneration: "1",
+      }),
+    });
+
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.find((entry) => entry.eventCode === "checkpoint.snapshot_finished"))
+      .toMatchObject({
+        redactedJson: {
+          nextWakeState: "future",
+          nextWakeOffsetMs: 60_000,
+          nextDefaultProcessingWakeState: state,
+          nextDefaultProcessingWakeOffsetMs: offsetMs,
+          nextDefaultProcessingWakeReasonPresent: wakeAt != null,
+          systemMailboxProgressGenerationPresent: wakeAt !== undefined,
+          webCheckpointAccepted: true,
+        },
+      });
+    const checkpointRequest = calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
+    expect(checkpointRequest?.nextWakeAt).toBe("2026-04-08T13:01:00.000Z");
+    expect(checkpointRequest?.nextDefaultProcessingWakeAt).toBe(wakeAt);
+    expect(checkpointRequest).not.toHaveProperty("nextDefaultProcessingWakeState");
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
   });
 
   it("retains one finished lifecycle record with checkpoint and plan metadata", async () => {
@@ -1587,7 +1790,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
   });
 
-  it("excludes transient inbox videos from v2 snapshots without deleting live bytes", async () => {
+  it("retains inbox videos alongside audio in v2 snapshots for later turns", async () => {
     const vaultRoot = await createVaultRoot();
     const now = "2026-06-10T00:00:00.000Z";
     await initializeVault({ createdAt: now, vaultRoot });
@@ -1644,7 +1847,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         .archiveEntries ?? [];
     expect(archiveEntries.some((entry) =>
       entry.root === "vault" && entry.relativePath === videoPath
-    )).toBe(false);
+    )).toBe(true);
     expect(archiveEntries.some((entry) =>
       entry.root === "vault" && entry.relativePath === audioPath
     )).toBe(true);
@@ -3079,7 +3282,7 @@ async function expectLeaseFailure(
     code: HostedRuntimeBridgeCheckpointLeaseErrorCode;
     stage: HostedRuntimeBridgeCheckpointLeaseStage;
   },
-): Promise<void> {
+): Promise<HostedRuntimeBridgeCheckpointLeaseError> {
   let thrown: unknown;
   try {
     await operation;
@@ -3093,4 +3296,5 @@ async function expectLeaseFailure(
   }
   expect(thrown.code).toBe(expected.code);
   expect(thrown.stage).toBe(expected.stage);
+  return thrown;
 }

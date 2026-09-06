@@ -1646,40 +1646,47 @@ export function createJunctionDeviceSyncProvider(
         );
     const {
       providerRecordsSeen: historicalSummaryHasFetchedRecords,
-      snapshots: summaries,
+      snapshots: historicalSummaries,
     } = summaryFetchResult;
-    const sourceScopedHistoricalSummaryHasRecords =
-      job.kind === "backfill" && sourceProviderSlug
-        ? await hasJunctionSourceScopedAdmittedSnapshotRecords({
-            context,
-            snapshots: summaries,
-            sourceProviderSlug,
-            sourceProviders,
-          })
-        : false;
     const profileSummaryResult = summaryPhaseComplete
       ? { checked: false, records: [] }
       : await fetchProfileSummaryOnce(context, skippedOptionalResources);
     const profileMetadataPatch = profileSummaryResult.checked
       ? buildJunctionProfileSummaryCheckedMetadataPatch(context)
       : {};
-    if (profileSummaryResult.records.length > 0) {
-      summaries[JUNCTION_PROFILE_SUMMARY_RESOURCE] = profileSummaryResult.records;
-    }
+    const summaries = profileSummaryResult.records.length > 0
+      ? { ...historicalSummaries, [JUNCTION_PROFILE_SUMMARY_RESOURCE]: profileSummaryResult.records }
+      : historicalSummaries;
     const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
-    const preparedSummaryImport =
-      job.kind === "backfill"
+    const yieldedEmptyBackfill = job.kind === "backfill"
       && !summaryHasFetchedRecords
-      && context.shouldYield?.() === true
+      && context.shouldYield?.() === true;
+    const historicalSummarySource = job.kind === "backfill" ? sourceProviderSlug : null;
+    const currentSummarySources = !yieldedEmptyBackfill || historicalSummarySource
+      ? await readJunctionImportSources(context)
+      : context.account.sources ?? [];
+    const sourceScopedHistoricalSummaryHasRecords =
+      historicalSummarySource
+        ? hasJunctionSourceScopedAdmittedSnapshotRecords({
+            listedSources: currentSummarySources,
+            snapshots: historicalSummaries,
+            sourceProviderSlug: historicalSummarySource,
+            sourceProviders,
+          })
+        : false;
+    const preparedSummaryImport =
+      yieldedEmptyBackfill
         ? prepareJunctionImportSnapshotForSources(
             summaries,
             sourceProviders,
             context.account.sources ?? [],
           )
-        : await prepareJunctionImportSnapshot(
-            context,
+        : prepareJunctionImportSnapshotForSources(
             summaries,
             sourceProviders,
+            currentSummarySources,
+            {},
+            { allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only" },
           );
     const importConnections = preparedSummaryImport.connections;
     const importSummaries = preparedSummaryImport.snapshots;
@@ -4389,10 +4396,7 @@ export function createJunctionDeviceSyncProvider(
       applyFetchedProviderRecordEvidence(fetchedProviderRecordIdentityEvidence);
 
       try {
-        const currentSources: readonly JunctionImportAdmissionSource[] =
-          context.listConnectionSources
-            ? await context.listConnectionSources()
-            : context.account.sources ?? [];
+        const currentSources = await readJunctionImportSources(context);
         const importSourceIdentities = resolveJunctionAccountSourceIdentities(currentSources);
         if (
           sourceProviderSlug
@@ -4493,16 +4497,18 @@ export function createJunctionDeviceSyncProvider(
               canonicalEventCount >= providerRecordCount ? 0 : providerRecordCount;
             unresolvedProviderRecordsWithoutStableIdentity = unresolvedProviderRecordCount > 0;
           }
-        }
-        if (
-          sourceProviderSlug
-          && options.sourceStatusRequirement === "connected"
-        ) {
-          postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
-            context,
-            sourceProviderSlug,
-            options.sourceLifecycleEpoch,
-          );
+          // Import introduces another asynchronous boundary; empty segments
+          // retain the post-fetch read instead of fetching it twice.
+          if (
+            sourceProviderSlug
+            && options.sourceStatusRequirement === "connected"
+          ) {
+            postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
+              context,
+              sourceProviderSlug,
+              options.sourceLifecycleEpoch,
+            );
+          }
         }
       } catch (error) {
         if (
@@ -5135,13 +5141,12 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const currentSources = sourceLifecycleFence && input.context.listConnectionSources
-      ? await input.context.listConnectionSources()
-      : null;
+    const currentSources = sourceLifecycleFence || records.length > 0 || input.authorizedLocalDay
+      ? await readJunctionImportSources(input.context)
+      : input.context.account.sources ?? [];
     if (
       sourceLifecycleFence
-      && (!currentSources
-        || !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources))
+      && !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources)
     ) {
       throw junctionTimeseriesSourceLifecycleSuperseded();
     }
@@ -5154,9 +5159,8 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const sourceScopedHistoricalRecordsSeen = input.sourceProviderSlug
-      ? await hasJunctionSourceScopedAdmittedSnapshotRecords({
-          context: input.context,
-          ...(currentSources ? { listedSources: currentSources } : {}),
+      ? hasJunctionSourceScopedAdmittedSnapshotRecords({
+          listedSources: currentSources,
           options: { projectAccountSourceIdentities: calendarDayAggregate },
           snapshots: { [input.resource]: records },
           sourceProviderSlug: input.sourceProviderSlug,
@@ -5164,25 +5168,18 @@ export function createJunctionDeviceSyncProvider(
         })
       : false;
 
-    const preparedImport = currentSources
-      ? prepareJunctionImportSnapshotForSources(
-          { [input.resource]: records },
-          input.sourceProviders,
-          currentSources,
-          calendarDayAggregate
-            ? { sourceIdentities: resolveJunctionAccountSourceIdentities(currentSources) }
-            : {},
-          {
-            allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only",
-            sourceStatusRequirement: "not_disconnected",
-          },
-        )
-      : await prepareJunctionImportSnapshot(
-          input.context,
-          { [input.resource]: records },
-          input.sourceProviders,
-          { projectAccountSourceIdentities: calendarDayAggregate },
-        );
+    const preparedImport = prepareJunctionImportSnapshotForSources(
+      { [input.resource]: records },
+      input.sourceProviders,
+      currentSources,
+      calendarDayAggregate
+        ? { sourceIdentities: resolveJunctionAccountSourceIdentities(currentSources) }
+        : {},
+      {
+        allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only",
+        sourceStatusRequirement: "not_disconnected",
+      },
+    );
     if (!hasJunctionSnapshotRecords(preparedImport.snapshots) && !input.authorizedLocalDay) {
       return {
         historicalProviderRecordsSeen: providerRecordsSeen,
@@ -5429,18 +5426,21 @@ export function createJunctionDeviceSyncProvider(
         const sourceScopedFeature = input.sourceProviderSlug
           ? withJunctionSourceProviderFallback(feature, input.sourceProviderSlug)
           : feature;
+        const currentSources = await readJunctionImportSources(input.context);
         historicalRecordsSeen ||= input.sourceProviderSlug
-          ? await hasJunctionSourceScopedAdmittedSnapshotRecords({
-              context: input.context,
+          ? hasJunctionSourceScopedAdmittedSnapshotRecords({
+              listedSources: currentSources,
               snapshots: { workout_stream: [sourceScopedFeature] },
               sourceProviderSlug: input.sourceProviderSlug,
               sourceProviders: input.sourceProviders,
             })
           : false;
-        const preparedImport = await prepareJunctionImportSnapshot(
-          input.context,
+        const preparedImport = prepareJunctionImportSnapshotForSources(
           { workout_stream: [sourceScopedFeature] },
           input.sourceProviders,
+          currentSources,
+          {},
+          { allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only" },
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
           await commitPreparedJunctionCanonicalImport(
@@ -8164,6 +8164,14 @@ function sanitizeJunctionImportConnections(
   });
 }
 
+async function readJunctionImportSources(
+  context: ProviderJobContext,
+): Promise<readonly JunctionImportAdmissionSource[]> {
+  return context.listConnectionSources
+    ? await context.listConnectionSources()
+    : context.account.sources ?? [];
+}
+
 async function prepareJunctionImportSnapshot(
   context: ProviderJobContext,
   snapshots: Record<string, unknown[]>,
@@ -8171,10 +8179,7 @@ async function prepareJunctionImportSnapshot(
   options: JunctionImportSnapshotSanitizeOptions = {},
   sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): Promise<PreparedJunctionImportSnapshot> {
-  const currentSources: readonly JunctionImportAdmissionSource[] =
-    context.listConnectionSources
-      ? await context.listConnectionSources()
-      : context.account.sources ?? [];
+  const currentSources = await readJunctionImportSources(context);
   const sourceIdentities = options.projectAccountSourceIdentities
     ? mergeJunctionAccountSourceIdentities(
         resolveJunctionAccountSourceIdentities(currentSources),
@@ -8194,21 +8199,14 @@ async function prepareJunctionImportSnapshot(
   );
 }
 
-async function hasJunctionSourceScopedAdmittedSnapshotRecords(input: {
-  context: ProviderJobContext;
-  listedSources?: readonly JunctionImportAdmissionSource[];
+function hasJunctionSourceScopedAdmittedSnapshotRecords(input: {
+  listedSources: readonly JunctionImportAdmissionSource[];
   options?: JunctionImportSnapshotSanitizeOptions;
   snapshots: Record<string, unknown[]>;
   sourceProviderSlug: string;
   sourceProviders: readonly JunctionProviderConnection[];
-}): Promise<boolean> {
-  const listedSources: readonly JunctionImportAdmissionSource[] = input.listedSources
-    ?? (input.context.listConnectionSources
-      ? await input.context.listConnectionSources({
-          sourceProviderSlug: input.sourceProviderSlug,
-        })
-      : input.context.account.sources ?? []);
-  const sourceAuthorities = listedSources.filter((source) =>
+}): boolean {
+  const sourceAuthorities = input.listedSources.filter((source) =>
     areJunctionProviderSlugsDataEquivalent(
       source.sourceProviderSlug,
       input.sourceProviderSlug,
@@ -9111,9 +9109,6 @@ function junctionTimeseriesRecordValueIdentity(
     return providerRowId ? [providerRowId] : [];
   }
   if (resource === "weight") {
-    if (includeProviderRowId && providerRowId) {
-      return [providerRowId];
-    }
     const { weightKilograms } = resolveJunctionWeightProviderRecordIdentity(entry);
     return weightKilograms === undefined ? [] : [`kg:${weightKilograms}`];
   }
@@ -9132,105 +9127,74 @@ function junctionTimeseriesRecordValueIdentity(
     ];
   }
 
-  const fidelityPointResource = resource === "glucose"
-    || resource === "blood_oxygen"
-    || resource === "stress_level";
   const fidelityIntervalResource = resource === "caffeine"
     || resource === "water"
     || resource === "mindfulness_minutes";
   const rowId = includeProviderRowId ? providerRowId : "";
-  const fidelitySourceRevision = String(
-    entry.recordedAt
-      ?? entry.recorded_at
-      ?? entry.updatedAt
-      ?? entry.updated_at
-      ?? "",
-  );
+  const fidelitySourceRevision = readJunctionTimeseriesIdentityField(entry, [
+    "recordedAt",
+    "recorded_at",
+    "updatedAt",
+    "updated_at",
+  ]);
   const timeZoneIdentity = [
-    String(entry.timeZone ?? entry.timezone ?? entry.time_zone ?? ""),
-    String(
-      entry.timeZoneOffsetMinutes
-        ?? entry.time_zone_offset_minutes
-        ?? entry.timezoneOffsetMinutes
-        ?? entry.timezone_offset_minutes
-        ?? entry.utcOffsetMinutes
-        ?? entry.utc_offset_minutes
-        ?? "",
-    ),
-    String(
-      entry.timezone_offset
-        ?? entry.timezoneOffset
-        ?? entry.timeZoneOffset
-        ?? entry.time_zone_offset
-        ?? entry.timezoneOffsetSeconds
-        ?? entry.timezone_offset_seconds
-        ?? entry.timeZoneOffsetSeconds
-        ?? entry.time_zone_offset_seconds
-        ?? entry.utcOffsetSeconds
-        ?? entry.utc_offset_seconds
-        ?? "",
-    ),
+    readJunctionTimeseriesIdentityField(entry, ["timeZone", "timezone", "time_zone"]),
+    readJunctionTimeseriesIdentityField(entry, [
+      "timeZoneOffsetMinutes",
+      "time_zone_offset_minutes",
+      "timezoneOffsetMinutes",
+      "timezone_offset_minutes",
+      "utcOffsetMinutes",
+      "utc_offset_minutes",
+    ]),
+    readJunctionTimeseriesIdentityField(entry, [
+      "timezone_offset",
+      "timezoneOffset",
+      "timeZoneOffset",
+      "time_zone_offset",
+      "timezoneOffsetSeconds",
+      "timezone_offset_seconds",
+      "timeZoneOffsetSeconds",
+      "time_zone_offset_seconds",
+      "utcOffsetSeconds",
+      "utc_offset_seconds",
+    ]),
   ];
   const providerDayIdentity = [
-    String(
-      entry.calendarDate
-        ?? entry.calendar_date
-        ?? entry.localDate
-        ?? entry.local_date
-        ?? "",
-    ),
-    String(entry.timestampSemantics ?? entry.timestamp_semantics ?? ""),
+    readJunctionTimeseriesIdentityField(entry, ["calendarDate", "calendar_date", "localDate", "local_date"]),
+    readJunctionTimeseriesIdentityField(entry, ["timestampSemantics", "timestamp_semantics"]),
   ];
 
   if (fidelityIntervalResource) {
-    const intervalValue = resource === "mindfulness_minutes"
-      ? entry.value ?? entry.mindfulnessMinutes ?? entry.mindfulness_minutes
-      : resource === "caffeine"
-        ? entry.value ?? entry.caffeine
-        : entry.value ?? entry.water;
+    const intervalValueKeys = resource === "mindfulness_minutes"
+      ? ["value", "mindfulnessMinutes", "mindfulness_minutes"]
+      : ["value", resource];
     return [
       rowId,
-      String(entry.start ?? entry.startAt ?? entry.start_at ?? entry.timeStart ?? entry.time_start ?? ""),
-      String(entry.end ?? entry.endAt ?? entry.end_at ?? entry.timeEnd ?? entry.time_end ?? ""),
-      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
-      String(intervalValue ?? ""),
+      readJunctionTimeseriesIdentityField(entry, ["start", "startAt", "start_at", "timeStart", "time_start"]),
+      readJunctionTimeseriesIdentityField(entry, ["end", "endAt", "end_at", "timeEnd", "time_end"]),
+      readJunctionTimeseriesIdentityField(entry, ["unit", "valueUnit", "value_unit"]),
+      readJunctionTimeseriesIdentityField(entry, intervalValueKeys),
       ...providerDayIdentity,
       ...timeZoneIdentity,
       fidelitySourceRevision,
     ];
   }
 
-  if (fidelityPointResource) {
+  if (resource === "glucose") {
     return [
       rowId,
-      String(
-        entry.observedAt
-          ?? entry.observed_at
-          ?? entry.observed_at_utc
-          ?? entry.timestamp
-          ?? entry.time
-          ?? entry.date
-          ?? entry.day
-          ?? "",
-      ),
-      String(entry.value ?? (resource === "glucose"
-        ? entry.glucose ?? entry.bloodGlucose ?? entry.blood_glucose
-        : resource === "blood_oxygen"
-          ? entry.spo2
-            ?? entry.spO2
-            ?? entry.bloodOxygen
-            ?? entry.blood_oxygen
-            ?? entry.oxygenSaturation
-            ?? entry.oxygen_saturation
-          : entry.stressLevel
-            ?? entry.stress_level
-            ?? entry.averageStressLevel
-            ?? entry.average_stress_level
-            ?? readPlainObject(entry.stress)?.average
-            ?? entry.stressLevelValue
-            ?? entry.stress_level_value
-            ?? entry.score) ?? ""),
-      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
+      readJunctionTimeseriesIdentityField(entry, [
+        "observedAt",
+        "observed_at",
+        "observed_at_utc",
+        "timestamp",
+        "time",
+        "date",
+        "day",
+      ]),
+      readJunctionTimeseriesIdentityField(entry, ["value", "glucose", "bloodGlucose", "blood_glucose"]),
+      readJunctionTimeseriesIdentityField(entry, ["unit", "valueUnit", "value_unit"]),
       ...providerDayIdentity,
       ...timeZoneIdentity,
       fidelitySourceRevision,
@@ -9250,10 +9214,25 @@ function junctionTimeseriesRecordValueIdentity(
     String(entry.value ?? ""),
     String(entry.unit ?? ""),
     String(entry.type ?? ""),
-    String(entry.bolus_purpose ?? entry.bolusPurpose ?? ""),
-    String(entry.delivery_form ?? entry.deliveryForm ?? ""),
-    String(entry.delivery_mode ?? entry.deliveryMode ?? ""),
+    readJunctionTimeseriesIdentityField(entry, ["bolus_purpose", "bolusPurpose"]),
+    readJunctionTimeseriesIdentityField(entry, ["delivery_form", "deliveryForm"]),
+    readJunctionTimeseriesIdentityField(entry, ["delivery_mode", "deliveryMode"]),
   ];
+}
+
+// Identity aliases use nullish precedence: empty strings, zero, and false are
+// values and must not fall through to a later provider spelling.
+function readJunctionTimeseriesIdentityField(
+  entry: Record<string, unknown>,
+  keys: readonly string[],
+): string {
+  for (const key of keys) {
+    const value = entry[key];
+    if (value !== null && value !== undefined) {
+      return String(value);
+    }
+  }
+  return "";
 }
 
 function firstJunctionTimeseriesIdentityValue(

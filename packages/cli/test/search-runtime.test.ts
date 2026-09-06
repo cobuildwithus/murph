@@ -128,6 +128,7 @@ async function makeRetrievalFixture(): Promise<MetricRetrievalFixture> {
     `---
 dayKey: 2026-03-12
 title: March 12
+experimentSlug: retrieval-study
 tags:
   - focus
 ---
@@ -307,6 +308,7 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
       }>
       query: string
       total: number
+      filters: Record<string, unknown>
     }>([
       'search',
       'query',
@@ -321,10 +323,43 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
     assert.equal(result.meta?.command, 'search query')
     assert.equal(requireData(result).query, 'afternoon crash pasta')
     assert.equal(requireData(result).total, 2)
+    assert.deepEqual(requireData(result).filters, {
+      text: 'afternoon crash pasta',
+      recordTypes: [],
+      kinds: [],
+      streams: [],
+      experiment: null,
+      from: null,
+      to: null,
+      tags: [],
+      limit: 10,
+    })
     assert.deepEqual(
       new Set(requireData(result).hits.map((hit) => hit.recordId)),
       new Set(['journal:2026-03-12', fixture.mealId]),
     )
+    for (const { flags, expectedIds } of [
+      { flags: ['--record-type', 'event'], expectedIds: [fixture.mealId] },
+      { flags: ['--tag', 'focus'], expectedIds: ['journal:2026-03-12'] },
+      { flags: ['--kind', 'meal'], expectedIds: [fixture.mealId] },
+      { flags: ['--experiment', 'retrieval-study'], expectedIds: ['journal:2026-03-12'] },
+      { flags: ['--experiment', 'unrelated-experiment'], expectedIds: [] },
+      {
+        flags: ['--record-type', 'event', '--record-type', 'journal'],
+        expectedIds: [fixture.mealId, 'journal:2026-03-12'],
+      },
+    ]) {
+      const filtered = await runCli<{ hits: Array<{ recordId: string }> }>([
+        'search', 'query', 'afternoon crash pasta',
+        ...flags, '--vault', fixture.vaultRoot,
+      ])
+      assert.equal(filtered.ok, true)
+      assert.deepEqual(
+        requireData(filtered).hits.map((hit) => hit.recordId).sort(),
+        [...expectedIds].sort(),
+        flags.join(' '),
+      )
+    }
     assert.match(requireData(result).hits[0]?.snippet ?? '', /afternoon crash|pasta/i)
     assert.equal(
       requireData(result).hits.some((hit) => hit.recordType === 'sample'),
@@ -363,24 +398,26 @@ test('search query accepts matching positional and named text on the built CLI',
   }
 })
 
-test('search query rejects blank mixed input on the built CLI', async () => {
+test('search query rejects blank and conflicting input through the real CLI', async () => {
   const fixture = await makeRetrievalFixture()
 
   try {
-    const result = await runCli([
-      'search',
-      'query',
-      'afternoon crash pasta',
-      '--text',
-      '   ',
-      '--limit',
-      '10',
-      '--vault',
-      fixture.vaultRoot,
-    ])
-
-    assert.equal(result.ok, false)
-    assert.equal(result.error?.code, 'invalid_query')
+    for (const input of [
+      ['--text', '   '],
+      ['afternoon crash pasta', '--text', '   '],
+      ['   ', '--text', 'afternoon crash pasta'],
+      ['afternoon crash pasta', '--text', 'different query'],
+    ]) {
+      const result = await runCli([
+        'search', 'query', ...input, '--vault', fixture.vaultRoot,
+      ])
+      assert.equal(result.ok, false, JSON.stringify(input))
+      assert.equal(result.error?.code, 'invalid_query', JSON.stringify(input))
+    }
+    assert.equal(
+      existsSync(path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite')),
+      false,
+    )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }
@@ -536,6 +573,40 @@ test('timeline merges journals, events, and metric sample summaries into one des
       ],
     )
     assert.equal(requireData(result).items[0]?.stream, 'heart_rate')
+    for (const item of requireData(result).items) {
+      assert.equal(Object.hasOwn(item, 'data'), false)
+    }
+
+    for (const { flags, expectedIds } of [
+      {
+        flags: ['--entry-type', 'event', '--entry-type', 'sample_summary'],
+        expectedIds: ['sample-summary:2026-03-12:heart_rate:bpm', fixture.mealId],
+      },
+      { flags: ['--entry-type', 'journal'], expectedIds: ['journal:2026-03-12'] },
+      { flags: ['--kind', 'meal'], expectedIds: [fixture.mealId] },
+      {
+        flags: ['--entry-type', 'sample_summary', '--stream', 'heart_rate'],
+        expectedIds: ['sample-summary:2026-03-12:heart_rate:bpm'],
+      },
+      { flags: ['--entry-type', 'sample_summary', '--stream', 'hrv'], expectedIds: [] },
+      { flags: ['--entry-type', 'journal', '--experiment', 'retrieval-study'], expectedIds: ['journal:2026-03-12'] },
+      { flags: ['--entry-type', 'journal', '--experiment', 'unrelated-experiment'], expectedIds: [] },
+      { flags: ['--limit', '1'], expectedIds: ['sample-summary:2026-03-12:heart_rate:bpm'] },
+    ]) {
+      const filtered = await runCli<{ items: Array<{ id: string }> }>([
+        'timeline', '--from', '2026-03-12', '--to', '2026-03-12',
+        ...flags, '--vault', fixture.vaultRoot,
+      ])
+      assert.equal(filtered.ok, true)
+      assert.deepEqual(
+        requireData(filtered).items.map((item) => item.id),
+        expectedIds,
+        flags.join(' '),
+      )
+      for (const item of requireData(filtered).items) {
+        assert.equal(Object.hasOwn(item, 'data'), false)
+      }
+    }
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

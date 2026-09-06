@@ -296,6 +296,50 @@ describe("device sync companion routes", () => {
   });
 
   describe("POST /api/device-sync/companion/auth-diagnostics", () => {
+    it("records bounded session recovery diagnostics and correlates a process without member identity", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        stage: "session_restore", method: "session", errorKind: "network",
+        diagnosticCode: "session_unverified", retryable: true,
+        appVersion: "1.1.16", appBuild: "36", osVersion: "26.3.0",
+        diagnosticSessionId: "00000000-0000-4000-8000-000000000001",
+      }));
+      expect(response.status).toBe(200);
+      expect(warn).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
+        eventCode: "companion_auth_diagnostic", stage: "session_restore",
+        appBuild: "36", osVersion: "26.3.0",
+        diagnosticSessionId: "00000000-0000-4000-8000-000000000001",
+      }));
+    });
+
+    it("logs successful session restoration at info level", async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        stage: "session_restore", method: "session", errorKind: "unknown",
+        diagnosticCode: "session_restored", retryable: false,
+      }));
+      expect(response.status).toBe(200);
+      expect(info).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
+        diagnosticCode: "session_restored",
+      }));
+    });
+
+    it("discards private strings in new metadata fields", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        stage: "session_refresh", method: "session", errorKind: "provider",
+        diagnosticCode: "identity_token_missing", retryable: true,
+        appBuild: "private@example.test", osVersion: "Bearer synthetic-token",
+        diagnosticSessionId: "did:privy:synthetic-member",
+      }));
+      expect(response.status).toBe(200);
+      expect(warn).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
+        appBuild: null, osVersion: null, diagnosticSessionId: null,
+      }));
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("synthetic-member");
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("synthetic-token");
+    });
+
     it("records typed pre-login Privy auth diagnostics without raw provider prose", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 

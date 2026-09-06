@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 
@@ -926,6 +926,8 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
 })
 
 test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at the provider-visible bound', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-04-22T10:00:03.000Z'))
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-event-steer-',
   )
@@ -1335,6 +1337,10 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
     hostedInput.inputId,
   ])
   expect(videoAuthoritiesBeforePreflight).toEqual([{
+    capturedAt: '2026-04-22T09:59:59.000Z',
+    expiresAt: '2026-05-22T09:59:59.000Z',
+    fileName: 'video.mp4',
+    kind: 'video',
     byteSize: initialVideo.bytes.byteLength,
     messageRef: earlierHostedInput.inputId,
     mimeType: 'video/mp4',
@@ -1344,6 +1350,10 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
   }])
   expect(videoAuthoritiesAfterPreflight).toEqual([
     {
+      capturedAt: '2026-04-22T09:59:59.000Z',
+      expiresAt: '2026-05-22T09:59:59.000Z',
+      fileName: 'video.mp4',
+      kind: 'video',
       byteSize: initialVideo.bytes.byteLength,
       messageRef: earlierHostedInput.inputId,
       mimeType: 'video/mp4',
@@ -1352,6 +1362,10 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       sha256: initialVideo.sha256,
     },
     {
+      capturedAt: '2026-04-22T10:00:00.000Z',
+      expiresAt: '2026-05-22T10:00:00.000Z',
+      fileName: 'video.mp4',
+      kind: 'video',
       byteSize: acceptedVideo.bytes.byteLength,
       messageRef: hostedInput.inputId,
       mimeType: 'video/mp4',
@@ -1968,6 +1982,105 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
     prompt: 'Late follow up',
     response: 'final after late input',
   })
+})
+
+test('sendAssistantMessageLocal derives video authority from validated inputs without another event read', async () => {
+  const context = await createTempVaultContext('assistant-local-service-input-read-bound-')
+  tempRoots.push(context.parentRoot)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    realAcceptedInputPersistence: true,
+  })
+  const inputStore = await import('../src/assistant/input-store.ts')
+  const event = await inputStore.upsertAssistantInputEvent({
+    event: {
+      content: { text: 'A fresh text message' },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_input_read_bound',
+        laneSeq: '1',
+      }),
+    },
+    vault: context.vaultRoot,
+  })
+  const readEvent = vi.spyOn(inputStore, 'readAssistantInputEvent')
+  const executeProvider = mocks.executeCodexTurnWithRecovery.getMockImplementation()
+  assert(executeProvider)
+  let readsBeforeProvider = 0
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    readsBeforeProvider = readEvent.mock.calls.filter(([query]) =>
+      query.inputId === event.inputId
+    ).length
+    return executeProvider(providerInput)
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [{
+        acceptedAt: event.receivedAt ?? event.occurredAt,
+        contentRef: {
+          kind: 'assistant-input-event',
+          refId: event.inputId,
+          version: 'murph.assistant-input-event.v1',
+        },
+        id: event.inputId,
+        source: 'assistant-input',
+      }],
+    },
+    prompt: 'A fresh text message',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  // Entry validation, transcript received time, and post-lock journal validation.
+  expect(readsBeforeProvider).toBe(3)
+})
+
+test('sendAssistantMessageLocal revalidates accepted inputs after waiting for the turn lock', async () => {
+  const context = await createTempVaultContext('assistant-local-service-input-lock-revalidation-')
+  tempRoots.push(context.parentRoot)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    realAcceptedInputPersistence: true,
+  })
+  const inputStore = await import('../src/assistant/input-store.ts')
+  const event = await inputStore.upsertAssistantInputEvent({
+    event: {
+      content: { text: 'A message removed before the turn lock' },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_input_lock_revalidation',
+        laneSeq: '1',
+      }),
+    },
+    vault: context.vaultRoot,
+  })
+  mocks.withAssistantTurnLock.mockImplementationOnce(async ({ run }) => {
+    await rm(inputStore.resolveAssistantInputEventPath({
+      inputId: event.inputId,
+      paths: resolveAssistantStatePaths(context.vaultRoot),
+    }))
+    return run()
+  })
+
+  await expect(sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [{
+        acceptedAt: event.receivedAt ?? event.occurredAt,
+        contentRef: {
+          kind: 'assistant-input-event',
+          refId: event.inputId,
+          version: 'murph.assistant-input-event.v1',
+        },
+        id: event.inputId,
+        source: 'assistant-input',
+      }],
+    },
+    prompt: 'A message removed before the turn lock',
+    vault: context.vaultRoot,
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+  })
+  expect(mocks.withAssistantTurnLock).toHaveBeenCalledOnce()
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
 })
 
 test('sendAssistantMessageLocal rejects initial assistant-input refs before provider execution when the event is missing', async () => {
@@ -2913,7 +3026,7 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
     await providerInput.onProviderRequestPlanned?.({
       providerAttemptId: null,
       codexContinuation: {
-        kind: 'explicit-structured-history',
+        kind: 'provider-state-optimization',
       },
     })
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
@@ -3015,6 +3128,15 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
     mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
       ?.providerRequestAcceptedInputIds,
   ).toEqual(['initial', 'manual-1'])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0]),
+  ).toContainEqual({
+    continuation: { kind: 'explicit-structured-history' },
+    ordinal: 0,
+    providerAttemptId: null,
+    turnId: 'turn-1',
+  })
 })
 
 test('sendAssistantMessageLocal registers manual steering before prompt persistence completes', async () => {

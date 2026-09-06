@@ -110,7 +110,7 @@ const realInstantFirstTurnTimeoutMs = runRealInstantFirstTurn
   : 360_000;
 const linqScenarioSetupTimeoutMs = runRealInstantFirstTurn
   ? 900_000
-  : 300_000;
+  : 600_000;
 const directWakeRetryBarrierPreloadPath = fileURLToPath(new URL(
   "../../web/test/support/hosted-local-direct-wake-retry-barrier-preload.ts",
   import.meta.url,
@@ -471,8 +471,10 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const requestCountBeforeReply = requireLinqStub().observedRequests.length;
+    const providerRequestCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const directReplyInputText = "hello mate, this is the direct reply tool contract check";
     requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT], {
-      matchInputContains: "hello mate",
+      matchInputContains: directReplyInputText,
     });
     const directReplyEventId = `evt_direct_reply_${directReplyUserId}`;
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -481,6 +483,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       {
         eventId: directReplyEventId,
         messageId: `msg_direct_reply_${directReplyUserId}`,
+        text: directReplyInputText,
       },
     ));
     expect(webhookResponse.status).toBe(202);
@@ -522,7 +525,15 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+    // Later scheduled work can advertise a different tool set after the reply.
+    // Attribute this proof to the first request for this exact inbound message.
+    const directReplyProviderRequest = requireScenario().assistantProviderRequests
+      .slice(providerRequestCountBeforeReply)
+      .find((request) =>
+        request.url === "/v1/responses" && request.body.includes(directReplyInputText)
+      );
+    expect(directReplyProviderRequest).toBeDefined();
+    expectAdvertisedMurphDynamicTools([directReplyProviderRequest!], {
       calendarLinkAvailable: true,
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
