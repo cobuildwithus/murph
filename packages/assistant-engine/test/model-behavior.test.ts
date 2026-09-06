@@ -2355,6 +2355,33 @@ describe('assistant system prompt cache stability', () => {
     )
   })
 
+  it.each(['direct', 'group'] as const)(
+    'puts context before questions in every %s scheduled turn, outside saved automation eligibility',
+    (conversationScope) => {
+      const input = createCommonNotificationPromptInput({ conversationScope })
+      const layers = buildAssistantSystemPromptLayers(input)
+      const policy = layers.dynamicTurnContextPrompt
+      expect(policy).toContain('Context before questions applies to every automation')
+      expect(policy).toContain('one-shots, recurring reminders, check-ins, and managed jobs')
+      expect(policy).toContain('takes precedence over saved wording such as "only say" or "ask exactly"')
+      expect(policy).toContain('over instructions to send a cue normally')
+      expect(policy).toContain('make a bounded, targeted read before asking the member to repeat it')
+      expect(policy).toContain('ask only for a still-useful missing detail within the agreed purpose')
+      expect(policy).toContain('return `skip` for this occurrence after completing any independently required work')
+      expect(policy).toContain('distinguish a plan from a completed action')
+      expect(policy).toContain('unavailable history, or mere topic overlap as proof of completion')
+      expect(policy).toContain('Preserve still-needed reminders, including treatment and safety cues')
+      expect(policy).not.toContain('Do not read conversation history')
+      expect(policy).not.toContain('Always send')
+      const foreground = buildAssistantSystemPromptLayers({
+        ...input, scheduledOccurrenceAt: null, turnTrigger: null,
+      })
+      expect(foreground.prompt).not.toContain('Context before questions applies to every automation')
+      expect(layers.staticCacheableCorePrompt).toBe(foreground.staticCacheableCorePrompt)
+      expect(layers.threadContextPrompt).toBe(foreground.threadContextPrompt)
+    },
+  )
+
   it('applies assistant tone preference to ordinary scheduled turns', () => {
     const prompt =
       buildAssistantSystemPromptWithCacheMetadata(

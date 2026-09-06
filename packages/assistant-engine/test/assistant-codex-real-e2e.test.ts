@@ -15202,6 +15202,88 @@ describeRealCodex('real Codex durable follow-up e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex automation context before questions e2e', () => {
+  it('uses known answers before exact automation questions without suppressing unresolved work', async () => {
+    const scenarios = [
+      {
+        scenario: 'skips an exact question already answered',
+        scope: 'direct' as const,
+        instructions: 'Ask exactly "How long was your walk today?" Say nothing else.',
+        context: 'August 5, 2026, 08:40 America/New_York. Member: I finished my morning walk; it took 25 minutes. Assistant: Logged your 25-minute walk for today.',
+        expectedKind: 'skip', expectedText: null, forbiddenText: null,
+      },
+      {
+        scenario: 'asks only for the missing part of a broader check-in',
+        scope: 'direct' as const,
+        instructions: 'Ask how long today’s walk was and whether the new shoes felt comfortable. Only ask that question.',
+        context: 'August 5, 2026, 08:40 America/New_York. Member: My walk took 25 minutes today. Assistant: Logged. No shoe comfort information has been shared.',
+        expectedKind: 'send_message', expectedText: /shoes|comfort/iu,
+        forbiddenText: /how long|how many minutes|duration|what.*walk/iu,
+      },
+      {
+        scenario: 'preserves the current question when only yesterday is answered',
+        scope: 'direct' as const,
+        instructions: 'Ask exactly "How long was your walk today?" Say nothing else.',
+        context: 'August 4, 2026, 08:40 America/New_York. Member: My walk took 25 minutes today. There is no August 5 walk report in the available records or conversation.',
+        expectedKind: 'send_message', expectedText: /how long|how many minutes/iu,
+        forbiddenText: /logged|already|another|again/iu,
+      },
+      {
+        scenario: 'does not confuse a planned action with completion',
+        scope: 'direct' as const,
+        instructions: 'Send the agreed brief reminder to do today’s ankle mobility practice.',
+        context: 'August 5, 2026, 08:40 America/New_York. Member: I plan to do the ankle mobility practice later today. No completion has been reported.',
+        expectedKind: 'send_message', expectedText: /ankle|mobility/iu,
+        forbiddenText: /logged|completed|already done/iu,
+      },
+      {
+        scenario: 'skips an answered room decision in a group automation',
+        scope: 'group' as const,
+        instructions: 'Only ask "Which park has the group chosen for Saturday’s outing?"',
+        context: 'August 5, 2026, 08:40 America/New_York. Group organizer: We agreed on Cedar Park for this Saturday’s outing. Assistant: Cedar Park is the group’s choice for Saturday.',
+        expectedKind: 'skip', expectedText: null, forbiddenText: null,
+      },
+    ]
+    for (const { scenario, scope, instructions, context, expectedKind, expectedText, forbiddenText } of scenarios) {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-context-e2e-'))
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions(scope),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          groupConversation: scope === 'group',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [instructions, 'Available recent conversation and record context:', context].join('\n\n'),
+          reasoningEffort: 'low',
+          sandbox: 'read-only',
+          workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        process.stdout.write(`[real-codex automation context ${scenario}] ${decision.kind === 'send_message' ? decision.text.replaceAll(/\s+/gu, ' ').trim() : 'skip'}\n`)
+        expect(decision.kind).toBe(expectedKind)
+        expect(result.followUpRequest).toBeNull()
+        expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(0)
+        if (decision.kind === 'send_message') {
+          if (expectedText) expect(decision.text).toMatch(expectedText)
+          if (forbiddenText) expect(decision.text).not.toMatch(forbiddenText)
+          expect((decision.text.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+          expect(decision.text.length).toBeLessThan(240)
+          expect(decision.text).not.toMatch(/automation|outbox|cron|system prompt/iu)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }
+  }, 900_000)
+})
+
 describeRealCodex('real Codex recurring reminder conversation e2e', () => {
   it('keeps saved control notes out of routine summaries while preserving requested controls', async () => {
     const config = await resolveRealCodexE2eConfig()
