@@ -1,6 +1,7 @@
 ---
 title: 'Production deployment smoke cannot verify standby inventory readiness'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2976'
 ---
 
 ## Expected Behavior
