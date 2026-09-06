@@ -277,7 +277,7 @@ export type AssistantAutomationOccurrenceReceipt =
       history: 'observed'
       outcome: 'failed' | 'no_message' | 'pending' | 'sent' | 'skipped' | 'unknown'
       scheduledAt: string | null
-      sent: 'confirmed' | 'not_reached' | 'pending' | 'unknown'
+      sent: 'confirmed' | 'not_reached' | 'partial' | 'pending' | 'unknown'
       startedAt: string
       trigger: 'manual' | 'scheduled' | 'unknown'
     }

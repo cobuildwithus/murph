@@ -666,6 +666,7 @@ function renderWearableTrendResponseCardText(
   })
   return [
     `7-day health · ${formatWearableTrendDateRange(card.localDates)}`,
+    'Daily averages · change vs prior 7 days',
     `Days: ${formatWearableTrendWeekdayLabels(card.localDates).join(' · ')}`,
     '',
     ...blocks,
@@ -1037,7 +1038,7 @@ function renderTelegramWearableTrendCardHtml(
   }).join('')
   return `<h2>${escapeTelegramRichHtml(heading)}</h2><p>${
     escapeTelegramRichHtml(weekdays)
-  }</p>${metrics}`
+  }</p><p>Daily averages · change vs prior 7 days</p>${metrics}`
 }
 
 function renderTelegramExerciseRoutineCardHtml(

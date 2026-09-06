@@ -133,7 +133,7 @@ export function listWearableSleepDailyValues(
     window,
   );
 
-  return selected.nights.map((night) => ({
+  const values = selected.nights.map((night) => ({
     confidence: night.night.totalSleepMinutes.confidence.level,
     date: night.analysisDate,
     provider: night.provider,
@@ -141,6 +141,29 @@ export function listWearableSleepDailyValues(
     totalSleepMinutes: night.totalSleepMinutes,
     unit: night.night.totalSleepMinutes.selection.unit,
   }));
+
+  // Daily totals do not require the clock-time evidence used by timing
+  // analysis. Keep an existing timed selection authoritative for its day.
+  const valuesByDate = new Map(values.map((value) => [value.date, value]));
+  for (const night of sleepNights) {
+    if (
+      night.sleepStartAt != null || night.sleepEndAt != null
+      || resolveSleepType(night) === "nap"
+      || night.date < window.from || night.date > window.to
+      || night.date >= asOfDate || valuesByDate.get(night.date)?.totalSleepMinutes != null
+    ) continue;
+    const totalSleepMinutes = selectedMetricValue(night.totalSleepMinutes);
+    if (totalSleepMinutes === null) continue;
+    valuesByDate.set(night.date, {
+      confidence: night.totalSleepMinutes.confidence.level,
+      date: night.date,
+      provider: night.totalSleepMinutes.selection.provider ?? night.provider ?? "unknown",
+      recordedAt: night.totalSleepMinutes.selection.recordedAt,
+      totalSleepMinutes,
+      unit: night.totalSleepMinutes.selection.unit,
+    });
+  }
+  return [...valuesByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
 }
 
 export function buildWearableSleepPatternSummary(

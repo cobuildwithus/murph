@@ -731,6 +731,10 @@ separate from generation and send evidence. The legacy internal `delivered`
 outcome means only provider dispatch for this projection, so the public result
 is sent with handset delivery unconfirmed; absent retained history is not proof
 that an automation never ran.
+Accepted text or media with an incomplete logical delivery is reported as
+`sent: partial`, preserving the pending or failed outcome. Terminal
+reconciliation retains that distinction in the existing run reason after the
+outbox pointer is cleared; partial dispatch never implies handset delivery.
 
 Detached phone-call results and usage-referral celebrations are the only
 notification families admitted through the dirty runtime's pre-checkpoint
@@ -795,7 +799,7 @@ Reply handling uses a different, historical boundary: the assistant receives a b
 
 ### Provider-Neutral Wearable Sleep Pattern Read Model
 
-`packages/query` derives one provider-neutral sleep-pattern summary from canonical wearable sleep evidence; it does not create a second persisted sleep owner. The default 28-day window reports coverage and missing dates without zero filling, excludes explicitly identified naps, and retains legacy records with unknown sleep type under an explicit caveat instead of guessing from titles. Duplicate and overlapping windows are suppressed deterministically. Session duration uses elapsed UTC instants across DST, while bedtime, wake, and midpoint use each night's canonical IANA time zone or an explicit validated reporting-zone fallback; clock fields are omitted when neither exists. Per-field sample counts stay visible and variability is withheld below its minimum sample count. The same eligible-night and localized sleep-end selection feeds the fixed seven-day wearable snapshot. That snapshot always returns seven ascending reporting-zone dates, keeps missing observations as null, caps future end dates, averages only observed days, and compares the current mean with the prior seven calendar dates only when both windows have enough observations. Its closed metric keys keep RMSSD and SDNN as separate HRV series.
+`packages/query` derives one provider-neutral sleep-pattern summary from canonical wearable sleep evidence; it does not create a second persisted sleep owner. The default 28-day window reports coverage and missing dates without zero filling, excludes explicitly identified naps, and retains legacy records with unknown sleep type under an explicit caveat instead of guessing from titles. Duplicate and overlapping windows are suppressed deterministically. Session duration uses elapsed UTC instants across DST, while bedtime, wake, and midpoint use each night's canonical IANA time zone or an explicit validated reporting-zone fallback; clock fields are omitted when neither exists. Per-field sample counts stay visible and variability is withheld below its minimum sample count. The localized completed-night selection also feeds the fixed seven-day wearable snapshot, with canonical duration-only totals retained for completed dates when clock times are absent. That snapshot returns seven ascending completed reporting-zone dates, keeps missing observations as null, caps requested end dates at yesterday, averages only observed days, and compares the current mean with the prior seven calendar dates only when both windows have enough observations. Its closed metric keys keep RMSSD and SDNN as separate HRV series.
 
 The summary keeps total sleep distinct from session duration and leaves provider-reported awake minutes labeled as awake minutes rather than inferring WASO or awakening count. It surfaces provider and time-zone mixing, local-date mismatches, late-arriving records, nap-only dates, unknown legacy types, overlap suppression, latest sleep end and record time, latest-night age, and per-source staleness both relative to the newest provider and to the absolute as-of date. Assistant guidance must carry these caveats forward and must not turn missing or stale device coverage into a fact about how the member slept.
 
@@ -3880,17 +3884,22 @@ notes, and an update is complete only after a successful workout re-read
 followed by a new V6 native workout snapshot and V4 static fallback. Generic
 compact tables continue to use V3.
 
-The wearable-trend card is a separate trusted, static-only response-card
+The wearable-trend card is a separate trusted response-card
 variant. The model-facing tool accepts only one to five ordered method-specific
 metric keys or one exact saved-view id; host code reads the current fixed
-seven-calendar-day query result and constructs the final card. V7 contains only
+seven-completed-local-calendar-day query result and constructs the final card.
+The current unfinished day is excluded, including when a requested end date
+is today or in the future. Duration-only canonical sleep summaries remain
+eligible on completed dates without inheriting clock-time analysis requirements;
+known naps and invalid or unfinished windows remain excluded. V7 contains only
 seven consecutive local dates, ordered numeric-or-null rows, and the query-owned
 neutral comparison direction. It carries no source, provider, timezone,
 canonical reference, saved-view id, or other authority. Averages, labels,
 units, and seven-position sparklines are deterministic presentation derivations.
-Linq sends this variant with `interactive: false`, omits the native app URL, and
-uses the existing static `image_url` layout for installed and app-absent
-recipients. Its provider preview remains value-free; capability failure and
+Linq sends this variant with `interactive: true` and the V7 native app URL,
+with the existing static `image_url` layout for app-absent and macOS
+recipients. The schema-7-capable extension must ship before activation.
+Its provider preview remains value-free; capability failure and
 definitive pre-acceptance rejection use the complete deterministic text
 recovery through the existing outbox path. Provider acceptance cannot reveal a
 later image-fetch or VoiceOver failure, so physical installed-app, app-absent,

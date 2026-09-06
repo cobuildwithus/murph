@@ -126,7 +126,10 @@ fallback identity before provider entry.
 Seven-day wearable trends also use a dedicated attachment tool, but for a
 different trust boundary: the model supplies only ordered method-specific
 metric keys or one exact saved-view id. Trusted host code reads the fixed
-calendar query and constructs the immutable V7 card. Linq sends that card the
+calendar query over seven completed local days and constructs the immutable V7
+card. Today's unfinished day is excluded so cumulative activity is compared
+with completed days. Valid duration-only sleep totals use their canonical dates;
+missing clock-time evidence alone does not mean missing sleep. Linq sends that card the
 same way as the other native kinds: `interactive: true` with the V7 Base64URL
 fragment as the native app URL so the shipping Messages extension renders its
 SwiftUI seven-day health balloon, plus the bounded caption, authority-free

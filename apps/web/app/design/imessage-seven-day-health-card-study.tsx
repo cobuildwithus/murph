@@ -92,7 +92,11 @@ const STUDIES = [
   { card: COMPLETE_CARD, label: "Complete" },
   { card: SPARSE_CARD, label: "Sparse" },
   { card: ALL_MISSING_CARD, label: "No data" },
-] as const;
+  {
+    card: { ...COMPLETE_CARD, localDates: ["2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02", "2027-01-03", "2027-01-04"] },
+    label: "Year boundary",
+  },
+] satisfies Array<{ card: WearableTrendResponseCardV1; label: string }>;
 
 export function ImessageSevenDayHealthCardStudy() {
   return (
@@ -114,14 +118,9 @@ export function ImessageSevenDayHealthCardStudy() {
         </p>
       </div>
 
-      <div className="hidden flex-col gap-8 sm:flex">
+      <div className="flex min-w-0 flex-col gap-8">
         {STUDIES.map(({ card, label }) => (
-          <CardStudy key={label} card={card} label={label} scale={0.72} />
-        ))}
-      </div>
-      <div className="flex flex-col gap-5 sm:hidden">
-        {STUDIES.map(({ card, label }) => (
-          <CardStudy key={label} card={card} label={label} scale={0.245} />
+          <CardStudy key={label} card={card} label={label} />
         ))}
       </div>
     </div>
@@ -131,11 +130,9 @@ export function ImessageSevenDayHealthCardStudy() {
 function CardStudy({
   card,
   label,
-  scale,
 }: {
   card: WearableTrendResponseCardV1;
   label: string;
-  scale: number;
 }) {
   const size = getWearableTrendCardImageSize(card);
   return (
@@ -143,21 +140,16 @@ function CardStudy({
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </p>
-      <div
-        className="overflow-hidden rounded-xl border border-border"
-        style={{ width: size.width * scale, height: size.height * scale }}
+      <svg
+        aria-label={`${label} seven-day health card`}
+        className="block w-full max-w-3xl overflow-hidden rounded-xl border border-border"
+        role="img"
+        viewBox={`0 0 ${size.width} ${size.height}`}
       >
-        <div
-          style={{
-            width: size.width,
-            height: size.height,
-            transform: `scale(${scale})`,
-            transformOrigin: "top left",
-          }}
-        >
+        <foreignObject width={size.width} height={size.height}>
           <WearableTrendCardImage card={card} />
-        </div>
-      </div>
+        </foreignObject>
+      </svg>
     </div>
   );
 }

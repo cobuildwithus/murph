@@ -123,19 +123,19 @@ test("wearable trend image leads each row with its average and neutral direction
   );
 
   expect(getWearableTrendCardImageSize(COMPLETE_CARD)).toEqual({
-    height: 815,
+    height: 877,
     width: 1_200,
   });
   expect(markup.match(/data-wearable-trend-day-axis="shared"/gu)).toHaveLength(1);
-  expect(markup.match(/>AVERAGE</gu)).toHaveLength(1);
-  // Single-letter day axis in calendar order: Mon..Sun.
+  expect(markup.match(/>DAILY AVERAGE</gu)).toHaveLength(1);
+  // Distinct two-letter weekdays remain in calendar order.
   const axisMarkup = markup.slice(
     markup.indexOf('data-wearable-trend-day-axis="shared"'),
     markup.indexOf('data-metric-key='),
   );
   expect(
-    Array.from(axisMarkup.matchAll(/>([A-Z])</gu), (match) => match[1]).join(""),
-  ).toBe("MTWTFSS");
+    Array.from(axisMarkup.matchAll(/>([A-Z][a-z])</gu), (match) => match[1]).join(" "),
+  ).toBe("Mo Tu We Th Fr Sa Su");
   expect(markup).toContain("7-day health");
   // The date range sits on the title row, not beneath it.
   expect(markup).toContain('data-card-date-range="Aug 24–30"');
@@ -224,7 +224,7 @@ test("wearable trend image preserves sparse and unavailable calendar slots", asy
   // Metrics with no observed days collapse to a shorter row and never show a
   // zero, a placeholder average, or a day label.
   expect(getWearableTrendCardImageSize(ALL_MISSING_CARD)).toEqual({
-    height: 629,
+    height: 691,
     width: 1_200,
   });
   expect(missingMarkup.match(/ no data/gu)).toHaveLength(21);
@@ -256,7 +256,7 @@ test("response-card image route accepts only the exact schema-seven wearable env
 
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 815);
+  assert.equal(init.height, 877);
   const markup = renderToStaticMarkup(imageTree);
   assert.match(markup, /imessage-native-wearable-trend-card/u);
   assert.match(markup, /10\.2k/u);

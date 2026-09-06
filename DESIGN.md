@@ -263,32 +263,28 @@ scores, progress, and coverage while using the identity-free public
 presentation defined by the challenge standings delivery contract.
 
 ### iMessage Seven-Day Health Card Image
-Render the fixed seven-day wearable view as the static sibling of the other
-response cards: the same cream field, rectangular bitmap, embedded Murph mark,
-and optically centered badge-and-title row, with the date range as quiet
-secondary text at the end of that same title row rather than beneath it. One
-shared day axis (`AVERAGE`, then single letters `M` through `S` in calendar
-order) heads the rows, and every metric keeps its seven days in those same
-columns. Each metric row leads with its uppercase label, then the weekly
-average as the largest number in the row with a small unit beside it, followed
-on the same line by one neutral arrow (`↑`, `↓`, or `→`) for the
-week-over-week direction; the unit and arrow are vertically centered against
-the number. Never spell the direction out as a word. A row with too few
-observed days to compare shows no arrow at all, and no surface names a comparison basis; the accessibility label reads the trend word only. The seven days are one
-line in a neutral warm stroke with a point on each observed day, fitted to a
-window centered on that metric's observed range but never narrower than a
-metric-specific minimum span (steps 3,000; sleep 90 minutes; resting heart
-rate 8 bpm; HRV 15 ms), so a week that really moves fills the chart while a
-quiet week draws a nearly level line instead of exaggerating small
-differences; there are no value
-labels, so the average is the only number in the row and the text recovery
-carries every day value. A missing day draws no point and no placeholder; the
-observed days on either side of it join with a dashed, lighter segment so the
-week still reads as one line with a visible hole rather than scattered
-fragments. A metric with no observed
-days collapses to a shorter row that reads `No data` and keeps its seven
-empty slots. No reference lines, legends, metric icons, pills, status color,
-or better/worse language.
+Render the seven completed local days on the shared cream field with the
+embedded Murph mark and one title row. Keep the date range at 36px, secondary
+and unwrapped, so even cross-year ranges fit beside the title. Each row leads
+with a readable 36px metric label and a 64px daily average. Sleep hours and
+minutes use smaller baseline-aligned units; other units remain subordinate.
+Reserve a 320px summary column and align every chart to one shared two-letter
+weekday grid. Preserve metric order and distinguish RMSSD from SDNN.
+
+Use one neutral arrow beside each comparable average. Name its meaning once
+below the card: averages compared with the prior seven days. Accessibility
+labels and complete text/Telegram recovery also name the comparison basis.
+Sparse rows state the number of observed days; unavailable comparisons show no
+arrow. Missing values are never zero-filled. Entirely missing rows say `No
+data`, and an all-missing card offers a concise conversational connection check.
+
+Use a neutral warm line with a point for each observed day. Fit it to the
+observed range with the existing minimum spans (steps 3,000; sleep 90 minutes;
+resting heart rate 8 bpm; HRV 15 ms) so quiet weeks remain quiet. Join gaps with
+lighter dashed segments, without inventing observations. Avoid status colors,
+metric icons, pills, or clinical better/worse judgments. The design study scales
+the real production component proportionally to its container and includes a
+year-boundary state; it must never require horizontal scrolling.
 
 ### Shared iMessage Card Handoff
 

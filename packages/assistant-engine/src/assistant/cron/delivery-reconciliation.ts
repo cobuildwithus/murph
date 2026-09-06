@@ -36,7 +36,7 @@ import {
 import { readAssistantOutboxIntent } from '../outbox/store.js'
 import { assistantDeliveryErrorPreventsFreshIntentRetry } from '../outbox/retry-policy.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
-import { hasAssistantOutboxDeliveryEvidence } from '../response-media.js'
+import { getAssistantCronDispatchState } from './delivery-evidence.js'
 import { isRecognizedMurphOnboardingFollowupAutomation } from '../managed-automations.js'
 import { isCurrentMurphOnboardingFollowupAutomation } from '../onboarding-followup-automation.js'
 
@@ -336,11 +336,10 @@ function resolveAssistantCronFailedDeliveryReason(input: {
   intent: AssistantOutboxIntent | null
   terminal: Extract<TerminalAssistantCronDeliveryOutcome, { kind: 'failed' }>
 }): string {
-  if (
-    input.intent !== null
-    && hasAssistantOutboxDeliveryEvidence(input.intent, true)
-  ) {
-    return 'delivery_failed_sent'
+  if (input.intent !== null) {
+    const dispatchState = getAssistantCronDispatchState(input.intent)
+    if (dispatchState === 'complete') return 'delivery_failed_sent'
+    if (dispatchState === 'partial') return 'delivery_failed_partial'
   }
 
   if (

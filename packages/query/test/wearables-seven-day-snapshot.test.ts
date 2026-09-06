@@ -201,6 +201,53 @@ function bundle(): WearableSevenDaySnapshotBundle {
   };
 }
 
+test("daily sleep totals survive missing clock times without admitting naps or unfinished sessions", () => {
+  const base = makeSleepNight({
+    date: "2026-08-28",
+    startAt: "2026-08-27T23:00:00.000Z",
+    endAt: "2026-08-28T07:00:00.000Z",
+    totalSleepMinutes: 420,
+  });
+  const durationOnly = { ...base, sleepStartAt: null, sleepEndAt: null };
+  const snapshot = buildWearableSevenDaySnapshot({
+    bundle: {
+      activityDays: [], recoveryDays: [],
+      sleepNights: [
+        durationOnly,
+        { ...durationOnly, date: "2026-08-27", sleepType: "nap" },
+        { ...base, date: "2026-08-29", sleepEndAt: "2026-08-31T07:00:00.000Z" },
+      ],
+    },
+    filters: { metricKeys: ["total-sleep-minutes"], now: "2026-08-30T08:00:00.000Z", timeZone: "UTC" },
+  });
+  assert.equal(snapshot.metrics[0]?.values[snapshot.days.indexOf("2026-08-28")], 420);
+  assert.equal(snapshot.metrics[0]?.observedDayCount, 1);
+});
+
+test("a morning snapshot compares completed local days instead of unfinished steps", () => {
+  const activityDays = Array.from({ length: 15 }, (_, index) => {
+    const date = `2026-08-${16 + index}`;
+    return { date, steps: resolvedMetric({ date, metric: "steps", unit: "count", value: index === 14 ? 200 : 10_000 }) };
+  });
+  const snapshot = buildWearableSevenDaySnapshot({
+    bundle: { activityDays, recoveryDays: [], sleepNights: [] },
+    filters: { metricKeys: ["steps"], now: "2026-08-30T08:00:00.000Z", timeZone: "UTC" },
+  });
+  assert.equal(snapshot.to, "2026-08-29");
+  assert.equal(snapshot.metrics[0]?.average, 10_000);
+  assert.equal(snapshot.metrics[0]?.trend.direction, "steady");
+  assert.equal(snapshot.metrics[0]?.trend.delta, 0);
+});
+
+test("completed-day bounds follow the reporting zone across midnight and year changes", () => {
+  const window = resolveWearableSevenDaySnapshotWindow({
+    now: "2027-01-01T04:00:00.000Z", timeZone: "America/New_York", to: "2027-01-03",
+  });
+  assert.equal(window.asOfDate, "2026-12-31");
+  assert.equal(window.to, "2026-12-30");
+  assert.equal(window.from, "2026-12-24");
+});
+
 test("seven-day snapshots keep exact local calendar slots and explicit HRV methods", () => {
   const snapshot = buildWearableSevenDaySnapshot({
     bundle: bundle(),
@@ -212,7 +259,7 @@ test("seven-day snapshots keep exact local calendar slots and explicit HRV metho
         "hrv-rmssd",
         "hrv-sdnn",
       ],
-      now: "2026-08-31T02:00:00.000Z",
+      now: "2026-09-01T02:00:00.000Z",
       timeZone: "America/Los_Angeles",
       to: "2026-09-02",
     },
@@ -226,7 +273,7 @@ test("seven-day snapshots keep exact local calendar slots and explicit HRV metho
     ],
   });
 
-  assert.equal(snapshot.asOfDate, "2026-08-30");
+  assert.equal(snapshot.asOfDate, "2026-08-31");
   assert.equal(snapshot.to, "2026-08-30");
   assert.deepEqual(snapshot.days, [
     "2026-08-24",
@@ -311,7 +358,7 @@ test("seven-day trends remain unavailable when either calendar window is too spa
     },
     filters: {
       metricKeys: ["steps"],
-      now: "2026-08-30T12:00:00.000Z",
+      now: "2026-08-31T12:00:00.000Z",
       timeZone: "UTC",
     },
   });

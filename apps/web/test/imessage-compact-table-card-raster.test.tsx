@@ -317,7 +317,7 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
     schemaVersion: 7,
     card: SPARSE_FIVE_METRIC_WEARABLE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 1_179]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_241]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
@@ -326,7 +326,7 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
     bounds.right <= 1_155,
     `Expected wearable card content within the right inset: ${JSON.stringify(bounds)}`,
   );
-  assert.ok(bounds.bottom <= image.height - 42);
+  assert.ok(bounds.bottom <= image.height - 38);
   // The fifth metric row still renders its summary and day slots.
   assert.equal(
     hasDarkPixel(image, {
@@ -358,12 +358,12 @@ test("real-font wearable trend contains all-missing slots without zero filling",
     schemaVersion: 7,
     card: ALL_MISSING_WEARABLE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 629]);
+  assert.deepEqual([image.width, image.height], [1_200, 691]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
   assert.ok(bounds.right <= 1_155);
-  assert.ok(bounds.bottom <= image.height - 42);
+  assert.ok(bounds.bottom <= image.height - 38);
   // Every collapsed no-data row still states its case in the summary and
   // draws nothing at all in the day grid: no points, no lines, no values.
   for (let row = 0; row < 3; row += 1) {
@@ -377,11 +377,30 @@ test("real-font wearable trend contains all-missing slots without zero filling",
       `Expected the no-data summary in row ${row + 1}`,
     );
     assert.equal(
-      hasNonBackgroundPixel(image, { left: 333, right: 1_155, ...rect }),
+      hasNonBackgroundPixel(image, { left: 395, right: 1_155, ...rect }),
       false,
       `Expected an empty day grid in no-data row ${row + 1}`,
     );
   }
+});
+
+test("real-font wearable header contains cross-year dates and maximum metric values", async () => {
+  const card: WearableTrendResponseCardV1 = {
+    ...SPARSE_FIVE_METRIC_WEARABLE_CARD,
+    localDates: ["2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02", "2027-01-03", "2027-01-04"],
+    metrics: SPARSE_FIVE_METRIC_WEARABLE_CARD.metrics.map((metric, index) => ({
+      ...metric,
+      values: Array.from({ length: 7 }, () => [1_000_000, 1_439, 300, 10_000, 10_000][index] ?? null),
+      trend: "higher",
+    })),
+  };
+  const image = await renderCard({ schemaVersion: 7, card });
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  // A wrapped title used to extend above the badge and the header's top inset.
+  assert.ok(bounds.top >= 20, `Header escapes its top inset: ${bounds.top}`);
+  assert.ok(bounds.right <= 1_155);
+  assert.ok(bounds.bottom <= image.height - 38);
 });
 
 test("real-font route keeps positive-kerning text above the stacked-row divider", async () => {

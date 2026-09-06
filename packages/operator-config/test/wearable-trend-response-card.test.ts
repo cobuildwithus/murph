@@ -48,6 +48,7 @@ const CARD: WearableTrendResponseCardV1 = {
 
 const EXPECTED_TEXT = [
   '7-day health · Aug 24–30',
+  'Daily averages · change vs prior 7 days',
   'Days: Mon · Tue · Wed · Thu · Fri · Sat · Sun',
   '',
   'STEPS · 8.6k · higher',
@@ -129,7 +130,7 @@ describe('wearable trend response cards', () => {
   it('provides the same complete block to Telegram without generic authoring', () => {
     const telegram = buildTelegramRichMessage(CARD)
     expect(telegram.html).toContain('7-day health · Aug 24–30')
-    expect(telegram.html).not.toMatch(/prior/iu)
+    expect(telegram.html).toContain('Daily averages · change vs prior 7 days')
     expect(telegram.html).toContain('STEPS · 8.6k · higher')
     expect(telegram.html).toContain('▁▃▆▅█▂▇')
     expect(assistantResponseCardAuthoringSchema.safeParse(CARD).success).toBe(

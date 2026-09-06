@@ -23,7 +23,7 @@ export const IMESSAGE_WEARABLE_TREND_CARD_IMAGE_WIDTH = 1_200;
 const CARD_HORIZONTAL_PADDING = 45;
 const CARD_VERTICAL_PADDING = 38;
 const HEADER_HEIGHT = IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT;
-const HEADER_DATE_FONT_SIZE = 44;
+const HEADER_DATE_FONT_SIZE = 36;
 const AXIS_MARGIN_TOP = 34;
 const AXIS_HEIGHT = 40;
 const AXIS_MARGIN_BOTTOM = 14;
@@ -32,18 +32,19 @@ const CHART_HEIGHT = 150;
 const EMPTY_CHART_HEIGHT = 24;
 const METRIC_ROW_HEIGHT = CHART_HEIGHT + 2 * METRIC_ROW_VERTICAL_INSET;
 const EMPTY_METRIC_ROW_HEIGHT = 120;
-const BOTTOM_PADDING = 42;
-const SUMMARY_WIDTH = 264;
-const SERIES_GAP = 24;
+const BOTTOM_PADDING = 38;
+const FOOTER_HEIGHT = 66;
+const SUMMARY_WIDTH = 320;
+const SERIES_GAP = 30;
 const CHART_WIDTH = IMESSAGE_WEARABLE_TREND_CARD_IMAGE_WIDTH
   - 2 * CARD_HORIZONTAL_PADDING
   - SUMMARY_WIDTH
   - SERIES_GAP;
 const DAY_COLUMN_WIDTH = CHART_WIDTH / 7;
 
-const AXIS_FONT_SIZE = 30;
-const METRIC_LABEL_FONT_SIZE = 30;
-const AVERAGE_FONT_SIZE = 60;
+const AXIS_FONT_SIZE = 34;
+const METRIC_LABEL_FONT_SIZE = 36;
+const AVERAGE_FONT_SIZE = 64;
 const AVERAGE_UNIT_FONT_SIZE = 28;
 const DIRECTION_GLYPH_FONT_SIZE = 40;
 const NO_DATA_FONT_SIZE = 34;
@@ -86,6 +87,7 @@ export function getWearableTrendCardImageSize(
         (total, metric) => total + metricRowHeight(metric.values),
         0,
       )
+      + FOOTER_HEIGHT
       + BOTTOM_PADDING,
   };
 }
@@ -100,10 +102,9 @@ function metricRowHeight(values: readonly (number | null)[]): number {
  * Read-only static fallback for a trusted seven-calendar-day wearable card.
  *
  * Every metric row leads with its weekly average and one neutral arrow for
- * the week-over-week direction, then draws the seven days as zero-based bars
- * in one shared day grid. Only the highest and lowest observed days carry a value so the row
- * reads as a chart rather than a table; missing days keep their column as a
- * faint baseline stub. Messages supplies the outer mask.
+ * the week-over-week direction, followed by one neutral fitted line in a
+ * shared day grid. Dashed segments distinguish missing days from observations.
+ * Messages supplies the outer mask.
  */
 export function WearableTrendCardImage({
   card,
@@ -143,7 +144,8 @@ export function WearableTrendCardImage({
             data-card-date-range={dateRange}
             style={{
               display: "flex",
-              marginLeft: 24,
+              marginLeft: 0,
+              flexShrink: 0,
               color: COLOR.secondary,
               fontSize: HEADER_DATE_FONT_SIZE,
               fontWeight: 400,
@@ -167,6 +169,14 @@ export function WearableTrendCardImage({
             weekdayLabels={weekdayLabels}
           />
         ))}
+      </div>
+      <div
+        data-wearable-trend-context="true"
+        style={{ display: "flex", alignItems: "flex-end", height: FOOTER_HEIGHT, color: COLOR.secondary, fontSize: 30, lineHeight: 1.2 }}
+      >
+        {card.metrics.every((metric) => metric.values.every((value) => value === null))
+          ? "No readings for these dates. Ask Murph to check your connection."
+          : "Arrows compare averages with the prior 7 days."}
       </div>
     </div>
   );
@@ -192,7 +202,7 @@ function DayAxis({ weekdayLabels }: { weekdayLabels: string[] }) {
           ...axisLabelStyle,
         }}
       >
-        AVERAGE
+        DAILY AVERAGE
       </div>
       <div
         aria-hidden="true"
@@ -213,7 +223,7 @@ function DayAxis({ weekdayLabels }: { weekdayLabels: string[] }) {
               ...axisLabelStyle,
             }}
           >
-            {weekday.charAt(0).toUpperCase()}
+            {weekday.slice(0, 2)}
           </div>
         ))}
       </div>
@@ -253,7 +263,7 @@ function MetricRow({
   const accessibilityLabel = [
     presentation.displayName,
     average === null ? "average unavailable" : `${renderedAverage} average`,
-    `trend ${formatWearableTrendDirection(metric.trend)}`,
+    `trend ${formatWearableTrendDirection(metric.trend)} compared with the prior 7 days`,
     ...localDates.map((_localDate, index) =>
       `${weekdayLabels[index] ?? "Day"} ${
         metric.values[index] === null ? "no data" : valueLabels[index] ?? "no data"
@@ -280,6 +290,7 @@ function MetricRow({
         direction={direction}
         label={presentation.compactLabel}
         metricKey={metric.metricKey}
+        observedDays={metric.values.filter((value) => value !== null).length}
       />
       <DayChart
         height={average === null ? EMPTY_CHART_HEIGHT : CHART_HEIGHT}
@@ -297,11 +308,13 @@ function MetricSummary({
   direction,
   label,
   metricKey,
+  observedDays,
 }: {
   average: number | null;
   direction: DirectionPresentation;
   label: string;
   metricKey: WearableTrendMetricKey;
+  observedDays: number;
 }) {
   const unit = averageUnit(metricKey);
   const number = formatWearableTrendMetricValue(metricKey, average);
@@ -323,7 +336,7 @@ function MetricSummary({
           color: COLOR.secondary,
           fontSize: METRIC_LABEL_FONT_SIZE,
           fontWeight: 600,
-          letterSpacing: "0.08em",
+          letterSpacing: "0.02em",
           lineHeight: 1,
           whiteSpace: "nowrap",
         }}
@@ -359,12 +372,19 @@ function MetricSummary({
             style={{
               display: "flex",
               fontSize: AVERAGE_FONT_SIZE,
+              alignItems: "baseline",
               fontWeight: 600,
               letterSpacing: "-0.02em",
               lineHeight: 1,
             }}
           >
-            {number}
+            {metricKey === "total-sleep-minutes"
+              ? number.split(/(\d+)/u).filter(Boolean).map((part, index) => (
+                <span key={index} style={{ fontSize: /^\d/u.test(part) ? AVERAGE_FONT_SIZE : AVERAGE_UNIT_FONT_SIZE, marginRight: /h/u.test(part) ? 10 : 0 }}>
+                  {part}
+                </span>
+              ))
+              : number}
           </div>
           {unit === null ? null : (
             <div
@@ -396,6 +416,11 @@ function MetricSummary({
           )}
         </div>
       )}
+      {observedDays > 0 && observedDays < 7 ? (
+        <div data-observed-days={observedDays} style={{ display: "flex", marginTop: 10, color: COLOR.secondary, fontSize: 28, lineHeight: 1 }}>
+          {`${observedDays} of 7 days`}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -535,7 +560,7 @@ type DirectionPresentation = {
 /**
  * Week-over-week direction as one neutral arrow beside the average. A row
  * with too few observed days to compare shows no arrow, and the comparison
- * basis is not repeated; the complete text recovery still names both.
+ * basis appears once in the shared card context.
  */
 function describeDirection(
   direction: WearableTrendDirection,

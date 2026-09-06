@@ -49,6 +49,38 @@ afterEach(async () => {
 })
 
 describe('assistant automation occurrence receipts', () => {
+  it('keeps accepted text partial while a rich link is pending or fails', async () => {
+    const { context, intent, paths } = await createPendingDeliveryFixture('assistant-occurrence-text-partial-', false)
+    const accepted = assistantOutboxIntentSchema.parse({
+      ...intent,
+      status: 'retryable',
+      deliveryConfirmationPending: false,
+      delivery: {
+        channel: 'linq',
+        idempotencyKey: intent.deliveryIdempotencyKey,
+        messageLength: intent.message.length,
+        providerMessageId: 'provider_synthetic_text',
+        providerMessageIds: ['provider_synthetic_text'],
+        providerThreadId: intent.threadId,
+        sentAt: '2026-08-30T12:00:30.000Z',
+        target: intent.explicitTarget,
+        targetKind: 'thread',
+      },
+    })
+    await writeFile(resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId), JSON.stringify(accepted))
+    await expect(getAssistantCronAutomationOccurrenceReceipt(context.vaultRoot, AUTOMATION_ID)).resolves.toMatchObject({
+      sent: 'partial', delivered: 'unconfirmed', outcome: 'pending',
+    })
+    await reconcileAssistantCronDeliveryIntent({
+      intent: { ...accepted, status: 'failed', updatedAt: '2026-08-30T12:01:00.000Z', lastError: { code: 'SYNTHETIC_LINK_FAILURE', message: 'Link unavailable.' } },
+      paths,
+      vault: context.vaultRoot,
+    })
+    await expect(getAssistantCronAutomationOccurrenceReceipt(context.vaultRoot, AUTOMATION_ID)).resolves.toMatchObject({
+      sent: 'partial', delivered: 'unconfirmed', outcome: 'failed',
+    })
+  })
+
   it('does not turn absent retained history into a never-ran claim', () => {
     expect(projectAssistantAutomationOccurrenceReceipt({
       latestRun: null,
@@ -169,8 +201,8 @@ describe('assistant automation occurrence receipts', () => {
     })).toEqual(expect.objectContaining({
       delivered: 'unconfirmed',
       generated: 'confirmed',
-      outcome: 'sent',
-      sent: 'confirmed',
+      outcome: status === 'failed' ? 'failed' : 'pending',
+      sent: 'partial',
     }))
   })
 
@@ -262,8 +294,8 @@ describe('assistant automation occurrence receipts', () => {
     })).resolves.toMatchObject({
       delivered: 'unconfirmed',
       generated: 'confirmed',
-      outcome: 'sent',
-      sent: 'confirmed',
+      outcome: 'failed',
+      sent: 'partial',
     })
 
     for (const input of [
@@ -602,12 +634,12 @@ function createOutboxEvidence(
 ) {
   return {
     deliveryConfirmationPending,
-    dispatchConfirmed,
+    dispatchState: dispatchConfirmed ? 'partial' as const : 'unconfirmed' as const,
     status,
   }
 }
 
-async function createPendingDeliveryFixture(prefix: string) {
+async function createPendingDeliveryFixture(prefix: string, includeMedia = true) {
   const context = await createTempVaultContext(prefix)
   tempRoots.push(context.parentRoot)
   const paths = resolveAssistantStatePaths(context.vaultRoot)
@@ -627,12 +659,12 @@ async function createPendingDeliveryFixture(prefix: string) {
     dedupeToken: prefix,
     explicitTarget: 'chat_synthetic_delivery_reconciliation',
     identityId: 'identity_synthetic_delivery_reconciliation',
-    media: [{
+    media: includeMedia ? [{
       alt: 'Synthetic health card',
       kind: 'image',
       source: 'test',
       url: 'https://cdn.example.test/health-card.png',
-    }],
+    }] : undefined,
     message: 'Synthetic scheduled health card.',
     scheduledOccurrenceAt: '2026-08-30T12:00:00.000Z',
     sessionId: 'session_synthetic_delivery_reconciliation',

@@ -110,9 +110,11 @@ export function resolveWearableSevenDaySnapshotWindow(
   const asOfDate = reportingTimeZone
     ? formatTimeZoneDateTimeParts(now, reportingTimeZone).dayKey
     : now.toISOString().slice(0, 10);
-  const requestedTo = filters.to ?? asOfDate;
+  // A cumulative day is only comparable once its local calendar day ends.
+  const lastCompletedDate = addDaysToIsoDate(asOfDate, -1);
+  const requestedTo = filters.to ?? lastCompletedDate;
   assertIsoDate(requestedTo, "wearable seven-day end date");
-  const to = requestedTo > asOfDate ? asOfDate : requestedTo;
+  const to = requestedTo > lastCompletedDate ? lastCompletedDate : requestedTo;
   const from = addDaysToIsoDate(to, -6);
   const priorFrom = addDaysToIsoDate(from, -7);
 

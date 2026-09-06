@@ -180,6 +180,12 @@ default destination for every goal or the definition of activation.
 
 ## Channel-Native Presentation
 
+- The fixed seven-day wearable view covers completed local calendar days so
+  unfinished activity does not appear as a decline. Preserve missing readings,
+  show sparse coverage, and make the comparison basis understandable. An
+  automation with only part of its response accepted must say partially sent;
+  neither full nor partial dispatch proves handset delivery.
+
 - Telegram and iMessage are product UI surfaces, not plain-text transports.
   When an owned workflow supports a card, table, image sequence, or other
   structured presentation that can carry the complete answer, Murph must use

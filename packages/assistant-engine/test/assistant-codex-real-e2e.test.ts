@@ -23007,9 +23007,12 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
-  it(
-    'reports a sent automation occurrence without claiming handset delivery',
-    async () => {
+  it.each([
+    { label: 'sent', outcome: 'sent' as const, sent: 'confirmed' as const },
+    { label: 'partially sent', outcome: 'failed' as const, sent: 'partial' as const },
+  ])(
+    'reports a $label automation occurrence without claiming handset delivery',
+    async ({ outcome, sent }) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-automation-occurrence-receipt-e2e-'),
@@ -23045,9 +23048,9 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                     finishedAt: '2026-08-29T23:00:12.000Z',
                     generated: 'confirmed',
                     history: 'observed',
-                    outcome: 'sent',
+                    outcome,
                     scheduledAt: '2026-08-29T23:00:00.000Z',
-                    sent: 'confirmed',
+                    sent,
                     startedAt: '2026-08-29T23:00:01.000Z',
                     trigger: 'scheduled',
                   },
@@ -23095,6 +23098,11 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           `[automation-occurrence-receipt-e2e] ${JSON.stringify({ reply })}\n`,
         )
         expect(reply).toMatch(/sent|dispatch(?:ed)?|provider/iu)
+        if (sent === 'partial') {
+          expect(reply).toMatch(/partial|part of|some.*sent|incomplete/iu)
+          expect(reply).toMatch(/fail|not.*(?:finish|complete)|incomplete/iu)
+          expect(reply).not.toMatch(/nothing was sent|never sent|not sent at all/iu)
+        }
         expect(reply).toMatch(
           /deliver(?:y|ed).*(?:unconfirmed|not confirmed|cannot confirm|can't confirm)|(?:unconfirmed|not confirmed|cannot confirm|can't confirm).*deliver(?:y|ed)/iu,
         )

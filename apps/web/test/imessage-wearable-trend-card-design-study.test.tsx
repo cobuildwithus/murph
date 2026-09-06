@@ -14,15 +14,16 @@ test("design studies expose complete, sparse, and unavailable production card st
   expect(markup).toContain(
     'data-design-component="imessage-seven-day-health-card"',
   );
-  expect(markup.match(/data-design-state="complete"/gu)).toHaveLength(2);
-  expect(markup.match(/data-design-state="sparse"/gu)).toHaveLength(2);
-  expect(markup.match(/data-design-state="no-data"/gu)).toHaveLength(2);
+  expect(markup.match(/data-design-state="complete"/gu)).toHaveLength(1);
+  expect(markup.match(/data-design-state="sparse"/gu)).toHaveLength(1);
+  expect(markup.match(/data-design-state="no-data"/gu)).toHaveLength(1);
+  expect(markup.match(/data-design-state="year-boundary"/gu)).toHaveLength(1);
   expect(markup).toContain('data-design-contract="imessage-native-wearable-trend-card"');
   expect(markup).toContain('data-metric-key="hrv-rmssd"');
   expect(markup).toContain('data-metric-key="hrv-sdnn"');
   expect(markup).toContain('data-line-segment="gap"');
   expect(markup).toContain('data-sparkline="·······"');
-  expect(markup).toContain(">AVERAGE<");
+  expect(markup).toContain(">DAILY AVERAGE<");
   expect(markup).toContain('data-metric-direction="not_enough_data"');
   expect(markup).toContain('data-metric-direction="no_data"');
   expect(markup).not.toMatch(/>[^<]*(?:too few|Higher|Lower|Steady)[^<]*</iu);

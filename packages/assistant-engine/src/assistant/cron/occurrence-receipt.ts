@@ -20,7 +20,7 @@ import type {
   AssistantAutomationOccurrenceReceipt,
 } from '../execution-context.js'
 import { resolveAssistantOutboxIntentPath } from '../outbox/intents.js'
-import { hasAssistantOutboxDeliveryEvidence } from '../response-media.js'
+import { getAssistantCronDispatchState } from './delivery-evidence.js'
 import {
   compareAssistantTimestampsAscending,
   isMissingFileError,
@@ -36,7 +36,7 @@ import { parseAssistantCronStore } from './store.js'
 
 type OccurrenceOutboxEvidence = {
   deliveryConfirmationPending: boolean
-  dispatchConfirmed: boolean
+  dispatchState: 'complete' | 'partial' | 'unconfirmed'
   status: AssistantOutboxIntent['status']
 }
 
@@ -199,9 +199,7 @@ function projectOccurrenceOutboxEvidence(
 ): OccurrenceOutboxEvidence {
   return {
     deliveryConfirmationPending: intent.deliveryConfirmationPending,
-    dispatchConfirmed:
-      intent.status === 'sent'
-      || hasAssistantOutboxDeliveryEvidence(intent, true),
+    dispatchState: getAssistantCronDispatchState(intent),
     status: intent.status,
   }
 }
@@ -351,6 +349,14 @@ function projectFailedOccurrenceReceipt(
         outcome: 'sent',
         sent: 'confirmed',
       }
+    case 'delivery_failed_partial':
+      return {
+        ...common,
+        delivered: 'unconfirmed',
+        generated: 'confirmed',
+        outcome: 'failed',
+        sent: 'partial',
+      }
     case 'delivery_failed_unknown':
       return {
         ...common,
@@ -401,13 +407,23 @@ function projectPendingDeliveryReceipt(
     }
   }
 
-  if (intent.dispatchConfirmed) {
+  if (intent.dispatchState === 'complete') {
     return {
       ...common,
       delivered: 'unconfirmed',
       generated: 'confirmed',
       outcome: 'sent',
       sent: 'confirmed',
+    }
+  }
+
+  if (intent.dispatchState === 'partial') {
+    return {
+      ...common,
+      delivered: 'unconfirmed',
+      generated: 'confirmed',
+      outcome: intent.status === 'failed' || intent.status === 'abandoned' ? 'failed' : 'pending',
+      sent: 'partial',
     }
   }
 

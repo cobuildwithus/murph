@@ -65,7 +65,7 @@ test("seven-day snapshot runtime uses vault-local dates and keeps Apple SDNN sep
     await rebuildQueryProjection(vaultRoot);
     const snapshot = await summarizeWearableSevenDaySnapshotRuntime(vaultRoot, {
       metricKeys: ["steps", "hrv-rmssd", "hrv-sdnn"],
-      now: "2026-08-31T02:00:00.000Z",
+      now: "2026-09-01T02:00:00.000Z",
     });
 
     assert.equal(snapshot.reportingTimeZone, "America/Los_Angeles");
