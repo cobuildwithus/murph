@@ -1,8 +1,8 @@
 # Diagnose expired Personal Patterns occurrences
 
-Status: active
+Status: completed
 Created: 2026-09-05
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 ## Goal
 
@@ -30,7 +30,7 @@ notification eligibility, delivery effect, or persistence owner changes.
 - [x] Record attempted checkpoint wake states and relative timing without raw values.
 - [x] Prove fresh expiry, retry expiry, mixed alert outcomes, and snapshot lifecycle diagnostics.
 - [x] Run relevant typechecks, lint, complexity and documentation checks.
-- [ ] Review and commit the scoped candidate; complete applicable external review.
+- [x] Review and commit the scoped candidate; complete applicable external review.
 
 ## Diagnostic contract
 
@@ -69,4 +69,18 @@ No production mutation is part of this task.
 - Parent candidate review found no scheduling or retry changes, new awaited
   operations, arbitrary values in the new log fields, or checkpoint authority
   derived from diagnostics. Existing complexity hotspots remain unchanged.
-- External review and any PR-required CI are pending publication.
+- ReviewGPT round 1 passed on `c3ba2332dfa3bf2014f4d72b482c906e4659322c`
+  with no qualifying findings. Phlebas supplied the full guarded snapshot;
+  captured model metadata verifies `gpt-6-pro`, and the completed thread reports
+  4m 54s. The review traced log serialization, snapshot outcomes and alert
+  idempotency, and verified all changed-file and base-hunk hashes. The first
+  attempt lacked its attachment and was discarded as invalid.
+- CI exposed a pre-existing Training test clock dependency after a Docker pull
+  rate-limit failure. Its selector and fixture are unchanged from the base;
+  the same failure reproduced locally. The fixture now supplies its existing
+  optional clock and UTC timezone. All 14 Training tests and the Web typecheck
+  pass. This isolated proof correction and the explanatory closeout do not
+  change the reviewed production implementation or require another review round.
+- Final pushed-head CI remains the handoff gate; no merge or deployment is
+  included in this task.
+Completed: 2026-09-06

@@ -335,6 +335,7 @@ test("Training derives the live workout, recent history and exercise progress fr
   });
   const view = selectBrowserVaultTraining(
     createBrowserVaultQueryClient(replica),
+    { now: new Date("2026-08-09T18:00:00.000Z"), timeZone: "UTC" },
   );
 
   assert.equal(view.activeSession?.id, "workout_active");
