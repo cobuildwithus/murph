@@ -1897,6 +1897,16 @@ the flow. Foreground native refresh and a fresh website load both re-read the
 same fact. The short-lived native vCard handoff reuses the existing signed card
 claim and never makes the app a routing-data owner.
 
+### Native Environment read projection
+
+The companion Environment route projects only Habitat report data from the
+published Browser Vault core replica. It reuses the browser's bounded encrypted
+session decoder with an ephemeral recipient key, then the Environment page's existing pure selectors and grading. Decrypted input and the report
+remain request-local; there is no score persistence or native vault replica.
+Privy bearer admission and current access/consent checks surround replica I/O.
+The native Home card and report retain only a session-fenced in-memory response.
+The Habitat product spec owns the wire shape, freshness, and editing handoff.
+
 ### iOS address-book advisory names
 
 The iOS companion owns the optional system Contacts prompt and produces one

@@ -7,7 +7,7 @@ import {
 } from "@murphai/contracts";
 
 import type { HabitatIndicatorNotes, ResolvedCategory } from "./home-model";
-import { toFahrenheit } from "./use-imperial-units";
+import { toFahrenheit } from "@/src/lib/environment/units";
 
 export type CategoryGrade = {
   letter: "A" | "B" | "C" | "D" | "F" | null;

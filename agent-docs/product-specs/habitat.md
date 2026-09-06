@@ -21,6 +21,30 @@ Habitat is the umbrella for this knowledge: durable, structured facts about the 
   no Habitat value is placed in public metadata or a public share asset. The
   separate Share action remains a generic card without member facts.
 
+## Native Environment report
+
+The iOS Home screen includes a compact Environment grade card opening a native
+read-only report. It presents the same five categories, known facts, targets,
+coverage, declined answers, and derived grades as the web page. Missing or
+insufficient evidence never produces an invented grade. The web voice
+walkthrough and existing conversations remain the editing surfaces.
+
+`GET /api/device-sync/companion/environment?units=metric|imperial` authenticates
+only a Privy identity bearer. It checks current access and required launch
+consent before reading the published Browser Vault core projection and again
+before returning the report. The existing replica decoder enforces member,
+key-envelope, AAD, identity, and byte-budget checks. An ephemeral recipient key
+and decrypted core live only for the request; only the Environment projection
+is returned with `Cache-Control: no-store`. iOS retains it only in memory,
+clears it at account/consent boundaries, and rejects late session responses.
+
+The versioned `murph.companion.environment.v1` response is `preparing` when no
+replica exists, or `ready` with `generatedAt`, `freshness`, `grade`, and
+`categories`. Stale/missing replicas use the existing best-effort refresh owner;
+there is no new job, database, or score store. An unavailable read remains
+retryable without blocking Health or Meals. Deploy this additive Web route
+before releasing the native consumer; older Web returns an unavailable report.
+
 ## Domains
 
 | Domain | Scope | Owner | Status |
