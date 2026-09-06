@@ -3,9 +3,14 @@ import { createReadStream, createWriteStream, promises as fs } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { Transform, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createGunzip, createGzip, gzipSync, gunzipSync } from "node:zlib";
+import { createGunzip, createGzip } from "node:zlib";
 
 import { prepareFileAtomicExclusive, writeFileAtomic } from "./atomic-write.ts";
+import {
+  compressShard,
+  decompressShard,
+  type ShardCompression,
+} from "./shard-compression.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, walkVaultFiles, walkVaultFilesInterruptible } from "./fs.ts";
@@ -22,7 +27,7 @@ export const MAX_EVENT_LEDGER_SHARD_BYTES = 256 * 1024 * 1024;
 export const MAX_EVENT_LEDGER_ARCHIVE_BYTES = 128 * 1024 * 1024;
 
 export interface EventLedgerShardSource {
-  kind: "jsonl" | "gzip";
+  kind: "jsonl" | ShardCompression;
   logicalPath: string;
   sourcePath: string;
 }
@@ -42,11 +47,10 @@ export interface ArchiveClosedEventLedgerShardsResult {
 }
 
 function isEventLedgerSourcePath(relativePath: string): boolean {
-  return isEventLedgerLogicalPath(relativePath)
-    || (
-      relativePath.endsWith(".jsonl.gz")
-      && isEventLedgerLogicalPath(relativePath.slice(0, -".gz".length))
-    );
+  return ["", ".gz", ".br"].some((suffix) =>
+    relativePath.endsWith(`.jsonl${suffix}`)
+    && isEventLedgerLogicalPath(suffix ? relativePath.slice(0, -suffix.length) : relativePath)
+  );
 }
 
 export function isEventLedgerLogicalPath(relativePath: string): boolean {
@@ -74,6 +78,9 @@ function requireEventLedgerLogicalPath(relativePath: string): string {
 
 function toEventLedgerShardSource(relativePath: string): EventLedgerShardSource {
   const normalized = normalizeRelativeVaultPath(relativePath);
+  if (normalized.endsWith(".jsonl.br")) {
+    return { kind: "brotli", logicalPath: normalized.slice(0, -3), sourcePath: normalized };
+  }
   if (normalized.endsWith(".jsonl.gz")) {
     return {
       kind: "gzip",
@@ -97,7 +104,7 @@ function assertUnambiguousEventLedgerSources(
     if (prior) {
       throw new VaultError(
         "EVENT_LEDGER_SHARD_AMBIGUOUS",
-        `Event ledger shard "${source.logicalPath}" has both plain and gzip representations.`,
+        `Event ledger shard "${source.logicalPath}" has multiple physical representations.`,
         { relativePath: source.logicalPath },
       );
     }
@@ -150,23 +157,15 @@ export async function resolveEventLedgerShardSource(
   relativePath: string,
 ): Promise<EventLedgerShardSource | null> {
   const logicalPath = requireEventLedgerLogicalPath(relativePath);
-  const plainPath = resolveVaultPath(vaultRoot, logicalPath).absolutePath;
-  const gzipPath = resolveVaultPath(vaultRoot, `${logicalPath}.gz`).absolutePath;
-  const [plainExists, gzipExists] = await Promise.all([
-    pathExists(plainPath),
-    pathExists(gzipPath),
-  ]);
-  if (plainExists && gzipExists) {
-    throw new VaultError(
-      "EVENT_LEDGER_SHARD_AMBIGUOUS",
-      `Event ledger shard "${logicalPath}" has both plain and gzip representations.`,
-      { relativePath: logicalPath },
-    );
-  }
-  if (gzipExists) {
-    return { kind: "gzip", logicalPath, sourcePath: `${logicalPath}.gz` };
-  }
-  return plainExists ? { kind: "jsonl", logicalPath, sourcePath: logicalPath } : null;
+  const candidates = await Promise.all(["", ".gz", ".br"].map(async (suffix) => {
+    const sourcePath = `${logicalPath}${suffix}`;
+    return await pathExists(resolveVaultPath(vaultRoot, sourcePath).absolutePath)
+      ? toEventLedgerShardSource(sourcePath)
+      : null;
+  }));
+  const sources = candidates.filter((source) => source !== null);
+  assertUnambiguousEventLedgerSources(sources);
+  return sources[0] ?? null;
 }
 
 async function readBoundedEventLedgerSourceBytes(
@@ -185,7 +184,7 @@ async function readBoundedEventLedgerSourceBytes(
       { relativePath: source.sourcePath },
     );
   }
-  const maxStoredBytes = source.kind === "gzip"
+  const maxStoredBytes = source.kind !== "jsonl"
     ? MAX_EVENT_LEDGER_ARCHIVE_BYTES
     : MAX_EVENT_LEDGER_SHARD_BYTES;
   if (stats.size > maxStoredBytes) {
@@ -211,9 +210,7 @@ async function readBoundedEventLedgerSourceBytes(
     return storedBytes;
   }
   try {
-    const bytes = gunzipSync(storedBytes, {
-      maxOutputLength: MAX_EVENT_LEDGER_SHARD_BYTES,
-    });
+    const bytes = decompressShard(storedBytes, source.kind, MAX_EVENT_LEDGER_SHARD_BYTES);
     signal?.throwIfAborted();
     return bytes;
   } catch (error) {
@@ -358,7 +355,7 @@ export async function createArchivedEventLedgerShardContentReceipt(
   logicalPath: string,
 ): Promise<EventLedgerShardContentReceipt | null> {
   const source = await resolveEventLedgerShardSource(vaultRoot, logicalPath);
-  if (!source || source.kind !== "gzip") {
+  if (!source || source.kind === "jsonl") {
     return null;
   }
   const bytes = await readBoundedEventLedgerSourceBytes(vaultRoot, source);
@@ -374,7 +371,7 @@ export async function inspectArchivedEventLedgerShardAppend(input: {
   vaultRoot: string;
 }): Promise<"applied" | "base" | null> {
   const source = await resolveEventLedgerShardSource(input.vaultRoot, input.targetRelativePath);
-  if (!source || source.kind !== "gzip") {
+  if (!source || source.kind === "jsonl") {
     return null;
   }
   const bytes = await readBoundedEventLedgerSourceBytes(input.vaultRoot, source);
@@ -414,7 +411,11 @@ export async function inspectArchivedEventLedgerShardAppend(input: {
   );
 }
 
-function buildVerifiedEventLedgerArchive(bytes: Uint8Array, relativePath: string): Buffer {
+function buildVerifiedEventLedgerArchive(
+  bytes: Uint8Array,
+  relativePath: string,
+  kind: ShardCompression,
+): Buffer {
   if (bytes.byteLength > MAX_EVENT_LEDGER_SHARD_BYTES) {
     throw new VaultError(
       "EVENT_LEDGER_SHARD_TOO_LARGE",
@@ -422,20 +423,20 @@ function buildVerifiedEventLedgerArchive(bytes: Uint8Array, relativePath: string
       { byteSize: bytes.byteLength, relativePath },
     );
   }
-  const archive = gzipSync(bytes, { level: 6 });
+  const archive = compressShard(bytes, kind);
   if (archive.byteLength > MAX_EVENT_LEDGER_ARCHIVE_BYTES) {
     throw new VaultError(
       "EVENT_LEDGER_SHARD_TOO_LARGE",
-      `Event ledger archive "${relativePath}.gz" exceeds its compressed size limit.`,
-      { byteSize: archive.byteLength, relativePath: `${relativePath}.gz` },
+      `Event ledger archive "${relativePath}" exceeds its compressed size limit.`,
+      { byteSize: archive.byteLength, relativePath },
     );
   }
-  const verified = gunzipSync(archive, { maxOutputLength: MAX_EVENT_LEDGER_SHARD_BYTES });
+  const verified = decompressShard(archive, kind, MAX_EVENT_LEDGER_SHARD_BYTES);
   if (!verified.equals(Buffer.from(bytes))) {
     throw new VaultError(
       "EVENT_LEDGER_ARCHIVE_INVALID",
       "Event ledger archive verification failed.",
-      { relativePath: `${relativePath}.gz` },
+      { relativePath },
     );
   }
   return archive;
@@ -446,7 +447,8 @@ async function rewriteArchivedEventLedgerShard(
   source: EventLedgerShardSource,
   bytes: Uint8Array,
 ): Promise<void> {
-  const archive = buildVerifiedEventLedgerArchive(bytes, source.logicalPath);
+  if (source.kind === "jsonl") throw new TypeError("Expected an archived event shard.");
+  const archive = buildVerifiedEventLedgerArchive(bytes, source.sourcePath, source.kind);
   await writeFileAtomic(
     resolveVaultPath(vaultRoot, source.sourcePath).absolutePath,
     archive,
@@ -469,7 +471,7 @@ export async function appendArchivedEventLedgerShard(input: {
   vaultRoot: string;
 }): Promise<{ originalSize: number }> {
   const source = await resolveEventLedgerShardSource(input.vaultRoot, input.targetRelativePath);
-  if (!source || source.kind !== "gzip") {
+  if (!source || source.kind === "jsonl") {
     throw new VaultError(
       "EVENT_LEDGER_SHARD_NOT_ARCHIVED",
       "Event ledger shard is not archived.",
@@ -511,7 +513,7 @@ export async function truncateArchivedEventLedgerShard(input: {
   vaultRoot: string;
 }): Promise<void> {
   const source = await resolveEventLedgerShardSource(input.vaultRoot, input.targetRelativePath);
-  if (!source || source.kind !== "gzip") {
+  if (!source || source.kind === "jsonl") {
     throw new VaultError(
       "EVENT_LEDGER_SHARD_NOT_ARCHIVED",
       "Event ledger shard is not archived.",
@@ -697,6 +699,11 @@ async function archivePlainEventLedgerShard(
 ): Promise<{ archiveByteCount: number; repaired: boolean; sourceByteCount: number }> {
   signal?.throwIfAborted();
   const plainAbsolutePath = resolveVaultPath(vaultRoot, source.logicalPath).absolutePath;
+  if (await pathExists(resolveVaultPath(vaultRoot, `${source.logicalPath}.br`).absolutePath)) {
+    throw new VaultError("EVENT_LEDGER_SHARD_AMBIGUOUS", "Event ledger shard has multiple representations.", {
+      relativePath: source.logicalPath,
+    });
+  }
   const gzipSource = {
     kind: "gzip" as const,
     logicalPath: source.logicalPath,

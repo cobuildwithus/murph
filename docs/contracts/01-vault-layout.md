@@ -48,7 +48,7 @@ Status: frozen current contract plus health extension fence
   ledger/inbox-captures/YYYY/YYYY-MM.jsonl
   derived/inbox/<captureId>/attachments/<attachmentId>/attempts/<attempt>/result.json
   ledger/assessments/YYYY/YYYY-MM.jsonl
-  ledger/events/YYYY/YYYY-MM.jsonl[.gz]
+  ledger/events/YYYY/YYYY-MM.jsonl[.gz|.br]
   ledger/integration-ingests/YYYY/YYYY-MM.jsonl
   ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl
   ledger/samples/<stream>/YYYY/YYYY-MM.jsonl
@@ -138,3 +138,18 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Published version strings are immutable.
 - Any incompatible change must mint a new version string and either ship an explicit core migration or fail closed until one exists.
 - `packages/core` owns the future migration seam and versioned write behavior. Current older-format vaults fail closed until an explicit upgrade step is registered, and query/CLI paths must not keep legacy reads alive by silently rewriting stored records during reads.
+
+### Brotli shard reader compatibility
+
+Canonical event and integration-ingest owners also read `.jsonl.br` and preserve
+that encoding on late append and rollback. Gzip and legacy integration ZIP reads
+remain supported. Logical `.jsonl` paths, complete decompressed byte receipts,
+row validation and existing compressed/uncompressed limits are unchanged. Multiple
+physical representations still fail closed. Brotli uses its standard bounded window; large-window extensions are disabled. Query source discovery includes Brotli event shards.
+
+This reader release continues publishing new closed-month archives as gzip. Deploy
+and drain it across every workspace consumer before enabling Brotli publication
+or migrating existing gzip archives. Once Brotli is written, this reader release
+is the rollback floor; downgrade requires an explicit lossless conversion first.
+Compatibility readers remain until retained snapshots and supported imports no
+longer contain those representations.

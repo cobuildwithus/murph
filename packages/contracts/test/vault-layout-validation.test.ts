@@ -484,7 +484,7 @@ describe("vault layout exports", () => {
       `${VAULT_LAYOUT.inboxCaptureLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
       `${DERIVED_DIRECTORY}/inbox/<captureId>/attachments/<attachmentId>/attempts/<attempt>/result.json`,
       `${VAULT_LAYOUT.assessmentLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
-      `${VAULT_LAYOUT.eventLedgerDirectory}/YYYY/YYYY-MM.jsonl[.gz]`,
+      `${VAULT_LAYOUT.eventLedgerDirectory}/YYYY/YYYY-MM.jsonl[.gz|.br]`,
       `${VAULT_LAYOUT.integrationIngestLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
       `${VAULT_LAYOUT.metricSampleLedgerDirectory}/<metric>/YYYY/YYYY-MM.jsonl`,
       `${VAULT_LAYOUT.sampleLedgerDirectory}/<stream>/YYYY/YYYY-MM.jsonl`,
