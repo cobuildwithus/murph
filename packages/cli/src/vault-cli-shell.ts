@@ -1,4 +1,5 @@
-import { Cli } from 'incur'
+import { Cli, middleware } from 'incur'
+import { timeCliDispatch } from '@murphai/runtime-state/node/cli-timing'
 
 import {
   CLI_CONFIG_FILES,
@@ -34,6 +35,7 @@ export function createVaultCliShell(
     },
     version: getVaultCliPackageVersion(),
   })
+  cli.use(middleware((context, next) => timeCliDispatch(context.command, next)))
   cli.use(incurErrorBridge)
 
   return cli

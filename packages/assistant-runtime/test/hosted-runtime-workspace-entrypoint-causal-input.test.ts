@@ -5,6 +5,7 @@ import {
   createBundleRef,
   createConsentedMemberAssistantAskRequestedWake,
   createDeferred,
+  createDeviceSyncSystemWakeForMailboxItem,
   createMailboxItem,
   createMailboxPort,
   createPlatform,
@@ -2523,20 +2524,27 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     }
   });
 
-  test("runs a late imported approval through the causal system owner before idle checkpoint", async () => {
+  test.each([false, true])("delivers an approval before idle checkpoint (mixed device prefix: %s)", async (mixedDevicePrefix) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const foregroundCausalOnlyValues: boolean[] = [];
     const approvalImportObserved = createDeferred<void>();
+    let checkpointStarted = false;
+    const deviceItem = createMailboxItem({
+      id: "mailbox_item_queued_device",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
     const effectId = "effect_late_imported_approval";
     const approvalItem = createMailboxItem({
       dedupeKey: `runtime.pending-effects-reconcile-requested:${effectId}`,
       id: "mailbox_item_late_imported_approval",
       kind: "runtime.pending-effects-reconcile-requested",
       lane: "system",
-      laneSeq: "1",
+      laneSeq: mixedDevicePrefix ? "2" : "1",
     });
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const providerFetch = vi.fn<typeof fetch>(async () => {
@@ -2624,7 +2632,13 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       } satisfies HostedRuntimePlatform;
       const bridgeImporter = createHostedWorkspaceBridgeMailboxImporter({
         decodeMailboxPayload: {
-          async decode() {
+          async decode(input) {
+            if (input.itemRef.kind === "device-sync.wake") {
+              return {
+                status: "decoded",
+                wake: createDeviceSyncSystemWakeForMailboxItem(deviceItem),
+              };
+            }
             return {
               status: "decoded",
               wake: buildHostedExecutionPendingEffectsReconcileRequestedWake({
@@ -2653,7 +2667,14 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           }),
           {
             async createCheckpointSnapshot(snapshotInput) {
+              checkpointStarted = true;
               events.push(`snapshot:${snapshotInput.reason}`);
+              if (mixedDevicePrefix) {
+                const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+                assert.deepEqual(pending.map((item) => [item.itemId, item.attemptCount]), [
+                  [deviceItem.id, 0],
+                ]);
+              }
               return {
                 snapshotRef: createBundleRef({
                   hash: "7".repeat(64),
@@ -2665,8 +2686,10 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             async importItem(item, context) {
               const outcome = await bridgeImporter(item, context);
               assert.equal(Object.hasOwn(outcome, "afterCheckpoint"), false);
-              events.push(`approval.import:${outcome.status}`);
-              approvalImportObserved.resolve();
+              events.push(`mailbox.import:${item.item.kind}:${outcome.status}`);
+              if (item.item.kind === approvalItem.kind) {
+                approvalImportObserved.resolve();
+              }
               return outcome;
             },
             platform,
@@ -2676,6 +2699,16 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               foregroundCausalOnlyValues.push(input.foregroundCausalOnly === true);
               events.push(`assistant.phase:${assistantPhaseCalls}`);
               if (assistantPhaseCalls === 1) {
+                if (mixedDevicePrefix) {
+                  setTimeout(() => {
+                    mailboxItems.push(deviceItem, approvalItem);
+                    runtimeWakeSignal.notify();
+                  }, 0);
+                  return {
+                    checkpointReason: "assistant_runtime_commit",
+                    progressed: true,
+                  };
+                }
                 return {
                   afterCheckpoint: async () => {
                     mailboxItems.push(approvalItem);
@@ -2690,6 +2723,11 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                   checkpointReason: "assistant_runtime_commit",
                   progressed: true,
                 };
+              }
+              // This proof ends at the first idle checkpoint. Background service
+              // after publication is covered by the system-mailbox scenarios.
+              if (mixedDevicePrefix && checkpointStarted) {
+                return { progressed: false };
               }
               return await runHostedWorkspaceAssistantPhase({
                 ...input,
@@ -2724,12 +2762,14 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         events.join(","),
       );
       assert.deepEqual(
-        (await readHostedSystemMailboxState(vaultRoot)).pending,
-        [],
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
+        mixedDevicePrefix ? [deviceItem.id] : [],
       );
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeReason, "assistant");
-      assert.ok(Date.parse(result.nextWakeAt ?? "") > Date.parse(TEST_NOW));
+      if (!mixedDevicePrefix) {
+        assert.equal(result.nextWakeReason, "assistant");
+        assert.ok(Date.parse(result.nextWakeAt ?? "") > Date.parse(TEST_NOW));
+      }
     } finally {
       if (mocks.actualCollectHostedAssistantDeliverySideEffects) {
         mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
@@ -3037,7 +3077,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     });
   }
 
-  test("keeps a mixed causal and device prefix gated until after checkpoint", async () => {
+  test.each(["device-sync.wake", "health.daily-metric.reported"] as const)(
+    "keeps %s without an admissible foreground batch gated until checkpoint",
+    async (deferredKind) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3050,7 +3092,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_mixed_pending_effects_device_dirty_wake",
+            attemptId: "attempt_synthetic_mixed_pending_effects_canonical_dirty_wake",
             idleCheckpointDelayMs: 200,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
@@ -3063,7 +3105,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             return {
               snapshotRef: createBundleRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/mixed-pending-effects-device.bundle.json",
+                key: "users/bundles/member-synthetic/mixed-pending-effects-canonical.bundle.json",
                 size: 512,
               }),
             };
@@ -3091,17 +3133,17 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               setTimeout(() => {
                 mailboxItems.push(
                   createMailboxItem({
-                    id: "mailbox_item_entrypoint_mixed_device",
-                    kind: "device-sync.wake",
+                    id: "mailbox_item_entrypoint_mixed_canonical",
+                    kind: deferredKind,
                     lane: "system",
                     laneSeq: "1",
                   }),
-                  createMailboxItem({
+                  ...(deferredKind === "device-sync.wake" ? [] : [createMailboxItem({
                     id: "mailbox_item_entrypoint_mixed_pending_effects",
                     kind: "runtime.pending-effects-reconcile-requested",
                     lane: "system",
                     laneSeq: "2",
-                  }),
+                  })]),
                 );
                 runtimeWakeSignal.notify();
               }, 0);
@@ -3126,17 +3168,19 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       assert.ok(
         idleCheckpointIndex < requireEventIndex(
           events,
-          "mailbox.importItem:mailbox_item_entrypoint_mixed_device",
+          "mailbox.importItem:mailbox_item_entrypoint_mixed_canonical",
         ),
         events.join(","),
       );
-      assert.ok(
-        idleCheckpointIndex < requireEventIndex(
-          events,
-          "mailbox.importItem:mailbox_item_entrypoint_mixed_pending_effects",
-        ),
-        events.join(","),
-      );
+      if (deferredKind !== "device-sync.wake") {
+        assert.ok(
+          idleCheckpointIndex < requireEventIndex(
+            events,
+            "mailbox.importItem:mailbox_item_entrypoint_mixed_pending_effects",
+          ),
+          events.join(","),
+        );
+      }
       assert.equal(result.status, "idle");
     } finally {
       await removeTempRoot(vaultRoot);

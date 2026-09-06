@@ -436,3 +436,9 @@ export const ERROR_CODES = Object.freeze([
 export const ERROR_CODE_VALUES = Object.freeze(
   ERROR_CODES.map((entry) => entry.code),
 ) as readonly (typeof ERROR_CODES)[number]["code"][];
+
+// Inbox bytes and their conversational references share these fixed lifetimes.
+export const INBOX_IMAGE_RETENTION_DAYS = 90;
+export const INBOX_IMAGE_RETENTION_WINDOW_MS = INBOX_IMAGE_RETENTION_DAYS * 86_400_000;
+export const INBOX_VIDEO_RETENTION_DAYS = 30;
+export const INBOX_VIDEO_RETENTION_WINDOW_MS = INBOX_VIDEO_RETENTION_DAYS * 86_400_000;
