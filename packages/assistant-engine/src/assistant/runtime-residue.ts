@@ -1,3 +1,4 @@
+import { hasRetainedAssistantInputMedia } from './input-media-retention.js'
 import { createHash } from 'node:crypto'
 import { createReadStream, type Dirent, type Stats } from 'node:fs'
 import { lstat, readdir, readFile, rm, rmdir, unlink } from 'node:fs/promises'
@@ -839,7 +840,9 @@ function planAssistantRuntimeResiduePrune(input: {
 
   const inputEventPaths = new Set<string>()
   const inputEventsById = new Map(
-    input.inventory.inputEvents.records.map((entry) => [
+    input.inventory.inputEvents.records
+      .filter((entry) => !hasRetainedAssistantInputMedia(entry.record, input.now.getTime()))
+      .map((entry) => [
       entry.record.inputId,
       entry,
     ] as const),
@@ -862,6 +865,7 @@ function planAssistantRuntimeResiduePrune(input: {
     const orphanEvents = input.inventory.inputEvents.records
       .filter(({ filePath, record }) =>
         !inputEventPaths.has(filePath) &&
+        !hasRetainedAssistantInputMedia(record, input.now.getTime()) &&
         !pendingInputIds.has(record.inputId) &&
         !retainedJournalInputIds.has(record.inputId) &&
         !activeAutoReplyInputIds.has(record.inputId) &&

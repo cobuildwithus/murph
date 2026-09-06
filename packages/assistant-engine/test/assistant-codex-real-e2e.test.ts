@@ -110,6 +110,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_CONVERSATION_ATTACHMENTS_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_AUTOMATION_TOOL,
@@ -528,6 +529,64 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
+
+describeRealCodex('real Codex retained image e2e', () => {
+  it('finds and views an earlier image without conversation text', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-retained-image-e2e-'))
+    const rawPath = 'raw/inbox/synthetic/attachments/01__picture.png'
+    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAcElEQVR4nO3PAQkAAAyEwO8fatkWQwThAuh2c+MLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsacHv6dOCmA4JHiwAAAABJRU5ErkJggg==', 'base64')
+    const materializedPaths: string[] = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_CONVERSATION_ATTACHMENTS_TOOL],
+        env: config.env,
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          currentConversationAttachmentAuthorities: () => [{
+            byteSize: bytes.length, capturedAt: '2026-08-01T12:00:00.000Z',
+            expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+            fileName: 'picture.png', kind: 'image', messageRef: `ain_${'a'.repeat(32)}`,
+            mimeType: 'image/png', ordinal: 1, rawPath,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          }],
+        },
+        materializeWorkspaceArtifacts: async (refs) => {
+          materializedPaths.push(...refs)
+          expect(refs).toEqual([rawPath])
+          await mkdir(path.dirname(path.join(workingDirectory, rawPath)), { recursive: true })
+          await writeFile(path.join(workingDirectory, rawPath), bytes)
+          return { materializedArtifactPaths: new Set(refs), missingArtifactPaths: new Set<string>() }
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What color is the image I sent earlier in this conversation?',
+        reasoningEffort: 'low', sandbox: 'workspace-write',
+        vaultRoot: workingDirectory, workingDirectory,
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents).filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_CONVERSATION_ATTACHMENTS_TOOL.name)
+      process.stdout.write(`[retained-image-e2e] ${JSON.stringify({ reply: result.finalMessage, materializationCount: materializedPaths.length })}\n`)
+      expect(calls).toHaveLength(2)
+      expect(calls).toMatchObject([
+        { argumentsValue: { action: 'list' }, success: true },
+        { argumentsValue: { action: 'open_image', message_ref: `ain_${'a'.repeat(32)}`, attachment_ordinal: 1 }, success: true },
+      ])
+      expect(materializedPaths).toEqual([rawPath])
+      expect(result.jsonEvents).toContainEqual(expect.objectContaining({
+        method: 'item/completed',
+        params: expect.objectContaining({ item: expect.objectContaining({ type: 'imageView' }) }),
+      }))
+      expect(result.finalMessage).toMatch(/green/iu)
+      expect(result.finalMessage).not.toMatch(/resend|re-upload|cannot see|can't see|raw\/|sha256/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
 
 describeRealCodex('real Codex Telegram file delivery e2e', () => {
   it('hands a saved Telegram PDF to the secure file tool and explains pending approval', async () => {
@@ -4668,7 +4727,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       providerObservation: 'The mat in the video is blue.',
       providerQuestion: 'What color is the mat in the video I sent earlier?',
       scenarioLabel: 'a later turn asks about a retained video without resending it',
-      testName: 'analyzes a retained video on a later real-Codex turn without resending',
+      testName: 'finds and analyzes a retained video without earlier conversation text',
       followup: true,
     },
   ] as const)(
@@ -4766,6 +4825,11 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
         let acceptedVideoInputIds = [messageRef]
         const hostedToolContext = {
           computerToolsAvailable: false,
+          currentConversationAttachmentAuthorities: () => [{
+            byteSize: videoBytes.byteLength, messageRef, mimeType: 'video/mp4', ordinal: 1, rawPath, sha256,
+            kind: 'video' as const, fileName: 'clip.mp4', capturedAt: '2026-08-26T12:00:00.000Z',
+            expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+          }],
           currentAnalyzeVideoAttachmentAuthorities: () => [{
             byteSize: videoBytes.byteLength,
             messageRef,
@@ -4839,7 +4903,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
             onboardingGuidance: false,
             turnTrigger: null,
           }),
-          dynamicTools: [MURPH_ANALYZE_VIDEO_TOOL],
+          dynamicTools: [MURPH_ANALYZE_VIDEO_TOOL, MURPH_CONVERSATION_ATTACHMENTS_TOOL],
           env: config.env,
           excludeResumeTurns: true,
           hostedToolContext,
@@ -4879,7 +4943,8 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           )).toHaveLength(0)
           expect(first.finalMessage.trim()).not.toBe('')
           expect(first.finalMessage).not.toMatch(/permanent|forever/iu)
-          resumeSessionId = first.sessionId
+          // A fresh session proves selection without the earlier message text.
+          resumeSessionId = null
           await rm(path.join(workingDirectory, rawPath))
           acceptedVideoInputIds = [`ain_${'b'.repeat(32)}`]
           const followupPrompt = buildAssistantAutoReplyPrompt([{
@@ -4911,6 +4976,9 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           })}\n`,
         )
         if ('followup' in scenario) {
+          expect(readCapabilityRoutingActions(result.jsonEvents).some((action) =>
+            action.kind === 'dynamic' && action.tool === MURPH_CONVERSATION_ATTACHMENTS_TOOL.name && action.success
+          )).toBe(true)
           expect(videoCalls).toHaveLength(1)
           expect(materializedVideoPaths).toEqual([rawPath])
         }
