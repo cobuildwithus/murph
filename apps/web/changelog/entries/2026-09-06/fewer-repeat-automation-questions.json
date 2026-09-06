@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "fewer-repeat-automation-questions",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer repeat questions",
+    "summary": "Scheduled check-ins use available conversation and records before asking you for information again.",
+    "details": "When the answer is already known, Murph can skip the question or ask only for a useful missing detail, even when a reminder has fixed wording. Future reminders stay active.",
+    "relevanceTags": [
+      "automations",
+      "messages"
+    ],
+    "sourcePullRequests": []
+  }
+}
