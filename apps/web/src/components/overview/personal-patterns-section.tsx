@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  ChevronDown,
   Ellipsis,
   Minus,
   Moon,
@@ -135,10 +136,13 @@ export function PersonalPatternsSection({
       ) : null}
 
       {state === "ready" ? (
-        <div className="-mx-2 overflow-hidden rounded-2xl border border-border bg-card sm:mx-0">
-          {displayedReport &&
-          displayedReport.factors.length > 0 &&
-          displayedReport.outcomes.length > 0 ? (
+        <div
+          className={cn(
+            "-mx-2 sm:mx-0 sm:overflow-hidden sm:rounded-2xl sm:border sm:border-border sm:bg-card",
+            !displayedReport && "overflow-hidden rounded-2xl border border-border bg-card",
+          )}
+        >
+          {displayedReport ? (
             <>
               <div id={matrixId}>
                 <PatternMatrix
@@ -251,7 +255,7 @@ function buildDisplayedPatternReport(
   report: PersonalPatternReport | null,
   showAllFactors: boolean,
 ): PersonalPatternReport | null {
-  if (!report) return null;
+  if (!report?.factors.length || !report.outcomes.length) return null;
   return {
     ...report,
     factors: showAllFactors
@@ -354,11 +358,11 @@ function PatternMatrix({
   return (
     <PatternPopoverContext.Provider value={popoverState}>
       <TooltipProvider>
-        <div className="border-t border-border">
-          <MobilePatternList onSort={onSort} report={report} sort={sort} />
+        <div className="sm:border-t sm:border-border">
+          <MobilePatternCards report={report} />
           <DesktopPatternMatrix onSort={onSort} report={report} sort={sort} />
 
-          <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
+          <div className="px-4 py-4 text-xs text-muted-foreground sm:border-t sm:border-border sm:px-8">
             Results show associations, not proof of cause.
           </div>
         </div>
@@ -367,102 +371,128 @@ function PatternMatrix({
   );
 }
 
-function MobilePatternList({
-  onSort,
-  report,
-  sort,
-}: {
-  onSort: (columnId: string) => void;
-  report: PersonalPatternReport;
-  sort: PatternSort | null;
-}) {
-  const selectId = useId();
+function MobilePatternCards({ report }: { report: PersonalPatternReport }) {
   const outcomeColumns = buildOutcomeColumns(report.outcomes);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const popover = useContext(PatternPopoverContext);
-  const selected =
-    outcomeColumns.find((outcome) => outcome.id === selectedId) ??
-    outcomeColumns[0];
-  if (!selected) return null;
-  const direction = sort?.columnId === selected.id ? sort.direction : null;
-  const SortIcon = direction === "ascending" ? ArrowUp : ArrowDown;
 
   return (
-    <div className="sm:hidden" data-patterns-layout="mobile">
-      <div className="space-y-3 border-b border-border bg-muted/20 px-4 py-4">
-        <label
-          className="block text-xs font-medium text-muted-foreground"
-          htmlFor={selectId}
-        >
-          Health measure
-        </label>
-        <div className="flex items-center gap-2">
-          <select
-            className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-base font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            id={selectId}
-            onChange={(event) => {
-              setSelectedId(event.target.value);
-              popover?.setActiveId(null);
-              if (sort?.columnId !== event.target.value) onSort(event.target.value);
-            }}
-            value={selected.id}
+    <ul
+      aria-label="Personal patterns"
+      className="space-y-4 sm:hidden"
+      data-patterns-layout="mobile"
+    >
+      {report.factors.map((factor) => (
+        <MobilePatternCard
+          factor={factor}
+          key={factor.id}
+          outcomeColumns={outcomeColumns}
+          report={report}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function MobilePatternCard({
+  factor,
+  outcomeColumns,
+  report,
+}: {
+  factor: PersonalPatternReport["factors"][number];
+  outcomeColumns: PatternOutcomeColumn[];
+  report: PersonalPatternReport;
+}) {
+  const headingId = useId();
+  const measured: PatternOutcomeColumn[] = [];
+  const pending: PatternOutcomeColumn[] = [];
+  for (const column of outcomeColumns) {
+    const hasComparison = column.outcomes.some((outcome) => {
+      const cell = findPatternCell(report, factor.id, outcome.id);
+      return cell && cell.stage !== "insufficient";
+    });
+    (hasComparison ? measured : pending).push(column);
+  }
+
+  return (
+    <li
+      aria-labelledby={headingId}
+      className="overflow-hidden rounded-2xl border border-border bg-card"
+      data-pattern-factor-row={factor.id}
+    >
+      <div className="flex items-center gap-3 border-b border-border px-5 py-5">
+        <Image
+          src={resolvePatternFactorIcon(factor)}
+          alt=""
+          width={44}
+          height={44}
+          className="size-11 shrink-0 object-contain"
+        />
+        <div className="min-w-0 space-y-1">
+          <h2
+            id={headingId}
+            className="break-words font-serif text-xl font-semibold leading-6 tracking-tight text-foreground"
           >
-            {outcomeColumns.map((outcome) => (
-              <option key={outcome.id} value={outcome.id}>
-                {outcome.label}
-              </option>
-            ))}
-          </select>
-          <button
-            aria-label={`Sort by ${selected.label}${direction ? `, ${direction}` : ""}`}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => onSort(selected.id)}
-            type="button"
-          >
-            <SortIcon aria-hidden="true" className="size-4" />
-            Sort
-          </button>
+            {factor.label}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {formatCaseCount(factor.observedDays)}
+          </p>
         </div>
       </div>
-      <ul
-        aria-label={`${selected.label} patterns`}
-        className="divide-y divide-border"
-      >
-        {report.factors.map((factor) => (
-          <li
-            className="flex min-h-20 items-center justify-between gap-4 px-4 py-3"
-            data-pattern-factor-row={factor.id}
-            key={factor.id}
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <Image
-                src={resolvePatternFactorIcon(factor)}
-                alt=""
-                width={40}
-                height={40}
-                className="size-9 shrink-0 object-contain"
-              />
-              <div className="min-w-0 space-y-1.5">
-                <p className="break-words text-sm font-medium leading-5 text-foreground">
-                  {factor.label}
-                </p>
-                <ObservedDaysMeter days={factor.observedDays} />
-              </div>
-            </div>
-            <div className="shrink-0 [&_button]:min-h-11 [&_button]:min-w-11">
-              <PatternOutcomeColumnCell
-                key={selected.id}
-                factorLabel={factor.label}
-                factorObservedDays={factor.observedDays}
-                outcomes={selected.outcomes}
-                report={report}
-                factorId={factor.id}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
+      <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
+      {pending.length > 0 ? (
+        <details className="group border-t border-border">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-5 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            More data needed ({pending.length})
+            <ChevronDown aria-hidden="true" className="size-4 shrink-0 group-open:rotate-180" />
+          </summary>
+          <PatternCardMeasures factor={factor} outcomes={pending} report={report} />
+        </details>
+      ) : null}
+    </li>
+  );
+}
+
+function PatternCardMeasures({
+  factor,
+  outcomes,
+  report,
+}: {
+  factor: PersonalPatternReport["factors"][number];
+  outcomes: PatternOutcomeColumn[];
+  report: PersonalPatternReport;
+}) {
+  if (outcomes.length === 0) return null;
+  return (
+    <dl
+      className={cn(
+        "grid grid-cols-2 gap-x-5 gap-y-3 px-5 py-4",
+        outcomes.length === 1 && "grid-cols-1",
+      )}
+    >
+      {outcomes.map((outcome) => (
+        <div
+          key={outcome.id}
+          className={cn(
+            "flex min-w-0 flex-col",
+            outcomes.length === 1 && "flex-row items-center justify-between gap-4",
+          )}
+        >
+          <dt className="text-sm leading-5 text-muted-foreground">
+            {outcome.label}
+          </dt>
+          <dd className="mt-auto flex items-center">
+            <PatternOutcomeColumnCell
+              card
+              factorLabel={factor.label}
+              factorObservedDays={factor.observedDays}
+              outcomes={outcome.outcomes}
+              report={report}
+              factorId={factor.id}
+            />
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -604,12 +634,10 @@ interface PatternEffectEntry {
 }
 
 function PatternOutcomeHeader({
-  compact = false,
   onSort,
   outcome,
   sortDirection,
 }: {
-  compact?: boolean;
   onSort: (columnId: string) => void;
   outcome: PatternOutcomeColumn;
   sortDirection: PatternSort["direction"] | null;
@@ -622,7 +650,7 @@ function PatternOutcomeHeader({
         }`}
         className={cn(
           "inline-flex items-center gap-1 rounded-sm font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-          compact ? "text-[10px] leading-[1.15]" : "text-xs leading-tight",
+          "text-xs leading-tight",
         )}
         onClick={() => onSort(outcome.id)}
         type="button"
@@ -634,14 +662,14 @@ function PatternOutcomeHeader({
 }
 
 function PatternOutcomeColumnCell({
-  compact = false,
+  card = false,
   factorId,
   factorLabel,
   factorObservedDays,
   outcomes,
   report,
 }: {
-  compact?: boolean;
+  card?: boolean;
   factorId: string;
   factorLabel: string;
   factorObservedDays: number;
@@ -663,7 +691,7 @@ function PatternOutcomeColumnCell({
     return (
       <PatternBubble
         cell={checked?.cell}
-        compact={compact}
+        card={card}
         factorLabel={factorLabel}
         factorObservedDays={factorObservedDays}
         outcomeId={outcome?.id ?? "unknown"}
@@ -679,7 +707,7 @@ function PatternOutcomeColumnCell({
     return (
       <PatternBubble
         cell={cell}
-        compact={compact}
+        card={card}
         factorLabel={factorLabel}
         factorObservedDays={factorObservedDays}
         outcomeId={outcome.id}
@@ -692,7 +720,7 @@ function PatternOutcomeColumnCell({
 
   return (
     <PatternCompositeBubble
-      compact={compact}
+      card={card}
       entries={effects}
       factorLabel={factorLabel}
     />
@@ -712,11 +740,11 @@ function isPatternEffectEntry(entry: {
 }
 
 function PatternCompositeBubble({
-  compact = false,
+  card = false,
   entries,
   factorLabel,
 }: {
-  compact?: boolean;
+  card?: boolean;
   entries: PatternEffectEntry[];
   factorLabel: string;
 }) {
@@ -757,7 +785,7 @@ function PatternCompositeBubble({
             } after ${factor}. ${label} average change across sleep score and sleep efficiency.`}
             className={cn(
               "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              compact ? "text-[10px]" : "text-sm",
+              card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
             )}
             data-pattern-state="effect"
             onKeyDown={pointerAnchor.onKeyDown}
@@ -779,7 +807,7 @@ function PatternCompositeBubble({
                 tone === "negative" &&
                   classification !== "pattern" &&
                   "bg-red-600/10 text-red-700 dark:bg-red-500/15 dark:text-red-300",
-                compact ? "size-4" : "size-[18px]",
+                "size-[18px]",
               )}
             >
               <DirectionIcon aria-hidden="true" className="size-3" />
@@ -838,7 +866,7 @@ function PatternCompositeBubble({
 
 function PatternBubble({
   cell,
-  compact = false,
+  card = false,
   factorLabel,
   factorObservedDays,
   outcomeId,
@@ -847,7 +875,7 @@ function PatternBubble({
   outcomeUnit,
 }: {
   cell?: PersonalPatternCell;
-  compact?: boolean;
+  card?: boolean;
   factorLabel: string;
   factorObservedDays: number;
   outcomeId: string;
@@ -873,13 +901,13 @@ function PatternBubble({
               )}.`}
               className={cn(
                 "inline-flex shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                compact ? "size-5" : "size-6",
+                card ? "min-h-11 justify-start rounded-md border-0 bg-transparent text-left text-sm" : "size-6",
               )}
               data-pattern-state="insufficient"
               onKeyDown={pointerAnchor.onKeyDown}
               onPointerMove={pointerAnchor.onPointerMove}
             >
-              <Ellipsis aria-hidden="true" className="size-3" />
+              {card ? "Not enough data" : <Ellipsis aria-hidden="true" className="size-3" />}
             </button>
           }
         />
@@ -914,7 +942,7 @@ function PatternBubble({
   const tone = isFlat
     ? "neutral"
     : getPatternEffectTone(outcomeId, cell.deltaPercent);
-  const indicatorSize = compact ? 16 : 18;
+  const cardFlat = card && isFlat;
   const label =
     cell.deltaPercent === null || isFlat
       ? "No clear pattern"
@@ -945,20 +973,23 @@ function PatternBubble({
             aria-label={accessibleLabel}
             className={cn(
               "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              compact ? "text-[10px]" : "text-sm",
+              card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
+              cardFlat && "font-sans text-sm font-normal text-muted-foreground",
             )}
             data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
             onKeyDown={pointerAnchor.onKeyDown}
             onPointerMove={pointerAnchor.onPointerMove}
           >
-            <PatternEffectIndicator
-              classification={cell.classification ?? null}
-              DirectionIcon={DirectionIcon}
-              isFlat={isFlat}
-              size={indicatorSize}
-              tone={tone}
-            />
-            {isFlat ? null : <span>{label}</span>}
+            {cardFlat ? null : (
+              <PatternEffectIndicator
+                classification={cell.classification ?? null}
+                DirectionIcon={DirectionIcon}
+                isFlat={isFlat}
+                size={18}
+                tone={tone}
+              />
+            )}
+            {isFlat ? (card ? <span>No clear change</span> : null) : <span>{label}</span>}
           </button>
         }
       />

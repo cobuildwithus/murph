@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Patterns fit your phone",
-    "summary": "Choose a health measure and compare factors in a readable vertical list without swiping sideways.",
-    "details": "Sort results and tap a comparison to inspect its supporting data. Desktop keeps the full comparison table.",
+    "summary": "Each factor now has its own card on phones, with health measures shown together without a selector or sideways scrolling.",
+    "details": "Tap a comparison to inspect its supporting data. Desktop keeps the sortable comparison table.",
     "relevanceTags": ["patterns", "mobile"],
     "sourcePullRequests": [],
     "tryIt": { "href": "/patterns", "label": "View your patterns" }
