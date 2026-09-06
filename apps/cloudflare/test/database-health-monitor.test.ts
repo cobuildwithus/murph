@@ -64,6 +64,36 @@ describe("database health monitor", () => {
     vi.restoreAllMocks();
   });
 
+  it("does not retry or page for observed Postgres counts without a state", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        postgresStates: { "": 3, active: 5, idle: 5 },
+      }),
+    });
+
+    const results = [];
+    for (const slot of [1, 2, 3]) {
+      results.push(await harness.runScheduledCheck(FIVE_MINUTES_MS * slot));
+    }
+    expect(results).toEqual([1, 2, 3].map(() => ({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "ok",
+    })));
+    expect(harness.planetScaleRequests).toHaveLength(6);
+    expect(harness.retryWaits).toEqual([]);
+    expect(harness.primaryLinqRequests).toEqual([]);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      consecutiveScrapeFailures: 0,
+      incidentOpen: false,
+    });
+    expect(harness.monitor.readRecentSamples()).toEqual([1, 2, 3].map(() =>
+      expect.objectContaining({ postgresConnections: 13, scrapeStatus: "ok" })
+    ));
+  });
+
   it("persists samples and sends no Linq page for healthy database metrics", async () => {
     const harness = createMonitorHarness();
 

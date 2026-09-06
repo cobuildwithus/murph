@@ -428,6 +428,14 @@ Last verified: 2026-09-04
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Wearable recovery-notice materialization serializes on its existing source
+  row before revalidating eligibility and rereading the episode's mailbox key.
+  A pending item keeps its original immutable payload and is re-signaled after
+  commit; retries never rebuild it with a later timestamp, copy, or route.
+  Consumed items remain terminal. Crypto preparation stays outside the bounded
+  database-only transaction, and strict mailbox payload-conflict checks remain
+  unchanged. Each serial candidate adds one exact source-row lock and at most
+  one unique mailbox read, with no new external calls or pooled concurrency.
 - Exact Cloudflare runtime completion sends `runtime_owner_released` only when
   Web observes actionable work. Its opaque runtime-attempt pointer may clear the
   accepted-processing horizon only for that same owner; stale callbacks cannot
@@ -1949,6 +1957,17 @@ Last verified: 2026-09-04
   idempotency key. Concurrent failures therefore produce at most one operator
   email for that occurrence without adding a database row, queue, or second
   retry owner.
+  The generic body explicitly covers both expiry and terminal failure; expiry
+  does not establish that model execution or automatic retry occurred. The
+  expiry event carries `priorFailureCount` from the existing cron state
+  (`failurePriorFailureCount` in hosted logs), where zero means no retained
+  prior failures, not proof that no attempt ran. Snapshot lifecycle diagnostics
+  classify ordinary and default-processing wake timestamps as `omitted`,
+  `none`, `invalid`, `due`, or `future`, with signed millisecond offsets measured
+  when the diagnostic is built. Negative means overdue. These describe the
+  requested checkpoint; only the finished event's `webCheckpointAccepted`
+  establishes Web acceptance. Malformed timestamp values and raw wake reasons
+  are never copied into these fields.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

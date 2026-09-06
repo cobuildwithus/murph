@@ -951,10 +951,14 @@ map only to the `read_shared` member with that exact id. Display name, handle,
 or member order cannot substitute, and the opaque id cannot appear in the
 answer.
 
-When a joined-group request, accepted-input completion, or closed
+When an approved-effect continuation, joined-group request, accepted-input completion, or closed
 `member.action.requested` reaches a dirty warm runtime, the mailbox prefetch may
 import it before the routine idle checkpoint only when the entire fetched
-prefix contains pre-checkpoint-safe system wakes.
+prefix contains pre-checkpoint-safe system wakes, optionally alongside
+queue-only `device-sync.wake` items. At least one foreground-safe wake must be
+present; a device-only prefix remains checkpoint-gated. Ordered import retains
+the device items in the existing system queue, while the foreground-causal
+execution selector services only the eligible continuations.
 One shared import context revalidates the decoded request adapter shape
 throughout that pre-checkpoint pass, including pre-assistant follow-up imports
 and foreground reruns. A consented-member request remains checkpoint-gated;
@@ -962,8 +966,8 @@ every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
 the existing foreground-causal delivery path, and a member action uses its
 existing provider-free foreground-causal service path. Neither starts or advances the
-at-least-180-second idle snapshot. Any unrelated system wake in that prefix
-keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
+at-least-180-second idle snapshot. Any other unrelated system wake in that
+prefix keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
 preceding pass drain before checkpoint. No progress, retryable failure,
@@ -2112,6 +2116,21 @@ missing fields from an older runtime stay quiet, while occurrence-expired
 events remain terminal. Every terminal event for one scheduled occurrence uses
 one member-independent email body and Resend idempotency key, so concurrent
 member failures coalesce without a new alert queue or persistence owner.
+The generic email describes either expiry or terminal failure without asserting
+that an expired occurrence reached a model. Expiry diagnostics add
+`failurePriorFailureCount` from the existing consecutive-failure state.
+Snapshot lifecycle events add `nextWakeState`, `nextWakeOffsetMs`,
+`nextDefaultProcessingWakeState`, `nextDefaultProcessingWakeOffsetMs`,
+`nextDefaultProcessingWakeReasonPresent`, and
+`systemMailboxProgressGenerationPresent`. Wake states distinguish `omitted`
+legacy fields, explicit `none`, `invalid`, `due`, and `future`; offsets are
+finite milliseconds relative to diagnostic construction, negative when overdue,
+and null for omitted, absent, or invalid timestamps. These are attempted
+checkpoint projections, not runtime admission decisions. Use
+`checkpoint.snapshot_finished` with `webCheckpointAccepted: true` to establish
+acceptance; failed or preempted snapshots do not establish it. Older runners
+omit the new diagnostics. Neither raw timestamp input nor arbitrary reason
+strings enter the new fields, and no diagnostic drives wake selection.
 Separately, after an exact successful completion clears the matching write
 fence, Cloudflare makes at most one signed `POST` to
 `/api/internal/hosted-runtime/owner-released`. The request has no body, uses a

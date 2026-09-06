@@ -313,7 +313,9 @@ export function isCanonicalQuerySourcePath(relativePath: string): boolean {
   for (const root of CANONICAL_JSONL_ROOTS) {
     if (
       root === VAULT_LAYOUT.eventLedgerDirectory
-      && isCanonicalPathUnderRoot(normalized, root, ".jsonl.gz")
+      && [".jsonl.gz", ".jsonl.br"].some((extension) =>
+        isCanonicalPathUnderRoot(normalized, root, extension)
+      )
     ) {
       return true;
     }

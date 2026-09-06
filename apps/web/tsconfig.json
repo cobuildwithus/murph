@@ -192,6 +192,9 @@
       "@murphai/runtime-state/assistant-generated-deliveries": [
         "../../packages/runtime-state/src/assistant-generated-deliveries.ts"
       ],
+      "@murphai/runtime-state/cli-timing": [
+        "../../packages/runtime-state/src/cli-timing.ts"
+      ],
       "@murphai/runtime-state/hosted-codex-subscription-auth": [
         "../../packages/runtime-state/src/hosted-codex-subscription-auth.ts"
       ],
@@ -203,6 +206,9 @@
       ],
       "@murphai/runtime-state/node/assistant-runtime-issues": [
         "../../packages/runtime-state/src/node/assistant-runtime-issues.ts"
+      ],
+      "@murphai/runtime-state/node/cli-timing": [
+        "../../packages/runtime-state/src/node/cli-timing.ts"
       ],
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "../../packages/runtime-state/src/node/loopback-control-plane-auth.ts"

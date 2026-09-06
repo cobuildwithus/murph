@@ -32,22 +32,33 @@ export async function runMurphCliEntrypoint(
   argv: string[] = process.argv.slice(2),
   options: MurphCliRunOptions = {},
 ): Promise<void> {
-  installBrokenPipeHandler()
-  installSqliteExperimentalWarningFilter()
-  loadCliEnvFiles()
-  let actionCompleted = false
-  try {
-    await runMurphCliAction(argv, options)
-    actionCompleted = true
-  } finally {
+  // Keep the timing wire/catalog out of the runner's static startup closure.
+  // Native import caching shares the same ALS owner with middleware and queries.
+  const { finishCliTimingAction, startCliPhase, withCliTiming } = await import(
+    '@murphai/runtime-state/node/cli-timing'
+  )
+  return withCliTiming(async () => {
+    installBrokenPipeHandler()
+    installSqliteExperimentalWarningFilter()
+    loadCliEnvFiles()
+    let actionCompleted = false
     try {
-      await stopWarmCodexAppServerForCliExit()
-    } catch (error) {
-      if (actionCompleted) {
-        throw error
+      await runMurphCliActionInternal(argv, options)
+      actionCompleted = true
+    } finally {
+      finishCliTimingAction()
+      const endTeardown = startCliPhase('teardown')
+      try {
+        await stopWarmCodexAppServerForCliExit()
+      } catch (error) {
+        if (actionCompleted) {
+          throw error
+        }
+      } finally {
+        endTeardown()
       }
     }
-  }
+  })
 }
 
 let brokenPipeHandlerInstalled = false
@@ -99,12 +110,28 @@ export async function runMurphCliAction(
   argv: string[],
   options: MurphCliRunOptions = {},
 ): Promise<void> {
+  const { finishCliTimingAction, withCliTiming } = await import(
+    '@murphai/runtime-state/node/cli-timing'
+  )
+  return withCliTiming(async () => {
+    try {
+      await runMurphCliActionInternal(argv, options)
+    } finally {
+      finishCliTimingAction()
+    }
+  })
+}
+
+async function runMurphCliActionInternal(
+  argv: string[],
+  options: MurphCliRunOptions,
+): Promise<void> {
   const programName = detectCliProgramName(options.argv0 ?? process.argv[1])
   const plannedInvocation = planVaultCliInvocation(argv, {
     env: process.env,
     programName,
   })
-  const serveOptions = createCliServeOptions(options.exit, options.stdout)
+  const serveOptions = await createCliServeOptions(options.exit, options.stdout)
 
   if (plannedInvocation.plan.kind === 'version') {
     const stdout = options.stdout ?? ((output: string) => process.stdout.write(output))
@@ -485,13 +512,22 @@ function parseOutputFormat(value: string | undefined): Formatter.Format | null {
   }
 }
 
-export function createCliServeOptions(
+export async function createCliServeOptions(
   exit: ((code?: number) => void) | undefined,
   stdout?: ((s: string) => void) | undefined,
-): CliServeOptions {
+): Promise<CliServeOptions> {
+  const { isCliTimingActive, noteCliTimingExit } = await import(
+    '@murphai/runtime-state/node/cli-timing'
+  )
   return {
     env: process.env,
-    ...(exit ? { exit: (code: number) => exit(code) } : {}),
+    ...(isCliTimingActive()
+      ? { exit: (code: number) => {
+          noteCliTimingExit(code, exit === undefined)
+          if (exit) exit(code)
+          else process.exit(code)
+        } }
+      : exit ? { exit: (code: number) => exit(code) } : {}),
     ...(stdout ? { stdout } : {}),
   }
 }

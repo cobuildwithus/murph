@@ -1,3 +1,4 @@
+import { normalizeCliTiming } from "@murphai/runtime-state/cli-timing";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
@@ -173,6 +174,7 @@ export type AssistantProviderRequestOutcome =
   | "succeeded";
 export type AssistantUsageTokenPricingBasis =
   | "openai-flex"
+  | "openai-priority"
   | "standard";
 export type AssistantUsageStripeMeterSource = "murph";
 
@@ -1155,12 +1157,16 @@ export function normalizeAssistantUsageTokenPricingBasis(
     return "standard";
   }
 
-  if (normalized === "openai-flex" || normalized === "standard") {
+  if (
+    normalized === "openai-flex"
+    || normalized === "openai-priority"
+    || normalized === "standard"
+  ) {
     return normalized;
   }
 
   throw new TypeError(
-    "tokenPricingBasis must be 'standard' or 'openai-flex' when provided.",
+    "tokenPricingBasis must be 'standard', 'openai-flex', or 'openai-priority' when provided.",
   );
 }
 
@@ -1388,7 +1394,11 @@ function requireValidTurnProfileJson(
     return normalized;
   });
 
+  // Optional diagnostics are independently best-effort; never reject valid
+  // legacy token/tool accounting because a producer sent malformed new fields.
+  const cliTiming = normalizeCliTiming(record.cliTiming);
   return {
+    ...(cliTiming ? { cliTiming } : {}),
     modelContextWindow: record.modelContextWindow,
     requestCount: record.requestCount,
     requests: record.requests.map((entry, index) =>

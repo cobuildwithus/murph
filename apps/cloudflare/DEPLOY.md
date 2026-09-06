@@ -237,12 +237,27 @@ together.
 
 Browser Vault publication also participates in account-deletion draining. The
 UserRunner admits each publication under the exact runtime write fence, all 36
-bounded-concurrency object writes settle before that admission is released, and
+object writes settle before that admission is released, and
 deletion stops the runner before inspecting the durable admission. If the
 publishing request died without releasing it, deletion establishes a 60-second
 post-stop drain before its final prefix sweep; this is longer than the Workers
 30-second post-disconnect extension window and prevents a late encrypted object
 from recreating member data after deletion completes.
+
+The replica write owner encodes the complete plan before `beforeWrite` admits
+any PUT or records its top-level orphan candidate. Temporary parsed/split
+projection copies are scoped to encoding; only their encoded children escape
+into the write phase.
+It consumes child descriptors in the existing bounded four-worker PUT pool,
+releasing each payload reference when its write settles. Only after every child
+worker finishes does it encrypt and write the retained full compatibility root,
+even if a child failed. Do not overlap root/base64 envelope serialization with
+child writes or retain consumed payloads: these full-buffer copies share the
+Worker's isolate budget. Admission remains held through the final root write.
+Every planned write is still attempted and settled on failure, and the reference
+is returned only if all 36 writes succeed. This ordering changes neither the
+50 MiB decoded size guard nor root/child formats, key ownership or AAD. It is a
+per-publication memory reduction, not an isolate-wide concurrency limit.
 
 ## Vault-Share Delivery Contract Rollout
 
@@ -2355,6 +2370,18 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 The GitHub deploy workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER` for every Worker deploy and sets a longer managed-container retry window for gradual rollouts. It enables `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT` only when `container_rollout=immediate`, and `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN` per the `live_model_turn` input (default on).
+
+When standby mode is `shadow` or `allocate`, the initial signed container smoke
+asks the current-release global coordinator to maintain inventory and reads its
+canonical state. It requires the configured number of distinct ready slots and
+no pending preparation. Incomplete inventory returns a retryable failure before
+starting the container probe. The response exposes only counts and release-match
+metadata; it never returns slot names or claims a slot. The CLI requires this
+proof when the expected mode is enabled, using `HOSTED_EXECUTION_STANDBY_TARGET`
+(default two). The separate live-model phase does not repeat this inventory
+check because foreground traffic can consume a previously verified slot. This
+proves a ready inventory snapshot; the migration checks above still own failed
+preparation recovery, drain, foreground allocation and background exclusion.
 
 Optional smoke env:
 

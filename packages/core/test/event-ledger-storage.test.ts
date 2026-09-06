@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { gunzipSync } from "node:zlib";
+import { brotliDecompressSync } from "node:zlib";
 
 import { test } from "vitest";
 
@@ -59,9 +59,9 @@ test("closed event months archive losslessly while the current month stays plain
   assert.equal(result.repairedShardCount, 0);
   assert.ok(result.archivedByteCount < result.sourceByteCount);
   await assert.rejects(fs.access(path.join(vaultRoot, historical.ledgerFile)));
-  await fs.access(path.join(vaultRoot, `${historical.ledgerFile}.gz`));
+  await fs.access(path.join(vaultRoot, `${historical.ledgerFile}.br`));
   await fs.access(path.join(vaultRoot, current.ledgerFile));
-  await assert.rejects(fs.access(path.join(vaultRoot, `${current.ledgerFile}.gz`)));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${current.ledgerFile}.br`)));
 
   const stored = await readEvent({ vaultRoot, eventId: historical.eventId });
   assert.equal(stored.event.title, "Archived event");
@@ -97,7 +97,7 @@ test("event archiving is abortable before publication and leaves the raw shard i
     (error: unknown) => error === abortReason,
   );
   await fs.access(path.join(vaultRoot, event.ledgerFile));
-  await assert.rejects(fs.access(path.join(vaultRoot, `${event.ledgerFile}.gz`)));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${event.ledgerFile}.br`)));
 });
 
 test("a long malformed closed event shard does not starve later valid months", async () => {
@@ -133,9 +133,9 @@ test("a long malformed closed event shard does not starve later valid months", a
   assert.equal(result.archivedShardCount, 1);
   assert.equal(result.blockedShardCount, 1);
   await fs.access(path.join(vaultRoot, malformed.ledgerFile));
-  await assert.rejects(fs.access(path.join(vaultRoot, `${malformed.ledgerFile}.gz`)));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${malformed.ledgerFile}.br`)));
   await assert.rejects(fs.access(path.join(vaultRoot, valid.ledgerFile)));
-  await fs.access(path.join(vaultRoot, `${valid.ledgerFile}.gz`));
+  await fs.access(path.join(vaultRoot, `${valid.ledgerFile}.br`));
 }, 30_000);
 
 test("event archiving leaves differing representations intact and continues later months", async () => {
@@ -155,9 +155,9 @@ test("event archiving leaves differing representations intact and continues late
     vaultRoot,
   });
   const conflictRawPath = path.join(vaultRoot, conflicting.ledgerFile);
-  const conflictArchivePath = `${conflictRawPath}.gz`;
+  const conflictArchivePath = `${conflictRawPath}.br`;
   const conflictArchiveBefore = await fs.readFile(conflictArchivePath);
-  const conflictingRows = gunzipSync(conflictArchiveBefore)
+  const conflictingRows = brotliDecompressSync(conflictArchiveBefore)
     .toString("utf8")
     .trimEnd()
     .split("\n")
@@ -192,7 +192,7 @@ test("event archiving leaves differing representations intact and continues late
   assert.deepEqual(await fs.readFile(conflictArchivePath), conflictArchiveBefore);
   const validRawPath = path.join(vaultRoot, valid.ledgerFile);
   await assert.rejects(fs.access(validRawPath));
-  await fs.access(`${validRawPath}.gz`);
+  await fs.access(`${validRawPath}.br`);
 });
 
 test("backdated writes and hosted replay amend archived event shards exactly once", async () => {
@@ -280,7 +280,7 @@ test("backdated writes and hosted replay amend archived event shards exactly onc
     });
     assert.equal(records.filter((record) => record.id === second.eventId).length, 1);
     await assert.rejects(fs.access(path.join(root, first.ledgerFile)));
-    await fs.access(path.join(root, `${first.ledgerFile}.gz`));
+    await fs.access(path.join(root, `${first.ledgerFile}.br`));
   }
 });
 
@@ -314,7 +314,7 @@ test("event append follows an archive transition that happens after staging", as
   await batch.commit();
 
   await assert.rejects(fs.access(path.join(vaultRoot, event.ledgerFile)));
-  await fs.access(path.join(vaultRoot, `${event.ledgerFile}.gz`));
+  await fs.access(path.join(vaultRoot, `${event.ledgerFile}.br`));
   assert.deepEqual(
     (await readEventLedgerShardRecords({
       relativePath: event.ledgerFile,
@@ -430,7 +430,7 @@ test("archived event append rolls back when a later action fails", async () => {
     now: new Date("2026-02-01T00:00:00.000Z"),
     vaultRoot,
   });
-  const archivePath = path.join(vaultRoot, `${event.ledgerFile}.gz`);
+  const archivePath = path.join(vaultRoot, `${event.ledgerFile}.br`);
   const originalArchive = await fs.readFile(archivePath);
   const appendedId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1D5";
   const batch = await WriteBatch.create({
@@ -476,12 +476,12 @@ test("event ledger readers reject duplicate representations and failed amendment
     now: new Date("2026-02-01T00:00:00.000Z"),
     vaultRoot,
   });
-  const archivePath = path.join(vaultRoot, `${event.ledgerFile}.gz`);
+  const archivePath = path.join(vaultRoot, `${event.ledgerFile}.br`);
   const originalArchive = await fs.readFile(archivePath);
 
   await assert.rejects(
     appendArchivedEventLedgerShard({
-      expectedBaseByteLength: gunzipSync(originalArchive).byteLength,
+      expectedBaseByteLength: brotliDecompressSync(originalArchive).byteLength,
       expectedBaseSha256: "invalid",
       payload: `${JSON.stringify({ id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D6" })}\n`,
       targetRelativePath: event.ledgerFile,
@@ -492,7 +492,7 @@ test("event ledger readers reject duplicate representations and failed amendment
   );
   assert.deepEqual(await fs.readFile(archivePath), originalArchive);
 
-  await fs.writeFile(path.join(vaultRoot, event.ledgerFile), gunzipSync(originalArchive));
+  await fs.writeFile(path.join(vaultRoot, event.ledgerFile), brotliDecompressSync(originalArchive));
   await assert.rejects(
     listEventLedgerShardSources(vaultRoot),
     (error: unknown) =>

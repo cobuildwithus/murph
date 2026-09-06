@@ -639,8 +639,10 @@ function sumByLabel(
 ): Record<string, number> | null {
   const totals: Record<string, number> = {};
   for (const point of points) {
-    const key = point.labels[label];
-    if (!key) {
+    // Unclassified Postgres counts remain observed counts. Prometheus treats
+    // empty and omitted labels alike; pool identifiers still require a value.
+    const key = point.labels[label] ?? "";
+    if (!key && label !== CONNECTION_STATE_LABEL) {
       return null;
     }
     totals[key] = (totals[key] ?? 0) + point.value;

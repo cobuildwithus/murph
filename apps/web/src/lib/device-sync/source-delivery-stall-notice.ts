@@ -74,6 +74,10 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
   if (!Number.isFinite(now.getTime())) {
     return;
   }
+  const policy = readSourceRecoveryNoticePolicy(input.candidate.sourceProviderSlug);
+  if (!policy) {
+    return;
+  }
   const notificationKey = buildHostedSourceDeliveryStallNoticeKey(input.candidate);
   const messageKey = input.candidate.sourceProviderSlug === "apple_health_kit"
     ? "linq.apple_health_delivery_stalled"
@@ -91,6 +95,15 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
   }
   const appended = await runWithPreparedHostedMailboxItemAppendCrypto({
     append: (prepared) => prisma.$transaction(async (tx) => {
+      // Serialize first materialization and retries on the existing episode
+      // owner before checking whether another attempt already queued it.
+      await tx.$queryRaw`
+        SELECT id
+        FROM device_connection_source
+        WHERE connection_id = ${input.candidate.connectionId}
+          AND source_instance_key = ${input.candidate.sourceInstanceKey}
+        FOR UPDATE
+      `;
       const source = await tx.deviceConnectionSource.findUnique({
         select: {
           connection: { select: { status: true, userId: true } },
@@ -153,9 +166,15 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
       ) {
         return null;
       }
-      const policy = readSourceRecoveryNoticePolicy(source.sourceProviderSlug);
-      if (!policy) {
-        return null;
+      const alreadyQueued = await readHostedMailboxItemByDedupeKey({
+        dedupeKey,
+        prisma: tx,
+        userId: input.userId,
+      });
+      if (alreadyQueued) {
+        // The stored payload is immutable: rebuilding it with this attempt's
+        // timestamp, copy, or route would produce a false dedupe conflict.
+        return { item: alreadyQueued };
       }
       const checkIn = renderUserFacingMessage({
         context: {
@@ -203,6 +222,9 @@ async function signalHostedSourceDeliveryStallNoticeBestEffort(input: {
   item: HostedMailboxItemRecord;
   prisma: PrismaClient;
 }): Promise<void> {
+  if (input.item.kind !== "assistant.notification.requested") {
+    throw new Error("Source recovery notification identity belongs to another mailbox kind.");
+  }
   if (input.item.consumedAt !== null) {
     return;
   }

@@ -6,6 +6,13 @@ import {
   type ToolFailureDiagnostic,
   type ToolFailureReason,
 } from './tool-failure-diagnostics.js'
+import {
+  MURPH_CONVERSATION_ATTACHMENTS_TOOL,
+  readConversationAttachmentsToolRequest,
+  currentConversationMediaScope,
+  executeConversationAttachmentsTool,
+  type ConversationAttachmentsArgs,
+} from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   compactTableGenericResponseCardV1Schema,
@@ -1411,6 +1418,10 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
+      kind: 'conversation-attachments'
+      args: ConversationAttachmentsArgs
+    }
+  | {
       kind: 'analyze-video'
       args: AnalyzeVideoToolArgs
     }
@@ -1469,6 +1480,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-song-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-conversation-attachments-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1831,20 +1846,10 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
-    case MURPH_ANALYZE_VIDEO_TOOL.name: {
-      const parsed = parseAnalyzeVideoArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-analyze-video-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-
-      return {
-        kind: 'analyze-video',
-        args: parsed.args,
-      }
-    }
+    case MURPH_CONVERSATION_ATTACHMENTS_TOOL.name:
+      return readConversationAttachmentsToolRequest(request.arguments)
+    case MURPH_ANALYZE_VIDEO_TOOL.name:
+      return readAnalyzeVideoDynamicToolRequest(request.arguments)
     case MURPH_CREATE_CALENDAR_LINK_TOOL.name: {
       const parsed = parseCreateCalendarLinkArguments(request.arguments)
       if (!parsed.ok) {
@@ -3663,13 +3668,16 @@ async function dispatchMurphDynamicToolRequest(
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
+    case 'conversation-attachments': {
+      return executeConversationAttachmentsTool({
+        args: input.request.args,
+        hostedToolContext: input.hostedToolContext,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        vaultRoot: input.vaultRoot,
+      })
+    }
     case 'analyze-video': {
-      const userActionScope =
-        input.hostedToolContext?.currentUserActionScope?.() ?? null
-      if (
-        userActionScope?.conversationScope === 'unverified-external'
-        || !userActionScope
-      ) {
+      if (!currentConversationMediaScope(input.hostedToolContext)) {
         return toolTextResult(
           false,
           'video analysis requires a verified direct or authenticated group conversation',
@@ -8317,4 +8325,10 @@ function phoneCallStopFailureReason(state: string): ToolFailureReason {
 
 function phoneCallStartFailureReason(status: string): ToolFailureReason {
   return status === 'starting' ? 'conflict' : 'reported_failure'
+}
+
+function readAnalyzeVideoDynamicToolRequest(value: unknown): MurphDynamicToolRequest {
+  const parsed = parseAnalyzeVideoArguments(value)
+  return parsed.ok ? { kind: 'analyze-video', args: parsed.args }
+    : { kind: 'invalid-analyze-video-arguments', validationDigest: parsed.validationDigest }
 }

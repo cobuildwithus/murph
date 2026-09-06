@@ -4,6 +4,9 @@ Last verified: 2026-09-05
 
 ## Purpose
 
+Personal Patterns expiry and checkpoint wake diagnostics are specified in
+`agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
+
 Runtime-owned terminal Linq send recovery and replacement receipt ownership
 are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/SECURITY.md`; focused provider and PostgreSQL proof is indexed in
@@ -35,7 +38,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, and retention limits. | Hosted account privacy workflow | High | 2026-05-13 |
-| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, web-control preflight rejection attribution, migration preflight, and rollback floor. | Hosted runtime observability storage | High | 2026-09-02 |
+| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, coverage, and consumer-first rollout), migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-04 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents. | Incident coordination and public status policy | High | 2026-08-05 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
@@ -47,7 +50,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, durable retry ownership, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-05 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-06 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, hosted media receipt recovery and atomic retirement, and escalation rules. | Security policy | High | 2026-09-05 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
@@ -62,7 +65,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-specs/member-owned-device-provider-applications.md` | Member-owned OAuth client application contract for provider-portal provisioning, exact app revision binding, polling-first runtime config, and optional signed webhooks. | Device-provider connection product spec | High | 2026-08-09 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history. | Biomarkers product spec | High | 2026-07-20 |
 | `agent-docs/product-specs/journal.md` | Private timeline derived from canonical health records. | Journal product spec | High | 2026-08-24 |
-| `agent-docs/product-specs/personal-patterns.md` | Deterministic private context-to-outcome findings. | Personal Patterns product spec | High | 2026-08-24 |
+| `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards showing available comparisons, coverage bars, compact neutral results, and detail drawers. | Personal Patterns product spec | High | 2026-09-06 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable usage-credit ledger. | Hosted access/billing product spec | High | 2026-08-18 |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers. | Hosted billing/current-state spec | High | 2026-07-30 |
@@ -134,7 +137,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Completion workflow. | Completion workflow | High | 2026-09-02 |
 | `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy. | Phone-number messaging policy | High | 2026-08-11 |
-| `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle. | Local rebuildable-storage lifecycle | High | 2026-08-10 |
+| `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle and guarded partial-retirement recovery. | Local rebuildable-storage lifecycle | High | 2026-09-06 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, no base-update limit, response timing and evidence requirements, and same-session waiting or paced polling by default. | Final PR ReviewGPT loop | Medium | 2026-09-04 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants. | Device-sync ingestion contract | High | 2026-08-20 |

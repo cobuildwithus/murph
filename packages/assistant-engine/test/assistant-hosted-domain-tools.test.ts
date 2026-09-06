@@ -45,10 +45,22 @@ describe('hosted domain dynamic tools', () => {
       'occurrenceProjection.status=pending',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'no member action is needed',
+      'briefly confirm the saved change and that the recurring reminder remains active',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an active one-shot at schedule, say the saved edit may not affect the occurrence already in progress',
+      'Its exact next delivery time is not yet available; do not promise one',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not expose scheduler, projection, or occurrence terminology',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain(
+      'explain briefly that the scheduler is finishing current work',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain(
+      'will project the next occurrence automatically',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active one-shot at schedule, say the saved edit may not affect the reminder already in progress',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',

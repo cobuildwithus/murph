@@ -7311,6 +7311,7 @@ describe('assistant cron runtime orchestration', () => {
             automationSlug: 'expired-one-shot-reminder',
             latenessMinutes: 240,
             occurrenceAt: '2026-04-08T09:00:00.000Z',
+            priorFailureCount: 0,
           }),
           safeDetails: 'cron_occurrence_expired',
           type: 'cron.occurrence.expired',
@@ -8717,8 +8718,10 @@ describe('assistant cron runtime orchestration', () => {
       },
     }))
 
+    const onEvent = vi.fn()
     const summary = await processDueAssistantCronJobsLocal({
       limit: 1,
+      onEvent,
       vault: vaultRoot,
     })
 
@@ -8728,6 +8731,14 @@ describe('assistant cron runtime orchestration', () => {
       succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'cron.occurrence.expired',
+      failureContext: expect.objectContaining({
+        occurrenceAt: '2026-04-08T09:00:00.000Z',
+        latenessMinutes: 65,
+        priorFailureCount: 1,
+      }),
+    }))
     await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
     await expect(
       listAssistantCronRuns({
