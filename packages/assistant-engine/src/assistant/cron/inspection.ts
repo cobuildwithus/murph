@@ -87,11 +87,11 @@ export async function getAssistantCronAutomationInspection(
       })),
       historyLimit: HISTORY_LIMIT,
       historyTruncated: runs.length > HISTORY_LIMIT,
-      nextStep: readInspectionNextStep(phase, runs[0]?.outcome),
+      nextStep: readInspectionNextStep(phase, runs[0]?.outcome, runs[0]?.reason),
       interpretation: 'This is retained attempt history, newest first, not a complete lifetime history. '
-        + 'A failed, expired, skipped_gate, or no_op run is not delivery confirmation. Report delivery as unconfirmed after failure; failure alone proves neither sending nor that nothing was sent. '
+        + 'A failed, expired, skipped_gate, or no_op run is not delivery confirmation. Failure alone proves neither sending nor that nothing was sent. '
         + 'delivery_pending means execution queued a message; use the outstanding delivery status when present. '
-        + 'Only delivered or delivery.status=sent confirms sending, not reading. '
+        + 'delivered or delivery.status=sent confirms sending, not reading. The bounded latestOccurrence receipt can also confirm complete or partial sending from persisted dispatch evidence; neither confirms receipt on the phone. '
         + 'A retry is scheduled only when current.retryAt or delivery.nextAttemptAt is present; a running attempt may still finish. '
 
         + 'For an idle active recurrence, use occurrenceProjection for the next scheduled occurrence. '
@@ -115,12 +115,14 @@ function readExecutionPhase(state: AssistantCronCanonicalRuntimeState | undefine
   return 'idle'
 }
 
-function readInspectionNextStep(phase: ExecutionPhase, outcome: AssistantCronRunRecord['outcome'] | undefined): string {
+function readInspectionNextStep(phase: ExecutionPhase, outcome: AssistantCronRunRecord['outcome'] | undefined, reason: string | undefined): string {
   if (phase !== 'idle') {
     return 'Explain the current work and any recorded retry time or outstanding delivery status. Do not promise delivery or create a replacement while work is pending.'
   }
   if (outcome === 'failed' || outcome === 'expired') {
-    return 'Explain the recorded failure without inventing a cause. State that sending is unconfirmed, and include the option to reschedule the missed occurrence if it is still wanted. Do not change or recreate it during inspection.'
+    return reason === 'delivery_failed_partial'
+      ? 'Explain that part of the message was sent before the remaining delivery failed. Receipt on the phone cannot be confirmed. Do not change or recreate it during inspection.'
+      : 'Explain the recorded failure without inventing a cause. Use latestOccurrence for any known sending evidence, and include the option to reschedule the missed occurrence if it is still wanted. Do not change or recreate it during inspection.'
   }
   return 'Explain the recorded outcome and use the stored schedule and occurrence projection for future timing. Missing retained history is not proof of delivery.'
 }

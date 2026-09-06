@@ -12,6 +12,8 @@ import {
   dailyNutritionResponseCardV2AuthoringSchema,
   isStrictIsoDate,
   type CalendarEventV1,
+  wearableTrendCardRequestV1Schema,
+  type WearableTrendCardRequestV1,
 } from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
@@ -300,6 +302,9 @@ import {
   MURPH_CREATE_CALENDAR_LINK_TOOL,
   parseCreateCalendarLinkArguments,
 } from './dynamic-tools/calendar-link.js'
+import {
+  resolveTrustedWearableTrendCard,
+} from './dynamic-tools/wearable-trend-card.js'
 import type {
   AskGrokToolArgs,
   AskGrokToolRuntime,
@@ -320,6 +325,7 @@ import {
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
@@ -391,6 +397,10 @@ const attachCompactTableWorkoutResponseCardArgumentsSchema = z
 
 const attachResponseCardValidationPaths =
   collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema)
+const attachWearableTrendCardValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL.inputSchema,
+  )
 const attachExerciseRoutineCardValidationPaths =
   collectSafeJsonSchemaValidationPaths(
     MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.inputSchema,
@@ -1390,6 +1400,10 @@ export type MurphDynamicToolRequest =
       card: AssistantResponseCard
     }
   | {
+      kind: 'attach-wearable-trend-card'
+      request: WearableTrendCardRequestV1
+    }
+  | {
       kind: 'attach-group-challenge-response-card'
       input: GroupChallengeResponseCardToolInput
     }
@@ -1494,6 +1508,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-response-card-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-wearable-trend-card-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1749,6 +1767,18 @@ export function readMurphDynamicToolRequest(
               kind: 'attach-response-card' as const,
             }),
       }
+    }
+    case MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL.name: {
+      const parsed = parseWearableTrendCardArguments(request.arguments)
+      return parsed.ok
+        ? {
+            kind: 'attach-wearable-trend-card',
+            request: parsed.request,
+          }
+        : {
+            kind: 'invalid-wearable-trend-card-arguments',
+            validationDigest: parsed.validationDigest,
+          }
     }
     case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
       const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
@@ -2284,7 +2314,10 @@ async function executeSendVaultFileDynamicTool(
       'secure vault-file approval is unavailable for this conversation',
     )
   }
-  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+  if (
+    input.currentResponseCard !== null &&
+    input.currentResponseCard !== undefined
+  ) {
     return replyRequiredResult(
       false,
       'vault-file sending cannot be combined with a response card',
@@ -3005,7 +3038,10 @@ async function executeGenerateImageDynamicTool(
   input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'generate-image' }>,
 ): Promise<MurphDynamicToolExecutionResult> {
-  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+  if (
+    input.currentResponseCard !== null &&
+    input.currentResponseCard !== undefined
+  ) {
     return toolTextResult(false, 'image generation cannot be combined with a response card')
   }
   if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
@@ -3167,6 +3203,76 @@ async function executeGenerateImageDynamicTool(
   }
 }
 
+async function executeWearableTrendCardAttachment(input: {
+  allowed: boolean
+  currentResponseCard?: AssistantResponseCard | null
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  request: WearableTrendCardRequestV1
+  vaultRoot?: string | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  if (!input.allowed) {
+    return toolTextResult(
+      false,
+      'wearable trend cards require a private direct conversation',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+    )
+  }
+  const resolved = await resolveTrustedWearableTrendCard({
+    request: input.request,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+  if (!resolved.ok) {
+    return toolTextResult(
+      false,
+      resolved.reason === 'saved_view_not_found'
+        ? 'that saved health view no longer exists; do not recreate or schedule it'
+        : 'wearable trend card data is unavailable',
+    )
+  }
+  return {
+    ...toolTextResult(true, 'wearable trend card attached'),
+    responseCardPatch: { card: resolved.card },
+  }
+}
+
+function executeOversizedResponseCardFallback(input: {
+  allowed: boolean
+  card: CompactTableWorkoutResponseCardV1
+  currentResponseCard?: AssistantResponseCard | null
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
+}): MurphDynamicToolExecutionResult {
+  if (!input.allowed) {
+    return toolTextResult(
+      false,
+      'response cards require a private direct conversation',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+    )
+  }
+  return {
+    ...toolTextResult(
+      true,
+      'workout card envelope too large; full text recovery selected',
+    ),
+    responseCardTextFallbackPatch: { card: input.card },
+  }
+}
+
 export async function executeMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3209,28 +3315,12 @@ export async function executeMurphDynamicToolRequest(
     case 'invalid-automation-arguments':
       return executeInvalidAutomationArgumentsDynamicTool(input.request)
     case 'response-card-envelope-too-large':
-      if (input.privateDirectResponseCardAllowed !== true) {
-        return toolTextResult(
-          false,
-          'response cards require a private direct conversation',
-        )
-      }
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'a response card is already attached')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'response cards cannot be combined with response media',
-        )
-      }
-      return {
-        ...toolTextResult(
-          true,
-          'workout card envelope too large; full text recovery selected',
-        ),
-        responseCardTextFallbackPatch: { card: input.request.card },
-      }
+      return executeOversizedResponseCardFallback({
+        allowed: input.privateDirectResponseCardAllowed === true,
+        card: input.request.card,
+        currentResponseCard: input.currentResponseCard,
+        currentResponseMedia: input.currentResponseMedia,
+      })
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-group-challenge-response-card':
@@ -3283,6 +3373,14 @@ export async function executeMurphDynamicToolRequest(
         responseCardPatch: { card },
       }
     }
+    case 'attach-wearable-trend-card':
+      return await executeWearableTrendCardAttachment({
+        allowed: input.privateDirectResponseCardAllowed === true,
+        currentResponseCard: input.currentResponseCard,
+        currentResponseMedia: input.currentResponseMedia,
+        request: input.request.request,
+        vaultRoot: input.vaultRoot,
+      })
     case 'attach-response-media': {
       if (
         input.request.media.length > 0 &&
@@ -7971,6 +8069,32 @@ function parseAttachResponseCardArguments(
     groupChallenge: true,
     input: groupChallengeParsed.data,
     ok: true,
+  }
+}
+
+function parseWearableTrendCardArguments(value: unknown):
+  | {
+      ok: true
+      request: WearableTrendCardRequestV1
+    }
+  | {
+      ok: false
+      validationDigest: SafeToolCallValidationDigest
+    } {
+  const parsed = wearableTrendCardRequestV1Schema.safeParse(value)
+  if (parsed.success) {
+    return { ok: true, request: parsed.data }
+  }
+  return {
+    ok: false,
+    validationDigest: buildDynamicToolValidationDigest({
+      error: parsed.error,
+      rawInput: value,
+      schemaName: 'murph.attach_wearable_trend_card.input',
+      schemaPaths: attachWearableTrendCardValidationPaths,
+      schemaRootKeys: ['metricKeys', 'savedViewId'],
+      toolName: 'murph.attach_wearable_trend_card',
+    }),
   }
 }
 

@@ -16,6 +16,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   buildAssistantProviderMurphToolCall,
+  buildAssistantProviderRequestDerivedMurphToolCall,
+  buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -44,26 +46,8 @@ const scheduledReminderDeliveredText =
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep, I am here.";
-const scheduledNutritionCard = {
-  kind: "daily_nutrition",
-  version: 2,
-  localDate: "2026-07-28",
-  mealCount: 3,
-  totals: {
-    calories: { mealCount: 3, total: 1_490.25 },
-    carbsGrams: { mealCount: 3, total: 193.125 },
-    fatGrams: { mealCount: 3, total: 34.75 },
-    fiberGrams: { mealCount: 3, total: 26.5 },
-    proteinGrams: { mealCount: 3, total: 94.5 },
-  },
-  goals: {
-    calories: { status: "under_target", target: 2_100 },
-    carbsGrams: { status: "on_target", target: 220 },
-    fatGrams: { status: "on_target", target: 40 },
-    fiberGrams: { status: "under_target", target: 30 },
-    proteinGrams: { status: "on_target", target: 100 },
-  },
-} as const;
+const scheduledWearableCardStepValue = 8_765;
+const scheduledWearableCardViewName = "Morning steps";
 const wakePreservationWindowRequestText =
   "Confirm the hosted-local wake-preservation checkpoint window.";
 const wakePreservationWindowReplyText =
@@ -73,10 +57,10 @@ const scheduledReminderLeadMs = scheduledReminderTiming.leadMs;
 const setupLeadText = scheduledReminderTiming.setupLeadText;
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
-const scheduledNutritionCardSetupRequestText =
-  `Remind me here in ${setupLeadText} to show my daily nutrition summary as a card.`;
-const scheduledNutritionCardInstructions =
-  "Show the user the hosted-local daily nutrition summary as a card.";
+const scheduledWearableCardSetupRequestText =
+  `Save a ${scheduledWearableCardViewName} health view, then remind me here in ${setupLeadText} to show it as a seven-day health card.`;
+const scheduledWearableCardInstructions =
+  `Show the saved ${scheduledWearableCardViewName} view with fresh data as a seven-day health card.`;
 const scheduledImageSetupRequestText =
   `Remind me here in ${setupLeadText} to go to sleep with a simple illustration.`;
 const scheduledReminderInstructions =
@@ -85,7 +69,7 @@ const scheduledImageReminderInstructions =
   "Send the user the hosted-local sleep reminder with a simple sleep illustration.";
 const scheduledImageReminderTitle = "Sleep image reminder";
 const overlapReminderTitle = "Overlapping sleep reminder";
-const scheduledNutritionCardTitle = "Daily nutrition card reminder";
+const scheduledWearableCardTitle = "Seven-day health card reminder";
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
@@ -499,23 +483,69 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const scheduledCardSetupTimes = resolveScheduledReminderTimes();
     const scheduledCardSetupBaselineCount =
       requireLinqStub().countObservedSends(reminderPath);
-    requireScenario().queueAssistantResponses(
-      buildHostedAssistantAutomationSaveResponses({
-        dueAtIso: scheduledCardSetupTimes.dueAtIso,
-        instructions: scheduledNutritionCardInstructions,
-        text: setupReplyText,
-        title: scheduledNutritionCardTitle,
-      }),
-      { matchInputContains: scheduledNutritionCardSetupRequestText },
-    );
+    const seededWearableObservationAt = new Date().toISOString();
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderVaultCliCall([
+        "event",
+        "observation",
+        "add",
+        "--metric",
+        "steps",
+        "--value",
+        String(scheduledWearableCardStepValue),
+        "--unit",
+        "count",
+        "--source",
+        "device",
+        "--occurred-at",
+        seededWearableObservationAt,
+        "--format",
+        "json",
+      ]),
+      buildAssistantProviderVaultCliCall([
+        "wearables",
+        "view",
+        "save",
+        scheduledWearableCardViewName,
+        "--metric",
+        "steps",
+        "--format",
+        "json",
+      ]),
+      buildAssistantProviderRequestDerivedMurphToolCall(
+        "automation",
+        ({ requestMatchText }) => {
+          const savedViewId = readSavedHealthViewId(requestMatchText);
+          return {
+            action: "save",
+            continuityPolicy: "preserve",
+            contextReferences: [{
+              entityId: savedViewId,
+              entityKind: "health_view",
+            }],
+            instructions: scheduledWearableCardInstructions,
+            schedule: {
+              kind: "at",
+              localAt: resolveScheduledReminderLocalAt(
+                scheduledCardSetupTimes.dueAtIso,
+              ),
+            },
+            summary: "One-shot seven-day health card.",
+            tags: ["assistant", "scheduled"],
+            title: scheduledWearableCardTitle,
+          };
+        },
+      ),
+      setupReplyText,
+    ], { matchInputContains: scheduledWearableCardSetupRequestText });
     const scheduledCardSetupResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(
         userId,
         scheduledChatId,
         {
-          eventId: `evt_scheduled_nutrition_card_setup_${userId}`,
-          messageId: `msg_scheduled_nutrition_card_setup_${userId}`,
-          text: scheduledNutritionCardSetupRequestText,
+          eventId: `evt_scheduled_wearable_card_setup_${userId}`,
+          messageId: `msg_scheduled_wearable_card_setup_${userId}`,
+          text: scheduledWearableCardSetupRequestText,
         },
       ),
     );
@@ -539,15 +569,26 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     assertScheduledReminderRunway(scheduledCardSetupTimes.dueAtIso);
 
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("attach_response_card", {
-        card: scheduledNutritionCard,
-      }),
+      buildAssistantProviderVaultCliCall([
+        "wearables",
+        "view",
+        "show",
+        scheduledWearableCardViewName,
+        "--format",
+        "json",
+      ]),
+      buildAssistantProviderRequestDerivedMurphToolCall(
+        "attach_wearable_trend_card",
+        ({ requestMatchText }) => ({
+          savedViewId: readSavedHealthViewId(requestMatchText),
+        }),
+      ),
       buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver scheduled nutrition card",
-        text: "Nutrition card attached.",
+        privateSummary: "deliver scheduled seven-day health card",
+        text: "Health card attached.",
       }),
     ], {
-      matchInputContains: scheduledNutritionCardInstructions,
+      matchInputContains: scheduledWearableCardInstructions,
     });
     const scheduledCardMatcher = createObservedLinqIMessageAppCardMatcher();
     const scheduledCardTotalSendBaselineCount =
@@ -576,14 +617,30 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(scheduledCardSend)).toBeNull();
-    expect(requireLinqStub().readObservedMessageAppCard(scheduledCardSend)).toMatchObject({
-      fallback_text: "Your daily nutrition.",
+    const scheduledCard = requireLinqStub()
+      .readObservedMessageAppCard(scheduledCardSend);
+    expect(scheduledCard).toMatchObject({
+      fallback_text: "Your health trend.",
       interactive: true,
       layout: {
-        caption: "Jul 28 · 3 meals",
+        caption: "7-day health",
       },
       type: "imessage_app",
+      url: expect.stringMatching(/^https:\/\/www\.withmurph\.ai\/#murph-card=[A-Za-z0-9_-]+$/u),
     });
+    const scheduledCardEnvelope = readWearableCardImageEnvelope(scheduledCard);
+    expect(scheduledCardEnvelope).toMatchObject({
+      card: {
+        kind: "wearable_trend",
+        metrics: [{
+          metricKey: "steps",
+          values: expect.arrayContaining([scheduledWearableCardStepValue]),
+        }],
+        version: 1,
+      },
+      schemaVersion: 7,
+    });
+    expect(scheduledCardEnvelope.card.localDates).toHaveLength(7);
     await requireLinqStub().waitForMatchingRequestCount({
       expectedCount: scheduledCardCapabilityBaselineCount + 1,
       expectedMethod: "POST",
@@ -664,8 +721,8 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
         title: overlapReminderTitle,
       },
       {
-        instructions: scheduledNutritionCardInstructions,
-        title: scheduledNutritionCardTitle,
+        instructions: scheduledWearableCardInstructions,
+        title: scheduledWearableCardTitle,
       },
     ].map(({ instructions, title }) => buildHostedAssistantAutomationSaveResponses({
       dueAtIso,
@@ -687,7 +744,7 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
       }),
       expect.objectContaining({
         customToolCall: expect.objectContaining({
-          input: expect.stringContaining(`"title":"${scheduledNutritionCardTitle}"`),
+          input: expect.stringContaining(`"title":"${scheduledWearableCardTitle}"`),
         }),
       }),
     ]);
@@ -895,6 +952,7 @@ async function startScenario(): Promise<void> {
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      MURPH_WEARABLE_TREND_CARDS_ENABLED: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
@@ -1209,6 +1267,44 @@ function createObservedLinqMessageTextMatcher(
 
 function createObservedLinqIMessageAppCardMatcher(): ObservedLinqRequestMatcher {
   return (request) => requireLinqStub().readObservedMessageAppCard(request) !== null;
+}
+
+function readSavedHealthViewId(text: string): string {
+  const savedViewId = text.match(/hview_[0-9A-HJKMNP-TV-Z]{26}/u)?.[0];
+  if (!savedViewId) {
+    throw new Error("Expected a saved health view id in the provider request.");
+  }
+  return savedViewId;
+}
+
+type WearableCardImageEnvelope = {
+  card: {
+    kind: "wearable_trend";
+    localDates: string[];
+    metrics: Array<{
+      metricKey: string;
+      values: Array<number | null>;
+    }>;
+    version: 1;
+  };
+  schemaVersion: 7;
+};
+
+function readWearableCardImageEnvelope(value: unknown): WearableCardImageEnvelope {
+  if (!isRecord(value) || !isRecord(value.layout)) {
+    throw new Error("Expected a wearable iMessage app card layout.");
+  }
+  const imageUrl = value.layout.image_url;
+  if (typeof imageUrl !== "string") {
+    throw new Error("Expected a wearable iMessage app card image URL.");
+  }
+  const filename = new URL(imageUrl).pathname.split("/").at(-1);
+  if (!filename?.endsWith(".png")) {
+    throw new Error("Expected an encoded wearable iMessage card image path.");
+  }
+  return JSON.parse(
+    Buffer.from(filename.slice(0, -".png".length), "base64url").toString("utf8"),
+  ) as WearableCardImageEnvelope;
 }
 
 function resolveScheduledReminderTimes(

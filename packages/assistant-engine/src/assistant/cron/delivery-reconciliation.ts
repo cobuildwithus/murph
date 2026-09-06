@@ -37,6 +37,7 @@ import {
 import { readAssistantOutboxIntent } from '../outbox/store.js'
 import { assistantDeliveryErrorPreventsFreshIntentRetry } from '../outbox/retry-policy.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
+import { getAssistantCronDispatchState } from './delivery-evidence.js'
 import { isRecognizedMurphOnboardingFollowupAutomation } from '../managed-automations.js'
 import { isCurrentMurphOnboardingFollowupAutomation } from '../onboarding-followup-automation.js'
 
@@ -74,6 +75,7 @@ export async function reconcileAssistantCronDeliveryIntent(input: {
   }
 
   return reconcileAssistantCronTerminalDelivery({
+    intent: input.intent,
     intentId: input.intent.intentId,
     paths: input.paths,
     terminal,
@@ -82,6 +84,7 @@ export async function reconcileAssistantCronDeliveryIntent(input: {
 }
 
 async function reconcileAssistantCronTerminalDelivery(input: {
+  intent: AssistantOutboxIntent | null
   intentId: string
   paths?: AssistantStatePaths
   terminal: TerminalAssistantCronDeliveryOutcome
@@ -109,7 +112,10 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       : {
           error: input.terminal.error.message,
           outcome: 'failed' as const,
-          reason: `delivery_${input.terminal.failureStatus}`,
+          reason: resolveAssistantCronFailedDeliveryReason({
+            intent: input.intent,
+            terminal: input.terminal,
+          }),
         }
     let reconciled = 0
     let localChanged = false
@@ -284,6 +290,7 @@ export async function repairPendingAssistantCronDeliveries(input: {
       }
 
       const result = await reconcileAssistantCronTerminalDelivery({
+        intent: null,
         intentId,
         paths,
         terminal: {
@@ -324,6 +331,26 @@ export async function repairPendingAssistantCronDeliveries(input: {
     checked: pendingIntentIds.size,
     reconciled,
   }
+}
+
+function resolveAssistantCronFailedDeliveryReason(input: {
+  intent: AssistantOutboxIntent | null
+  terminal: Extract<TerminalAssistantCronDeliveryOutcome, { kind: 'failed' }>
+}): string {
+  if (input.intent !== null) {
+    const dispatchState = getAssistantCronDispatchState(input.intent)
+    if (dispatchState === 'complete') return 'delivery_failed_sent'
+    if (dispatchState === 'partial') return 'delivery_failed_partial'
+  }
+
+  if (
+    input.terminal.failureStatus === 'failed'
+    && input.intent?.deliveryConfirmationPending !== true
+  ) {
+    return 'delivery_failed_not_reached'
+  }
+
+  return 'delivery_failed_unknown'
 }
 
 function recordPendingAssistantCronDeliveryIntent(input: {

@@ -1,6 +1,8 @@
 import {
   isMurphAndroidAppEnabled,
+  isMurphWearableTrendCardsEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 
 import {
@@ -243,6 +245,7 @@ function assertHostedR2Configuration(input: {
 
 function readHostedWorkerVars(source: EnvSource): Record<string, string> {
   const androidAppEnabled = isMurphAndroidAppEnabled(source);
+  const wearableTrendCardsEnabled = isMurphWearableTrendCardsEnabled(source);
 
   return {
     ...Object.fromEntries(
@@ -259,6 +262,9 @@ function readHostedWorkerVars(source: EnvSource): Record<string, string> {
     ),
     ...(androidAppEnabled
       ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+      : {}),
+    ...(wearableTrendCardsEnabled
+      ? { [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: "1" }
       : {}),
   };
 }

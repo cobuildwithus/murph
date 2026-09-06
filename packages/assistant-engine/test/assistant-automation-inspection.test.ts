@@ -19,6 +19,7 @@ describe('automation definition inspection', () => {
           expect(received).toEqual(request)
           return {
             action: 'inspect',
+            latestOccurrence: { history: 'not_observed' },
             automationId: request.lookup,
             contextReferences: [],
             ...definition,

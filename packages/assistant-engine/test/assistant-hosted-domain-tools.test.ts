@@ -123,7 +123,19 @@ describe('hosted domain dynamic tools', () => {
       'patch never changes the recipe key',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
+      'bounded latestOccurrence',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'sent=partial means only part of the message was accepted',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Neither proves receipt on the phone',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'not_observed does not prove no run',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'never expose internal receipt codes or upgrade other outcomes',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       "For a later question about an existing automation's timing, inspect it without mutation and answer from the current stored schedule and occurrence projection. If inspection fails, make no timing claim.",
@@ -1645,19 +1657,42 @@ describe('hosted domain dynamic tools', () => {
         action: 'inspect' as const,
         executionInspection: { status: 'unavailable' as const },
         automationId: 'automation-1',
+        error: 'private occurrence error',
         effectiveTimeZone: 'America/Chicago',
+        intentId: 'private_delivery_intent',
+        latestOccurrence: {
+          delivered: 'unconfirmed' as const,
+          error: 'private nested occurrence error',
+          finishedAt: '2026-08-10T03:30:12.000Z',
+          generated: 'confirmed' as const,
+          history: 'observed' as const,
+          intentId: 'private_nested_delivery_intent',
+          outcome: 'sent' as const,
+          providerMessageId: 'private_nested_provider_message',
+          reason: 'private nested occurrence reason',
+          response: 'private nested generated response',
+          scheduledAt: '2026-08-10T03:30:00.000Z',
+          sent: 'confirmed' as const,
+          sessionId: 'private_nested_session',
+          startedAt: '2026-08-10T03:30:01.000Z',
+          trigger: 'scheduled' as const,
+        },
         lookupId: 'evening-wind-down',
         occurrenceProjection: {
           nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
           status: 'resolved' as const,
         },
         routeBinding: 'preserved' as const,
+        providerMessageId: 'private_provider_message',
+        reason: 'private occurrence reason',
+        response: 'private generated response',
         schedule: {
           kind: 'dailyLocal' as const,
           localTime: '22:30',
           timeZone: 'America/Chicago',
         },
         status: 'active' as const,
+        sessionId: 'private_session',
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
@@ -1687,6 +1722,17 @@ describe('hosted domain dynamic tools', () => {
       executionInspection: { status: 'unavailable' },
       automationId: 'automation-1',
       effectiveTimeZone: 'America/Chicago',
+      latestOccurrence: {
+        delivered: 'unconfirmed',
+        finishedAt: '2026-08-10T03:30:12.000Z',
+        generated: 'confirmed',
+        history: 'observed',
+        outcome: 'sent',
+        scheduledAt: '2026-08-10T03:30:00.000Z',
+        sent: 'confirmed',
+        startedAt: '2026-08-10T03:30:01.000Z',
+        trigger: 'scheduled',
+      },
       occurrenceProjection: {
         nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
         status: 'resolved' as const,
@@ -1700,6 +1746,33 @@ describe('hosted domain dynamic tools', () => {
       status: 'active',
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
+    const serialized = result.rpcResult.contentItems[0]?.text ?? ''
+    for (const privateValue of [
+      'private occurrence error',
+      'private_delivery_intent',
+      'private_provider_message',
+      'private occurrence reason',
+      'private generated response',
+      'private_session',
+      'private nested occurrence error',
+      'private_nested_delivery_intent',
+      'private_nested_provider_message',
+      'private nested occurrence reason',
+      'private nested generated response',
+      'private_nested_session',
+    ]) {
+      expect(serialized).not.toContain(privateValue)
+    }
+    for (const privateField of [
+      'error',
+      'intentId',
+      'providerMessageId',
+      'reason',
+      'response',
+      'sessionId',
+    ]) {
+      expect(serialized).not.toContain(`"${privateField}"`)
+    }
   })
 
   it('treats only a missing automation inspection as a successful absent read', async () => {

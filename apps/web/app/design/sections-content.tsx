@@ -82,6 +82,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ExperimentRepeatedResultsStudy } from "./experiment-repeated-results-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
+import { ImessageSevenDayHealthCardStudy } from "./imessage-seven-day-health-card-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 import { FoodLabelLabStudy } from "./food-label-lab-study";
@@ -279,6 +280,15 @@ export function SectionsContent({
 
       {category === "messages" ? (
         <>
+          <Separator />
+
+          <StudySection
+            id="imessage-seven-day-health-card"
+            title="Seven-day health trend card"
+          >
+            <ImessageSevenDayHealthCardStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Stateless calendar link">

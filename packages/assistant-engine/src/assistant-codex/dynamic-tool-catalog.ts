@@ -11,6 +11,7 @@ import {
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
   assistantVoiceOptions,
+  wearableTrendCardRequestV1Schema,
 } from '@murphai/contracts'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
@@ -306,6 +307,14 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     },
     required: ['card'],
   },
+} as const
+
+export const MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL = {
+  namespace: 'murph',
+  name: 'attach_wearable_trend_card',
+  description:
+    'Attach the host-resolved compact seven-day card in a private direct reply. Never pass display data. The card is the whole reply and cannot combine with media.',
+  inputSchema: z.toJSONSchema(wearableTrendCardRequestV1Schema, { io: 'input' }),
 } as const
 
 export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
@@ -1700,6 +1709,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
@@ -1783,6 +1793,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
+  wearableTrendCardsAvailable?: boolean | null
   exerciseRoutineResponseCardsAvailable?: boolean | null
   telegramRichContentResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
@@ -1824,6 +1835,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
+    [MURPH_ATTACH_WEARABLE_TREND_CARD_TOOL, defaultOff((a) =>
+      a.wearableTrendCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
       a.exerciseRoutineResponseCardsAvailable)],
     [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL, defaultOff((a) =>

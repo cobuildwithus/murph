@@ -55,6 +55,7 @@ const MURPH_ANDROID_PLAY_STORE_URL =
 
 export interface AssistantSystemPromptInput {
   assistantAndroidAppAvailable?: boolean;
+  assistantWearableTrendCardsAvailable?: boolean;
   assistantCliContract: string | null;
   assistantContextSnapshotPrompt?: string | null;
   assistantDynamicContextPrompts?: readonly string[] | null;
@@ -422,6 +423,8 @@ function buildStableRouteCapabilityPrompt(
             input.assistantHostedDeviceConnectAvailable ?? false,
           assistantHostedDeviceConnectProviders:
             input.assistantHostedDeviceConnectProviders ?? [],
+          assistantWearableTrendCardsAvailable:
+            input.assistantWearableTrendCardsAvailable === true,
         })
       : null,
     buildAssistantJournalCaptureGuidanceText(conversationScope),
@@ -1503,11 +1506,16 @@ function buildHealthCommonsDiscoverySurfaceText(): string {
 function buildAssistantVaultNavigationText(input: {
   assistantHostedDeviceConnectAvailable: boolean;
   assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[];
+  assistantWearableTrendCardsAvailable: boolean;
 }): string {
   const hostedDeviceConnectGuidance =
     buildAssistantHostedDeviceConnectGuidanceText(input);
   const hostedDeviceConnectLine = hostedDeviceConnectGuidance
     ? `${hostedDeviceConnectGuidance}\n`
+    : "";
+  const wearableTrendCardLines = input.assistantWearableTrendCardsAvailable
+    ? `- Seven-day wearable view/template: if \`murph.attach_wearable_trend_card\` is available, call it exactly once, not an acknowledgment; its card is the whole reply (no text/media). One-off: only ordered \`metricKeys\`, no display data. Bare HRV follows current source evidence: Apple HealthKit=\`hrv-sdnn\`; Oura/WHOOP/Garmin recovery=\`hrv-rmssd\`. Never mix; ask only if multiple current methods remain ambiguous. Saved: run \`vault-cli wearables view show <id-or-name> --format json\`, then only exact \`savedViewId\`; manage views via \`vault-cli wearables view ...\`.
+- Saving a view does not schedule or alter the managed digest. Explicit recurrence only: create an ordinary automation whose instructions call \`murph.attach_wearable_trend_card\` once with only exact \`savedViewId\` and whose \`contextReferences\` include \`{"entityKind":"health_view","entityId":<savedViewId>}\`. Runs use current view/fresh data; missing/deleted views skip/fail, never recreate.\n`
     : "";
   return `Vault and tool usage:
 ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph runtime surface in this privileged local route.
@@ -1519,7 +1527,7 @@ ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph ru
 - For exact memory-record verification, use \`vault-cli memory show <id> --record-only --format json\`; keep the complete memory read above when resolving context or conflicts. Use \`--compact\` on memory upsert, update, forget, and set-name to return the exact affected record and outcome without the whole document; inspect that receipt and retain any required canonical readback.
 - For workout activity, choose one data read at the needed level: \`wearables activity list\` for day totals, add \`--include-workout-summaries\` for individual workout facts, or \`--include-workout-details\` for lap/split rows. Never probe with a smaller level and retry; omitted splits are not absent splits.
 - For common wearable questions, prefer the normalized first reads first: \`vault-cli wearables latest\` for recent nightly summaries, \`vault-cli wearables metric latest <metric>\` for one metric's freshest reading, \`vault-cli wearables metric trend <metric>\` for recent direction, and \`vault-cli wearables drift\` for "what changed?" explanations. Use \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command when the question is date-specific or you need one summary family in more detail. Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.
-- Connected observations include body composition, respiratory, metabolic, alerts, accessibility, environment, and ECG/workout summaries. Read with bounded \`vault-cli measurement entry list\`, not \`wearables metric\`; missing is unavailable, not zero or proof. Raw ECG voltage/workout points are not stored. Burned calories are expenditure; carbs can be partial intake evidence, not proof of a complete meal or eaten-calorie total; read \`food-journal\`.
+${wearableTrendCardLines}- Connected observations include body composition, respiratory, metabolic, alerts, accessibility, environment, and ECG/workout summaries. Read with bounded \`vault-cli measurement entry list\`, not \`wearables metric\`; missing is unavailable, not zero or proof. Raw ECG voltage/workout points are not stored. Burned calories are expenditure; carbs can be partial intake evidence, not proof of a complete meal or eaten-calorie total; read \`food-journal\`.
 - Connected insulin records are \`intervention_session\` events; read \`cardiometabolic-health\`.
 - When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields. Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal. Ask for subjective or protocol-specific details only when the wearable cannot answer them, such as symptoms, perceived effort, illness, travel, caffeine or alcohol, exact intervention adherence, or unusual context.
 - Keep the internal device-sync provider out of user-facing replies. Prefer the upstream source name such as Garmin, Oura, WHOOP, or Strava. For low-level problems, say "device connection" or "sync service" rather than naming internal plumbing.

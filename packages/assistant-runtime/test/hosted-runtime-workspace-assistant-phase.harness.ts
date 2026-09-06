@@ -44,6 +44,7 @@ type HostedAssistantPhaseMockName =
   | "drainHostedPreparedAssistantDeliveries"
   | "drainHostedProviderCleanupAfterCommit"
   | "findAssistantAutoReplyDeliveryIntentIds"
+  | "getAssistantCronAutomationOccurrenceReceipt"
   | "getAssistantCronStatus"
   | "hasCompleteAssistantAutoReplyTerminalEvidence"
   | "hydrateHostedExecutionDefaultTarget"
@@ -106,6 +107,7 @@ const mocks: Record<HostedAssistantPhaseMockName, Mock> = vi.hoisted(() => ({
   drainHostedProviderCleanupAfterCommit: vi.fn(),
   drainHostedPreparedAssistantDeliveries: vi.fn(),
   findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
+  getAssistantCronAutomationOccurrenceReceipt: vi.fn(),
   getAssistantCronStatus: vi.fn(),
   hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
@@ -186,6 +188,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
       automation.createStoreBackedAssistantInputSource,
     DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT:
       automation.DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    getAssistantCronAutomationOccurrenceReceipt:
+      mocks.getAssistantCronAutomationOccurrenceReceipt,
     getAssistantCronStatus: mocks.getAssistantCronStatus,
     resolveAssistantCronDefaultTimeZoneProjection:
       mocks.resolveAssistantCronDefaultTimeZoneProjection,
@@ -570,6 +574,9 @@ beforeEach(() => {
     nextRunAt: null,
     runningJobs: 0,
     totalJobs: 0,
+  });
+  mocks.getAssistantCronAutomationOccurrenceReceipt.mockResolvedValue({
+    history: "not_observed",
   });
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.hasCompleteAssistantAutoReplyTerminalEvidence.mockResolvedValue(false);

@@ -85,6 +85,9 @@ import {
   repairExperimentMediaInternal,
 } from "./experiment-media-repair.ts";
 import {
+  createSavedHealthView as createSavedHealthViewInternal,
+  deleteSavedHealthView as deleteSavedHealthViewInternal,
+  patchSavedHealthView as patchSavedHealthViewInternal,
   updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutCapturePreferences as updateWorkoutCapturePreferencesInternal,
@@ -702,6 +705,24 @@ export async function updateAssistantPreferences(
   input: Parameters<typeof updateAssistantPreferencesInternal>[0],
 ): ReturnType<typeof updateAssistantPreferencesInternal> {
   return updateAssistantPreferencesInternal(input);
+}
+
+export async function createSavedHealthView(
+  input: Parameters<typeof createSavedHealthViewInternal>[0],
+): ReturnType<typeof createSavedHealthViewInternal> {
+  return createSavedHealthViewInternal(input);
+}
+
+export async function patchSavedHealthView(
+  input: Parameters<typeof patchSavedHealthViewInternal>[0],
+): ReturnType<typeof patchSavedHealthViewInternal> {
+  return patchSavedHealthViewInternal(input);
+}
+
+export async function deleteSavedHealthView(
+  input: Parameters<typeof deleteSavedHealthViewInternal>[0],
+): ReturnType<typeof deleteSavedHealthViewInternal> {
+  return deleteSavedHealthViewInternal(input);
 }
 
 export async function appendHistoryEvent(

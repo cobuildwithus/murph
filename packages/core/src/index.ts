@@ -26,13 +26,20 @@ export * from "./automation-availability.ts";
 export * from "./scheduled-logs.ts";
 export * from "./memory.ts";
 export {
+  listSavedHealthViews,
+  readSavedHealthView,
+  readSavedHealthViewSnapshot,
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
 } from "./preferences.ts";
 export type {
   AssistantPersonalityPreferencesUpdate,
   AssistantPreferencesUpdate,
+  CreateSavedHealthViewInput,
+  DeleteSavedHealthViewInput,
+  PatchSavedHealthViewInput,
   PreferencesDocumentSnapshot,
+  SavedHealthViewSnapshot,
   WorkoutCapturePreferencesUpdate,
 } from "./preferences.ts";
 export {
@@ -133,12 +140,14 @@ export {
   appendJsonlRecord,
   checkpointExperiment,
   copyRawArtifact,
+  createSavedHealthView,
   createExperiment,
   dedupeDeviceEventsByExternalRef,
   deleteEvent,
   deleteFood,
   deleteProvider,
   deleteRecipe,
+  deleteSavedHealthView,
   ensureJournalDay,
   listInboxDocumentDefaultPromotionCorrelations,
   listLiveExactDocumentImportEvidence,
@@ -153,6 +162,7 @@ export {
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  patchSavedHealthView,
   recordInboxDocumentDefaultPromotion,
   removeAutomaticMealPhoto,
   repairJunctionWorkoutHeartRateZones,

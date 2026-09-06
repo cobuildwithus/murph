@@ -369,6 +369,14 @@ fragments render normally. The compact dialog complements the canonical App
 Store identity in Linq's card payload; neither path changes Messages-extension
 routing or application authorization.
 
+Seven-day wearable card images render seven completed local calendar days with
+readable averages, method-specific HRV labels, observed-day counts for sparse
+rows, and one shared comparison explanation. The production component's
+responsive synthetic study is at
+`/design?tab=components#imessage-seven-day-health-card`; it includes complete,
+sparse, unavailable, and cross-year states. The image route remains stateless
+and private/no-store, and native Messages activation retains its device gates.
+
 ## Legal and health-permission publication surfaces
 
 Hosted deployments should expose HTML legal pages in addition to downloadable

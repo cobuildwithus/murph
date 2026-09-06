@@ -270,6 +270,30 @@ optional supporting text directly under the title. Preserve scorer-owned order,
 scores, progress, and coverage while using the identity-free public
 presentation defined by the challenge standings delivery contract.
 
+### iMessage Seven-Day Health Card Image
+Render the seven completed local days on the shared cream field with the
+embedded Murph mark and one title row. Keep the date range at 36px, secondary
+and unwrapped, so even cross-year ranges fit beside the title. Each row leads
+with a readable 36px metric label and a 64px daily average. Sleep hours and
+minutes use smaller baseline-aligned units; other units remain subordinate.
+Reserve a 320px summary column and align every chart to one shared two-letter
+weekday grid. Preserve metric order and distinguish RMSSD from SDNN.
+
+Use one neutral arrow beside each comparable average. Name its meaning once
+below the card: averages compared with the prior seven days. Accessibility
+labels and complete text/Telegram recovery also name the comparison basis.
+Sparse rows state the number of observed days; unavailable comparisons show no
+arrow. Missing values are never zero-filled. Entirely missing rows say `No
+data`, and an all-missing card offers a concise conversational connection check.
+
+Use a neutral warm line with a point for each observed day. Fit it to the
+observed range with the existing minimum spans (steps 3,000; sleep 90 minutes;
+resting heart rate 8 bpm; HRV 15 ms) so quiet weeks remain quiet. Join gaps with
+lighter dashed segments, without inventing observations. Avoid status colors,
+metric icons, pills, or clinical better/worse judgments. The design study scales
+the real production component proportionally to its container and includes a
+year-boundary state; it must never require horizontal scrolling.
+
 ### Shared iMessage Card Handoff
 
 When a shared response-card URL reaches the public homepage instead of the

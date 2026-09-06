@@ -36,6 +36,7 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   AssistantActiveTurnInputUnavailableError,
   applyMurphManagedAutomations,
+  getAssistantCronAutomationOccurrenceReceipt,
   getAssistantCronAutomationTimingProjection,
   getAssistantCronAutomationInspection,
   getAssistantCronStatus,
@@ -1955,13 +1956,21 @@ async function buildHostedAutomationToolResponse(
     vaultRoot: input.vaultRoot,
   });
   if (input.action === "inspect") {
+    const [latestOccurrence, executionInspection] = await Promise.all([
+      getAssistantCronAutomationOccurrenceReceipt(
+        input.vaultRoot,
+        record.automationId,
+        record.schedule.kind === "deviceActivity"
+          ? { deviceActivitySchedule: record.schedule }
+          : undefined,
+      ),
+      getAssistantCronAutomationInspection(input.vaultRoot, record.automationId),
+    ]);
     return {
       action: "inspect" as const,
       ...responseFields,
-      executionInspection: await getAssistantCronAutomationInspection(
-        input.vaultRoot,
-        record.automationId,
-      ),
+      latestOccurrence,
+      executionInspection,
       instructions: record.instructions,
       title: record.title,
       routeBinding: "preserved" as const,

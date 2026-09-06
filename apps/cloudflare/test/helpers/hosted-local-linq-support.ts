@@ -1121,19 +1121,25 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
         && part.value.startsWith("https://");
     }
     if (part.type === "imessage_app") {
+      const hasInteractiveFlag = "interactive" in part;
+      const interactive = hasInteractiveFlag ? part.interactive : true;
+      const hasValidAppTarget = interactive === false
+        ? !("url" in part)
+        : "url" in part
+          && typeof part.url === "string"
+          && part.url.startsWith("https://");
+      const hasValidLayout = "layout" in part
+        && isObservedLinqIMessageAppLayout(part.layout);
       return parts.length === 1
-        && "url" in part
-        && typeof part.url === "string"
-        && part.url.startsWith("https://")
+        && (!hasInteractiveFlag || typeof interactive === "boolean")
+        && hasValidAppTarget
         && "fallback_text" in part
         && typeof part.fallback_text === "string"
         && part.fallback_text.trim().length > 0
         && "app" in part
         && Boolean(part.app)
         && typeof part.app === "object"
-        && "layout" in part
-        && Boolean(part.layout)
-        && typeof part.layout === "object";
+        && hasValidLayout;
     }
     if (part.type !== "media") {
       return false;
@@ -1148,6 +1154,27 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
       && part.url.trim().length > 0
     );
   });
+}
+
+function isObservedLinqIMessageAppLayout(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const layout = value as Record<string, unknown>;
+  const textFields = [
+    "caption",
+    "subcaption",
+    "trailing_caption",
+    "trailing_subcaption",
+  ];
+  const hasText = textFields.some((field) =>
+    typeof layout[field] === "string"
+    && layout[field].trim().length > 0
+  );
+  const hasImage = typeof layout.image_url === "string"
+    && layout.image_url.startsWith("https://");
+  const hasInvalidImage = "image_url" in layout && !hasImage;
+  return !hasInvalidImage && (hasText || hasImage);
 }
 
 function readObservedLinqMessageLink(request: ObservedLinqRequest): string | null {

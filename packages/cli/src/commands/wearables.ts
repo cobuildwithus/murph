@@ -1,6 +1,12 @@
 import { Cli, z } from 'incur'
 import {
   isStrictIsoDate,
+  SAVED_HEALTH_VIEW_MAX_COUNT,
+  SAVED_HEALTH_VIEW_MAX_METRICS,
+  savedHealthViewNameSchema,
+  savedHealthViewSchema,
+  wearablePreferenceProviderValues,
+  wearableTrendMetricKeySchema,
 } from '@murphai/contracts'
 import {
   normalizeWearableQueryProviderSlug,
@@ -15,6 +21,14 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  deleteSavedHealthView,
+  editSavedHealthView,
+  listSavedHealthViews,
+  normalizeRepeatableEnumFlagOption,
+  saveSavedHealthView,
+  showSavedHealthView,
+} from '@murphai/vault-usecases'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -578,6 +592,45 @@ export const wearablesDriftResultSchema = z
     filters: wearableDriftFiltersResultSchema,
     summary: wearablesDriftSummarySchema.nullable(),
   })
+
+const savedHealthViewLookupSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .describe('Saved health view name or stable id.')
+const savedHealthViewMetricKeysSchema = z
+  .array(wearableTrendMetricKeySchema)
+  .min(1)
+  .max(SAVED_HEALTH_VIEW_MAX_METRICS)
+  .refine(
+    (metricKeys) => new Set(metricKeys).size === metricKeys.length,
+    'Repeat each metric at most once.',
+  )
+  .describe('Ordered metrics for the saved health view.')
+const savedHealthViewEnvelopeShape = {
+  preferencesPath: z.string().min(1),
+  recordedAt: nullableTimestampSchema,
+}
+
+export const wearablesViewListResultSchema = z.object({
+  ...savedHealthViewEnvelopeShape,
+  count: z.number().int().nonnegative().max(SAVED_HEALTH_VIEW_MAX_COUNT),
+  views: z.array(savedHealthViewSchema).max(SAVED_HEALTH_VIEW_MAX_COUNT),
+})
+export const wearablesViewShowResultSchema = z.object({
+  ...savedHealthViewEnvelopeShape,
+  view: savedHealthViewSchema,
+})
+export const wearablesViewSaveResultSchema = wearablesViewShowResultSchema.extend({
+  created: z.boolean(),
+})
+export const wearablesViewEditResultSchema = wearablesViewShowResultSchema.extend({
+  updated: z.boolean(),
+})
+export const wearablesViewDeleteResultSchema = wearablesViewShowResultSchema.extend({
+  deleted: z.boolean(),
+})
 
 type WearablesLatestResult = z.infer<typeof wearablesLatestResultSchema>
 type WearablesMetricLatestResult = z.infer<typeof wearablesMetricLatestResultSchema>
@@ -1185,6 +1238,102 @@ export function registerWearablesCommands(
     },
   })
 
+  const view = Cli.create('view', {
+    description: 'Saved ordered metric sets for the fixed seven-day wearable view.',
+  })
+
+  view.command('list', {
+    description: 'List saved health views.',
+    args: emptyArgsSchema,
+    options: withBaseOptions(),
+    output: wearablesViewListResultSchema,
+    async run({ options }) {
+      const result = await listSavedHealthViews(options.vault)
+      return wearablesViewListResultSchema.parse(withoutWearableVaultPath(result))
+    },
+  })
+
+  view.command('show', {
+    description: 'Show one saved health view by name or id.',
+    args: z.object({ lookup: savedHealthViewLookupSchema }),
+    options: withBaseOptions(),
+    output: wearablesViewShowResultSchema,
+    async run({ args, options }) {
+      const result = await showSavedHealthView({
+        vault: options.vault,
+        lookup: args.lookup,
+      })
+      return wearablesViewShowResultSchema.parse(withoutWearableVaultPath(result))
+    },
+  })
+
+  view.command('save', {
+    description: 'Save one ordered metric set for the fixed seven-day wearable view.',
+    args: z.object({ name: savedHealthViewNameSchema }),
+    options: withBaseOptions({ metric: savedHealthViewMetricKeysSchema }),
+    hint: 'Metric order is preserved. Saving a view does not create or change a schedule.',
+    output: wearablesViewSaveResultSchema,
+    async run({ args, options }) {
+      const result = await saveSavedHealthView({
+        vault: options.vault,
+        name: args.name,
+        metricKeys: options.metric,
+      })
+      return wearablesViewSaveResultSchema.parse(withoutWearableVaultPath(result))
+    },
+  })
+
+  view.command('edit', {
+    description: 'Rename or replace the ordered metrics for one saved health view.',
+    args: z.object({ lookup: savedHealthViewLookupSchema }),
+    options: withBaseOptions({
+      name: savedHealthViewNameSchema.optional(),
+      metric: savedHealthViewMetricKeysSchema.optional(),
+    }),
+    hint: 'Provide --name, --metric, or both. Editing never changes a schedule.',
+    output: wearablesViewEditResultSchema,
+    async run({ args, options }) {
+      if (options.name === undefined && options.metric === undefined) {
+        throw new VaultCliError(
+          'invalid_option',
+          'Provide --name, --metric, or both.',
+        )
+      }
+      const resolved = await showSavedHealthView({
+        vault: options.vault,
+        lookup: args.lookup,
+      })
+      const result = await editSavedHealthView({
+        vault: options.vault,
+        savedViewId: resolved.view.savedViewId,
+        ...(options.name === undefined ? {} : { name: options.name }),
+        ...(options.metric === undefined
+          ? {}
+          : { metricKeys: options.metric }),
+      })
+      return wearablesViewEditResultSchema.parse(withoutWearableVaultPath(result))
+    },
+  })
+
+  view.command('delete', {
+    description: 'Delete one saved health view by name or id.',
+    args: z.object({ lookup: savedHealthViewLookupSchema }),
+    options: withBaseOptions(),
+    output: wearablesViewDeleteResultSchema,
+    async run({ args, options }) {
+      const resolved = await showSavedHealthView({
+        vault: options.vault,
+        lookup: args.lookup,
+      })
+      const result = await deleteSavedHealthView({
+        vault: options.vault,
+        savedViewId: resolved.view.savedViewId,
+      })
+      return wearablesViewDeleteResultSchema.parse(withoutWearableVaultPath(result))
+    },
+  })
+
+  wearables.command(view)
   wearables.command(metric)
   wearables.command(sleep)
   wearables.command(activity)

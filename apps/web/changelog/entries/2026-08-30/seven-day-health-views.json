@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 100,
+  "item": {
+    "id": "seven-day-health-views",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Seven-day health trends at a glance",
+    "summary": "Ask Murph for a compact view of seven completed days of steps, sleep, resting heart rate, and method-specific HRV, with missing days kept visible and changes compared with the previous week.",
+    "details": "Metric selections can be saved for reuse without creating a schedule. For scheduled views, Murph distinguishes complete and partial sends without claiming that a message reached your phone. Health cards are available in supported conversations.",
+    "relevanceTags": ["assistant", "wearables", "messaging"],
+    "sourcePullRequests": [2629],
+    "tryIt": {
+      "label": "Show my health trends",
+      "prompt": "Show my steps, sleep, resting heart rate, and HRV for the last seven days."
+    }
+  }
+}

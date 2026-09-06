@@ -2666,7 +2666,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("projects the trusted Android rollout gate into the assistant turn env", async () => {
+  test("projects trusted app rollout gates into the assistant turn env", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const runtimeEnvs: Readonly<Record<string, string>>[] = [];
 
@@ -2680,6 +2680,7 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           platformEnv: {
             MURPH_ANDROID_APP_ENABLED: "1",
+            MURPH_WEARABLE_TREND_CARDS_ENABLED: "1",
           },
         }),
         {
@@ -2726,6 +2727,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(runtimeEnvs.length, 1);
       assert.equal(runtimeEnvs[0]?.MURPH_ANDROID_APP_ENABLED, "1");
+      assert.equal(
+        runtimeEnvs[0]?.MURPH_WEARABLE_TREND_CARDS_ENABLED,
+        "1",
+      );
     } finally {
       await removeTempRoot(vaultRoot);
     }

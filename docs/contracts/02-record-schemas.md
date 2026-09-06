@@ -53,7 +53,8 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
 - Memory document:
   `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`. Each stored memory bullet carries a hidden `murph-memory` metadata comment with canonical id, creation time, and update time.
 - Preferences singleton:
-  `schemaVersion`, `updatedAt`, optional `assistant`, `workoutUnitPreferences`, and `wearablePreferences`
+  `schemaVersion`, `updatedAt`, optional `assistant`, optional bounded
+  `savedHealthViews`, `workoutUnitPreferences`, and `wearablePreferences`
 - Markdown frontmatter:
   `CORE.md`, journal day pages, experiment pages, provider pages, food pages, workout-format pages, and health registry pages each use a closed or explicitly documented frontmatter schema. Automation frontmatter may include bounded exact `contextReferences` (`entityKind` plus canonical `entityId`) as reminder routing and interpretation context; those references grant no mutation authority.
 
@@ -69,7 +70,17 @@ Missing personality values resolve through the shared contract defaults: Humor 3
 
 Personality stores expression preferences only. It never stores prompt text, conversation excerpts, inferred psychological traits, notification policy, or tool authority. In a person member's vault it configures that private Murph; in a synthetic thread-container vault it configures that group room's Murph. A room value is owned by the container and must never be copied from, resolved through, or written to a participant's private preferences.
 
-The preferences schema is strict. Although `assistant.personality` is additive, a binary that predates the field can reject a document after the first personality write. Roll out compatible readers before writers. After a personality override is stored, the first compatible reader/writer version is the rollback floor unless a current compatible binary removes the field through the canonical mutation path.
+`savedHealthViews` stores at most eight reusable display definitions. Each item
+contains one opaque stable id, one canonical case-insensitively unique name, and
+one to five ordered, unique, method-specific wearable metric keys. It stores no
+wearable values, schedule, route, or delivery state.
+
+The preferences schema is strict. Although `assistant.personality` and
+`savedHealthViews` are additive, a binary that predates either field can reject
+a document after its first write. Roll out compatible readers before writers.
+After a personality override or non-empty saved-view collection is stored, its
+first compatible reader/writer version is the rollback floor unless current
+compatible code removes that field through the canonical mutation path.
 
 ## Event Kinds
 

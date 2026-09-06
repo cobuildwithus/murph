@@ -188,6 +188,11 @@ import {
   wearablesSleepListResultSchema,
   wearablesSleepPatternResultSchema,
   wearablesSourcesListResultSchema,
+  wearablesViewDeleteResultSchema,
+  wearablesViewEditResultSchema,
+  wearablesViewListResultSchema,
+  wearablesViewSaveResultSchema,
+  wearablesViewShowResultSchema,
 } from './commands/wearables.js'
 
 type VaultServiceGroups = {
@@ -1575,6 +1580,31 @@ export const vaultCliCommandDescriptors = [
         path: ['wearables', 'patterns'],
         description: 'Compare repeated activity and intervention days with next-day sleep and recovery outcomes.',
         output: wearablesPersonalPatternsResultSchema,
+      },
+      {
+        path: ['wearables', 'view', 'list'],
+        description: 'List saved health views.',
+        output: wearablesViewListResultSchema,
+      },
+      {
+        path: ['wearables', 'view', 'show'],
+        description: 'Show one saved health view by name or id.',
+        output: wearablesViewShowResultSchema,
+      },
+      {
+        path: ['wearables', 'view', 'save'],
+        description: 'Save one ordered metric set for the fixed seven-day wearable view.',
+        output: wearablesViewSaveResultSchema,
+      },
+      {
+        path: ['wearables', 'view', 'edit'],
+        description: 'Rename or replace the ordered metrics for one saved health view.',
+        output: wearablesViewEditResultSchema,
+      },
+      {
+        path: ['wearables', 'view', 'delete'],
+        description: 'Delete one saved health view by name or id.',
+        output: wearablesViewDeleteResultSchema,
       },
     ],
     directVaultServiceBindings: assumeDirectVaultServiceBindings({

@@ -62,6 +62,24 @@ describe('automation execution inspection', () => {
     expect(result).toMatchObject({ nextStep: expect.stringContaining('option to reschedule') })
   })
 
+
+  it('preserves terminal partial-send evidence without suggesting an automatic resend', async () => {
+    const { vault, paths } = await fixture()
+    await appendAssistantCronRun(paths, {
+      schema: 'murph.assistant-cron-run.v1', runId: 'acr_11111111111111111111111111111111',
+      jobId, trigger: 'scheduled', startedAt: at, finishedAt: at,
+      scheduledOccurrenceAt: at, sessionId: null, response: null, responseLength: 0,
+      outcome: 'failed', reason: 'delivery_failed_partial', error: null,
+    })
+    const result = await getAssistantCronAutomationInspection(vault, jobId)
+    expect(result).toMatchObject({
+      status: 'available',
+      nextStep: expect.stringContaining('part of the message was sent'),
+      interpretation: expect.stringContaining('partial sending from persisted dispatch evidence'),
+    })
+    expect(result).toMatchObject({ nextStep: expect.not.stringContaining('sending is unconfirmed') })
+  })
+
   it.each(['retryable', 'sent', 'failed', 'abandoned'] as const)('shows exact outstanding delivery evidence when %s', async (status) => {
     const { vault, paths } = await fixture()
     const intent = await createAssistantOutboxIntent({ vault, message: 'PRIVATE_MESSAGE_SENTINEL',

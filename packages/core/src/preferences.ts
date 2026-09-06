@@ -12,11 +12,16 @@ import {
   assistantVoiceOptionIdSchema,
   isAssistantPersonalitySettingId,
   isWearablePreferenceProvider,
+  normalizeSavedHealthViewName,
   normalizeStoredAssistantPersonaId,
   normalizeWearablePreferenceProviders,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
+  SAVED_HEALTH_VIEW_MAX_COUNT,
+  savedHealthViewIdSchema,
+  savedHealthViewNameSchema,
+  savedHealthViewSchema,
   workoutDefaultDurationMinutesSchema,
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
@@ -29,6 +34,9 @@ import {
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
   type PreferencesDocument,
+  type SavedHealthView,
+  type SavedHealthViewId,
+  type WearableTrendMetricKey,
   type WearablePreferences,
   type WorkoutCapturePreferences,
   type WorkoutUnitPreferences,
@@ -44,6 +52,8 @@ import {
 } from "./operations/index.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { commitAuditedCanonicalWrite } from "./audited-write.ts";
+import { VaultError } from "./errors.ts";
+import { generateRecordId } from "./ids.ts";
 import { isPlainRecord } from "./types.ts";
 
 export type {
@@ -55,6 +65,9 @@ export type {
   AssistantTonePreference,
   AssistantVoiceOptionId,
   PreferencesDocument,
+  SavedHealthView,
+  SavedHealthViewId,
+  WearableTrendMetricKey,
   WearablePreferences,
   WorkoutCapturePreferences,
   WorkoutUnitPreferences,
@@ -78,9 +91,10 @@ export interface AssistantPreferencesUpdate {
 
 export interface PreferencesDocumentSnapshot extends Omit<
   PreferencesDocument,
-  "updatedAt" | "workoutCapturePreferences"
+  "updatedAt" | "savedHealthViews" | "workoutCapturePreferences"
 > {
   exists: boolean;
+  savedHealthViews: SavedHealthView[];
   sourcePath: string;
   updatedAt: string | null;
   workoutCapturePreferences: WorkoutCapturePreferences;
@@ -296,6 +310,7 @@ function filterAssistantPreferencesByFields(
 
 function buildPreferencesDocument(input: {
   assistant?: AssistantPreferences;
+  savedHealthViews: SavedHealthView[];
   updatedAt: string;
   wearablePreferences: WearablePreferences;
   workoutCapturePreferences: WorkoutCapturePreferences;
@@ -313,6 +328,9 @@ function buildPreferencesDocument(input: {
       : {}),
     workoutUnitPreferences: input.workoutUnitPreferences,
     wearablePreferences: input.wearablePreferences,
+    ...(input.savedHealthViews.length > 0
+      ? { savedHealthViews: input.savedHealthViews }
+      : {}),
   };
 
   return preferencesDocumentSchema.parse(document);
@@ -329,6 +347,7 @@ export async function readPreferencesDocument(
       schemaVersion: preferencesDocumentSchemaVersion,
       sourcePath: resolved.relativePath,
       updatedAt: null,
+      savedHealthViews: [],
       workoutCapturePreferences: {},
       workoutUnitPreferences: {},
       wearablePreferences: {
@@ -346,6 +365,7 @@ export async function readPreferencesDocument(
   const document = buildPreferencesDocument({
     ...(assistantPreferences ? { assistant: assistantPreferences } : {}),
     updatedAt: parsedDocument.updatedAt,
+    savedHealthViews: parsedDocument.savedHealthViews ?? [],
     workoutCapturePreferences: parsedDocument.workoutCapturePreferences ?? {},
     workoutUnitPreferences: parsedDocument.workoutUnitPreferences,
     wearablePreferences: normalizeWearablePreferencesForRead(
@@ -356,10 +376,321 @@ export async function readPreferencesDocument(
   return {
     ...document,
     exists: true,
+    savedHealthViews: document.savedHealthViews ?? [],
     sourcePath: resolved.relativePath,
     updatedAt: document.updatedAt,
     workoutCapturePreferences: document.workoutCapturePreferences ?? {},
   };
+}
+
+export interface CreateSavedHealthViewInput {
+  vaultRoot: string;
+  name: string;
+  metricKeys: readonly WearableTrendMetricKey[];
+  updatedAt?: string;
+}
+
+export interface PatchSavedHealthViewInput {
+  vaultRoot: string;
+  savedViewId: SavedHealthViewId;
+  name?: string;
+  metricKeys?: readonly WearableTrendMetricKey[];
+  updatedAt?: string;
+}
+
+export interface DeleteSavedHealthViewInput {
+  vaultRoot: string;
+  savedViewId: SavedHealthViewId;
+  updatedAt?: string;
+}
+
+function normalizeSavedHealthViewLookup(lookup: unknown): string {
+  if (typeof lookup !== "string" || lookup.trim().length === 0) {
+    throw new VaultError(
+      "SAVED_HEALTH_VIEW_LOOKUP_INVALID",
+      "Saved health view lookup is required.",
+    );
+  }
+  return lookup.trim();
+}
+
+function findSavedHealthView(
+  views: readonly SavedHealthView[],
+  lookup: string,
+): SavedHealthView | undefined {
+  const normalizedLookup = normalizeSavedHealthViewLookup(lookup);
+  return views.find((view) => view.savedViewId === normalizedLookup)
+    ?? views.find(
+      (view) =>
+        normalizeSavedHealthViewName(view.name)
+        === normalizedLookup.normalize("NFKC").toLowerCase(),
+    );
+}
+
+function requireSavedHealthView(
+  views: readonly SavedHealthView[],
+  lookup: string,
+): SavedHealthView {
+  const view = findSavedHealthView(views, lookup);
+  if (!view) {
+    throw new VaultError(
+      "SAVED_HEALTH_VIEW_NOT_FOUND",
+      "Saved health view was not found.",
+    );
+  }
+  return view;
+}
+
+function assertSavedHealthViewNameAvailable(
+  views: readonly SavedHealthView[],
+  name: string,
+  exceptSavedViewId?: string,
+): void {
+  const validatedName = savedHealthViewNameSchema.parse(name);
+  const normalizedName = normalizeSavedHealthViewName(validatedName);
+  if (normalizedName === null) {
+    throw new TypeError("Saved health view name must be text.");
+  }
+  const conflict = views.find(
+    (view) =>
+      view.savedViewId !== exceptSavedViewId
+      && normalizeSavedHealthViewName(view.name) === normalizedName,
+  );
+  if (conflict) {
+    throw new VaultError(
+      "SAVED_HEALTH_VIEW_NAME_CONFLICT",
+      "A saved health view already uses that name.",
+      { savedViewId: conflict.savedViewId },
+    );
+  }
+}
+
+async function writeSavedHealthViews(input: {
+  vaultRoot: string;
+  current: PreferencesDocumentSnapshot;
+  savedHealthViews: SavedHealthView[];
+  commandName:
+    | "core.createSavedHealthView"
+    | "core.patchSavedHealthView"
+    | "core.deleteSavedHealthView";
+  summary: string;
+  savedViewId: SavedHealthViewId;
+  updatedAt?: string;
+}): Promise<PreferencesDocumentSnapshot> {
+  const validatedDocument = buildPreferencesDocument({
+    ...(input.current.assistant ? { assistant: input.current.assistant } : {}),
+    savedHealthViews: input.savedHealthViews,
+    updatedAt: input.updatedAt ?? new Date().toISOString(),
+    workoutCapturePreferences: input.current.workoutCapturePreferences,
+    workoutUnitPreferences: input.current.workoutUnitPreferences,
+    wearablePreferences: input.current.wearablePreferences,
+  });
+
+  await commitAuditedCanonicalWrite({
+    vaultRoot: input.vaultRoot,
+    operationType: "preferences_update",
+    summary: input.summary,
+    occurredAt: validatedDocument.updatedAt,
+    audit: {
+      action: "preferences_update",
+      commandName: input.commandName,
+      summary: input.summary,
+      targetIds: [input.savedViewId],
+    },
+    mutate: async ({ batch }) => {
+      await batch.stageTextWrite(
+        preferencesDocumentRelativePath,
+        `${JSON.stringify(validatedDocument, null, 2)}\n`,
+        { overwrite: true },
+      );
+
+      return {
+        result: null,
+        changes: [
+          {
+            path: preferencesDocumentRelativePath,
+            op: input.current.exists ? "update" as const : "create" as const,
+          },
+        ],
+      };
+    },
+  });
+
+  return readPreferencesDocument(input.vaultRoot);
+}
+
+export async function listSavedHealthViews(
+  vaultRoot: string,
+): Promise<SavedHealthView[]> {
+  return (await readPreferencesDocument(vaultRoot)).savedHealthViews;
+}
+
+export async function readSavedHealthView(input: {
+  vaultRoot: string;
+  lookup: string;
+}): Promise<SavedHealthView> {
+  return (await readSavedHealthViewSnapshot(input)).view;
+}
+
+export interface SavedHealthViewSnapshot {
+  document: PreferencesDocumentSnapshot;
+  view: SavedHealthView;
+}
+
+export async function readSavedHealthViewSnapshot(input: {
+  vaultRoot: string;
+  lookup: string;
+}): Promise<SavedHealthViewSnapshot> {
+  const document = await readPreferencesDocument(input.vaultRoot);
+  return {
+    document,
+    view: requireSavedHealthView(document.savedHealthViews, input.lookup),
+  };
+}
+
+function requireSavedHealthViewById(
+  views: readonly SavedHealthView[],
+  savedViewId: unknown,
+): SavedHealthView {
+  const parsedId = savedHealthViewIdSchema.safeParse(savedViewId);
+  if (!parsedId.success) {
+    throw new VaultError(
+      "SAVED_HEALTH_VIEW_ID_INVALID",
+      "Saved health view id is invalid.",
+    );
+  }
+  const view = views.find((candidate) => candidate.savedViewId === parsedId.data);
+  if (!view) {
+    throw new VaultError(
+      "SAVED_HEALTH_VIEW_NOT_FOUND",
+      "Saved health view was not found.",
+    );
+  }
+  return view;
+}
+
+export async function createSavedHealthView(
+  input: CreateSavedHealthViewInput,
+): Promise<{
+  created: true;
+  view: SavedHealthView;
+  document: PreferencesDocumentSnapshot;
+}> {
+  return withLockedPreferencesDocument(input.vaultRoot, async () => {
+    const current = await readPreferencesDocument(input.vaultRoot);
+    if (current.savedHealthViews.length >= SAVED_HEALTH_VIEW_MAX_COUNT) {
+      throw new VaultError(
+        "SAVED_HEALTH_VIEW_LIMIT_REACHED",
+        `At most ${SAVED_HEALTH_VIEW_MAX_COUNT} saved health views are allowed.`,
+        { maxCount: SAVED_HEALTH_VIEW_MAX_COUNT },
+      );
+    }
+    assertSavedHealthViewNameAvailable(current.savedHealthViews, input.name);
+
+    const view = savedHealthViewSchema.parse({
+      savedViewId: generateRecordId("hview"),
+      name: input.name,
+      metricKeys: [...input.metricKeys],
+    });
+    const savedHealthViews = [...current.savedHealthViews, view];
+    const document = await writeSavedHealthViews({
+      vaultRoot: input.vaultRoot,
+      current,
+      savedHealthViews,
+      commandName: "core.createSavedHealthView",
+      summary: "Created a saved health view preference.",
+      savedViewId: view.savedViewId,
+      updatedAt: input.updatedAt,
+    });
+
+    return { created: true, view, document };
+  });
+}
+
+export async function patchSavedHealthView(
+  input: PatchSavedHealthViewInput,
+): Promise<{
+  updated: boolean;
+  view: SavedHealthView;
+  document: PreferencesDocumentSnapshot;
+}> {
+  if (input.name === undefined && input.metricKeys === undefined) {
+    throw new VaultError(
+      "SAVED_HEALTH_VIEW_EMPTY_PATCH",
+      "Saved health view edit requires a name or metrics.",
+    );
+  }
+
+  return withLockedPreferencesDocument(input.vaultRoot, async () => {
+    const current = await readPreferencesDocument(input.vaultRoot);
+    const existing = requireSavedHealthViewById(
+      current.savedHealthViews,
+      input.savedViewId,
+    );
+    if (input.name !== undefined) {
+      assertSavedHealthViewNameAvailable(
+        current.savedHealthViews,
+        input.name,
+        existing.savedViewId,
+      );
+    }
+
+    const view = savedHealthViewSchema.parse({
+      ...existing,
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.metricKeys === undefined
+        ? {}
+        : { metricKeys: [...input.metricKeys] }),
+    });
+    if (JSON.stringify(existing) === JSON.stringify(view)) {
+      return { updated: false, view: existing, document: current };
+    }
+
+    const savedHealthViews = current.savedHealthViews.map((candidate) =>
+      candidate.savedViewId === existing.savedViewId ? view : candidate
+    );
+    const document = await writeSavedHealthViews({
+      vaultRoot: input.vaultRoot,
+      current,
+      savedHealthViews,
+      commandName: "core.patchSavedHealthView",
+      summary: "Updated a saved health view preference.",
+      savedViewId: view.savedViewId,
+      updatedAt: input.updatedAt,
+    });
+
+    return { updated: true, view, document };
+  });
+}
+
+export async function deleteSavedHealthView(
+  input: DeleteSavedHealthViewInput,
+): Promise<{
+  deleted: true;
+  view: SavedHealthView;
+  document: PreferencesDocumentSnapshot;
+}> {
+  return withLockedPreferencesDocument(input.vaultRoot, async () => {
+    const current = await readPreferencesDocument(input.vaultRoot);
+    const view = requireSavedHealthViewById(
+      current.savedHealthViews,
+      input.savedViewId,
+    );
+    const savedHealthViews = current.savedHealthViews.filter(
+      (candidate) => candidate.savedViewId !== view.savedViewId,
+    );
+    const document = await writeSavedHealthViews({
+      vaultRoot: input.vaultRoot,
+      current,
+      savedHealthViews,
+      commandName: "core.deleteSavedHealthView",
+      summary: "Deleted a saved health view preference.",
+      savedViewId: view.savedViewId,
+      updatedAt: input.updatedAt,
+    });
+
+    return { deleted: true, view, document };
+  });
 }
 
 export async function updateWorkoutCapturePreferences(input: {
@@ -425,6 +756,7 @@ export async function updateWorkoutCapturePreferences(input: {
     const validatedDocument = buildPreferencesDocument({
       ...(current.assistant ? { assistant: current.assistant } : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
+      savedHealthViews: current.savedHealthViews,
       workoutCapturePreferences: nextPreferences,
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: current.wearablePreferences,
@@ -493,6 +825,7 @@ export async function updateWorkoutUnitPreferences(input: {
     const validatedDocument = buildPreferencesDocument({
       ...(current.assistant ? { assistant: current.assistant } : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
+      savedHealthViews: current.savedHealthViews,
       workoutCapturePreferences: current.workoutCapturePreferences,
       workoutUnitPreferences: nextPreferences,
       wearablePreferences: current.wearablePreferences,
@@ -560,6 +893,7 @@ export async function updateWearablePreferences(input: {
     const validatedDocument = buildPreferencesDocument({
       ...(current.assistant ? { assistant: current.assistant } : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
+      savedHealthViews: current.savedHealthViews,
       workoutCapturePreferences: current.workoutCapturePreferences,
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: nextPreferences,
@@ -685,6 +1019,7 @@ export async function updateAssistantPreferences(input: {
     const validatedDocument = buildPreferencesDocument({
       ...(nextPreferences ? { assistant: nextPreferences } : {}),
       updatedAt: hasChanges ? operationAt : (current.updatedAt ?? operationAt),
+      savedHealthViews: current.savedHealthViews,
       workoutCapturePreferences: current.workoutCapturePreferences,
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: current.wearablePreferences,

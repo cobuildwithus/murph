@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { advanceAutomationDeviceActivityCursor } from '@murphai/core'
 import {
   compareDeviceActivityCoverageKeys,
@@ -33,6 +32,8 @@ import {
   assistantDeviceActivityAuthorityKeyMatches,
   appendAssistantDeviceActivityCronJobMetadata,
   buildAssistantDeviceActivityAuthorityKey,
+  buildAssistantDeviceActivityCronJobId,
+  buildAssistantDeviceActivityOccurrenceKey,
   readAssistantDeviceActivityCronJobMetadata,
 } from './device-activity-cron-tags.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
@@ -577,23 +578,24 @@ function buildDeviceActivityAutomationNotificationJobId(input: {
   activity: MatchedDeviceActivity
   automation: DeviceActivityAutomation
 }): string {
-  return `cron_device_activity_${buildDeviceActivityAutomationNotificationOccurrenceKey(input)}`
+  return buildAssistantDeviceActivityCronJobId({
+    entityId: input.activity.entityId,
+    occurredAt: input.activity.occurredAt,
+    parentAutomationId: input.automation.automationId,
+    triggeredAt: input.activity.triggeredAt,
+  })
 }
 
 function buildDeviceActivityAutomationNotificationOccurrenceKey(input: {
   activity: MatchedDeviceActivity
   automation: DeviceActivityAutomation
 }): string {
-  return createHash('sha256')
-    .update(input.automation.automationId)
-    .update('\0')
-    .update(input.activity.entityId)
-    .update('\0')
-    .update(input.activity.triggeredAt)
-    .update('\0')
-    .update(input.activity.occurredAt)
-    .digest('hex')
-    .slice(0, 40)
+  return buildAssistantDeviceActivityOccurrenceKey({
+    entityId: input.activity.entityId,
+    occurredAt: input.activity.occurredAt,
+    parentAutomationId: input.automation.automationId,
+    triggeredAt: input.activity.triggeredAt,
+  })
 }
 
 function buildDeviceActivityAutomationNotificationJobName(input: {

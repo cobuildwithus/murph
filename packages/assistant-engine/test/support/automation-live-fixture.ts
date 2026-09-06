@@ -15,7 +15,7 @@ type AutomationPatchRequest = Extract<
 
 export type VersionedAutomationFixtureRecord = Omit<
   AutomationInspectResponse,
-  'action' | 'routeBinding'
+  'action' | 'latestOccurrence' | 'routeBinding'
 >
 
 export function createVersionedAutomationPatchFixture(input: {
@@ -44,6 +44,7 @@ export function createVersionedAutomationPatchFixture(input: {
       return {
         action: 'inspect',
         ...current,
+        latestOccurrence: { history: 'not_observed' },
         routeBinding: 'preserved',
       }
     }

@@ -64,7 +64,9 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
   isHostedRuntimeProcessEnv,
   isMurphAndroidAppEnabled,
+  isMurphWearableTrendCardsEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -726,6 +728,9 @@ describe("hosted execution coverage gaps", () => {
       "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON",
     );
     expect(MURPH_ANDROID_APP_ENABLED_ENV).toBe("MURPH_ANDROID_APP_ENABLED");
+    expect(MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV).toBe(
+      "MURPH_WEARABLE_TREND_CARDS_ENABLED",
+    );
     expect(
       isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
     ).toBe(true);
@@ -743,6 +748,22 @@ describe("hosted execution coverage gaps", () => {
       isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "true" }),
     ).toBe(false);
     expect(isMurphAndroidAppEnabled({})).toBe(false);
+    expect(
+      isMurphWearableTrendCardsEnabled({
+        [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: " 1 ",
+      }),
+    ).toBe(false);
+    expect(
+      isMurphWearableTrendCardsEnabled({
+        [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: "1",
+      }),
+    ).toBe(true);
+    expect(
+      isMurphWearableTrendCardsEnabled({
+        [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: "true",
+      }),
+    ).toBe(false);
+    expect(isMurphWearableTrendCardsEnabled({})).toBe(false);
   });
 
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {

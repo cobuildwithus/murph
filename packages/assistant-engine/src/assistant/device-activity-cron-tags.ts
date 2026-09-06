@@ -32,6 +32,34 @@ export interface AssistantDeviceActivityCronJobMetadata {
   parentAutomationRelativePath?: string
 }
 
+export interface AssistantDeviceActivityOccurrenceIdentity {
+  entityId: string
+  occurredAt: string
+  parentAutomationId: string
+  triggeredAt: string
+}
+
+export function buildAssistantDeviceActivityOccurrenceKey(
+  input: AssistantDeviceActivityOccurrenceIdentity,
+): string {
+  return createHash('sha256')
+    .update(input.parentAutomationId)
+    .update('\0')
+    .update(input.entityId)
+    .update('\0')
+    .update(input.triggeredAt)
+    .update('\0')
+    .update(input.occurredAt)
+    .digest('hex')
+    .slice(0, 40)
+}
+
+export function buildAssistantDeviceActivityCronJobId(
+  input: AssistantDeviceActivityOccurrenceIdentity,
+): string {
+  return `cron_device_activity_${buildAssistantDeviceActivityOccurrenceKey(input)}`
+}
+
 export function buildAssistantDeviceActivityAuthorityKey(
   automation: AssistantDeviceActivityAuthorityInput,
 ): string {

@@ -8,6 +8,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   buildHostedRuntimeLaunchSpec,
@@ -133,6 +134,8 @@ export function buildHostedRunnerContainerPlatformEnv(
     platformEnv[HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV];
   const physicalNotesEnabled = platformEnv[HOSTED_PHYSICAL_NOTES_ENABLED_ENV];
   const androidAppEnabled = platformEnv[MURPH_ANDROID_APP_ENABLED_ENV];
+  const wearableTrendCardsEnabled =
+    platformEnv[MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV];
   return {
     ...(privateMediaDeliveryOrigin
       ? {
@@ -145,6 +148,9 @@ export function buildHostedRunnerContainerPlatformEnv(
       : {}),
     ...(androidAppEnabled
       ? { [MURPH_ANDROID_APP_ENABLED_ENV]: androidAppEnabled }
+      : {}),
+    ...(wearableTrendCardsEnabled
+      ? { [MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV]: wearableTrendCardsEnabled }
       : {}),
     ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(source, options),
     ...buildHostedRunnerChannelPlatformEnv(source, options),

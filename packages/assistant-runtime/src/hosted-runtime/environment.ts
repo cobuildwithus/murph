@@ -9,7 +9,9 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   isMurphAndroidAppEnabled,
+  isMurphWearableTrendCardsEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
+  MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 
 import {
@@ -389,6 +391,12 @@ export function sanitizeHostedAssistantRuntimePlatformEnv(
     sanitized[MURPH_ANDROID_APP_ENABLED_ENV] = "1";
   } else {
     delete sanitized[MURPH_ANDROID_APP_ENABLED_ENV];
+  }
+
+  if (isMurphWearableTrendCardsEnabled(platformEnv)) {
+    sanitized[MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV] = "1";
+  } else {
+    delete sanitized[MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV];
   }
 
   return sanitized;

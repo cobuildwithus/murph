@@ -189,6 +189,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
+import { ImessageSevenDayHealthCardStudy } from "./imessage-seven-day-health-card-study";
 import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
@@ -1593,6 +1594,15 @@ export function ComponentsContent() {
           title="iMessage challenge-standings fallback parity"
         >
           <ImessageChallengeStandingsCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-seven-day-health-card"
+          title="iMessage seven-day health fallback"
+        >
+          <ImessageSevenDayHealthCardStudy />
         </Section>
 
         <Separator />

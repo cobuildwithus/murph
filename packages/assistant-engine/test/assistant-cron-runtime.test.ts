@@ -12055,6 +12055,7 @@ describe('assistant cron runtime orchestration', () => {
 
     await reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId: queuedIntentId,
         lastError: {
           code: 'LINQ_API_REQUEST_FAILED',
@@ -12089,7 +12090,7 @@ describe('assistant cron runtime orchestration', () => {
             'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
           finishedAt: '2026-05-04T16:00:20.000Z',
           outcome: 'failed',
-          reason: 'delivery_failed',
+          reason: 'delivery_failed_not_reached',
         }),
       ],
     })
@@ -12319,6 +12320,7 @@ describe('assistant cron runtime orchestration', () => {
 
     await reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId: queuedIntentId,
         lastError: null,
         sentAt: '2026-05-04T16:00:20.000Z',
@@ -12426,6 +12428,7 @@ describe('assistant cron runtime orchestration', () => {
 
     await expect(reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId: firstIntentId,
         lastError: {
           code: 'LINQ_API_REQUEST_FAILED',
@@ -12455,6 +12458,7 @@ describe('assistant cron runtime orchestration', () => {
 
     await expect(reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId: firstIntentId,
         lastError: { message: 'Final review delivery failed.' },
         sentAt: null,
@@ -12499,6 +12503,7 @@ describe('assistant cron runtime orchestration', () => {
 
     await expect(reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId: secondIntentId,
         lastError: null,
         sentAt: '2026-04-08T10:06:00.000Z',
@@ -12599,6 +12604,7 @@ describe('assistant cron runtime orchestration', () => {
 
     await expect(reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId: queuedIntentId,
         lastError: {
           code,
@@ -13036,6 +13042,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     await reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId,
         lastError: { message: 'Required delivery failed.' },
         sentAt: null,
@@ -13101,6 +13108,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     await reconcileAssistantCronDeliveryIntent({
       intent: {
+        delivery: null,
         intentId: queuedIntentId,
         lastError: null,
         sentAt: null,

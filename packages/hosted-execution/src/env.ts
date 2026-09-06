@@ -15,6 +15,8 @@ export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
 export const HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV =
   "MURPH_HOSTED_SUBAGENT_MODEL_OVERRIDES_ALLOWED";
 export const MURPH_ANDROID_APP_ENABLED_ENV = "MURPH_ANDROID_APP_ENABLED";
+export const MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV =
+  "MURPH_WEARABLE_TREND_CARDS_ENABLED";
 
 export interface HostedExecutionBaseUrlNormalizationOptions {
   allowHttpHosts?: readonly string[];
@@ -28,6 +30,10 @@ export function isHostedRuntimeProcessEnv(env: EnvSource): boolean {
 
 export function isMurphAndroidAppEnabled(env: EnvSource): boolean {
   return env[MURPH_ANDROID_APP_ENABLED_ENV] === "1";
+}
+
+export function isMurphWearableTrendCardsEnabled(env: EnvSource): boolean {
+  return env[MURPH_WEARABLE_TREND_CARDS_ENABLED_ENV] === "1";
 }
 
 export function normalizeHostedExecutionBaseUrl(

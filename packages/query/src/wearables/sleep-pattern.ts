@@ -58,6 +58,15 @@ export interface WearableSleepPatternBuildContext {
   >;
 }
 
+export interface WearableSleepDailyValue {
+  confidence: WearableSleepNight["totalSleepMinutes"]["confidence"]["level"];
+  date: string;
+  provider: string;
+  recordedAt: string | null;
+  totalSleepMinutes: number | null;
+  unit: string | null;
+}
+
 export function isWearableSleepPatternEligibleNight(
   night: { sleepType: WearableSleepSessionType },
 ): boolean {
@@ -100,6 +109,63 @@ export function resolveWearableSleepPatternReadFilters(
   };
 }
 
+/**
+ * Selects at most one completed, usable non-nap sleep value per localized
+ * sleep-end date. Callers must still supply adjacent stored dates, as directed
+ * by resolveWearableSleepPatternReadFilters, before applying the exact window.
+ */
+export function listWearableSleepDailyValues(
+  sleepNights: readonly WearableSleepNight[],
+  filters: WearableSleepPatternFilters = {},
+): WearableSleepDailyValue[] {
+  const asOf = parseAsOfInstant(filters.now);
+  const explicitReportingTimeZone = resolveExplicitReportingTimeZone(filters.timeZone);
+  const reportingTimeZone = explicitReportingTimeZone
+    ?? newestCompletedNonNapCanonicalTimeZone(sleepNights, asOf.getTime());
+  const asOfDate = reportingTimeZone
+    ? formatTimeZoneDateTimeParts(asOf, reportingTimeZone).dayKey
+    : asOf.toISOString().slice(0, 10);
+  const window = resolveWindow(filters, asOfDate, asOfDate);
+  const selected = selectPreparedSleepNights(
+    sleepNights,
+    explicitReportingTimeZone,
+    asOf.getTime(),
+    window,
+  );
+
+  const values = selected.nights.map((night) => ({
+    confidence: night.night.totalSleepMinutes.confidence.level,
+    date: night.analysisDate,
+    provider: night.provider,
+    recordedAt: night.night.totalSleepMinutes.selection.recordedAt,
+    totalSleepMinutes: night.totalSleepMinutes,
+    unit: night.night.totalSleepMinutes.selection.unit,
+  }));
+
+  // Daily totals do not require the clock-time evidence used by timing
+  // analysis. Keep an existing timed selection authoritative for its day.
+  const valuesByDate = new Map(values.map((value) => [value.date, value]));
+  for (const night of sleepNights) {
+    if (
+      night.sleepStartAt != null || night.sleepEndAt != null
+      || resolveSleepType(night) === "nap"
+      || night.date < window.from || night.date > window.to
+      || night.date >= asOfDate || valuesByDate.get(night.date)?.totalSleepMinutes != null
+    ) continue;
+    const totalSleepMinutes = selectedMetricValue(night.totalSleepMinutes);
+    if (totalSleepMinutes === null) continue;
+    valuesByDate.set(night.date, {
+      confidence: night.totalSleepMinutes.confidence.level,
+      date: night.date,
+      provider: night.totalSleepMinutes.selection.provider ?? night.provider ?? "unknown",
+      recordedAt: night.totalSleepMinutes.selection.recordedAt,
+      totalSleepMinutes,
+      unit: night.totalSleepMinutes.selection.unit,
+    });
+  }
+  return [...valuesByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
 export function buildWearableSleepPatternSummary(
   input: {
     sleepNights: readonly WearableSleepNight[];
@@ -125,17 +191,18 @@ export function buildWearableSleepPatternSummary(
     : asOf.toISOString().slice(0, 10);
   assertIsoDate(asOfDate, "as-of date");
 
-  const prepared = input.sleepNights
-    .map((night) => prepareSleepNight(night, explicitReportingTimeZone, asOf.getTime()))
-    .filter((night): night is PreparedSleepNight => night !== null);
   const window = resolveWindow(filters, asOfDate, asOfDate);
-  const preparedInWindow = prepared.filter((night) =>
-    night.analysisDate >= window.from && night.analysisDate <= window.to
+  const {
+    nights,
+    nonNapPreparedInWindow,
+    preparedInWindow,
+    sameDateCollapsed,
+  } = selectPreparedSleepNights(
+    input.sleepNights,
+    explicitReportingTimeZone,
+    asOf.getTime(),
+    window,
   );
-  const nonNapPreparedInWindow = preparedInWindow.filter(isWearableSleepPatternEligibleNight);
-  const collapsed = collapseDuplicateAndOverlappingNights(nonNapPreparedInWindow);
-  const sameDateCollapsed = selectOneNightPerAnalysisDate(collapsed.nights);
-  const nights = sameDateCollapsed.nights;
   const suppressionPreparedInWindow = input.sleepNights
     .flatMap((night) => prepareSleepSuppressionEvidence(
       night,
@@ -286,6 +353,33 @@ export function buildWearableSleepPatternSummary(
       weekday: weekdayMidpoints.length,
       weekend: weekendMidpoints.length,
     },
+  };
+}
+
+function selectPreparedSleepNights(
+  sleepNights: readonly WearableSleepNight[],
+  explicitReportingTimeZone: string | null,
+  asOfMs: number,
+  window: { from: string; to: string },
+): {
+  nights: PreparedSleepNight[];
+  nonNapPreparedInWindow: PreparedSleepNight[];
+  preparedInWindow: PreparedSleepNight[];
+  sameDateCollapsed: ReturnType<typeof selectOneNightPerAnalysisDate>;
+} {
+  const preparedInWindow = sleepNights
+    .map((night) => prepareSleepNight(night, explicitReportingTimeZone, asOfMs))
+    .filter((night): night is PreparedSleepNight => night !== null)
+    .filter((night) => night.analysisDate >= window.from && night.analysisDate <= window.to);
+  const nonNapPreparedInWindow = preparedInWindow.filter(isWearableSleepPatternEligibleNight);
+  const collapsed = collapseDuplicateAndOverlappingNights(nonNapPreparedInWindow);
+  const sameDateCollapsed = selectOneNightPerAnalysisDate(collapsed.nights);
+
+  return {
+    nights: sameDateCollapsed.nights,
+    nonNapPreparedInWindow,
+    preparedInWindow,
+    sameDateCollapsed,
   };
 }
 

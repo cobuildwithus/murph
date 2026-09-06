@@ -81,7 +81,7 @@ const commandGroups: Readonly<Record<string, string>> = {
   "validate": "",
   "vault": "compact-inbox-parser-attempts|repair|repair-experiment-media|repair-inbox-envelopes|repair-integration-ingests|repair-junction-hr-zones|repair-wearable-storage|show|stats|update",
   "vitals": "import-json|payload-schema|save|scaffold",
-  "wearables": "activity list|body list|day|drift|latest|metric latest|metric trend|patterns|recovery list|sleep list|sleep pattern|sources list",
+  "wearables": "activity list|body list|day|drift|latest|metric latest|metric trend|patterns|recovery list|sleep list|sleep pattern|sources list|view delete|view edit|view list|view save|view show",
   "workout": "add|defaults set|defaults show|delete|edit|exercise add|exercise set-reps|finish|format import-json|format list|format log|format save|format show|import csv|import inspect|import-json|list|manifest|payload-schema|set clear|set log|show|start|units set|units show",
 };
 const commandNames = new Set([

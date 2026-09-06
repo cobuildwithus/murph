@@ -808,6 +808,19 @@ External conversation directness is three-state authority. Explicit direct evide
 Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. Ordinary model-authored saves omit a recipe key and receive a generated `automationId`: titles may repeat, and existing records are patched only by exact id. A current loaded skill may supply only its exact stable, non-title-derived recipe key so a singleton product recipe can be rediscovered; inspection returns its authoritative id and every patch uses that id. The markdown owner stores that key in the existing slug field and otherwise derives an opaque id-based slug and path solely for schema and rollout compatibility; legacy aliases remain readable, while fixed managed automations retain their registered identities. Ordinary hosted model processes use the native `murph-member-workspace` permission profile: they retain normal workspace and temporary-file writes plus automation reads, while `bank/automations` is read-only at the filesystem boundary. The root-turn automation port remains outside that profile, and local operator CLI mutation behavior remains unchanged. Relative one-shot day words resolve from the persisted accepted input's ingress receipt time, with the stored event time only as a legacy fallback; if one delivery context spans different calendar dates in the requested IANA timezone, the host requires an explicit date instead of choosing a context-wide day. DST gap and fold recovery stays root-turn-local as an insertion-ordered collection keyed by an opaque recovery correlation and trusted date: each failure returns its key, each unresolved reminder receives a target-specific question in delivered and transcript text, and only a successful explicit-date owner mutation echoing that exact key and date removes the entry as completed. The correlation is stripped before the canonical owner call and grants no mutation authority; every executable or locally invalid correlated retry must match an existing exact key and date before owner execution or recovery-state mutation. An invalid matching retry retains the original target-specific entry, while an unknown, consumed, dismissed, or mismatched correlation is rejected without minting or resurrecting one; omission or a failed owner call leaves existing obligations untouched. The opaque key, rather than mutable title text, correlates an explicit retry or withdrawal with its exact pending DST question. When the participant instead withdraws the reminder or supersedes its trusted date, one active-root, offered-tool dismissal carrying that exact key and date removes only the matching ephemeral entry without calling the automation owner; any replacement date then proceeds as an ordinary independent save or versioned patch. No-reply or response-card delivery remains suppressed until the collection is empty. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Canonical automations may also own a bounded list of exact generic record references; scheduled execution persists them on the existing outbox delivery and exposes them with `automationId`, occurrence timestamps, and `supportSeriesId` to the next ordinary cross-session direct-chat turn as routing and interpretation context only, never mutation authority. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs as a fresh ephemeral thread on the resident App Server; its thread-local deny configuration leaves the ordinary provider-process launch identity unchanged. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For every hosted Linq send, foreground or scheduled, persisted route data, binding delivery, session actor, invocation-local delivery context, and explicit target are only bounded hints. Immediately before capability or provider work, the existing Web egress owner resolves one ephemeral typed route containing the canonical target, target kind, direct/group fact, privacy-blinded conversation locator, and only the raw recipient and sender coordinates required by that provider call. Runtime delivery consumes no other recipient or thread source and reasserts the identical route before capability access and the idempotent provider-dispatch claim; a mismatch fails before provider mutation. Raw coordinates remain transient across that signed control-plane exchange and the immediate provider call; they are never copied into prompts, logs, outbox/checkpoint/Temporal state, or artifacts. Exact-message authority, durable groups, known-group no-fallback, personal current-home fallback, and authorized stale direct-thread recovery retain their existing owners. An authorized private scheduled occurrence can therefore perform native-card capability lookup without a foreground actor or inbound delivery context, while unresolved authority remains retryable without a marker or manual-repair protocol.
 
 
+Automation inspection projects one content-free latest-occurrence receipt from
+the retained cron run plus current runtime/outbox evidence; it creates no
+receipt store and exposes no response, error, session, recipient, route,
+provider, or intent identifier. Configuration and next-occurrence state remain
+separate from generation and send evidence. The legacy internal `delivered`
+outcome means only provider dispatch for this projection, so the public result
+is sent with handset delivery unconfirmed; absent retained history is not proof
+that an automation never ran.
+Accepted text or media with an incomplete logical delivery is reported as
+`sent: partial`, preserving the pending or failed outcome. Terminal
+reconciliation retains that distinction in the existing run reason after the
+outbox pointer is cleared; partial dispatch never implies handset delivery.
+
 Detached phone-call results and usage-referral celebrations are the only
 notification families admitted through the dirty runtime's pre-checkpoint
 system prefix. Their server-generated event identities and idempotent delivery
@@ -883,9 +896,32 @@ Reply handling uses a different, historical boundary: the assistant receives a b
 
 ### Provider-Neutral Wearable Sleep Pattern Read Model
 
-`packages/query` derives one provider-neutral sleep-pattern summary from canonical wearable sleep evidence; it does not create a second persisted sleep owner. The default 28-day window reports coverage and missing dates without zero filling, excludes explicitly identified naps, and retains legacy records with unknown sleep type under an explicit caveat instead of guessing from titles. Duplicate and overlapping windows are suppressed deterministically. Session duration uses elapsed UTC instants across DST, while bedtime, wake, and midpoint use each night's canonical IANA time zone or an explicit validated reporting-zone fallback; clock fields are omitted when neither exists. Per-field sample counts stay visible and variability is withheld below its minimum sample count.
+`packages/query` derives one provider-neutral sleep-pattern summary from canonical wearable sleep evidence; it does not create a second persisted sleep owner. The default 28-day window reports coverage and missing dates without zero filling, excludes explicitly identified naps, and retains legacy records with unknown sleep type under an explicit caveat instead of guessing from titles. Duplicate and overlapping windows are suppressed deterministically. Session duration uses elapsed UTC instants across DST, while bedtime, wake, and midpoint use each night's canonical IANA time zone or an explicit validated reporting-zone fallback; clock fields are omitted when neither exists. Per-field sample counts stay visible and variability is withheld below its minimum sample count. The localized completed-night selection also feeds the fixed seven-day wearable snapshot, with canonical duration-only totals retained for completed dates when clock times are absent. That snapshot returns seven ascending completed reporting-zone dates, keeps missing observations as null, caps requested end dates at yesterday, averages only observed days, and compares the current mean with the prior seven calendar dates only when both windows have enough observations. Its closed metric keys keep RMSSD and SDNN as separate HRV series.
 
 The summary keeps total sleep distinct from session duration and leaves provider-reported awake minutes labeled as awake minutes rather than inferring WASO or awakening count. It surfaces provider and time-zone mixing, local-date mismatches, late-arriving records, nap-only dates, unknown legacy types, overlap suppression, latest sleep end and record time, latest-night age, and per-source staleness both relative to the newest provider and to the absolute as-of date. Assistant guidance must carry these caveats forward and must not turn missing or stale device coverage into a fact about how the member slept.
+
+### Saved Seven-Day Health Views
+
+`bank/preferences.json` owns saved seven-day health views as bounded typed
+configuration: one opaque stable id, one unique display name, and one to five
+ordered method-specific metric keys. Display names cannot use the opaque-id
+shape, so id-first lookup cannot shadow a named view. The record stores no wearable values,
+units, template text, schedule, route, or delivery state. Reads may resolve an
+exact id or unique case-insensitive name; edit and delete resolve that read to
+the exact stable id and mutate the latest preferences document under the
+existing preferences lock and audited canonical-write path. Every unrelated
+preferences writer preserves the optional collection, and an empty collection
+is omitted. Saving or editing a view never creates an automation or changes a
+managed digest. Only a separate explicit recurrence request creates an ordinary
+automation with the exact view id as routing context; each occurrence rereads
+the current view and fresh query data, while a deleted view is never recreated.
+This optional preferences field rolls out reader-first: readers that accept both
+omission and the bounded collection must be deployed before any writer emits a
+non-empty collection. Because the prior strict preferences reader rejects an
+unknown top-level field, the first persisted saved view establishes the rollback
+floor. Disable saved-view writes and remove the field through a compatible reader
+or explicit migration before reverting below that floor; never roll back the
+reader while emitted saved-view state remains.
 
 ## Hosted Labs Discovery
 
@@ -4000,6 +4036,32 @@ notes, and an update is complete only after a successful workout re-read
 followed by a new V6 native workout snapshot and V4 static fallback. Generic
 compact tables continue to use V3.
 
+The wearable-trend card is a separate trusted response-card
+variant. The model-facing tool accepts only one to five ordered method-specific
+metric keys or one exact saved-view id; host code reads the current fixed
+seven-completed-local-calendar-day query result and constructs the final card.
+The current unfinished day is excluded, including when a requested end date
+is today or in the future. Duration-only canonical sleep summaries remain
+eligible on completed dates without inheriting clock-time analysis requirements;
+known naps and invalid or unfinished windows remain excluded. V7 contains only
+seven consecutive local dates, ordered numeric-or-null rows, and the query-owned
+neutral comparison direction. It carries no source, provider, timezone,
+canonical reference, saved-view id, or other authority. Averages, labels,
+units, and seven-position sparklines are deterministic presentation derivations.
+Linq sends this variant with `interactive: true` and the V7 native app URL,
+with the existing static `image_url` layout for app-absent and macOS
+recipients. The schema-7-capable extension must ship before activation.
+Its provider preview remains value-free; capability failure and
+definitive pre-acceptance rejection use the complete deterministic text
+recovery through the existing outbox path. Provider acceptance cannot reveal a
+later image-fetch or VoiceOver failure, so physical installed-app, app-absent,
+macOS, image-failure, and VoiceOver proof remains a rollout gate.
+Production turn planning therefore exposes the wearable-card tool and its
+saved-view guidance only when the platform-owned
+`MURPH_WEARABLE_TREND_CARDS_ENABLED` value is exactly `1`; omission and every
+other value keep card production dormant while V7 readers and replay support
+remain available.
+
 The optional tracking reference is one exact canonical event ULID plus a
 canonical UTC snapshot instant. That reference remains in semantic transcript
 history so a later turn can reopen the workout without a second table store;
@@ -4011,21 +4073,29 @@ message URL, is not sent to the Web origin by an HTTPS request, and is decoded
 locally by the Messages extension. Recipients without that extension receive a
 provider static layout whose `image_url` carries the authority-free V4 workout
 envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
-stateless Web renderer accepts only strict V1-V5 presentation envelopes, reads
+stateless Web renderer accepts only strict V1-V7 presentation envelopes, reads
 no database or remote service, logs no card values, and returns private
 no-store/no-index headers. Linq uses that image as its static card fallback;
 Telegram daily-nutrition Rich Messages reuse the same image inside their native
 table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain only the bounded values permitted by its
-versioned delivery contract. V1-V4 carry private-direct presentation values;
-V5 uses the identity-free public challenge projection, and V6 carries its
-inline opaque-binding and bounded typed editable-set projection. None may
+versioned delivery contract. V1-V4 and V7 carry private-direct presentation
+values; V5 uses the identity-free public challenge projection, and V6 carries
+its inline opaque-binding and bounded typed editable-set projection. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
 Generic V3 tables use compact grid typography and choose their one shared-header
 grid solely from the exact intrinsic width of every admitted header and cell
 track plus its gutters. Only genuinely overwide content uses repeated
 full-width field labels; column count does not create a second layout authority.
+Wearable V7 instead owns one fixed shared seven-day axis and one to five flat
+metric rows; it does not route through the generic four-column table layout.
+V7 outbox rollout is runner-first: every runner that can claim or replay an
+intent must accept the V7 card before any producer persists one. The first
+strict-v1 outbox intent containing V7 establishes a separate rollback floor,
+because an older runner rejects that persisted card instead of safely
+downgrading it. Stop V7 production and drain, resolve, or compatibly rewrite all
+persisted V7 intents before reverting below the V7-capable runner.
 The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
 delivery. Generic compact-table provider chrome uses only the bounded title;
