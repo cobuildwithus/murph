@@ -12254,8 +12254,8 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns first complete digest e2e', () => {
-  it('sends one bounded digest after the first complete import', async () => {
+describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () => {
+  it.each([false, true])('sends a clear bounded digest with a full link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'personal-patterns-update',
@@ -12270,12 +12270,15 @@ describeRealCodex('real Codex Personal Patterns first complete digest e2e', () =
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
       const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      const commandCapturePath = path.join(workingDirectory, 'commands.txt')
       const vocabularyCapturePath = path.join(
         workingDirectory,
         'vocabulary-write.txt',
       )
       await materializePersonalPatternsBaselineVaultCli({
         binDirectory,
+        commandCapturePath,
+        initialDigestSent,
         ledgerCapturePath,
         vocabularyCapturePath,
       })
@@ -12286,7 +12289,10 @@ describeRealCodex('real Codex Personal Patterns first complete digest e2e', () =
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+          currentLocalDate: '2026-08-29',
+          scheduledOccurrenceAt: '2026-08-29T17:00:00.000Z',
+        }),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
         fixtureBinDirectory: binDirectory,
@@ -12300,76 +12306,75 @@ describeRealCodex('real Codex Personal Patterns first complete digest e2e', () =
           '- This is a controlled synthetic fixture.',
           '- Complete the normal scheduled decision.',
         ].join('\n\n'),
-        reasoningEffort: 'low',
+        reasoningEffort: automation.assistantTargetOverride?.reasoningEffort ?? 'medium',
         sandbox: 'workspace-write',
         workingDirectory,
       })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      if (decision.kind !== 'send_message') {
+        process.stdout.write(`[personal-pattern-decision-e2e] ${JSON.stringify(decision)}\n`)
+      }
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') throw new Error('Expected a Pattern message')
+      const message = decision.text
       const actions = readCapabilityRoutingActions(result.jsonEvents)
-      const patternReads = actions.filter(
-        (action) =>
-          action.kind === 'command' &&
-          action.command.includes('vault-cli wearables patterns'),
-      )
-      const ledgerReads = actions.filter(
-        (action) =>
-          action.kind === 'command' &&
-          action.command.includes(
-            'vault-cli knowledge show personal-pattern-notifications',
-          ),
-      )
-      const vocabularyReads = actions.filter(
-        (action) =>
-          action.kind === 'command' &&
-          action.command.includes(
-            'vault-cli knowledge show journal-pattern-vocabulary',
-          ),
-      )
-      const sourceReads = actions.filter(
-        (action) =>
-          action.kind === 'command' &&
-          action.command.includes('vault-cli wearables sources list'),
-      )
-      const ledgerWrites = actions.filter(
-        (action) =>
-          action.kind === 'command' &&
-          action.command.includes(
-            'vault-cli knowledge upsert --slug personal-pattern-notifications',
-          ),
-      )
-      const vocabularyWrites = actions.filter(
-        (action) =>
-          action.kind === 'command' &&
-          action.command.includes(
-            'vault-cli knowledge upsert --slug journal-pattern-vocabulary',
-          ),
-      )
+      // Count executed fixture commands, not shell text after a short-circuited &&.
+      const commands = (await readFile(commandCapturePath, 'utf8')).trim().split('\n')
+      const patternReads = commands.filter((command) => command.startsWith('wearables patterns '))
+      const vocabularyReads = commands.filter((command) => command.startsWith('knowledge show journal-pattern-vocabulary '))
+      const ledgerReads = commands.filter((command) => command.startsWith('knowledge show personal-pattern-notifications '))
+      const sourceReads = commands.filter((command) => command.startsWith('wearables sources list '))
+      const ledgerWrites = commands.filter((command) => command === 'knowledge upsert --slug personal-pattern-notifications')
+      const vocabularyWrites = commands.filter((command) => command === 'knowledge upsert --slug journal-pattern-vocabulary')
       const finishCalls = actions.filter(
         (action) =>
           action.kind === 'dynamic' &&
           action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
       )
 
-      expect(patternReads).toHaveLength(2)
-      expect(vocabularyReads).toHaveLength(1)
-      expect(ledgerReads.length).toBeGreaterThanOrEqual(1)
-      expect(ledgerReads.length).toBeLessThanOrEqual(2)
-      expect(sourceReads.length).toBeGreaterThanOrEqual(1)
-      expect(sourceReads.length).toBeLessThanOrEqual(2)
-      expect(ledgerWrites).toHaveLength(1)
-      expect(vocabularyWrites).toHaveLength(1)
-      expect(await readFile(vocabularyCapturePath, 'utf8')).toContain(
-        'yard-work',
-      )
-      expect(await readFile(ledgerCapturePath, 'utf8')).toContain('yard-work')
-      expect(finishCalls).toHaveLength(0)
-      expect(result.finalMessage).toMatch(/yard work/iu)
-      expect(result.finalMessage).toMatch(/grade D|D-grade/iu)
       process.stdout.write(
         `[personal-pattern-baseline-e2e] ${JSON.stringify({
-          finalMessage: result.finalMessage,
+          initialDigestSent,
+          patternReads: patternReads.length,
+          vocabularyWrites: vocabularyWrites.length,
+          finalMessage: message,
           ledgerWrites: ledgerWrites.length,
         })}\n`,
       )
+
+      expect(vocabularyWrites.length).toBeLessThanOrEqual(1)
+      expect(patternReads).toHaveLength(1 + vocabularyWrites.length)
+      expect(vocabularyReads).toHaveLength(1)
+      expect(ledgerReads).toHaveLength(1)
+      expect(sourceReads).toHaveLength(1)
+      expect(ledgerWrites).toHaveLength(1)
+      if (vocabularyWrites.length === 1) {
+        expect(await readFile(vocabularyCapturePath, 'utf8')).toContain('yard-work')
+      }
+      expect(await readFile(ledgerCapturePath, 'utf8')).toContain('yard-work')
+      expect(finishCalls).toHaveLength(0)
+      expect(message).toMatch(/yard work/iu)
+      expect(message).not.toMatch(/\bgrade\b|\b[A-E][- ](?:grade|association)\b|evidence days|classification|ledger/iu)
+      expect(message).toMatch(/(?:tend(?:ed|s)? to|tentative|early|hint|seem(?:ed|s)?|may|might)/iu)
+      expect(message).not.toMatch(/other factors|proof (?:of|that)|not caus(?:es|ation)|correlation.{0,20}causation/iu)
+      expect(message).not.toMatch(/(?:^|\n)\s*[•*-]\s/u)
+      expect(message.trim().split(/\s+/u).length).toBeLessThanOrEqual(100)
+      expect(message).toMatch(/(?:16|sixteen)\s+(?:comparable |matched )?(?:days|nights|comparisons|cases)/iu)
+      expect(message.trim()).toMatch(/\nhttps:\/\/www\.withmurph\.ai\/patterns$/u)
+      expect(message).not.toMatch(/`|\]\(|(?:^|\s)\/patterns\b/u)
+      expect(message).not.toMatch(/\b(?:should|need to|must) (?:do|add|stop|avoid|change)\b/iu)
+      const ledger = await readFile(ledgerCapturePath, 'utf8')
+      for (const outcomeId of ['hrv', 'sleep_score', 'readiness_score', 'respiratory_rate']) {
+        expect(ledger).toContain(outcomeId)
+      }
+      // Four eligible outcomes must be recorded, but the message remains bounded.
+      const mentionedOutcomes = [
+        /\bHRV\b|heart.rate variability/iu,
+        /sleep/iu,
+        /readiness/iu,
+        /breathing|respiratory/iu,
+      ].filter((pattern) => pattern.test(message))
+      expect(mentionedOutcomes.length).toBeLessThanOrEqual(3)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -32611,6 +32616,8 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
 
 async function materializePersonalPatternsBaselineVaultCli(input: {
   binDirectory: string
+  commandCapturePath: string
+  initialDigestSent: boolean
   ledgerCapturePath: string
   vocabularyCapturePath: string
 }): Promise<void> {
@@ -32622,32 +32629,57 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       asOfDate: '2026-08-29',
       cells: [
         {
-          classification: 'early_signal',
-          comparisonBasis: 'matched_weekday',
-          comparisonDays: 8,
+          classification: 'pattern',
+          comparisonBasis: 'confirmed_absence',
+          comparisonDays: 16,
           comparisonMean: 50,
           delta: 20,
           deltaPercent: 40,
           direction: 'higher',
-          exposedDays: 8,
+          exposedDays: 16,
           exposedMean: 70,
           factorId: 'yard-work',
-          grade: 'D',
+          grade: 'A',
           lagDays: 1,
           outcomeId: 'hrv',
-          stage: 'seen_again',
+          stage: 'worth_testing',
         },
+        ...[
+          { outcomeId: 'sleep_score', grade: 'C', count: 6, mean: 72, delta: 8 },
+          { outcomeId: 'readiness_score', grade: 'D', count: 3, mean: 65, delta: 9 },
+          { outcomeId: 'respiratory_rate', grade: 'D', count: 2, mean: 16, delta: -2 },
+        ].map(({ outcomeId, grade, count, mean, delta }) => ({
+          classification: grade === 'C' ? 'pattern' : 'early_signal',
+          comparisonBasis: 'confirmed_absence',
+          comparisonDays: count,
+          comparisonMean: mean,
+          delta,
+          deltaPercent: delta / mean * 100,
+          direction: delta > 0 ? 'higher' : 'lower',
+          exposedDays: count,
+          exposedMean: mean + delta,
+          factorId: 'yard-work',
+          grade,
+          lagDays: 1,
+          outcomeId,
+          stage: grade === 'C' ? 'seen_again' : 'new_clue',
+        })),
       ],
       factors: [
         {
           id: 'yard-work',
           kind: 'activity',
           label: 'Yard work',
-          observedDays: 8,
+          observedDays: 16,
         },
       ],
       lagDays: 1,
-      outcomes: [{ id: 'hrv', label: 'HRV', unit: 'ms' }],
+      outcomes: [
+        { id: 'hrv', label: 'HRV', unit: 'ms' },
+        { id: 'sleep_score', label: 'Sleep score', unit: 'score' },
+        { id: 'readiness_score', label: 'Readiness score', unit: 'score' },
+        { id: 'respiratory_rate', label: 'Respiratory rate', unit: 'breaths/min' },
+      ],
     },
   })
 
@@ -32655,6 +32687,7 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
     executablePath,
     [
       '#!/bin/sh',
+      `printf '%s %s %s %s\\n' "$1" "$2" "$3" "$4" >> ${quoteNutritionShellLiteral(input.commandCapturePath)}`,
       'case "$*" in',
       '  *"wearables patterns"*)',
       `    printf '%s\\n' '${report}'`,
@@ -32663,12 +32696,12 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       "    printf '%s\\n' '{\"sources\":[{\"provider\":\"fixture\",\"status\":\"healthy\",\"firstDate\":\"2026-05-02\",\"lastDate\":\"2026-08-29\",\"stalenessVsNewestDays\":0}]}'",
       '    ;;',
       '  *"knowledge show personal-pattern-notifications"*)',
-      "    printf '%s\\n' 'knowledge page not found' >&2",
-      '    exit 1',
+      ...(input.initialDigestSent
+        ? ["    printf '%s\\n' '{\"initialDigestSent\":true,\"results\":[]}'"]
+        : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
       '    ;;',
       '  *"knowledge show journal-pattern-vocabulary"*)',
-      "    printf '%s\\n' 'knowledge page not found' >&2",
-      '    exit 1',
+      "    printf '%s\\n' '{\"version\":1,\"concepts\":[{\"id\":\"yard-work\",\"label\":\"Yard work\",\"icon\":\"activity\",\"aliases\":[\"yard-work\"]}]}'",
       '    ;;',
       '  *"knowledge upsert --slug journal-pattern-vocabulary"*)',
       '    while [ "$#" -gt 0 ]; do',
@@ -34835,7 +34868,10 @@ function buildAdaptiveWearableDeveloperInstructions(input: {
   })
 }
 
-function buildWeeklyHealthInsightDeveloperInstructions(): string {
+function buildWeeklyHealthInsightDeveloperInstructions(input: {
+  currentLocalDate?: string
+  scheduledOccurrenceAt?: string
+} = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
@@ -34848,7 +34884,8 @@ function buildWeeklyHealthInsightDeveloperInstructions(): string {
       setupCommand: 'murph',
     },
     conversationScope: 'direct',
-    currentLocalDate: '2026-08-09',
+    currentLocalDate: input.currentLocalDate ?? '2026-08-09',
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt,
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',

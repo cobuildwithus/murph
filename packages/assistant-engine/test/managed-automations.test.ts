@@ -1316,6 +1316,15 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord?.instructions).toContain('Send at most one compact message')
     expect(patternsUpdateRecord?.instructions).toContain('factorId + outcomeId')
     expect(patternsUpdateRecord?.instructions).toContain(
+      'Determine new identities against the notification ledger read at the start of this run, after alias migration',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'report stages such as `seen_again` describe evidence strength, not notification history',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Preserve this decision when adding identities to the ledger before sending',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
       'Grade changes belong in the weekly health insight',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
@@ -1326,6 +1335,19 @@ describe('applyMurphManagedAutomations', () => {
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'combine at most three highlights',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Grades are internal selection and ledger metadata; never include letter grades',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain('C/D need a light qualifier')
+    expect(patternsUpdateRecord?.instructions).toContain('A qualifier within the finding is enough')
+    expect(patternsUpdateRecord?.instructions).toContain('do not turn cases into days')
+    expect(patternsUpdateRecord?.instructions).toContain('Never imply cause')
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'end with https://www.withmurph.ai/patterns on its own line',
+    )
+    expect(patternsUpdateRecord?.instructions).not.toMatch(
+      /State each grade|Always state the grade|available on `\/patterns`|briefly explain that other factors/u,
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'do not rely on a shell environment variable',
@@ -2439,6 +2461,36 @@ describe('applyMurphManagedAutomations', () => {
       .toBe(true)
     expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
       .toBe(false)
+  })
+
+  it('refreshes existing Personal Patterns wording without changing its route or schedule', async () => {
+    const options = {
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    }
+    await applyMurphManagedAutomations(options)
+    const record = managedAutomationMocks.records.get(MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)
+    if (!record) throw new Error('Expected the managed Patterns automation')
+    const expectedInstructions = record.instructions
+    managedAutomationMocks.records.set(record.automationId, {
+      ...record,
+      instructions: 'Previous managed notification wording.',
+    })
+    managedAutomationMocks.upsertAutomation.mockClear()
+
+    await expect(applyMurphManagedAutomations(options)).resolves.toEqual({
+      created: 0,
+      skipped: 4,
+      updated: 1,
+    })
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(managedAutomationMocks.records.get(record.automationId)).toMatchObject({
+      instructions: expectedInstructions,
+      route: record.route,
+      schedule: record.schedule,
+      status: record.status,
+    })
   })
 
   it('does not rewrite an unchanged managed automation', async () => {
