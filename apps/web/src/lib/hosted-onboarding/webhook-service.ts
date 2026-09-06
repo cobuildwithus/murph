@@ -2996,9 +2996,9 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       : Promise.resolve(null),
     preserveFirstPreparationError(async () => {
       const preparedControlRoot = await prepareDomainRoot("control");
-      for (const rootKeyId of readHostedMemberIdentityControlRootKeyIds(
-        identityRecord,
-      )) {
+      for (const rootKeyId of preparedFamilyInvite
+        ? readHostedMemberIdentityControlRootKeyIds(identityRecord)
+        : []) {
         const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
           prisma: input.prisma,
           references: [{
@@ -3019,6 +3019,9 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
         routingRecord,
       });
       return {
+        identityState: preparedFamilyInvite && identityRecord
+          ? await projectHostedMemberIdentityState(identityRecord, input.prisma)
+          : null,
         preparedControlRoot,
         routingState: routingRecord
           ? await projectHostedMemberRoutingState(
@@ -3039,9 +3042,6 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   if (controlRoutingResult.status === "rejected") {
     throw controlRoutingResult.reason;
   }
-  const identityState = identityRecord
-    ? await projectHostedMemberIdentityState(identityRecord, input.prisma)
-    : null;
   const preparedFamilyOwnerNotification = shouldPrepareFamilyAcceptance
     ? await prepareHostedFamilyOwnerNotification({
         inviteCode: preparedFamilyInvite.inviteCode,
@@ -3050,7 +3050,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     : null;
   return {
     identityRecord,
-    identityState,
+    identityState: controlRoutingResult.value.identityState,
     memberId,
     preparedControlRoot: controlRoutingResult.value.preparedControlRoot,
     preparedCryptoDomainRoots,
