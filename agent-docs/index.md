@@ -4,6 +4,9 @@ Last verified: 2026-09-05
 
 ## Purpose
 
+Personal Patterns expiry and checkpoint wake diagnostics are specified in
+`agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
+
 Runtime-owned terminal Linq send recovery and replacement receipt ownership
 are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/SECURITY.md`; focused provider and PostgreSQL proof is indexed in

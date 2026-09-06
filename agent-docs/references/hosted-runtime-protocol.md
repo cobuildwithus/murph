@@ -2112,6 +2112,21 @@ missing fields from an older runtime stay quiet, while occurrence-expired
 events remain terminal. Every terminal event for one scheduled occurrence uses
 one member-independent email body and Resend idempotency key, so concurrent
 member failures coalesce without a new alert queue or persistence owner.
+The generic email describes either expiry or terminal failure without asserting
+that an expired occurrence reached a model. Expiry diagnostics add
+`failurePriorFailureCount` from the existing consecutive-failure state.
+Snapshot lifecycle events add `nextWakeState`, `nextWakeOffsetMs`,
+`nextDefaultProcessingWakeState`, `nextDefaultProcessingWakeOffsetMs`,
+`nextDefaultProcessingWakeReasonPresent`, and
+`systemMailboxProgressGenerationPresent`. Wake states distinguish `omitted`
+legacy fields, explicit `none`, `invalid`, `due`, and `future`; offsets are
+finite milliseconds relative to diagnostic construction, negative when overdue,
+and null for omitted, absent, or invalid timestamps. These are attempted
+checkpoint projections, not runtime admission decisions. Use
+`checkpoint.snapshot_finished` with `webCheckpointAccepted: true` to establish
+acceptance; failed or preempted snapshots do not establish it. Older runners
+omit the new diagnostics. Neither raw timestamp input nor arbitrary reason
+strings enter the new fields, and no diagnostic drives wake selection.
 Separately, after an exact successful completion clears the matching write
 fence, Cloudflare makes at most one signed `POST` to
 `/api/internal/hosted-runtime/owner-released`. The request has no body, uses a

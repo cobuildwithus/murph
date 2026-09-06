@@ -1368,6 +1368,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       {
         ...createCheckpointInput("idle_shutdown"),
         handledConversationFrontierSelected: true,
+        nextDefaultProcessingWakeAt: "invalid synthetic wake value",
+        nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "1",
       },
     )).rejects.toThrow("HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON");
 
@@ -1377,10 +1380,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const redactedJson = failureEntry?.redactedJson ?? {};
     expect(redactedJson).toMatchObject({
       handledConversationFrontierSelected: true,
+      nextDefaultProcessingWakeState: "invalid",
+      nextDefaultProcessingWakeOffsetMs: null,
     });
     expect(redactedJson).not.toHaveProperty("webCheckpointAccepted");
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(JSON.stringify(redactedJson)).not.toContain(rawPath);
+    expect(JSON.stringify(redactedJson)).not.toContain("invalid synthetic wake value");
     expect(JSON.stringify(redactedJson)).toContain("<redacted-path>");
   });
 
@@ -1506,6 +1512,49 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await snapshot;
     await canonicalWrite;
     expect(canonicalWriterEntered).toBe(true);
+  });
+
+  it.each([
+    { label: "legacy omitted", wakeAt: undefined, state: "omitted", offsetMs: null },
+    { label: "explicitly absent", wakeAt: null, state: "none", offsetMs: null },
+    { label: "overdue", wakeAt: "2026-04-08T12:00:00.000Z", state: "due", offsetMs: -3_600_000 },
+    { label: "due now", wakeAt: "2026-04-08T13:00:00.000Z", state: "due", offsetMs: 0 },
+    { label: "future", wakeAt: "2026-04-08T14:00:00.000Z", state: "future", offsetMs: 3_600_000 },
+  ])("records a $label default wake alongside a future system wake", async ({ wakeAt, state, offsetMs }) => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-04-08T13:00:00.000Z"));
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const options = createBridgeOptions({ platform, vaultRoot });
+    await options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"),
+      nextWakeAt: "2026-04-08T13:01:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      ...(wakeAt === undefined ? {} : {
+        nextDefaultProcessingWakeAt: wakeAt,
+        nextDefaultProcessingWakeReason: wakeAt === null ? null : "assistant",
+        systemMailboxProgressGeneration: "1",
+      }),
+    });
+
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.find((entry) => entry.eventCode === "checkpoint.snapshot_finished"))
+      .toMatchObject({
+        redactedJson: {
+          nextWakeState: "future",
+          nextWakeOffsetMs: 60_000,
+          nextDefaultProcessingWakeState: state,
+          nextDefaultProcessingWakeOffsetMs: offsetMs,
+          nextDefaultProcessingWakeReasonPresent: wakeAt != null,
+          systemMailboxProgressGenerationPresent: wakeAt !== undefined,
+          webCheckpointAccepted: true,
+        },
+      });
+    const checkpointRequest = calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
+    expect(checkpointRequest?.nextWakeAt).toBe("2026-04-08T13:01:00.000Z");
+    expect(checkpointRequest?.nextDefaultProcessingWakeAt).toBe(wakeAt);
+    expect(checkpointRequest).not.toHaveProperty("nextDefaultProcessingWakeState");
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
   });
 
   it("retains one finished lifecycle record with checkpoint and plan metadata", async () => {
