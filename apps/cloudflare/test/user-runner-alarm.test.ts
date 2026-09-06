@@ -2355,6 +2355,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspaceRead = createDeferred<void>();
+    const cryptoRead = createDeferred<void>();
     const workspaceReadTimeouts: number[] = [];
     let preparationStartedAtEpochMs: number | null = null;
     const ensureReadyForProcessing = vi.fn<
@@ -2385,12 +2386,7 @@ describe("HostedUserRunner execution coordination", () => {
     }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
-      onCryptoContextRead: () => {
-        if (preparationStartedAtEpochMs === null) {
-          throw new Error("Expected workspace preparation to have started.");
-        }
-        vi.setSystemTime(new Date(preparationStartedAtEpochMs + 1_250));
-      },
+      onCryptoContextRead: async () => { await cryptoRead.promise; },
       onWorkspaceRead: async (input) => {
         preparationStartedAtEpochMs = Date.now();
         workspaceReadTimeouts.push(input.timeoutMs);
@@ -2436,13 +2432,14 @@ describe("HostedUserRunner execution coordination", () => {
     expect(workspaceReadTimeouts[0]).toBeLessThanOrEqual(19_000);
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
       ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-    )).toHaveLength(0);
+    )).toHaveLength(1);
 
     if (preparationStartedAtEpochMs === null) {
       throw new Error("Expected workspace preparation to have started.");
     }
-    vi.setSystemTime(new Date(preparationStartedAtEpochMs + 1_000));
+    vi.setSystemTime(new Date(preparationStartedAtEpochMs + 1_250));
     workspaceRead.resolve();
+    cryptoRead.resolve();
 
     await expect(accepted).resolves.toMatchObject({
       action: "started",
@@ -2469,14 +2466,14 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_042,
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
-      runtimeStoreEnsureElapsedMs: 250,
+      runtimeStoreEnsureElapsedMs: 1_250,
       shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
       shellPrewarmFinishedAtEpochMs: 1_777_000_000_030,
       shellPrewarmHintCount: 2,
       shellPrewarmOperationElapsedMs: 20,
       shellPrewarmOutcome: "cold_start_observed",
       shellPrewarmSource: "linq-typing-started",
-      workspaceReadElapsedMs: 1_000,
+      workspaceReadElapsedMs: 1_250,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
       .not.toBe(999_995);
@@ -2731,23 +2728,27 @@ describe("HostedUserRunner execution coordination", () => {
   it("returns retry_later when fresh-start preparation exhausts the caller command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceRead = createDeferred<void>();
+    const readinessStarted = createDeferred<void>();
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => ({ kind: "ready" }));
+    >(async () => { readinessStarted.resolve(); return { kind: "ready" }; });
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
-      onWorkspaceRead: () => {
-        vi.setSystemTime(new Date("2026-04-27T00:00:09.500Z"));
-      },
+      onWorkspaceRead: async () => { await workspaceRead.promise; },
       workspace: createWorkspaceState({ version: "5" }),
     });
     await runner.bindUser(TEST_USER_ID);
 
-    await expect(runner.ensureRuntimeProcessingForUser({
+    const response = runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs: 10_000,
       orchestrationAttemptId: "test-orchestration-attempt",
       userId: TEST_USER_ID,
-    })).resolves.toEqual({
+    });
+    await readinessStarted.promise;
+    vi.setSystemTime(new Date("2026-04-27T00:00:09.500Z"));
+    workspaceRead.resolve();
+    await expect(response).resolves.toEqual({
       kind: "retry_later",
       retryAt: "2026-04-27T00:00:19.500Z",
     });
@@ -3118,7 +3119,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
       ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-    )).toHaveLength(0);
+    )).toHaveLength(1);
     expect(invoke).not.toHaveBeenCalled();
 
     readiness.reject(createRuntimeStartupTimeoutError());

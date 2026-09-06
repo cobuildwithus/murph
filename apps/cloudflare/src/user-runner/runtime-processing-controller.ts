@@ -280,7 +280,7 @@ export class RuntimeProcessingController {
   constructor(
     private readonly input: {
       env: HostedExecutionEnvironment;
-      invocationService: Pick<RuntimeInvocationService, "prepareWithFence" | "invokePreparedWithFence">;
+      invocationService: Pick<RuntimeInvocationService, "prepareForFreshStart" | "invokePreparedWithFence">;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
       readCheckpointHandoff?: (input: {
         attemptId: string;
@@ -1268,6 +1268,14 @@ export class RuntimeProcessingController {
       userId: processingInput.userId,
     });
 
+    // Read-only preparation can overlap the distributed claim/bind handoff.
+    // Rejection is observed even if allocation exits early; each read retains
+    // the original command deadline and cannot start a member invocation.
+    const prepareInvocation = this.input.invocationService.prepareForFreshStart({
+      commandBudget: input.commandBudget,
+      input: toRuntimeInvocationInput(processingInput),
+    });
+
     const standbyAllocationStartedAtEpochMs = Date.now();
     const resolution = await this.resolveFreshRunnerContainer({
       commandBudget: input.commandBudget,
@@ -1343,6 +1351,7 @@ export class RuntimeProcessingController {
     }
 
     const preparation = await this.prepareFreshRuntimeStart({
+      prepareInvocation,
       commandBudget: input.commandBudget,
       input: processingInput,
       runnerContainerName,
@@ -1444,12 +1453,12 @@ export class RuntimeProcessingController {
   }
 
   private async prepareFreshRuntimeStart(input: {
+    prepareInvocation: ReturnType<RuntimeInvocationService["prepareForFreshStart"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
     runnerContainerName: string;
     token: RunnerWriteFenceToken;
   }): Promise<FreshRuntimeStartPreparation> {
-    const executionInput = toRuntimeInvocationInput(input.input);
     const token = input.token;
     const readinessPromise = this.confirmRuntimeContainerStartup({
       commandBudget: input.commandBudget,
@@ -1467,11 +1476,7 @@ export class RuntimeProcessingController {
         startupConfirmed,
       };
     });
-    const preparationPromise = this.input.invocationService.prepareWithFence({
-      commandBudget: input.commandBudget,
-      input: executionInput,
-      token,
-    }).then(
+    const preparationPromise = input.prepareInvocation(token).then(
       (prepared) => ({
         kind: "prepared" as const,
         prepared,

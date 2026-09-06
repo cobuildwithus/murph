@@ -106,7 +106,7 @@ import {
 } from "./runtime-fence-liveness.js";
 import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import { RunnerStateStore } from "./runner-state-store.js";
-import { RunnerStoreCache } from "./runner-store-cache.js";
+import { RunnerStoreCache, type RunnerUserStores } from "./runner-store-cache.js";
 
 const RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS = 5_000;
 const RUNTIME_OWNER_RELEASE_CALLBACK_TIMEOUT_MS = 2_000;
@@ -176,6 +176,13 @@ export type RuntimeInvocationInput = {
   userId: string;
 };
 
+interface RuntimeInvocationPreparationInputs {
+  workspaceRead: HostedWorkspaceReadResponse;
+  workspaceReadElapsedMs: number;
+  stores: RunnerUserStores;
+  runtimeStoreEnsureElapsedMs: number;
+}
+
 export interface PreparedRuntimeInvocation {
   input: RuntimeInvocationInput;
   job: HostedExecutionWorkspaceInvocationJobInput;
@@ -226,32 +233,71 @@ export class RuntimeInvocationService {
     });
   }
 
+  prepareForFreshStart(input: {
+    commandBudget?: RuntimeProcessingCommandBudget;
+    input: RuntimeInvocationInput;
+  }): (token: RunnerWriteFenceToken) => Promise<PreparedRuntimeInvocation> {
+    const preparationInputs = this.prepareInputs(input);
+    // Allocation can fail before consuming the reads. Observe rejection while
+    // their original request deadlines bound any remaining read-only work.
+    void preparationInputs.catch(() => undefined);
+    return (token) => this.prepareWithInputs({ ...input, token }, preparationInputs);
+  }
+
+  private async prepareInputs(input: {
+    commandBudget?: RuntimeProcessingCommandBudget;
+    input: RuntimeInvocationInput;
+  }): Promise<RuntimeInvocationPreparationInputs> {
+    const timeoutMs = input.commandBudget
+      ? readRuntimeProcessingCommandStepTimeoutMs({
+          budget: input.commandBudget,
+          stepTimeoutMs: this.input.env.webControlTimeoutMs,
+        })
+      : this.input.env.webControlTimeoutMs;
+    const startedAtMs = Date.now();
+    let workspaceReadElapsedMs = 0;
+    let runtimeStoreEnsureElapsedMs = 0;
+    // Both reads are admitted member inputs. Neither grants execution authority;
+    // fenced preparation still requires the exact slot and write fence.
+    const [workspaceRead, stores] = await Promise.all([
+      this.input.readHostedWorkspaceFromWeb(input.input.userId, { timeoutMs })
+        .finally(() => { workspaceReadElapsedMs = Math.max(0, Date.now() - startedAtMs); }),
+      this.input.runnerStoreCache.ensure(input.input.userId, { webControlTimeoutMs: timeoutMs })
+        .finally(() => { runtimeStoreEnsureElapsedMs = Math.max(0, Date.now() - startedAtMs); }),
+    ]);
+    this.input.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.input.userId);
+    if (stores.userId !== input.input.userId) {
+      throw new Error("Hosted runtime preparation stores belong to another user.");
+    }
+    return {
+      workspaceRead,
+      workspaceReadElapsedMs,
+      stores,
+      runtimeStoreEnsureElapsedMs,
+    };
+  }
+
   async prepareWithFence(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
     input: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
   }): Promise<PreparedRuntimeInvocation> {
+    return this.prepareWithInputs(input, this.prepareInputs(input));
+  }
+
+  private async prepareWithInputs(
+    input: Parameters<RuntimeInvocationService["prepareWithFence"]>[0],
+    preparationInputs: Promise<RuntimeInvocationPreparationInputs>,
+  ): Promise<PreparedRuntimeInvocation> {
     const preparationStartedAtMs = Date.now();
-    const workspaceReadStartedAtMs = Date.now();
-    const workspaceRead = await this.input.readHostedWorkspaceFromWeb(
-      input.input.userId,
-      {
-        timeoutMs: input.commandBudget
-          ? readRuntimeProcessingCommandStepTimeoutMs({
-              budget: input.commandBudget,
-              stepTimeoutMs: this.input.env.webControlTimeoutMs,
-            })
-          : this.input.env.webControlTimeoutMs,
-      },
-    );
-    const workspaceReadElapsedMs = Math.max(
-      0,
-      Date.now() - workspaceReadStartedAtMs,
-    );
-    this.input.assertWorkspaceBelongsToRunnerUser(
-      workspaceRead.workspace,
-      input.input.userId,
-    );
+    const preparation = await preparationInputs;
+    if (input.commandBudget) {
+      readRuntimeProcessingCommandStepTimeoutMs({
+        budget: input.commandBudget,
+        stepTimeoutMs: this.input.env.webControlTimeoutMs,
+      });
+    }
+    const { workspaceRead, workspaceReadElapsedMs, stores, runtimeStoreEnsureElapsedMs } = preparation;
     const workspaceVersion = workspaceRead.workspace?.version ?? "0";
     const hostedAssistantCustomInferenceOverride =
       workspaceRead.hostedAssistantCustomInferenceOverride ?? null;
@@ -318,10 +364,8 @@ export class RuntimeInvocationService {
       token: input.token,
       workspaceVersion,
     });
-    const {
-      runtimeStoreEnsureElapsedMs,
-      ...workspaceRunnerInvocation
-    } = await this.prepareWorkspaceRunnerInvocation({
+    const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
+      stores,
       commandBudget: input.commandBudget,
       hostedAssistantCustomInferenceOverride,
       hostedAssistantModelOverride:
@@ -901,6 +945,7 @@ export class RuntimeInvocationService {
       HostedAssistantReasoningEffortOverride | null;
     hostedAssistantSubagentModelOverridesAllowed: boolean;
     processingMode?: HostedWorkspaceInvocationProcessingMode | null;
+    stores: RunnerUserStores;
     token: RunnerWriteFenceToken;
     userId: string;
     workspace: HostedWorkspaceState | null;
@@ -908,7 +953,6 @@ export class RuntimeInvocationService {
   }): Promise<{
     job: HostedExecutionWorkspaceInvocationJobInput;
     runnerContainerName: string;
-    runtimeStoreEnsureElapsedMs: number;
   }> {
     if (!this.input.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
@@ -943,23 +987,7 @@ export class RuntimeInvocationService {
       }
     }
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
-    const webControlTimeoutMs = input.commandBudget
-      ? readRuntimeProcessingCommandStepTimeoutMs({
-          budget: input.commandBudget,
-          stepTimeoutMs: this.input.env.webControlTimeoutMs,
-        })
-      : undefined;
-    const runtimeStoreEnsureStartedAtMs = Date.now();
-    const stores = await this.input.runnerStoreCache.ensure(
-      input.userId,
-      webControlTimeoutMs === undefined
-        ? undefined
-        : { webControlTimeoutMs },
-    );
-    const runtimeStoreEnsureElapsedMs = Math.max(
-      0,
-      Date.now() - runtimeStoreEnsureStartedAtMs,
-    );
+    const stores = input.stores;
     const readRunnerSecrets = async () =>
       await stores.runnerSecrets.readRunnerSecrets(input.userId);
     const emitSnapshotRestorePreparationUnavailableLog = (error: unknown): void => {
@@ -985,7 +1013,7 @@ export class RuntimeInvocationService {
         userId: input.userId,
         workspace: input.workspace,
       });
-    const [runnerSecrets, workspaceSnapshotPathHashSecret, preparedSnapshotRestore] =
+    const [runnerSecrets, workspaceSnapshotPathHashSecret, preparedSnapshotRestore, runnerContainerName] =
       await Promise.all([
         input.commandBudget
           ? runRuntimeProcessingCommandStep({
@@ -1001,12 +1029,12 @@ export class RuntimeInvocationService {
           operation: prepareSnapshotRestore,
           stepTimeoutMs: this.input.env.webControlTimeoutMs,
         }),
+        this.resolveInvocationRunnerContainerName({
+          commandBudget: input.commandBudget ?? null,
+          runnerContainerName: input.token.runnerContainerName,
+          userId: input.userId,
+        }),
       ]);
-    const runnerContainerName = await this.resolveInvocationRunnerContainerName({
-      commandBudget: input.commandBudget ?? null,
-      runnerContainerName: input.token.runnerContainerName,
-      userId: input.userId,
-    });
     const openAiCredentialBeforeMintKind =
       readHostedProviderCredentialDiagnosticKind(forwardedEnv.OPENAI_API_KEY);
     const veniceCredentialBeforeMintKind =
@@ -1127,7 +1155,6 @@ export class RuntimeInvocationService {
     return {
       job,
       runnerContainerName,
-      runtimeStoreEnsureElapsedMs,
     };
   }
 

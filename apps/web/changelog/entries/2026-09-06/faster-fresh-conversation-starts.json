@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "faster-fresh-conversation-starts",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less setup before a fresh reply",
+    "summary": "Murph prepares independent parts of a fresh conversation session together so it can begin processing your message sooner.",
+    "details": "Workspace access and session checks still finish before processing begins. The saving varies with startup and network conditions.",
+    "relevanceTags": [
+      "messaging",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      2999
+    ]
+  }
+}
