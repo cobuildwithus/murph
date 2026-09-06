@@ -32,6 +32,7 @@ vi.mock("@murphai/runtime-state", async () => {
 
 import {
   createBrowserVaultRouteQueryClient,
+  decodeReadyBrowserVaultSession,
   isBrowserVaultAbortError,
   isBrowserVaultUnauthorizedError,
   loadBrowserVaultReplica,
@@ -48,6 +49,18 @@ beforeEach(() => {
   });
   runtimeMocks.unwrapHostedBrowserSessionKey.mockReset();
   runtimeMocks.unwrapHostedBrowserSessionKey.mockResolvedValue(new Uint8Array([1, 2, 3]));
+});
+
+test("companion decode rejects another member before private key unwrap", async () => {
+  const fixture = createShardedReadyFixture(["core"]);
+  const session = parseBrowserVaultSessionResponse(await fixture.response.json());
+  assert.equal(session.state, "ready");
+  if (session.state !== "ready") return;
+  const keys = await import("@murphai/runtime-state").then((runtime) => runtime.generateHostedUserRecipientKeyPair());
+  await assert.rejects(decodeReadyBrowserVaultSession({
+    session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: "different_member",
+  }), /did not match the authorized member/u);
+  assert.equal(runtimeMocks.unwrapHostedBrowserSessionKey.mock.calls.length, 0);
 });
 
 test("route query construction ignores loaded capabilities outside the route demand", async () => {
