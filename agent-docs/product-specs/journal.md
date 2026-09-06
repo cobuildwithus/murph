@@ -164,7 +164,8 @@ Journal projection.
 
 ## Native iOS experience
 
-The native Journal page reads the same saved projection through
+A single native Home card previews the current day and opens the full Journal
+page, with no dedicated Journal tab. It reads the same saved projection through
 `GET /api/device-sync/companion/journal`. The route derives the member from
 Privy bearer authentication, enforces current Browser Vault access and consent
 before and after loading the encrypted core shard, and returns only Journal
