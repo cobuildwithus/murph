@@ -9,6 +9,6 @@
     "summary": "Personal Pattern messages explain what Murph noticed and how much support it has in everyday language.",
     "details": "Updates keep uncertainty clear, leave letter grades out of the message, and include a clickable Patterns link when more findings remain.",
     "relevanceTags": ["patterns", "messaging"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2967]
   }
 }
