@@ -8,8 +8,15 @@
     "title": "A simpler home screen",
     "summary": "Home now keeps your remaining setup steps together and points you back to Murph when setup is done.",
     "details": "Experiment cards and feature promotions no longer appear on Home.",
-    "relevanceTags": ["home"],
-    "sourcePullRequests": [],
-    "tryIt": { "label": "Open Home", "href": "/home" }
+    "relevanceTags": [
+      "home"
+    ],
+    "sourcePullRequests": [
+      3017
+    ],
+    "tryIt": {
+      "label": "Open Home",
+      "href": "/home"
+    }
   }
 }
