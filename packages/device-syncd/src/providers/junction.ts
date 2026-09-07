@@ -1536,7 +1536,7 @@ export function createJunctionDeviceSyncProvider(
   async function executeJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
-    resourceInventories?: Map<string, readonly JunctionProviderConnection[]>,
+    passInventories?: Map<string, readonly JunctionProviderConnection[]>,
   ): Promise<ProviderJobResult> {
     const skippedOptionalResources: JunctionSkippedOptionalResource[] = [];
 
@@ -1569,7 +1569,7 @@ export function createJunctionDeviceSyncProvider(
         job,
         skippedOptionalResources,
         completedWorkoutStreamIdentities,
-        resourceInventories,
+        passInventories,
       );
     }
 
@@ -1585,20 +1585,8 @@ export function createJunctionDeviceSyncProvider(
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
-    const listedSourceProviders = await measureJunctionProviderRequest(
-      context,
-      "inventory",
-      () => client.listUserProviders(
-        context.account.externalAccountId,
-        {
-          ...(job.kind === "reconcile" && context.shouldYield
-            ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
-            : {}),
-          signal: context.signal ?? null,
-        },
-      ),
-    );
-    await projectJunctionSources(context, listedSourceProviders);
+    const inventory = createJobInventoryLoader(context, job, passInventories);
+    const listedSourceProviders = await inventory.loadAndProjectSourceProviders();
     const sourceProviders = sourceProviderSlug
       ? listedSourceProviders.filter((provider) => areJunctionProviderSlugsDataEquivalent(
           provider.origin.sourceProviderSlug ?? provider.slug,
@@ -2494,21 +2482,23 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  function createResourceInventoryLoader(
+  function createJobInventoryLoader(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
-    resourceInventories?: Map<string, readonly JunctionProviderConnection[]>,
+    passInventories?: Map<string, readonly JunctionProviderConnection[]>,
   ) {
+    const boundedReconcile = job.kind === "reconcile" && Boolean(context.shouldYield);
     // Historical attempts and calendar repair require their own inventory read.
-    const inventoryKey = resourceInventories
+    const inventoryKey = passInventories
+      && (job.kind === "resource" || boundedReconcile)
       && !readJunctionSparseCalendarRefreshDay(job)
       && job.payload.historicalBackfill !== true
-      ? buildJunctionResourceInventoryKey(context)
+      ? buildJunctionJobInventoryKey(context, boundedReconcile)
       : null;
     if (!inventoryKey) {
-      resourceInventories?.clear();
+      passInventories?.clear();
     }
-    const priorInventory = inventoryKey ? resourceInventories?.get(inventoryKey) : undefined;
+    const priorInventory = inventoryKey ? passInventories?.get(inventoryKey) : undefined;
     let listedSourceProviders = priorInventory ?? null;
     let projectedSourceProviders = priorInventory ?? null;
     const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
@@ -2520,6 +2510,9 @@ export function createJunctionDeviceSyncProvider(
         context,
         "inventory",
         () => client.listUserProviders(context.account.externalAccountId, {
+          ...(boundedReconcile
+            ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
+            : {}),
           signal: context.signal ?? null,
         }),
       );
@@ -2534,7 +2527,7 @@ export function createJunctionDeviceSyncProvider(
       await projectJunctionSources(context, sourceProviders);
       projectedSourceProviders = sourceProviders;
       if (inventoryKey) {
-        resourceInventories?.set(inventoryKey, sourceProviders);
+        passInventories?.set(inventoryKey, sourceProviders);
       }
       return sourceProviders;
     };
@@ -2546,7 +2539,7 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     completedWorkoutStreamIdentities: ReadonlySet<string>,
-    resourceInventories?: Map<string, readonly JunctionProviderConnection[]>,
+    passInventories?: Map<string, readonly JunctionProviderConnection[]>,
   ): Promise<ProviderJobResult> {
     const resourceName = normalizeString(job.payload.resource);
 
@@ -2628,7 +2621,7 @@ export function createJunctionDeviceSyncProvider(
       return {};
     }
     const { loadSourceProviders, loadAndProjectSourceProviders } =
-      createResourceInventoryLoader(context, job, resourceInventories);
+      createJobInventoryLoader(context, job, passInventories);
 
     if (calendarRefreshDay) {
       if (
@@ -6135,16 +6128,19 @@ export function createJunctionDeviceSyncProvider(
       createScheduledJobs,
       executeJob,
       createPassExecutor(): DeviceJobExecutor {
-        const resourceInventories = new Map<string, readonly JunctionProviderConnection[]>();
+        const passInventories = new Map<string, readonly JunctionProviderConnection[]>();
         return {
           async executeJob(context, job) {
-            if (job.kind !== "resource") {
-              resourceInventories.clear();
+            if (
+              (job.kind !== "resource" && job.kind !== "reconcile")
+              || isFullJobTimeseriesContinuation(job)
+            ) {
+              passInventories.clear();
             }
             try {
-              return await executeJob(context, job, resourceInventories);
+              return await executeJob(context, job, passInventories);
             } catch (error) {
-              resourceInventories.clear();
+              passInventories.clear();
               throw error;
             }
           },
@@ -6154,7 +6150,10 @@ export function createJunctionDeviceSyncProvider(
   };
 }
 
-function buildJunctionResourceInventoryKey(context: ProviderJobContext): string {
+function buildJunctionJobInventoryKey(
+  context: ProviderJobContext,
+  boundedReconcile: boolean,
+): string {
   const account = context.account;
   return JSON.stringify([
     account.id,
@@ -6162,6 +6161,7 @@ function buildJunctionResourceInventoryKey(context: ProviderJobContext): string 
     account.connectedAt,
     account.disconnectGeneration,
     context.connectionSourceAdmissionMode,
+    boundedReconcile,
     (account.sources ?? []).map((source) => [
       source.sourceProviderSlug,
       source.firstSeenAt,

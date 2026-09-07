@@ -4,6 +4,7 @@ import {
   createAccount,
   createConnectionSource,
   createJob,
+  createJobFromInput,
   createJunctionJobContext,
   createJunctionProvider,
   executeJunctionJob,
@@ -93,7 +94,7 @@ test.each([
 });
 
 
-test("Junction resource pass shares inventory but reads live import authority for every job", async () => {
+test.each(["resource", "reconcile"] as const)("Junction %s pass shares inventory but reads live import authority for every job", async (kind) => {
   let inventoryReads = 0;
   let sourceReads = 0;
   let imports = 0;
@@ -110,15 +111,23 @@ test("Junction resource pass shares inventory but reads live import authority fo
         resource_availability: { blood_oxygen: true },
       }] });
     }
-    assert.equal(url.pathname, "/v2/timeseries/junction-user-1/blood_oxygen/grouped");
+    assert.equal(url.pathname, kind === "resource"
+      ? "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
+      : "/v2/summary/activity/junction-user-1");
     if (disconnectDuringFetch) {
       liveSource = createConnectionSource({ status: "disconnected" });
+    }
+    if (kind === "reconcile") {
+      return createJsonResponse({ data: [{
+        id: "activity-1", source: { provider: "garmin", type: "watch" },
+        calendar_date: "2026-04-02", steps: 5000,
+      }] });
     }
     return createJsonResponse({ groups: { garmin: [{
       data: [{ timestamp: "2026-04-02T14:00:00.000Z", unit: "%", value: 97 }],
       source: { provider: "garmin", type: "watch" },
     }] } });
-  }, { summaryResources: [], timeseriesResources: ["blood_oxygen"] });
+  }, { summaryResources: ["activity"], timeseriesResources: ["blood_oxygen"] });
   const context = createJunctionJobContext({
     now: "2026-04-04T12:00:00.000Z",
     account: createAccount({ sources: [{ ...liveSource, resourceCount: 1 }] }),
@@ -128,9 +137,16 @@ test("Junction resource pass shares inventory but reads live import authority fo
       if (sourceReadFailure) throw sourceFailure;
       return [liveSource];
     },
-    importSnapshot: async () => { imports += 1; return { imported: true }; },
+    importSnapshot: async (snapshot) => {
+      // Summary jobs still submit an empty, fenced snapshot after disconnect.
+      if (kind === "resource" || JSON.stringify(snapshot).includes('"steps":5000')) {
+        imports += 1;
+      }
+      return { imported: true };
+    },
   });
-  const job = createJob("resource", {
+  if (kind === "reconcile") context.shouldYield = () => false;
+  const job = createJob(kind, {
     resource: "blood_oxygen", resourceCategory: "timeseries", sourceProviderSlug: "garmin",
     windowEnd: "2026-04-03T00:00:00.000Z", windowStart: "2026-04-02T00:00:00.000Z",
   });
@@ -193,4 +209,118 @@ test("Junction resource pass shares inventory but reads live import authority fo
   await nextPass.executeJob(context, job);
   assert.equal(inventoryReads, 8);
   assert.equal(imports, 9);
+});
+
+
+test("Junction summary continuations preserve imports and progress with one inventory per pass", async () => {
+  let inventoryReads = 0;
+  let sourceReads = 0;
+  const imported: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname === "/v2/user/providers/junction-user-1") {
+      inventoryReads += 1;
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-1", slug: "garmin", status: "connected",
+        resource_availability: { activity: true, sleep: true, sleep_cycle: true, body: true },
+      }] });
+    }
+    const resource = pathname.match(/^\/v2\/summary\/([^/]+)\/junction-user-1$/u)?.[1];
+    assert.ok(resource);
+    return createJsonResponse({ data: [{
+      id: `${resource}-1`, connectionId: "provider-garmin-1",
+      calendar_date: "2026-04-02", steps: 5000,
+    }] });
+  }, { summaryResources: ["activity", "sleep", "sleep_cycle", "body"], timeseriesResources: [] });
+  const source = createConnectionSource();
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [{ ...source, resourceCount: 1 }] }),
+    connectionSourceAdmissionMode: "listed_only",
+    listConnectionSources: async () => { sourceReads += 1; return [source]; },
+    importSnapshot: async (snapshot) => { imported.push(snapshot); return { imported: true }; },
+    shouldYield: () => false,
+  });
+  const jobExecutor = provider.jobExecutor;
+  assert.ok(jobExecutor?.createPassExecutor);
+  const pass = jobExecutor.createPassExecutor();
+  const run = async (shareInventory: boolean) => {
+    const executor = shareInventory ? pass : jobExecutor;
+    let job = createJob("reconcile", {
+      windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+    });
+    const results = [];
+    for (let index = 0; index < 4; index += 1) {
+      const result = await executor.executeJob(context, job);
+      results.push(result);
+      const continuation = result.scheduledJobs?.[0];
+      if (!continuation) {
+        assert.equal(index, 3);
+        break;
+      }
+      job = createJobFromInput(continuation, index);
+    }
+    return results;
+  };
+  const baselineResults = await run(false);
+  const baselineImports = [...imported];
+  assert.equal(inventoryReads, 4);
+  assert.equal(sourceReads, 8);
+  assert.equal(imported.length, 4);
+  assert.ok(JSON.stringify(imported).includes('"steps":5000'));
+  imported.length = 0;
+  inventoryReads = 0;
+  sourceReads = 0;
+  assert.deepEqual(await run(true), baselineResults);
+  assert.deepEqual(imported, baselineImports);
+  assert.equal(inventoryReads, 1);
+  assert.equal(sourceReads, 5);
+});
+
+
+test("Junction pass keeps bounded inventory separate and refreshes after history or full work", async () => {
+  let inventoryReads = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const pathname = new URL(readUrl(input)).pathname;
+    if (pathname === "/v2/user/providers/junction-user-1") {
+      inventoryReads += 1;
+      return createJsonResponse({ providers: [{
+        slug: "garmin", status: "connected", resource_availability: { blood_oxygen: true },
+      }] });
+    }
+    if (pathname === "/v2/summary/activity/junction-user-1") return createJsonResponse({ data: [] });
+    assert.equal(pathname, "/v2/timeseries/junction-user-1/blood_oxygen/grouped");
+    return createJsonResponse({ groups: {} });
+  }, { summaryResources: ["activity"], timeseriesResources: ["blood_oxygen"] });
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [{ ...createConnectionSource(), resourceCount: 1 }] }),
+    shouldYield: () => false,
+  });
+  assert.ok(provider.jobExecutor?.createPassExecutor);
+  const pass = provider.jobExecutor.createPassExecutor();
+  const window = { windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" };
+  const resource = createJob("resource", {
+    ...window, resource: "blood_oxygen", resourceCategory: "timeseries", sourceProviderSlug: "garmin",
+  });
+  const reconcile = createJob("reconcile", window);
+  await pass.executeJob(context, resource);
+  assert.equal(inventoryReads, 1);
+  await pass.executeJob(context, reconcile);
+  assert.equal(inventoryReads, 2); // Ordinary inventory cannot bypass bounded collection.
+  await pass.executeJob(context, reconcile);
+  await pass.executeJob(context, resource);
+  assert.equal(inventoryReads, 2);
+  await pass.executeJob({ ...context, shouldYield: undefined }, reconcile);
+  assert.equal(inventoryReads, 3);
+  await pass.executeJob(context, reconcile);
+  assert.equal(inventoryReads, 4);
+  await pass.executeJob(context, createJob("backfill", window));
+  await pass.executeJob(context, createJob("backfill", window));
+  assert.equal(inventoryReads, 6);
+  await pass.executeJob(context, reconcile);
+  assert.equal(inventoryReads, 7);
+  await pass.executeJob(context, createJob("reconcile", {
+    ...window, timeseriesCursor: window.windowStart, timeseriesResourceCursor: "blood_oxygen",
+  }));
+  await pass.executeJob(context, reconcile);
+  assert.equal(inventoryReads, 8);
 });
