@@ -4143,7 +4143,7 @@ describe("hosted system mailbox notification execution context", () => {
       connectionId,
       eventId: "device-sync.wake:synthetic-retained-drain",
       expectedConnectedAt,
-      hint: { jobs: [{ availableAt: retryAt, dedupeKey: "synthetic-history-retry",
+      hint: { nextReconcileAt: retryAt, jobs: [{ availableAt: retryAt, dedupeKey: "synthetic-history-retry",
         kind: "resource", maxAttempts: 1, payload: {}, priority: 30 }] },
       occurredAt: FIXED_NOW,
       provider: "junction",
@@ -4167,6 +4167,7 @@ describe("hosted system mailbox notification execution context", () => {
           connectionId, eventId: `device-sync.wake:synthetic-hint-${index}`,
           expectedConnectedAt, occurredAt: FIXED_NOW, provider: "junction",
           reason, userId: "member_123",
+          ...(reason === "reconcile_due" ? { hint: { nextReconcileAt: FIXED_NOW } } : {}),
         });
         await enqueueHostedSystemMailboxItem({
           item: createResolvedDeviceSyncItem({ dedupeKey: wake.eventId,
@@ -4246,14 +4247,14 @@ describe("hosted system mailbox notification execution context", () => {
 
   it.each([
     "epoch", "manual", "jobs", "attempted", "recording", "disconnect",
-    "reauthorization", "connected", "future_schedule", "unbound_owner", "other_connection",
+    "reauthorization", "connected", "future_schedule", "equal_schedule", "undated_schedule", "unbound_owner", "other_connection",
   ])("preserves %s work when a retained device owner admits hints", async (boundary) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_synthetic_hint_boundary";
     const expectedConnectedAt = "2026-04-01T00:00:00.000Z";
     const wake = buildHostedExecutionDeviceSyncWake({
       connectionId, eventId: "device-sync.wake:synthetic-boundary-owner", expectedConnectedAt,
-      hint: { jobs: [{ availableAt: "2026-04-28T00:00:00.000Z", dedupeKey: "synthetic-job", kind: "resource" }] },
+      hint: { nextReconcileAt: FIXED_NOW, jobs: [{ availableAt: "2026-04-28T00:00:00.000Z", dedupeKey: "synthetic-job", kind: "resource" }] },
       occurredAt: FIXED_NOW, provider: "junction", reason: "reconcile_due", userId: "member_123",
     });
     const candidate = buildHostedExecutionDeviceSyncWake({
@@ -4267,6 +4268,8 @@ describe("hosted system mailbox notification execution context", () => {
     if (boundary === "reauthorization") candidate.reason = "reauthorization_required";
     if (boundary === "connected") candidate.reason = "connected";
     if (boundary === "future_schedule") { candidate.reason = "reconcile_due"; candidate.hint = { nextReconcileAt: "2026-04-29T00:00:00.000Z" }; }
+    if (boundary === "equal_schedule") { candidate.reason = "reconcile_due"; candidate.hint = { nextReconcileAt: FIXED_NOW }; }
+    if (boundary === "undated_schedule") { candidate.reason = "reconcile_due"; candidate.hint = {}; }
     if (boundary === "other_connection") candidate.connectionId = "dsc_synthetic_other";
     if (boundary === "unbound_owner") delete wake.expectedConnectedAt;
     try {

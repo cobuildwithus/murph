@@ -760,6 +760,7 @@ function collapseHostedRetainedDeviceSyncWakeHints(input: {
   }
 
   const ownerSeq = BigInt(owner.mailboxLaneSeq);
+  const ownerCadence = wake.hint?.nextReconcileAt;
   let reachedOwner = false;
   let barrier = false;
   return input.pending.filter((item) => {
@@ -776,6 +777,7 @@ function collapseHostedRetainedDeviceSyncWakeHints(input: {
       return true;
     }
     const candidate = item.wake;
+    const candidateCadence = candidate.hint?.nextReconcileAt;
     if (
       !isHostedPlainDeviceSyncWakeHint(item)
       || item.mailboxLaneSeq === null
@@ -783,17 +785,18 @@ function collapseHostedRetainedDeviceSyncWakeHints(input: {
       || candidate.userId !== wake.userId
       || candidate.provider !== wake.provider
       || candidate.expectedConnectedAt !== wake.expectedConnectedAt
-      || (candidate.hint?.nextReconcileAt != null && (
-        wake.hint?.nextReconcileAt == null
-        || Date.parse(candidate.hint.nextReconcileAt) > Date.parse(wake.hint.nextReconcileAt)
+      || (candidate.reason === "reconcile_due" && candidateCadence == null)
+      || (candidateCadence != null && (
+        ownerCadence == null || Date.parse(candidateCadence) >= Date.parse(ownerCadence)
       ))
       || Date.parse(candidate.occurredAt) > Date.parse(input.now)
     ) {
       barrier = true;
       return true;
     }
-    // The selected continuation will fetch this connection's durable dirty
-    // work. Transfer only queued hints, preserving its exact jobs and epoch.
+    // A copied cadence does not prove its tick ran: only a strictly older
+    // schedule is superseded. The owner fetches dirty work for webhook hints.
+    // Preserve its exact jobs and epoch.
     return false;
   });
 }

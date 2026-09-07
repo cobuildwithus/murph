@@ -1468,10 +1468,12 @@ Last verified: 2026-09-04
   another connection's position in the global frontier. A later due webhook for that same connection may
   admit the older exact retained mailbox item so newly dirty data can enter the
   local worker without waiting behind a historical retry. At preparation, that
-  selected retained owner absorbs already-queued, unattempted plain webhook and
-  scheduled hints for its exact member, provider, connection, and connection
-  epoch. This transfers the hints to the existing durable continuation before
-  dirty input is fetched; it never discards its provider jobs or backoff. A
+  selected retained owner absorbs already-queued, unattempted plain webhook
+  hints and superseded scheduled ticks for its exact member, provider,
+  connection, and connection epoch. A scheduled tick is superseded only when
+  its explicit cadence is strictly earlier than the retained owner's; equal or
+  missing cadence cannot prove reconciliation ran. This transfers the hints to
+  the existing durable continuation before dirty input is fetched; it never discards its provider jobs or backoff. A
   distinct epoch, lifecycle event, explicit job, manual request, recording or
   attempted item, or newer cadence remains a same-connection ordering barrier.
   New hints arriving after admission remain independently queued. On a newer
