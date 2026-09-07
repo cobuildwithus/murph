@@ -2987,7 +2987,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       reason: domain === "control"
         ? "hosted-linq.direct-routing"
         : "hosted-linq.direct-mailbox",
-      reusableCandidates: preparedCryptoDomainRoots,
+      preparedCandidates: preparedCryptoDomainRoots,
       userId: memberId,
     });
   const [ingressRootResult, controlRoutingResult] = await Promise.allSettled([
