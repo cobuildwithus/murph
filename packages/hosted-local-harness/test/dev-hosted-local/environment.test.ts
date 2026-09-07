@@ -1691,8 +1691,8 @@ describe("buildWranglerLocalDevConfig", () => {
       ssh: { enabled: boolean };
     }[];
     const container = containers[0]!;
-    const smokeContainer = containers[1]!;
-    const standbyContainer = containers[2]!;
+    const smokeContainer = containers[2]!;
+    const standbyContainer = containers[3]!;
 
     expect(config.main).toBe("../src/index.ts");
     expect(config.name).toBe("murph-hosted");
@@ -1706,6 +1706,7 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.vars).not.toHaveProperty("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS");
     expect(containers.map((entry) => entry.class_name)).toEqual([
       "RunnerContainer",
+      "NextRunnerContainer",
       "DeploySmokeRunnerContainer",
       "StandbyRunnerContainer",
     ]);
@@ -1841,7 +1842,7 @@ describe("buildWranglerLocalDevConfig", () => {
       image_vars: Record<string, string>;
     }[];
     const container = containers[0]!;
-    const smokeContainer = containers[1]!;
+    const smokeContainer = containers[2]!;
 
     expect(config.main).toBe("../../workspace/apps/cloudflare/src/index.ts");
     expect(container.image).toBe("../../workspace/Dockerfile.cloudflare-hosted-runner");
