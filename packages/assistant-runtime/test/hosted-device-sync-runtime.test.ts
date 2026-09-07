@@ -11,7 +11,6 @@ import {
   VaultError,
   withHostedCanonicalWritePort,
 } from "@murphai/core";
-import type { HostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
@@ -5301,7 +5300,6 @@ describe("hosted device-sync runtime", () => {
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
       assert.deepEqual(state.pendingDirtyPayloadJobs, [{
-        replayableFromWeb: true,
         connectionId: "hosted_conn_dirty_wake",
         dirtyPayloadId: null,
         jobId: jobs[0]?.id,
@@ -5910,271 +5908,6 @@ describe("hosted device-sync runtime", () => {
 
     assert.equal(processedIds.size, 500);
     assert.equal(pendingIndexes.size, 0);
-  });
-
-  test.each(["fresh", "running", "retry", "future", "unowned"] as const)(
-    "overflow defers only Web-owned unstarted payload jobs: %s",
-    async (mode) => {
-      const workspace = await createHostedRuntimeWorkspace("hosted-device-sync-retention-bound-");
-      const service = createDeviceSyncServiceForVault(workspace.vaultRoot);
-      try {
-        const store = getStore(service);
-        const now = "2026-04-04T10:00:00.000Z";
-        const account = store.upsertAccount({
-          connectedAt: now,
-          credential: { credentialMetadata: {}, kind: "none" },
-          externalAccountId: "demo-retention-bound",
-          provider: "demo", scopes: [], status: "active",
-        });
-        const payload = store.enqueueJob({
-          accountId: account.id, kind: "resource", provider: "demo",
-          payload: { resource: "steps" }, priority: 100,
-          availableAt: mode === "future" ? "2099-01-01T00:00:00.000Z" : now,
-        });
-        if (mode === "running" || mode === "retry") {
-          assert.equal(store.claimDueJob("retention-worker", now, 60_000, account.id)?.id, payload.id);
-          if (mode === "retry") {
-            store.failJob(payload.id, now, "RETRY", "Synthetic retry", "2099-01-01T00:00:00.000Z", true);
-          }
-        }
-        for (let index = 0; index < 100; index += 1) {
-          store.enqueueJob({
-            accountId: account.id, kind: "resource", provider: "demo",
-            payload: { resource: "steps" }, dedupeKey: `retained-child-${index}`, availableAt: now,
-          });
-        }
-        const state: HostedDeviceSyncRuntimeSyncState = {
-          dirtyWorkRemaining: false,
-          hostedToLocalAccountIds: new Map([["hosted_bound", account.id]]),
-          localToHostedAccountIds: new Map([[account.id, "hosted_bound"]]),
-          observedTokenVersions: new Map(), pendingDirtyAcks: [], snapshot: null,
-          pendingDirtyPayloadJobs: [{
-            replayableFromWeb: true, connectionId: "hosted_bound", dirtyPayloadId: mode === "unowned" ? null : "dsp_bound",
-            jobId: payload.id, processedRevision: "1", resource: "steps", sourceProviderSlug: "demo",
-          }],
-        };
-        const pendingRead = vi.spyOn(store, "listPendingJobsForAccount");
-        const recover = () => resolveHostedDeviceSyncWakeRecovery({
-          service, state,
-          wake: buildDeviceSyncWake({ connectionId: "hosted_bound", occurredAt: now, reason: "webhook_hint" }),
-        });
-        if (mode === "fresh") {
-          const result = recover();
-          assert.equal(result?.wake.hint?.jobs?.length, 100);
-          assert.ok(result?.wake.hint?.jobs?.every((job) => job.dedupeKey?.startsWith("retained-child-")));
-          assert.equal(state.dirtyWorkRemaining, true);
-        } else {
-          assert.throws(recover, /retained work exceeds/);
-          assert.equal(state.dirtyWorkRemaining, false);
-        }
-        assert.equal(pendingRead.mock.calls.length, 2);
-        assert.ok(pendingRead.mock.calls.every(([, limit]) => limit <= 201));
-        assert.equal(store.getJobById(payload.id)?.status, mode === "running" ? "running" : "queued");
-      } finally {
-        closeHostedRuntimeDeviceSyncService(service);
-        await workspace.cleanup();
-      }
-    },
-  );
-
-  test("cold-restored payload retries preserve their cursor and remaining attempt budget during overflow", async () => {
-    const connectionId = "hosted_junction_restored_retry";
-    const base = createFakeProvider();
-    const provider: DeviceSyncProvider = {
-      ...base, provider: "junction", descriptor: { ...base.descriptor, provider: "junction" },
-    };
-    const snapshot = buildRuntimeSnapshot({ connectionId, externalAccountId: "junction-restored-retry", provider: "junction" });
-    const resources = [1, 2].map((day) => ({
-      count: 1, dirtyPayloadId: `dsp_restored_${day}`, jobKind: "resource" as const,
-      payload: {
-        resource: "workout_stream", sourceProviderSlug: "garmin",
-        windowStart: `2026-04-0${day}T00:00:00.000Z`, windowEnd: "2026-04-04T00:00:00.000Z",
-      },
-      resource: "workout_stream", resourceCategory: "timeseries", sourceProviderSlug: "garmin",
-      windowStart: null, windowEnd: null,
-    }));
-    const port: HostedRuntimeDeviceSyncPort = {
-      ...createNoDirtyStateDeviceSyncPortMethods(),
-      async applyUpdates() { throw new Error("Unexpected update"); },
-      async createConnectLink() { throw new Error("Unexpected connect"); },
-      async fetchSnapshot() { return snapshot; },
-      async fetchDirtyStates() {
-        return { hasMore: false, nextWakeAt: null, userId: "member_123", items: [
-          buildDirtyState({ connectionId, provider: "junction", dirtyResources: resources }),
-        ] };
-      },
-    };
-    let wake: HostedExecutionDeviceSyncWake = buildDirtyDeviceSyncWake(connectionId, "2026-04-04T10:00:00.000Z", "junction");
-    let retryDedupeKey: string | null = null;
-    const cursor = JSON.stringify({ i: ["synthetic-workout"], v: 1 });
-    const advancedStart = "2026-04-03T00:00:00.000Z";
-    for (let pass = 0; pass < 3; pass += 1) {
-      const workspace = await createHostedRuntimeWorkspace("hosted-restored-retry-overflow-");
-      const service = createDeviceSyncServiceForVault(workspace.vaultRoot, [provider]);
-      const store = getStore(service);
-      const enqueue = store.enqueueJob.bind(store);
-      // Make the valid cold-admission order deterministic instead of relying
-      // on random IDs when multiple rows receive the same millisecond.
-      let enqueueTime = Date.now();
-      vi.useFakeTimers({ toFake: ["Date"] });
-      const enqueueSpy = vi.spyOn(store, "enqueueJob").mockImplementation((input) => {
-        vi.setSystemTime(new Date(++enqueueTime));
-        return enqueue(input);
-      });
-      try {
-        const state = await syncHostedDeviceSyncControlPlaneState({ deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake });
-        const accountId = state.hostedToLocalAccountIds.get(connectionId);
-        assert.ok(accountId);
-        if (pass === 0) {
-          const now = new Date().toISOString();
-          const job = store.claimDueJob("retry-owner", now, 60_000, accountId);
-          assert.ok(job);
-          retryDedupeKey = job.dedupeKey;
-          assert.ok(store.failJobIfOwned(job.id, "retry-owner", now, "RETRY", "Synthetic retry", now, true, false, {
-            ...job.payload, windowStart: advancedStart, workoutStreamCursor: cursor,
-          }));
-        } else {
-          const retry = store.listPendingJobsForAccount(accountId, 101).find((job) => job.dedupeKey === retryDedupeKey);
-          assert.ok(retry);
-          assert.equal(retry.attempts, 0);
-          assert.equal(retry.startedAt, null);
-          assert.equal(retry.maxAttempts, 4);
-          assert.equal(retry.payload.windowStart, advancedStart);
-          assert.equal(retry.payload.workoutStreamCursor, cursor);
-        }
-        if (pass === 1) {
-          // A child batch plus the two restored payload jobs overflows by one.
-          // All child work must keep its own retained owner.
-          for (let index = 0; index < 99; index += 1) {
-            store.enqueueJob({ accountId, provider: "junction", kind: "resource", dedupeKey: `retry-child-${index}`,
-              payload: { resource: "heartrate", windowStart: advancedStart, windowEnd: "2026-04-04T00:00:00.000Z" } });
-          }
-        }
-        const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
-        assert.ok(recovery);
-        const hints = recovery.wake.hint?.jobs ?? [];
-        const retainedRetry = hints.find((job) => job.dedupeKey === retryDedupeKey);
-        assert.ok(retainedRetry, "overflow must preserve the checkpointed retry");
-        assert.equal(retainedRetry.maxAttempts, 4);
-        assert.equal(retainedRetry.payload?.workoutStreamCursor, cursor);
-        if (pass === 1) {
-          assert.equal(hints.length, 100);
-          assert.equal(hints.filter((job) => job.dedupeKey?.startsWith("retry-child-")).length, 99);
-        }
-        wake = recovery.wake;
-        if (pass === 0) {
-          // A valid incoming wake may list the retry last; cold enqueue order
-          // must not make that retry look like a new deferrable payload.
-          wake = { ...wake, hint: { ...wake.hint, jobs: [...hints.filter((job) => job !== retainedRetry), retainedRetry] } };
-        }
-      } finally {
-        enqueueSpy.mockRestore();
-        vi.useRealTimers();
-        closeHostedRuntimeDeviceSyncService(service);
-        await workspace.cleanup();
-      }
-    }
-  });
-
-  test("worker fanout preserves bounded recovery and drains Web payloads across cold restores", async () => {
-    const connectionId = "hosted_strava_fanout";
-    const baseProvider = createFakeProvider();
-    const completedChildren = new Set<string>();
-    let expanded = false;
-    const provider: DeviceSyncProvider = {
-      ...baseProvider,
-      provider: "strava",
-      descriptor: { ...baseProvider.descriptor, provider: "strava" },
-      jobExecutor: {
-        async executeJob(_context, job) {
-          if (typeof job.payload.resourceId === "string" && job.payload.resourceId.startsWith("child-")) {
-            completedChildren.add(job.payload.resourceId);
-            return {};
-          }
-          if (expanded) return {};
-          expanded = true;
-          return {
-            scheduledJobs: Array.from({ length: 25 }, (_, index) => ({
-              kind: "resource" as const,
-              dedupeKey: `fanout-child-${index}`,
-              payload: { resourceId: `child-${index}`, resourceType: "activity" },
-              priority: 10,
-            })),
-          };
-        },
-      },
-    };
-    let dirtyResources = Array.from({ length: 100 }, (_, index) => ({
-      count: 1,
-      dirtyPayloadId: `dsp_fanout_${index}`,
-      jobKind: "resource" as const,
-      payload: { resourceId: `activity-${index}`, resourceType: "activity" },
-      resource: "activity",
-      resourceCategory: "activity",
-      sourceProviderSlug: "strava",
-      windowEnd: null,
-      windowStart: null,
-    }));
-    const snapshot = buildRuntimeSnapshot({
-      connectionId,
-      externalAccountId: "strava-fanout",
-      provider: "strava",
-    });
-    const port: HostedRuntimeDeviceSyncPort = {
-      ...createNoDirtyStateDeviceSyncPortMethods(),
-      async applyUpdates() { throw new Error("Unexpected update"); },
-      async createConnectLink() { throw new Error("Unexpected connect"); },
-      async fetchSnapshot() { return snapshot; },
-      async fetchDirtyStates() {
-        return {
-          hasMore: false,
-          items: [buildDirtyState({
-            connectionId, provider: "strava", dirtyRevision: "100", dirtyResources,
-          })],
-          nextWakeAt: null,
-          userId: "member_123",
-        };
-      },
-    };
-    let wake: HostedExecutionDeviceSyncWake = buildDirtyDeviceSyncWake(connectionId, "2026-04-04T10:00:00.000Z", "strava");
-    const acknowledged = new Set<string>();
-    for (let pass = 0; pass < 3; pass += 1) {
-      const workspace = await createHostedRuntimeWorkspace("hosted-device-sync-fanout-");
-      const service = createDeviceSyncServiceForVault(workspace.vaultRoot, [provider]);
-      try {
-        const state = await syncHostedDeviceSyncControlPlaneState({
-          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
-        });
-        const accountId = state.hostedToLocalAccountIds.get(connectionId);
-        assert.ok(accountId);
-        await service.drainWorker(pass === 0 ? 1 : 100, accountId);
-        promoteHostedCompletedDirtyPayloadAcks({ service, state });
-        if (pass === 0) {
-          assert.equal(getStore(service).listPendingJobsForAccount(accountId, 125).length, 124);
-        }
-        const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
-        if (pass === 0) {
-          assert.ok(recovery);
-          assert.equal(recovery.wake.hint?.jobs?.length, 100);
-          assert.equal(recovery.wake.hint?.jobs?.filter((job) =>
-            job.dedupeKey?.startsWith("fanout-child-")).length, 25);
-          assert.equal(state.dirtyWorkRemaining, true);
-        }
-        // This models the existing post-checkpoint Web acknowledgement; only
-        // terminal payload IDs leave the authoritative queue.
-        for (const ack of state.pendingDirtyAcks) {
-          for (const id of ack.processedDirtyPayloadIds ?? []) acknowledged.add(id);
-        }
-        dirtyResources = dirtyResources.filter((resource) => !acknowledged.has(resource.dirtyPayloadId));
-        if (recovery) wake = recovery.wake;
-      } finally {
-        closeHostedRuntimeDeviceSyncService(service);
-        await workspace.cleanup();
-      }
-    }
-    assert.equal(acknowledged.size, 100);
-    assert.equal(dirtyResources.length, 0);
-    assert.equal(completedChildren.size, 25);
   });
 
   test("a cold-restored full dirty page relinks every retained job before completion", async () => {
@@ -7083,7 +6816,6 @@ describe("hosted device-sync runtime", () => {
         processedRevision: "7",
       }]);
       assert.deepEqual(state.pendingDirtyPayloadJobs, [{
-        replayableFromWeb: true,
         connectionId,
         dirtyPayloadId,
         jobId: retryJob?.id,
@@ -10179,7 +9911,6 @@ describe("hosted device-sync runtime", () => {
         processedRevision: "11",
       }]);
       assert.deepEqual(epochBState.pendingDirtyPayloadJobs, [{
-        replayableFromWeb: true,
         connectionId,
         dirtyPayloadId,
         jobId: epochADelete.id,

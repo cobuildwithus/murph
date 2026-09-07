@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
@@ -111,8 +110,6 @@ export interface HostedDeviceSyncRuntimeDirtyAck {
 }
 
 export interface HostedDeviceSyncRuntimeDirtyPayloadJob {
-  /** Transient admission proof; a cold restore must derive it again from Web. */
-  replayableFromWeb?: boolean;
   connectionId: string;
   dirtyPayloadId: string | null;
   jobId: string;
@@ -1074,11 +1071,15 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
-  const pendingJobs = listHostedDeviceSyncRetainedJobs({
-    accountId: localAccountId,
-    state: input.state,
-    store,
-  });
+  const pendingJobs = store.listPendingJobsForAccount(
+    localAccountId,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+  );
+  if (pendingJobs.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT) {
+    throw new Error(
+      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
+    );
+  }
   if (pendingJobs.length > 0) {
     let retryAt: string | null = null;
     const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
@@ -1162,50 +1163,6 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
       },
     },
   };
-}
-
-function listHostedDeviceSyncRetainedJobs(input: {
-  accountId: string;
-  state: HostedDeviceSyncRuntimeSyncState;
-  store: HostedRuntimeDeviceSyncStore;
-}): DeviceSyncJobRecord[] {
-  const limit = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
-  let pending = input.store.listPendingJobsForAccount(input.accountId, limit + 1);
-  if (pending.length <= limit) return pending;
-
-  // Worker-created continuations can expand a full admission page. Defer only
-  // enough Web-reconstructible, untouched payload jobs to retain every
-  // continuation and attempted job, including cold-restored retries.
-  const payloadJobIds = new Set(input.state.pendingDirtyPayloadJobs
-    .filter((job) => job.dirtyPayloadId !== null && job.replayableFromWeb === true)
-    .map((job) => job.jobId));
-  pending = input.store.listPendingJobsForAccount(
-    input.accountId,
-    limit + Math.min(payloadJobIds.size, limit) + 1,
-  );
-  let overflow = pending.length - limit;
-  const now = Date.now();
-  const retained = [...pending].reverse().filter((job) => {
-    if (
-      overflow > 0
-      && payloadJobIds.has(job.id)
-      && job.status === "queued"
-      && job.attempts === 0
-      && job.startedAt === null
-      && Date.parse(job.availableAt) <= now
-    ) {
-      overflow -= 1;
-      return false;
-    }
-    return true;
-  }).reverse();
-  if (overflow > 0) {
-    throw new Error(
-      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
-    );
-  }
-  input.state.dirtyWorkRemaining = true;
-  return retained;
 }
 
 function resolveHostedDeviceSyncWakeJobDedupeKey(input: {
@@ -1429,10 +1386,10 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
     0,
     HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingJobs.length,
   );
-  const jobsByDedupeKey = new Map<string, DeviceSyncJobRecord>();
+  const jobIdsByDedupeKey = new Map<string, string>();
   for (const job of pendingJobs) {
     if (job.provider === input.provider && job.dedupeKey) {
-      jobsByDedupeKey.set(job.dedupeKey, job);
+      jobIdsByDedupeKey.set(job.dedupeKey, job.id);
     }
   }
   const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
@@ -1440,12 +1397,12 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
 
   for (const job of input.jobs) {
     const dedupeKey = job.input.dedupeKey;
-    let localJob = dedupeKey ? jobsByDedupeKey.get(dedupeKey) ?? null : null;
-    if (!localJob) {
+    let jobId = dedupeKey ? jobIdsByDedupeKey.get(dedupeKey) ?? null : null;
+    if (!jobId) {
       if (availableSlots === 0) {
         continue;
       }
-      localJob = input.store.enqueueJob({
+      const enqueued = input.store.enqueueJob({
         accountId: input.accountId,
         availableAt: job.input.availableAt,
         dedupeKey,
@@ -1455,9 +1412,10 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
         priority: job.input.priority ?? 0,
         provider: input.provider,
       });
+      jobId = enqueued.id;
       availableSlots -= 1;
       if (dedupeKey) {
-        jobsByDedupeKey.set(dedupeKey, localJob);
+        jobIdsByDedupeKey.set(dedupeKey, jobId);
       }
     }
     admittedJobCount += 1;
@@ -1469,8 +1427,7 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
       pendingDirtyPayloadJobs.push({
         connectionId: input.connectionId,
         dirtyPayloadId: job.dirtyPayloadId,
-        jobId: localJob.id,
-        replayableFromWeb: hostedDirtyJobCanReplayFromWeb(localJob, job.input),
+        jobId,
         processedRevision: input.processedRevision,
         resource: job.resource.resource,
         sourceProviderSlug: job.resource.sourceProviderSlug,
@@ -1480,21 +1437,6 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   }
 
   return { admittedJobCount, pendingDirtyPayloadJobs };
-}
-
-function hostedDirtyJobCanReplayFromWeb(
-  localJob: DeviceSyncJobRecord,
-  webJob: DeviceSyncJobInput,
-): boolean {
-  // enqueueJob defaults new Web jobs to five attempts. A restored row starts
-  // at attempts=0 too, but its retained budget and execution payload may differ.
-  return localJob.kind === webJob.kind
-    && localJob.maxAttempts === (webJob.maxAttempts ?? 5)
-    && localJob.priority === (webJob.priority ?? 0)
-    && isDeepStrictEqual(
-      shapeHostedDeviceSyncJobHintPayload(localJob.provider, localJob),
-      shapeHostedDeviceSyncJobHintPayload(localJob.provider, webJob),
-    );
 }
 
 function withHostedDirtyPayloadAckIds(
