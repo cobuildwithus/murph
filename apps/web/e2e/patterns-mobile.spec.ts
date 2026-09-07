@@ -42,7 +42,6 @@ test("pattern cards show available comparisons on phones and retain result detai
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAccessibleName("Good coverage");
   await expect(drawer).toContainText("Based on 14 recorded cases");
-  await expect(drawer).toContainText("sample can be smaller");
   await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0);
   if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
     await mkdir(process.env.DESIGN_PROOF_OUTPUT_DIR, { recursive: true });
@@ -67,7 +66,7 @@ test("pattern cards show available comparisons on phones and retain result detai
   await expect(drawer).toBeFocused();
   await expect(drawer).toContainText("48 ms");
   await expect(drawer).toContainText("42.7 ms");
-  await expect(drawer.locator("dt")).toHaveText(["After running9 days", "Other days9 days"]);
+  await expect(drawer.locator("dt")).toHaveText(["After running · 9 days", "Other days · 9 days"]);
   await expect(drawer).toContainText("Data from");
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
@@ -84,8 +83,8 @@ test("pattern cards show available comparisons on phones and retain result detai
   await sleepQuality.tap();
   await expect(drawer.getByRole("region", { name: "Sleep score", exact: true })).toBeVisible();
   await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true })).toBeVisible();
-  await expect(drawer.getByRole("region", { name: "Sleep score", exact: true }).locator("dt")).toHaveText(["After running8 days", "Other days8 days"]);
-  await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true }).locator("dt")).toHaveText(["After running7 days", "Other days7 days"]);
+  await expect(drawer.getByRole("region", { name: "Sleep score", exact: true }).locator("dt")).toHaveText(["After running · 8 days", "Other days · 8 days"]);
+  await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true }).locator("dt")).toHaveText(["After running · 7 days", "Other days · 7 days"]);
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
     return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;

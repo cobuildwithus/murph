@@ -499,8 +499,8 @@ function MobilePatternCard({
           </div>
           <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
           {neutral.length > 0 ? (
-            <details className="group border-t border-border">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <details className="group -mt-2 pb-1">
+              <summary className="mx-5 flex min-h-11 w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                 No clear change
                 <ChevronDown aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
               </summary>
@@ -836,7 +836,7 @@ function PatternCompositeBubble({
   return (
     <PatternResultDetails
       card={card}
-      eyebrow="Sleep quality"
+      eyebrow={card ? undefined : "Sleep quality"}
       title={`You slept ${deltaPercent >= 0 ? "better" : "worse"} after ${factor}.`}
       description="Sleep score and sleep efficiency comparisons."
       trigger={
@@ -1095,7 +1095,7 @@ function PatternResultDetails({
   card: boolean;
   children?: ReactNode;
   description: string;
-  eyebrow: string;
+  eyebrow?: string;
   showDescription?: boolean;
   title: string;
   trigger: ReactElement;
@@ -1108,9 +1108,11 @@ function PatternResultDetails({
   const content = (
     <>
       <div className={cn("flex flex-col gap-1.5", card && "pr-10")}>
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-          {eyebrow}
-        </p>
+        {eyebrow ? (
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+            {eyebrow}
+          </p>
+        ) : null}
         <Title className={cn("font-serif font-semibold", card ? "text-2xl leading-8" : "text-lg leading-6")}>
           {title}
         </Title>
@@ -1208,7 +1210,7 @@ function PatternDetails({
     <PatternResultDetails
       card={card}
       trigger={trigger}
-      eyebrow={outcomeLabel}
+      eyebrow={card ? undefined : outcomeLabel}
       title={isFlat ? "No clear pattern" : describePlainResult({
         cell, factorLabel, outcomeId, outcomeLabel, outcomeLagDays,
       })}
@@ -1313,7 +1315,7 @@ function ComparisonBar({
       <div className="mb-1.5 flex items-baseline justify-between gap-4">
         <dt className="text-xs text-muted-foreground">
           {label}
-          {days !== undefined ? <span className="mt-0.5 block">{formatDayCount(days)}</span> : null}
+          {days !== undefined ? <span className="whitespace-nowrap"> · {formatDayCount(days)}</span> : null}
         </dt>
         <dd className="font-serif text-sm font-semibold text-foreground">
           {value}
@@ -1484,15 +1486,7 @@ function ObservedDaysMeter({
             {bars}
           </button>
         }
-      >
-        <Separator />
-        <p className="text-sm leading-6 text-muted-foreground">
-          Coverage counts recorded observations of this factor. Each comparison uses only days with the relevant health data, so its sample can be smaller.
-        </p>
-        <p className="text-xs leading-5 text-muted-foreground">
-          More coverage does not necessarily mean a stronger association.
-        </p>
-      </PatternResultDetails>
+      />
     );
   }
 
