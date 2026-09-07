@@ -1367,17 +1367,16 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   provider: string;
   store: HostedRuntimeDeviceSyncStore;
 }): HostedDirtyDeviceSyncAdmissionResult {
-  const pendingJobs = input.store.listPendingJobsForAccount(
-    input.accountId,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-  );
-  let availableSlots = Math.max(
-    0,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingJobs.length,
-  );
+  let availableSlots = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+  const requestedDedupeKeys = new Set(input.jobs.map((job) => job.input.dedupeKey));
   const jobIdsByDedupeKey = new Map<string, string>();
-  for (const job of pendingJobs) {
-    if (job.provider === input.provider && job.dedupeKey) {
+  for (const job of input.store.iteratePendingJobsForAccount(input.accountId)) {
+    availableSlots = Math.max(0, availableSlots - 1);
+    if (
+      job.provider === input.provider
+      && job.dedupeKey
+      && requestedDedupeKeys.has(job.dedupeKey)
+    ) {
       jobIdsByDedupeKey.set(job.dedupeKey, job.id);
     }
   }

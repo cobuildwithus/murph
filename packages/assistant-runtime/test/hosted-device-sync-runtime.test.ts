@@ -5816,8 +5816,7 @@ describe("hosted device-sync runtime", () => {
           provider: "strava",
         });
         const store = getStore(service);
-        const listPendingJobsForAccount = vi.spyOn(store, "listPendingJobsForAccount");
-      const iteratePendingJobsForAccount = vi.spyOn(getStore(service), "iteratePendingJobsForAccount");
+        const iteratePendingJobsForAccount = vi.spyOn(store, "iteratePendingJobsForAccount");
         const wake = buildDirtyDeviceSyncWake(
           connectionId,
           `2026-04-04T10:0${pass}:00.000Z`,
@@ -5870,12 +5869,12 @@ describe("hosted device-sync runtime", () => {
         assert.equal(state.pendingDirtyPayloadJobs.length, 100);
         assert.equal(readJobsForAccount(service, localAccountId).length, 100);
         assert.equal(state.dirtyWorkRemaining, pass < 4);
-        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+        assert.equal(iteratePendingJobsForAccount.mock.calls.length, 1);
 
         assert.equal(await service.drainWorker(100, localAccountId), 100);
         promoteHostedCompletedDirtyPayloadAcks({ service, state });
         assert.equal(state.pendingDirtyPayloadJobs.length, 0);
-        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+        assert.equal(iteratePendingJobsForAccount.mock.calls.length, 1);
         const [ack] = state.pendingDirtyAcks;
         assert.ok(ack);
         assert.equal(ack.processedDirtyPayloadIds?.length, 100);
@@ -5889,8 +5888,7 @@ describe("hosted device-sync runtime", () => {
         const recoveryRequestedAtMs = Date.now();
         const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
         const recoveryResolvedAtMs = Date.now();
-        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
-        assert.deepEqual(iteratePendingJobsForAccount.mock.calls, [[localAccountId]]);
+        assert.deepEqual(iteratePendingJobsForAccount.mock.calls, [[localAccountId], [localAccountId]]);
         assert.equal(recovery?.wake.hint?.jobs?.length ?? 0, 0);
         assert.equal(
           recovery?.wake.hint?.reason ?? null,
@@ -5912,7 +5910,7 @@ describe("hosted device-sync runtime", () => {
     assert.equal(pendingIndexes.size, 0);
   });
 
-  test("a cold-restored full dirty page relinks every retained job before completion", async () => {
+  test.each([0, 150])("a cold-restored full dirty page relinks every retained job with %i follow-ups", async (followUpCount) => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-dirty-relink-first-",
     );
@@ -5978,6 +5976,16 @@ describe("hosted device-sync runtime", () => {
       },
       async fetchDirtyStates(input = {}) {
         assert.equal(input.connectionId, connectionId);
+        if (firstClosed && followUpCount > 0) {
+          // Make the partial-query boundary deterministic after cold hydration.
+          const database = openSqliteRuntimeDatabase(getStore(restoredService).databasePath);
+          try {
+            database.prepare("update device_job set created_at = ? where dedupe_key like 'relink-follow-up-%'")
+              .run("2026-01-01T00:00:00.000Z");
+          } finally {
+            database.close();
+          }
+        }
         return {
           hasMore: false,
           items: [dirtyState],
@@ -6010,20 +6018,31 @@ describe("hosted device-sync runtime", () => {
       const firstJobIds = new Set(firstJobs.map((job) => job.id));
       assert.equal(firstState.pendingDirtyPayloadJobs.length, 100);
 
+      for (let index = 0; index < followUpCount; index += 1) {
+        getStore(firstService).enqueueJob({
+          accountId: firstAccountId,
+          availableAt: "2099-04-04T10:00:00.000Z",
+          dedupeKey: `relink-follow-up-${index}`,
+          kind: "reconcile",
+          payload: {},
+          provider: "strava",
+        });
+      }
+
       const recovery = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,
         state: firstState,
         wake: initialWake,
       });
       assert.ok(recovery);
-      assert.equal(recovery.wake.hint?.jobs?.length, 100);
+      assert.equal(recovery.wake.hint?.jobs?.length, 100 + followUpCount);
 
       closeHostedRuntimeDeviceSyncService(firstService);
       firstClosed = true;
 
       const restoredStore = getStore(restoredService);
       const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
-      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const iteratePendingJobsForAccount = vi.spyOn(restoredStore, "iteratePendingJobsForAccount");
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: port,
         secret: DEVICE_SYNC_SECRET,
@@ -6033,13 +6052,13 @@ describe("hosted device-sync runtime", () => {
       const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
       assert.ok(restoredAccountId);
       const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
-      assert.equal(restoredJobs.length, 100);
+      assert.equal(restoredJobs.length, 100 + followUpCount);
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 100);
-      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
-      assert.equal(enqueueJob.mock.calls.length, 100);
+      assert.equal(iteratePendingJobsForAccount.mock.calls.length, 1);
+      assert.equal(enqueueJob.mock.calls.length, 100 + followUpCount);
       assert.equal(
         new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
-        100,
+        100 + followUpCount,
       );
       assert.ok(restoredJobs.every((job) => !firstJobIds.has(job.id)));
       assert.equal(await restoredService.drainWorker(100, restoredAccountId), 100);
@@ -6053,7 +6072,7 @@ describe("hosted device-sync runtime", () => {
         new Set(restoredState.pendingDirtyAcks[0]?.processedDirtyPayloadIds),
         new Set(dirtyResources.map((resource) => resource.dirtyPayloadId)),
       );
-      assert.equal(readJobsForAccount(restoredService, restoredAccountId).length, 100);
+      assert.equal(readJobsForAccount(restoredService, restoredAccountId).length, 100 + followUpCount);
     } finally {
       if (!firstClosed) {
         closeHostedRuntimeDeviceSyncService(firstService);
@@ -6177,7 +6196,7 @@ describe("hosted device-sync runtime", () => {
 
       const restoredStore = getStore(restoredService);
       const enqueueJob = vi.spyOn(restoredStore, "enqueueJob");
-      const listPendingJobsForAccount = vi.spyOn(restoredStore, "listPendingJobsForAccount");
+      const iteratePendingJobsForAccount = vi.spyOn(restoredStore, "iteratePendingJobsForAccount");
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: port,
         secret: DEVICE_SYNC_SECRET,
@@ -6190,7 +6209,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(restoredJobs.length, 100);
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 101);
       assert.equal(restoredState.dirtyWorkRemaining, true);
-      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      assert.equal(iteratePendingJobsForAccount.mock.calls.length, 1);
       assert.equal(enqueueJob.mock.calls.length, 100);
       assert.equal(
         new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,

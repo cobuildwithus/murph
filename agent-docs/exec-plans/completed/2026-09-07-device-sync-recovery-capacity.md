@@ -1,6 +1,6 @@
 # Preserve provider follow-ups through hosted recovery
 
-Status: active
+Status: completed
 Created: 2026-09-07
 Updated: 2026-09-07
 
@@ -26,7 +26,8 @@ Connected-device sync must retain accepted work across runtime replacement and a
 ## Candidate evidence and parent review
 
 - The synthetic provider completed one of 100 accepted jobs and created two future follow-ups. Baseline recovery threw the per-pass durable-limit error with 101 pending jobs. The corrected recovery preserves all 101 through mailbox recording, disk readback, wire parsing, and fresh-service reconstruction. No job runs before its retry; subsequent drains execute 100 then 1.
-- All 359 relevant tests passed: 123 runtime sync, 176 mailbox/entrypoint/preemption, and 60 device store. The existing maximum dirty-input proof now asserts one bounded admission read plus one account-scoped recovery iterator. Iterator coverage includes 200 pending rows, running work, terminal exclusion, independent accounts, and interrupted iteration.
+- All 360 relevant tests passed: 124 runtime sync, 176 mailbox/entrypoint/preemption, and 60 device store. The existing maximum dirty-input proof now asserts one account-scoped admission iterator plus one recovery iterator. Iterator coverage includes 200 pending rows, running work, terminal exclusion, independent accounts, and interrupted iteration.
 - Both package typechecks and diff whitespace checks passed. Complexity guard passed; runtime-source debt decreases 145 to 143, maximum stays 75. The changed recovery hotspot decreases 29 to 27; the other pre-existing hotspots remain unchanged.
 - Parent review confirmed one existing query owner, unchanged execution/admission limits, identical manifest shaping, and no credential or provider-input changes. Product UX: Ready for the scoped connected-device restart recovery journey.
-- Remaining release gates: changelog fragment, final pushed-head CI and ReviewGPT, merge, managed deployment, and read-only production outcome inspection.
+- PR #3025 carries the content-only connected-device-large-sync-recovery changelog entry. The final parent audit also reproduced lost dirty relinking with 150 retained follow-ups ahead of 100 dirty-owned jobs (0 matched versus 100 required). Admission now reuses the complete account iterator while keeping its identity map bounded to the current dirty page and new admission capped at 100. The PR retains the final pushed-head CI/ReviewGPT and managed deployment gates, followed by read-only production outcome inspection.
+Completed: 2026-09-07

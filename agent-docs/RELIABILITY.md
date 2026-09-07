@@ -1432,7 +1432,10 @@ Last verified: 2026-09-04
   execution and dirty-admission budgets do not cap recovery: one completed job
   can create multiple accepted follow-ups. The existing workspace snapshot byte
   envelope bounds publication; recovery never truncates accepted work to a pass
-  budget or adds another persisted queue. The same wake
+  budget or adds another persisted queue. Dirty admission uses the same complete
+  account stream to count capacity and relink already-owned jobs anywhere in the
+  queue. Its dedupe map retains only identities from the bounded current dirty
+  page; a full queue blocks new jobs, never acknowledgement of existing jobs. The same wake
   carries the provider's advanced cadence, but Web does not receive that
   cadence until the post-record checkpoint has made the exact completion state
   durable. Before exposing that completion record, the pass requires Web to
