@@ -167,6 +167,7 @@ import type {
   DeviceSyncBackfillDiagnosticResult,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
+  DeviceJobExecutor,
   DeviceSyncProvider,
   DeviceSyncProviderRequestCandidateAliasSource,
   DeviceSyncRestDiagnosticContext,
@@ -1535,6 +1536,7 @@ export function createJunctionDeviceSyncProvider(
   async function executeJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
+    resourceInventories?: Map<string, readonly JunctionProviderConnection[]>,
   ): Promise<ProviderJobResult> {
     const skippedOptionalResources: JunctionSkippedOptionalResource[] = [];
 
@@ -1567,6 +1569,7 @@ export function createJunctionDeviceSyncProvider(
         job,
         skippedOptionalResources,
         completedWorkoutStreamIdentities,
+        resourceInventories,
       );
     }
 
@@ -2491,11 +2494,59 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  function createResourceInventoryLoader(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+    resourceInventories?: Map<string, readonly JunctionProviderConnection[]>,
+  ) {
+    // Historical attempts and calendar repair require their own inventory read.
+    const inventoryKey = resourceInventories
+      && !readJunctionSparseCalendarRefreshDay(job)
+      && job.payload.historicalBackfill !== true
+      ? buildJunctionResourceInventoryKey(context)
+      : null;
+    if (!inventoryKey) {
+      resourceInventories?.clear();
+    }
+    const priorInventory = inventoryKey ? resourceInventories?.get(inventoryKey) : undefined;
+    let listedSourceProviders = priorInventory ?? null;
+    let projectedSourceProviders = priorInventory ?? null;
+    const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (listedSourceProviders) {
+        return listedSourceProviders;
+      }
+
+      const sourceProviders = await measureJunctionProviderRequest(
+        context,
+        "inventory",
+        () => client.listUserProviders(context.account.externalAccountId, {
+          signal: context.signal ?? null,
+        }),
+      );
+      listedSourceProviders = sourceProviders;
+      return sourceProviders;
+    };
+    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (projectedSourceProviders) {
+        return projectedSourceProviders;
+      }
+      const sourceProviders = await loadSourceProviders();
+      await projectJunctionSources(context, sourceProviders);
+      projectedSourceProviders = sourceProviders;
+      if (inventoryKey) {
+        resourceInventories?.set(inventoryKey, sourceProviders);
+      }
+      return sourceProviders;
+    };
+    return { loadSourceProviders, loadAndProjectSourceProviders };
+  }
+
   async function executeResourceJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     completedWorkoutStreamIdentities: ReadonlySet<string>,
+    resourceInventories?: Map<string, readonly JunctionProviderConnection[]>,
   ): Promise<ProviderJobResult> {
     const resourceName = normalizeString(job.payload.resource);
 
@@ -2576,32 +2627,8 @@ export function createJunctionDeviceSyncProvider(
     ) {
       return {};
     }
-    let listedSourceProviders: readonly JunctionProviderConnection[] | null = null;
-    let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
-    const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
-      if (listedSourceProviders) {
-        return listedSourceProviders;
-      }
-
-      const sourceProviders = await measureJunctionProviderRequest(
-        context,
-        "inventory",
-        () => client.listUserProviders(context.account.externalAccountId, {
-          signal: context.signal ?? null,
-        }),
-      );
-      listedSourceProviders = sourceProviders;
-      return sourceProviders;
-    };
-    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
-      if (projectedSourceProviders) {
-        return projectedSourceProviders;
-      }
-      const sourceProviders = await loadSourceProviders();
-      await projectJunctionSources(context, sourceProviders);
-      projectedSourceProviders = sourceProviders;
-      return sourceProviders;
-    };
+    const { loadSourceProviders, loadAndProjectSourceProviders } =
+      createResourceInventoryLoader(context, job, resourceInventories);
 
     if (calendarRefreshDay) {
       if (
@@ -6107,8 +6134,42 @@ export function createJunctionDeviceSyncProvider(
     jobExecutor: {
       createScheduledJobs,
       executeJob,
+      createPassExecutor(): DeviceJobExecutor {
+        const resourceInventories = new Map<string, readonly JunctionProviderConnection[]>();
+        return {
+          async executeJob(context, job) {
+            if (job.kind !== "resource") {
+              resourceInventories.clear();
+            }
+            try {
+              return await executeJob(context, job, resourceInventories);
+            } catch (error) {
+              resourceInventories.clear();
+              throw error;
+            }
+          },
+        };
+      },
     },
   };
+}
+
+function buildJunctionResourceInventoryKey(context: ProviderJobContext): string {
+  const account = context.account;
+  return JSON.stringify([
+    account.id,
+    account.externalAccountId,
+    account.connectedAt,
+    account.disconnectGeneration,
+    context.connectionSourceAdmissionMode,
+    (account.sources ?? []).map((source) => [
+      source.sourceProviderSlug,
+      source.firstSeenAt,
+      source.lifecycleEpoch,
+      source.status,
+      source.lastErrorCode,
+    ]),
+  ]);
 }
 
 async function fetchJunctionTimeseriesWindow(
