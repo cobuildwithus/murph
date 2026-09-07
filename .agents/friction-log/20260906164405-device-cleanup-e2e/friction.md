@@ -1,6 +1,7 @@
 ---
 title: 'Device cleanup E2E assumes atomic status samples'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3033'
 ---
 
 ## Expected Behavior
