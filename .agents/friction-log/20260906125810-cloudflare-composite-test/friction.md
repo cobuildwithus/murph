@@ -1,6 +1,7 @@
 ---
 title: 'Cloudflare composite test script drops focused file filters'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2994'
 ---
 
 ## Expected Behavior
