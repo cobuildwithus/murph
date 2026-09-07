@@ -5,6 +5,8 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  ChevronDown,
+  ChevronRight,
   Ellipsis,
   Minus,
   Moon,
@@ -425,48 +427,88 @@ function MobilePatternCard({
     }
   }
 
-  return (
-    <li
-      aria-labelledby={headingId}
-      className="overflow-hidden rounded-2xl border border-border bg-card"
-      data-pattern-factor-row={factor.id}
-    >
-      <div className="flex items-center gap-3 border-b border-border px-5 py-5">
-        <Image
-          src={resolvePatternFactorIcon(factor)}
-          alt=""
-          width={44}
-          height={44}
-          className="size-11 shrink-0 object-contain"
-        />
+  const neutralOnly = measured.length === 0 && neutral.length > 0;
+  const heading = (
+    <>
+      <Image
+        src={resolvePatternFactorIcon(factor)}
+        alt=""
+        width={44}
+        height={44}
+        className="size-11 shrink-0 object-contain"
+      />
+      <div className="min-w-0 flex-1">
         <h2
           id={headingId}
-          className="min-w-0 flex-1 break-words font-serif text-xl font-semibold leading-6 tracking-tight text-foreground"
+          className={cn(
+            "break-words font-serif text-xl font-semibold leading-6 tracking-tight text-foreground",
+            neutralOnly && "text-lg",
+          )}
         >
           {factor.label}
         </h2>
-        <ObservedDaysMeter className="min-h-11 shrink-0" days={factor.observedDays} />
+        {neutralOnly ? (
+          <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            No clear change
+            <ChevronDown aria-hidden="true" className="size-3.5 group-open:rotate-180" />
+          </span>
+        ) : null}
       </div>
-      <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
-      {neutral.length > 0 ? (
-        <div aria-label="No clear change" role="group" className="border-t border-border px-5 pb-2 pt-3">
-          <p className="text-xs text-muted-foreground">No clear change</p>
-          <div className="flex flex-wrap gap-x-4">
-            {neutral.map((outcome) => (
-              <PatternOutcomeColumnCell
-                card
-                key={outcome.id}
-                neutralLabel={outcome.label}
-                factorLabel={factor.label}
-                factorObservedDays={factor.observedDays}
-                outcomes={outcome.outcomes}
-                report={report}
-                factorId={factor.id}
-              />
-            ))}
+    </>
+  );
+  const comparisons = (
+    <div aria-label="No clear change" role="group" className="grid grid-cols-2 gap-x-5 px-5 pb-3">
+      {neutral.map((outcome) => (
+        <PatternOutcomeColumnCell
+          card
+          key={outcome.id}
+          neutralLabel={outcome.label}
+          factorLabel={factor.label}
+          factorObservedDays={factor.observedDays}
+          outcomes={outcome.outcomes}
+          report={report}
+          factorId={factor.id}
+        />
+      ))}
+    </div>
+  );
+
+  return (
+    <li
+      aria-labelledby={headingId}
+      className="relative overflow-hidden rounded-2xl border border-border bg-card"
+      data-pattern-factor-row={factor.id}
+    >
+      <ObservedDaysMeter
+        card
+        factorLabel={factor.label}
+        className={cn("absolute right-5 top-5 min-h-11 min-w-11 justify-center", neutralOnly && "top-4")}
+        days={factor.observedDays}
+      />
+      {neutralOnly ? (
+        <details className="group">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 py-4 pl-5 pr-24 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            {heading}
+          </summary>
+          {comparisons}
+        </details>
+      ) : (
+        <>
+          <div className="flex items-center gap-3 border-b border-border py-5 pl-5 pr-24">
+            {heading}
           </div>
-        </div>
-      ) : null}
+          <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
+          {neutral.length > 0 ? (
+            <details className="group border-t border-border">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                No clear change
+                <ChevronDown aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
+              </summary>
+              {comparisons}
+            </details>
+          ) : null}
+        </>
+      )}
     </li>
   );
 }
@@ -845,8 +887,10 @@ function PatternCompositeBubble({
               <PatternComparisonBars
                 comparisonLabel="Other days"
                 comparisonMean={cell.comparisonMean}
+                comparisonDays={card ? cell.comparisonDays : undefined}
                 exposedLabel={`After ${factor}`}
                 exposedMean={cell.exposedMean}
+                exposedDays={card ? cell.exposedDays : undefined}
                 tone={getPatternEffectTone(outcome.id, cell.deltaPercent)}
                 unit={outcome.unit}
               />
@@ -950,7 +994,7 @@ function PatternBubble({
           className={cn(
             "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
             card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
-            cardFlat && "font-sans text-xs font-normal text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-current",
+            cardFlat && "w-full min-w-0 justify-between gap-2 font-sans text-sm font-normal text-left text-muted-foreground hover:text-foreground",
           )}
           data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
         >
@@ -963,7 +1007,12 @@ function PatternBubble({
               tone={tone}
             />
           )}
-          {isFlat ? (card ? <span>{neutralLabel}</span> : null) : <span>{label}</span>}
+          {cardFlat ? (
+            <>
+              <span>{neutralLabel}</span>
+              <ChevronRight aria-hidden="true" className="size-3.5 shrink-0" />
+            </>
+          ) : isFlat ? null : <span>{label}</span>}
         </button>
       }
     />
@@ -1174,8 +1223,10 @@ function PatternDetails({
           <PatternComparisonBars
             comparisonLabel={comparisonLabel}
             comparisonMean={cell.comparisonMean}
+            comparisonDays={card ? cell.comparisonDays : undefined}
             exposedLabel={exposedLabel}
             exposedMean={cell.exposedMean}
+            exposedDays={card ? cell.exposedDays : undefined}
             tone={tone}
             unit={outcomeUnit}
           />
@@ -1193,15 +1244,19 @@ function PatternDetails({
 function PatternComparisonBars({
   comparisonLabel,
   comparisonMean,
+  comparisonDays,
   exposedLabel,
   exposedMean,
+  exposedDays,
   tone,
   unit,
 }: {
   comparisonLabel: string;
   comparisonMean: number;
+  comparisonDays?: number;
   exposedLabel: string;
   exposedMean: number;
+  exposedDays?: number;
   tone: PatternEffectTone;
   unit: string;
 }) {
@@ -1225,12 +1280,14 @@ function PatternComparisonBars({
           tone === "neutral" && "bg-muted-foreground/60",
         )}
         label={exposedLabel}
+        days={exposedDays}
         value={formatMean(exposedMean, unit)}
         width={exposedWidth}
       />
       <ComparisonBar
         className="bg-muted-foreground/25"
         label={comparisonLabel}
+        days={comparisonDays}
         value={formatMean(comparisonMean, unit)}
         width={comparisonWidth}
       />
@@ -1241,18 +1298,23 @@ function PatternComparisonBars({
 function ComparisonBar({
   className,
   label,
+  days,
   value,
   width,
 }: {
   className: string;
   label: string;
+  days?: number;
   value: string;
   width: number;
 }) {
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between gap-4">
-        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dt className="text-xs text-muted-foreground">
+          {label}
+          {days !== undefined ? <span className="mt-0.5 block">{formatDayCount(days)}</span> : null}
+        </dt>
         <dd className="font-serif text-sm font-semibold text-foreground">
           {value}
         </dd>
@@ -1381,36 +1443,63 @@ function formatCombinedEvidencePeriod(entries: PatternEffectEntry[]): string {
 
 function ObservedDaysMeter({
   className,
+  card = false,
+  factorLabel,
   days,
 }: {
   className?: string;
+  card?: boolean;
+  factorLabel?: string;
   days: number;
 }) {
   const level = getObservedDaysLevel(days);
   const coverageLabel = getObservedDaysLabel(level);
   const label = `${coverageLabel}: based on ${formatCaseCount(days)}`;
 
+  const bars = (
+    <span aria-hidden="true" className="flex items-center gap-0.5">
+      {Array.from({ length: 5 }, (_, index) => (
+        <span
+          className={cn("h-[5px] w-2 rounded-[2px]", index < level ? "bg-primary" : "bg-border")}
+          key={index}
+        />
+      ))}
+    </span>
+  );
+  const triggerClassName = cn(
+    "flex w-fit items-center rounded-sm py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    className,
+  );
+
+  if (card) {
+    return (
+      <PatternResultDetails
+        card
+        eyebrow={factorLabel ?? "Patterns"}
+        title={coverageLabel}
+        description={`Based on ${formatCaseCount(days)}.`}
+        showDescription
+        trigger={
+          <button type="button" aria-label={label} className={triggerClassName} data-observed-days={days}>
+            {bars}
+          </button>
+        }
+      >
+        <Separator />
+        <p className="text-sm leading-6 text-muted-foreground">
+          Coverage counts recorded observations of this factor. Each comparison uses only days with the relevant health data, so its sample can be smaller.
+        </p>
+        <p className="text-xs leading-5 text-muted-foreground">
+          More coverage does not necessarily mean a stronger association.
+        </p>
+      </PatternResultDetails>
+    );
+  }
+
   return (
     <Tooltip>
-      <TooltipTrigger
-        aria-label={label}
-        className={cn(
-          "flex w-fit items-center rounded-sm py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-          className,
-        )}
-        data-observed-days={days}
-      >
-        <span aria-hidden="true" className="flex items-center gap-0.5">
-          {Array.from({ length: 5 }, (_, index) => (
-            <span
-              className={cn(
-                "h-[5px] w-2 rounded-[2px]",
-                index < level ? "bg-primary" : "bg-border",
-              )}
-              key={index}
-            />
-          ))}
-        </span>
+      <TooltipTrigger aria-label={label} className={triggerClassName} data-observed-days={days}>
+        {bars}
       </TooltipTrigger>
       <TooltipContent className="max-w-52 flex-col items-start gap-0.5">
         <div className="flex flex-col gap-0.5">

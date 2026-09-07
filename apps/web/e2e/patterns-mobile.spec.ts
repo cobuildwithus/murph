@@ -37,10 +37,24 @@ test("pattern cards show available comparisons on phones and retain result detai
   const coverage = running.locator("[data-observed-days]");
   await expect(coverage).toHaveAccessibleName("Good coverage: based on 14 recorded cases");
   await expect(running.getByText("14 recorded cases", { exact: true })).toHaveCount(0);
-  await page.keyboard.press("Tab");
-  await coverage.focus();
-  await expect(page.locator('[data-slot="tooltip-content"]')).toContainText("Based on 14 recorded cases");
-  await page.keyboard.press("Escape");
+  const drawer = page.locator('[data-slot="drawer-content"]');
+  await coverage.tap();
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveAccessibleName("Good coverage");
+  await expect(drawer).toContainText("Based on 14 recorded cases");
+  await expect(drawer).toContainText("sample can be smaller");
+  await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0);
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await mkdir(process.env.DESIGN_PROOF_OUTPUT_DIR, { recursive: true });
+    await expect.poll(async () => {
+      const bounds = await drawer.boundingBox();
+      return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;
+    }).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-coverage-drawer.png"), style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });
+  }
+  await drawer.getByRole("button", { name: "Close pattern details" }).tap();
+  await expect(drawer).toHaveCount(0);
+  await expect(coverage).toBeFocused();
   await expect(running.locator("dt")).toHaveText([
     "HRV", "Resting heart rate", "Readiness score",
     "Sleep quality", "SpO₂",
@@ -48,12 +62,12 @@ test("pattern cards show available comparisons on phones and retain result detai
   const result = running.getByRole("button", { name: /^Your HRV was higher after running/ });
   await populated.locator("h1").evaluate((element) => element.scrollIntoView({ block: "start" }));
   await result.tap();
-  const drawer = page.locator('[data-slot="drawer-content"]');
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAccessibleName("Your HRV was higher after running.");
   await expect(drawer).toBeFocused();
   await expect(drawer).toContainText("48 ms");
   await expect(drawer).toContainText("42.7 ms");
+  await expect(drawer.locator("dt")).toHaveText(["After running9 days", "Other days9 days"]);
   await expect(drawer).toContainText("Data from");
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
@@ -70,6 +84,8 @@ test("pattern cards show available comparisons on phones and retain result detai
   await sleepQuality.tap();
   await expect(drawer.getByRole("region", { name: "Sleep score", exact: true })).toBeVisible();
   await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true })).toBeVisible();
+  await expect(drawer.getByRole("region", { name: "Sleep score", exact: true }).locator("dt")).toHaveText(["After running8 days", "Other days8 days"]);
+  await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true }).locator("dt")).toHaveText(["After running7 days", "Other days7 days"]);
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
     return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;
@@ -79,26 +95,51 @@ test("pattern cards show available comparisons on phones and retain result detai
   }
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  const neutral = running.getByRole("group", { name: "No clear change", exact: true });
+  const neutralDisclosure = running.locator("details");
+  const neutral = neutralDisclosure.getByRole("group", { name: "No clear change", exact: true });
+  await expect(neutralDisclosure).not.toHaveAttribute("open", "");
+  await expect(neutral).not.toBeVisible();
+  await neutralDisclosure.locator("summary").tap();
+  await expect(neutralDisclosure).toHaveAttribute("open", "");
   await expect(neutral.getByRole("button")).toHaveText(["Sleep duration", "Deep sleep", "Respiratory rate"]);
   await expect(running.locator("dl [data-pattern-state='no-clear-pattern']")).toHaveCount(0);
-  expect(await neutral.evaluate((element) => element === element.parentElement?.lastElementChild)).toBe(true);
-  await neutral.getByRole("button").nth(1).focus();
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("dialog")).toContainText("deep sleep");
+  expect(await neutralDisclosure.evaluate((element) => element === element.parentElement?.lastElementChild)).toBe(true);
+  await neutral.getByRole("button").nth(1).tap();
+  await expect(drawer).toContainText("deep sleep");
   await page.keyboard.press("Escape");
+  await expect(neutral.getByRole("button").nth(1)).toBeFocused();
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await running.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-neutral-expanded.png"), style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });
+  }
+  await neutralDisclosure.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(neutralDisclosure).not.toHaveAttribute("open", "");
   const sparse = mobile.locator('[data-pattern-factor-row="housework"]');
-  await expect(mobile.locator("details")).toHaveCount(0);
+  await expect(mobile.getByText(/More data needed/)).toHaveCount(0);
   await expect(mobile.locator('[data-pattern-state="insufficient"]')).toHaveCount(0);
   await expect(sparse.getByRole("button", { name: /^Your HRV/ })).toBeVisible();
   await populated.getByRole("button", { name: "Show more", exact: true }).click();
   await expect(mobile.locator("li")).toHaveCount(19);
   const neutralOnly = mobile.locator('[data-pattern-factor-row="custom-tag"]');
   await expect(neutralOnly.locator('[data-pattern-state="effect"]')).toHaveCount(0);
+  const neutralOnlyDetails = neutralOnly.locator("details");
+  await expect(neutralOnlyDetails).not.toHaveAttribute("open", "");
+  await expect(neutralOnly.getByRole("group", { name: "No clear change", exact: true })).not.toBeVisible();
+  expect((await neutralOnly.boundingBox())?.height).toBeLessThan(105);
+  await neutralOnly.locator("[data-observed-days]").tap();
+  await expect(drawer).toBeVisible();
+  await expect(neutralOnlyDetails).not.toHaveAttribute("open", "");
+  await page.keyboard.press("Escape");
+  await neutralOnlyDetails.locator("summary").focus();
+  await page.keyboard.press("Enter");
   await expect(neutralOnly.getByRole("group", { name: "No clear change", exact: true })).toBeVisible();
+  await neutralOnly.getByRole("group").getByRole("button").first().tap();
+  await expect(drawer).toContainText("No clear pattern");
+  await page.keyboard.press("Escape");
+  await neutralOnlyDetails.locator("summary").tap();
   if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
     await mkdir(process.env.DESIGN_PROOF_OUTPUT_DIR, { recursive: true });
-    await neutralOnly.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-neutral-only.png") });
+    await neutralOnly.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-neutral-only.png"), style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });
   }
   await populated.getByRole("button", { name: "Show less", exact: true }).click();
   await expect(mobile.locator("li")).toHaveCount(15);
@@ -134,6 +175,9 @@ test("pattern cards show available comparisons on phones and retain result detai
       await drawer.getByRole("button", { name: "Close pattern details" }).tap();
       await expect(drawer).toHaveCount(0);
     } else {
+      await layout.locator('[data-observed-days="14"]').hover();
+      await expect(page.locator('[data-slot="tooltip-content"]')).toContainText("Based on 14 recorded cases");
+      await page.keyboard.press("Escape");
       await layout.getByRole("button", { name: /^Your HRV was higher after running/ }).hover();
       const popover = page.locator('[data-slot="popover-content"]');
       await expect(popover).toBeVisible();

@@ -153,9 +153,12 @@ The `/patterns` page shows the first 15 factors. Desktop compares every
 supported outcome in a matrix. Phones show one card per factor, with coverage
 bars and changed comparisons together. Tapping a mobile result opens a bottom
 drawer with the same comparison details and evidence dates as the desktop
-hover popover. Neutral measures appear
-as compact links under one `No clear change` label at the bottom. Measures that
-still need data are omitted from mobile cards. `Show more`
+hover popover, plus the number of days behind each average. The coverage bars
+open a mobile drawer explaining the factor observation count; this count can
+differ from each comparison sample. Neutral measures appear behind one collapsed
+`No clear change` row. Expanding it reveals the individual comparison controls.
+Cards with only neutral measures use a compact header with the same disclosure.
+Measures that still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. A recognized factor
 stays visible when it has no suitable comparison day. Its desktop cells explain that
