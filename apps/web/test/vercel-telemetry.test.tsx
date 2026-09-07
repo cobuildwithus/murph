@@ -174,6 +174,7 @@ test("VercelTelemetry does not mount outside the explicit page allowlist", () =>
     "/integrations/connect/private-claim",
     "/join/private-invite",
     "/experiments/runs/private-run",
+    "/companion/environment-voice",
     "/screenshots",
     "/screenshots/home",
     "/unknown/private-segment",
@@ -223,6 +224,14 @@ test("VercelTelemetry drops non-allowlisted events before either vendor sends", 
       type: "vital",
       url: "https://www.example.test/experiments/runs/private-run",
     }),
+    null,
+  );
+  assert.equal(
+    analyticsProps.beforeSend({ type: "pageview", url: "/companion/environment-voice?source=native" }),
+    null,
+  );
+  assert.equal(
+    speedInsightsProps.beforeSend({ type: "vital", url: "/companion/environment-voice" }),
     null,
   );
   assert.equal(
@@ -556,6 +565,7 @@ function listStaticPagePathnames(
     .filter(
       ({ path }) =>
         path !== "app/screenshots/page.tsx"
+        && path !== "app/companion/environment-voice/page.tsx"
         && (path === "app/page.tsx" || path.endsWith("/page.tsx")),
     )
     .flatMap(({ path }) => {
