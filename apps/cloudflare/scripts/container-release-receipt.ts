@@ -142,6 +142,7 @@ export function parseWranglerContainerActions(
   );
   const observed: Array<{ action: WranglerContainerActionKind; applicationName: string }> = [];
 
+  let pendingEditApplication: string | null = null;
   for (const line of stripAnsi(output).replaceAll("\r", "\n").split("\n")) {
     const created = matchOutputAction(
       line,
@@ -168,6 +169,13 @@ export function parseWranglerContainerActions(
       ),
     );
 
+    const edit = matchOutputAction(line, new RegExp(`(?:^|[^A-Za-z0-9._-])EDIT ${OUTPUT_APPLICATION_NAME}[^A-Za-z0-9._-]*$`, "u"));
+    if (edit) pendingEditApplication = edit;
+    if (/\bSkipping application rollout\s*$/u.test(line) && pendingEditApplication) {
+      observed.push({ action: "unchanged", applicationName: pendingEditApplication });
+      pendingEditApplication = null;
+    }
+    if (created || modified || unchanged) pendingEditApplication = null;
     if (created) {
       observed.push({ action: "created", applicationName: created });
     }

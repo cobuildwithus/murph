@@ -1,3 +1,4 @@
+import { scopeHostedRunnerReleaseEnvironment } from "../../hosted-runner-release.ts";
 import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -118,7 +119,7 @@ export async function handleDeployContainerSmokeRoute(
   // The initial smoke proves inventory before running the separate live-model
   // phase. A later foreground claim must not invalidate that model-only probe.
   const standbyInventory = liveModelTurnModel === null
-    ? await readDeployStandbyInventory(context.env)
+    ? await readDeployStandbyInventory(scopeHostedRunnerReleaseEnvironment(context.env, "candidate"))
     : null;
   if (standbyInventory && !standbyInventory.ready) {
     return json({ ok: false, error: "Deploy standby inventory is not ready.", standbyInventory }, 503);

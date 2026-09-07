@@ -1,3 +1,4 @@
+import { readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import {
   isHostedStandbyClaimId,
   readHostedRunnerTargetIdentity,
@@ -251,7 +252,8 @@ export function requireRetainedRunnerRequest(
     userId: string;
   },
 ): RetainedStandbyRequest {
-  const currentReleaseId = resolveHostedRunnerReleaseId(environment);
+  const currentReleaseId = readHostedRunnerDeployment(environment)?.active.id
+    ?? resolveHostedRunnerReleaseId(environment);
   if (input.currentReleaseId !== currentReleaseId) {
     throw new Error("Hosted standby retained-slot release authority is stale.");
   }

@@ -463,6 +463,11 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
   assertGeneratedContainerUsesPreparedImage(runnerContainer);
   assertGeneratedContainerUsesPreparedImage(deploySmokeContainer);
   assertGeneratedContainerUsesPreparedImage(standbyRunnerContainer);
+  const nextRunnerContainer = findGeneratedContainerConfig(containers, "NextRunnerContainer");
+  if (!nextRunnerContainer) {
+    throw new Error("Generated Wrangler config is missing the NextRunnerContainer entry.");
+  }
+  assertGeneratedContainerUsesPreparedImage(nextRunnerContainer);
 }
 
 function findGeneratedContainerConfig(

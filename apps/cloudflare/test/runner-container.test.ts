@@ -31,6 +31,7 @@ import {
   resolveHostedExecutionRunnerContainerName,
   RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   RunnerContainer,
+  NextRunnerContainer,
   type RunnerContainerStartupFailureStage,
 } from "../src/runner-container.ts";
 import { StandbyRunnerContainer } from "../src/standby-runner-container.ts";
@@ -1988,6 +1989,51 @@ describe("RunnerContainer", () => {
             === "Hosted execution container startup confirmation failed.",
       ),
     ).toHaveLength(0);
+  });
+
+  it("reproduces the old deployment gap: new Worker fingerprints reject an available previous image", async () => {
+    const { container, destroy, containerFetch } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "c".repeat(64),
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "d".repeat(64),
+      },
+      containerFetch: vi.fn(async () => new Response(JSON.stringify({
+        ...createRunnerHealthResult(),
+        runnerBundle: { bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) },
+      }), { headers: { "content-type": "application/json" } })),
+    });
+    await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" }))
+      .rejects.toThrow("bundle fingerprint mismatch");
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalled();
+  });
+
+  it.each(["preparing", "promoted"])("keeps both exact images usable without replacement while %s", async (phase) => {
+    const previous = { bank: "primary", id: "primary-previous", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const candidate = { bank: "next", id: "next-candidate", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
+    const deployment = phase === "preparing"
+      ? { active: previous, candidate, previous: null }
+      : { active: candidate, candidate: null, previous };
+    for (const [containerClass, release] of [[RunnerContainer, previous], [NextRunnerContainer, candidate]] as const) {
+      const { container, destroy, startAndWaitForPorts, containerFetch } = createContainerDouble({
+        containerClass,
+        env: {
+          CF_VERSION_METADATA: { id: "worker-new" },
+          HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment),
+          HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: candidate.bundleFingerprint,
+          HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: candidate.sourceFingerprint,
+        },
+        containerFetch: vi.fn(async () => new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          runnerBundle: { bundleFingerprint: release.bundleFingerprint, sourceFingerprint: release.sourceFingerprint },
+        }), { headers: { "content-type": "application/json" } })),
+      });
+      await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" }))
+        .resolves.toMatchObject({ kind: "ready" });
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(containerFetch).toHaveBeenCalledOnce();
+      expect(destroy).not.toHaveBeenCalled();
+    }
   });
 
   it("replaces one stale rollout image before cold readiness succeeds", async () => {
