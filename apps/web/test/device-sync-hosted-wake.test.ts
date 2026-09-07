@@ -3073,7 +3073,7 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
-  it("stages companion metadata inside encrypted dirty state without copying health data into the wake", async () => {
+  it.each([17, 500])("stages companion metadata at %i pending payloads without copying health data into the wake", async (pendingPayloadCount) => {
     const connection = buildHostedConnection({
       displayName: "Apple Health",
       provider: "junction",
@@ -3086,7 +3086,7 @@ describe("hosted device-sync wakes", () => {
       dirty,
       shouldRequestWake: true,
     });
-    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(16);
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(pendingPayloadCount);
     const webhookDataJson = JSON.stringify({
       records: [{
         endAt: "2026-07-08T12:00:00.000Z",
@@ -3305,7 +3305,7 @@ describe("hosted device-sync wakes", () => {
       sourceProviderSlug: "apple_health_kit",
       status: "connected",
     }]);
-    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(17);
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(501);
 
     await expect(persistHostedDeviceSyncCompanionMetadata({
       connectionId: connection.id,
@@ -3346,7 +3346,7 @@ describe("hosted device-sync wakes", () => {
       dirty: buildDirtyConnectionRecord({ provider: "junction" }),
       shouldRequestWake: false,
     });
-    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(16);
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(500);
 
     await expect(persistHostedDeviceSyncCompanionMetadata({
       connectionId: connection.id,

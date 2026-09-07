@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Health sync keeps making progress",
     "summary": "Busy health-data imports can recover from a full queue without repeatedly losing their place.",
-    "details": "Finished batches stay finished while remaining updates continue after a retry or restart, helping companion uploads resume.",
+    "details": "Companion uploads have more room to wait while finished batches stay finished and remaining updates continue after a retry or restart.",
     "relevanceTags": [
       "wearables",
       "reliability"

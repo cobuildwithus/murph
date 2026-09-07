@@ -1442,6 +1442,10 @@ Last verified: 2026-09-04
   reconciliation path. An epoch-less legacy record or a replaced, missing,
   disconnected, or reauthorization-required connection has no cadence authority
   and drains without a Web write.
+  Companion upload admission permits at most 500 pending payload rows per
+  connection after insertion; exact replay at that cap remains a no-op. The
+  existing request-body, hydration-byte and 100-job execution limits remain
+  separate, so the larger buffer does not enlarge a runtime pass.
   If worker-created continuations expand a full dirty page beyond the 100-job
   retained-hint limit, recovery defers only enough never-started, currently due
   payload jobs whose exact Web rows remain authoritative. Attempted, running,

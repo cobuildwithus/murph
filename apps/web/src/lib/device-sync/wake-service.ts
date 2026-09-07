@@ -123,7 +123,7 @@ import {
 
 const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
 const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v3";
-const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
+const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 500;
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
@@ -2336,7 +2336,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
             tx,
           });
           // Insert/no-op first so an exact replay at the cap remains a successful
-          // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
+          // no-op. A net-new payload beyond the cap rolls back, preserving the queue.
           const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
             where: {
               connectionId: currentAuthority.connectionId,
