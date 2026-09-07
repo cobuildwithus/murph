@@ -26,6 +26,22 @@ export function createRunnerReleaseProvider(input: {
     return value;
   };
   return {
+    async readAccountLimits(): Promise<{ vcpu: number; memoryMiB: number; diskMB: number }> {
+      const response = await read("/containers/me");
+      const account = response.result;
+      if (!isObjectRecord(account) || !isObjectRecord(account.limits)) throw unavailable();
+      const limits = account.limits;
+      const positive = (value: unknown): number => {
+        if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw unavailable();
+        return value;
+      };
+      // Return only resource limits, never account identity, defaults or credentials.
+      return {
+        vcpu: positive(limits.total_vcpu),
+        memoryMiB: positive(limits.total_memory_mib),
+        diskMB: positive(limits.total_disk_mb),
+      };
+    },
     async readWorkerVersion(workerName: string, versionId: string): Promise<unknown> {
       const response = await read(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
       return response.result;
