@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runnerApplicationExecutionIdentity, runnerApplicationSpecification } from "../scripts/runner-release-application.ts";
 import { stageHostedRunnerRelease } from "../scripts/stage-runner-release.ts";
 
 let directory: string;
@@ -12,7 +13,7 @@ const image = `registry.cloudflare.com/${"a".repeat(32)}/synthetic@sha256:${"e".
 const config = {
   name: "synthetic-worker", main: "../src/index.ts",
   vars: { HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "e".repeat(64), HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "f".repeat(64) },
-  containers: classes.map((class_name) => ({ class_name, image, max_instances: 12, instance_type: "standard-1" })),
+  containers: classes.map((class_name) => ({ class_name, image, max_instances: 12, instance_type: "standard-1", ssh: { enabled: false }, rollout_active_grace_period: 300 })),
 };
 function version(deployment?: unknown) {
   const vars: Record<string, string> = {
@@ -20,7 +21,7 @@ function version(deployment?: unknown) {
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: primary.sourceFingerprint,
     ...(deployment ? { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment) } : {}),
   };
-  return { resources: { bindings: Object.entries(vars).map(([name, text]) => ({ name, text, type: "plain_text" })) } };
+  return { resources: { bindings: [...Object.entries(vars).map(([name, text]) => ({ name, text, type: "plain_text" })), ...classes.map((class_name) => ({ type: "durable_object_namespace", class_name, namespace_id: `namespace-${class_name}` }))] } };
 }
 const listApplications = async (name: string) => [{
   id: `id-${name}`, name,
@@ -46,16 +47,15 @@ describe("runner deployment staging", () => {
     const promotion = JSON.parse(await readFile(staged.promotionConfigPath, "utf8"));
     const activeClass = reversed ? "NextRunnerContainer" : "RunnerContainer";
     const candidateClass = reversed ? "RunnerContainer" : "NextRunnerContainer";
-    expect(stage.containers.find((entry: { class_name: string }) => entry.class_name === activeClass))
-      .toMatchObject({ image: "registry.example.test/previous@sha256:old", max_instances: 10, rollout_kind: "none" });
-    expect(stage.containers.find((entry: { class_name: string }) => entry.class_name === candidateClass))
-      .toMatchObject({ image, max_instances: 12 });
+    expect(staged.applications.map((entry) => entry.className)).toEqual([candidateClass, "DeploySmokeRunnerContainer"]);
+    expect(staged.applications.some((entry) => entry.className === activeClass)).toBe(false);
+    expect(staged.applications[0]?.specification.configuration.image).toBe(image);
     const prepared = JSON.parse(stage.vars.HOSTED_EXECUTION_RUNNER_DEPLOYMENT);
     const promoted = JSON.parse(promotion.vars.HOSTED_EXECUTION_RUNNER_DEPLOYMENT);
     expect(prepared.active).toEqual(active);
     expect(promoted).toEqual({ active: prepared.candidate, candidate: null, previous: active });
-    expect(promotion.containers).toEqual(stage.containers.map((entry: Record<string, unknown>) => ({ ...entry, rollout_kind: "none" })));
-    expect(staged.mustDrainCandidate).toBe(true);
+    expect(promotion.containers).toEqual(stage.containers);
+    expect(staged.applications[0]?.applicationId).toContain("id-");
   });
 
   it("bootstraps from the existing Worker fingerprint without changing its release identity", async () => {
@@ -66,8 +66,40 @@ describe("runner deployment staging", () => {
     });
     expect(staged.deployment.active).toEqual({ ...primary, id: "worker-live" });
     expect(staged.deployment.candidate?.bank).toBe("next");
-    expect(staged.mustDrainCandidate).toBe(false);
-    expect(staged.candidateApplicationId).toBeNull();
+    expect(staged.applications[0]?.applicationId).toBeNull();
+  });
+
+  it("preserves release identity and skips native mutations for an identical execution image", async () => {
+    const specification = runnerApplicationSpecification(config.containers[0]!, false);
+    const active = { ...primary, bundleFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT, sourceFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT, executionIdentity: runnerApplicationExecutionIdentity(specification) };
+    const deployment = { active, candidate: null, previous: next };
+    const staged = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "new-worker-attempt", currentVersion: version(deployment), listApplications: async (name) => [{ ...specification, id: `id-${name}`, name }] });
+    expect(staged.workerOnly).toBe(true);
+    expect(staged.applications).toEqual([]);
+    expect(staged.deployment).toEqual(deployment);
+  });
+
+  it("resumes the exact pending candidate and rejects a conflicting admitted image", async () => {
+    const first = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion: version(), listApplications });
+    const second = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications });
+    expect(second.deployment).toEqual(first.deployment);
+    await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config, vars: { ...config.vars, HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "a".repeat(64) } }));
+    await expect(stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications })).rejects.toThrow("different candidate");
+  });
+
+  it("reuses already admitted pending inventory after an interrupted staging smoke", async () => {
+    const first = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion: version(), listApplications });
+    const specification = runnerApplicationSpecification(config.containers[0]!, false);
+    const resumed = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications: async (name) => [{ ...specification, id: `id-${name}`, name }] });
+    expect(resumed.deployment).toEqual(first.deployment);
+    expect(resumed.applications).toEqual([]);
+    expect(resumed.workerOnly).toBe(false);
+  });
+
+  it("requires preexisting namespace bindings before a native candidate can be created", async () => {
+    const currentVersion = version();
+    currentVersion.resources.bindings = currentVersion.resources.bindings.filter((binding) => !("class_name" in binding && binding.class_name === "NextRunnerContainer"));
+    await expect(stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion, listApplications })).rejects.toThrow("authoritative live configuration");
   });
 
   it("fails closed when the live target's image identity cannot be established", async () => {

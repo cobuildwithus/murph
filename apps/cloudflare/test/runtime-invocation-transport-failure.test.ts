@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
+import { createHostedStandbyClaimId, HOSTED_RUNNER_REGION } from "../src/standby-runner-contract.js";
 
 import {
   runHostedWorkspaceRuntimeJobInProcess,
@@ -86,6 +88,30 @@ describe("runtime invocation transport failure fence handling", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("admits the exact bound previous release after promotion and preserves member/claim fences", async () => {
+    const previous = { bank: "primary", id: "primary-before", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const active = { bank: "next", id: "next-after", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
+    const source = { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, previous, candidate: null }) };
+    const slotName = `runner--v-primary-before--${"1".repeat(32)}`;
+    const durable = createRunnerDurableState();
+    if (!durable.state.storage.sql) throw new Error("Test SQL storage is required.");
+    const bindingStore = new RunnerSlotBindingStore(durable.state.storage.sql);
+    const claim = { releaseId: previous.id, slotName, region: HOSTED_RUNNER_REGION, userId: TEST_USER_ID, claimId: createHostedStandbyClaimId() };
+    bindingStore.initialize(claim);
+    bindingStore.bind(claim);
+    const container = new RunnerContainer({ ...durable.state, id: { name: slotName } }, source);
+    const { service } = await createTransportFailureHarness({ readActiveRuntimeUserFence: null, runnerRuntimeEnvSource: source, runnerContainerNamespace: { getByName: () => container } });
+    const input = { commandBudget: null, runnerContainerName: slotName, userId: TEST_USER_ID };
+    await expect(service["resolveInvocationRunnerContainerName"](input)).resolves.toBe(slotName);
+    await expect(service["resolveInvocationRunnerContainerName"]({ ...input, userId: "foreign-member" })).rejects.toThrow("did not match");
+    const bound = bindingStore.read();
+    if (bound.state !== "bound") throw new Error("Expected bound test slot.");
+    const invalidReceipt = { ...bound, claimId: "invalid" };
+    await expect(service["resolveInvocationRunnerContainerName"]({ ...input, verifiedSlotBinding: invalidReceipt })).rejects.toThrow("did not match");
+    bindingStore.beginRetirement({ claimId: claim.claimId });
+    await expect(service["resolveInvocationRunnerContainerName"](input)).rejects.toThrow("did not match");
   });
 
   it("persists the runtime phase for a natural generic control-plane failure", async () => {
@@ -993,6 +1019,8 @@ function createRunnerContainerStorageDouble() {
 }
 
 async function createTransportFailureHarness(input: {
+  runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
+  runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
   ensureProcessingFailure?: Extract<
     RunnerContainerEnsureProcessingResult,
     { kind: "failed" }
@@ -1011,6 +1039,7 @@ async function createTransportFailureHarness(input: {
   invoke: (overrides?: { acceptedProcessingAttempt?: boolean }) => Promise<unknown>;
   loggedFailureEntries: () => unknown[];
   ownerReleaseCallCount: () => number;
+  service: RuntimeInvocationService;
   stateStore: RunnerStateStore;
   token: RunnerWriteFenceToken;
 }> {
@@ -1058,14 +1087,14 @@ async function createTransportFailureHarness(input: {
       fetchedAt: FIXED_NOW,
       workspace: null,
     }),
-    runnerContainerNamespace: createFailingInvokeContainerNamespace({
+    runnerContainerNamespace: input.runnerContainerNamespace ?? createFailingInvokeContainerNamespace({
       ensureProcessingFailure: input.ensureProcessingFailure,
       invocationError: input.invocationError,
       readActiveRuntimeUserFence: readActiveRuntimeUserFenceInput
         ? (() => readActiveRuntimeUserFenceInput(token))
         : null,
     }),
-    runnerRuntimeEnvSource: {},
+    runnerRuntimeEnvSource: input.runnerRuntimeEnvSource ?? {},
     runnerStoreCache: new TestRunnerStoreCache({}),
     stateStore,
     waitUntil: (promise) => durable.state.waitUntil(promise),
@@ -1084,6 +1113,7 @@ async function createTransportFailureHarness(input: {
   };
 
   return {
+    service,
     invoke: (overrides?: { acceptedProcessingAttempt?: boolean }) =>
       service.invokePreparedWithFence({
         acceptedProcessingAttempt: overrides?.acceptedProcessingAttempt ?? true,

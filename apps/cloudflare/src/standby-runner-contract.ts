@@ -1,4 +1,4 @@
-import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName } from "./hosted-runner-release.ts";
+import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
@@ -233,6 +233,17 @@ export function resolveHostedRunnerReleaseId(
     throw new TypeError("Hosted runner release metadata is invalid.");
   }
   return releaseId;
+}
+
+/** The selection for new work does not invalidate an exactly bound warm session. */
+export function isSupportedHostedRunnerRelease(
+  source: Readonly<Record<string, unknown>>,
+  releaseId: string,
+): boolean {
+  const deployment = readHostedRunnerDeployment(source);
+  return deployment
+    ? releaseId === deployment.active.id || releaseId === deployment.previous?.id
+    : releaseId === resolveHostedRunnerReleaseId(source);
 }
 
 export function resolveHostedStandbyCoordinatorName(input: {

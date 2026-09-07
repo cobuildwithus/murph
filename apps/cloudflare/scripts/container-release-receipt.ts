@@ -209,7 +209,7 @@ export function parseWranglerWorkerVersionId(output: string): string {
   const versionIds = stripAnsi(output)
     .replaceAll("\r", "\n")
     .split("\n")
-    .map((line) => /^Current Version ID:\s*([^\s]+)\s*$/u.exec(line.trim())?.[1] ?? null)
+    .map((line) => /^(?:Current|Worker) Version ID:\s*([^\s]+)\s*$/u.exec(line.trim())?.[1] ?? null)
     .filter((value): value is string => value !== null);
 
   if (versionIds.length !== 1 || !isConfiguredSingleLine(versionIds[0] ?? "")) {

@@ -1,20 +1,23 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
+import { runnerApplicationMatches, type RunnerApplicationSpecification } from "./runner-release-application.ts";
 
-/** Read-only deployment preconditions. Provider failures never permit a switch. */
+/** Native admission and release evidence. Provider failures never permit a Worker switch. */
 export function createRunnerReleaseProvider(input: {
   accountId: string;
   apiToken: string;
   fetchImpl?: typeof fetch;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const read = async (pathname: string): Promise<Record<string, unknown>> => {
+  const request = async (pathname: string, method = "GET", body?: unknown): Promise<Record<string, unknown>> => {
     let value: unknown;
     try {
       const response = await fetchImpl(
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(input.accountId)}${pathname}`,
         {
-          headers: { Authorization: `Bearer ${input.apiToken}` },
+          method,
+          headers: { Authorization: `Bearer ${input.apiToken}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           cache: "no-store",
           signal: AbortSignal.timeout(30_000),
         },
@@ -27,7 +30,7 @@ export function createRunnerReleaseProvider(input: {
   };
   return {
     async readAccountLimits(): Promise<{ vcpu: number; memoryMiB: number; diskMB: number }> {
-      const response = await read("/containers/me");
+      const response = await request("/containers/me");
       const account = response.result;
       if (!isObjectRecord(account) || !isObjectRecord(account.limits)) throw unavailable();
       const limits = account.limits;
@@ -43,8 +46,50 @@ export function createRunnerReleaseProvider(input: {
       };
     },
     async readWorkerVersion(workerName: string, versionId: string): Promise<unknown> {
-      const response = await read(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
+      const response = await request(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
       return response.result;
+    },
+    async admitApplication(input: {
+      applicationId: string | null;
+      name: string;
+      namespaceId: string;
+      specification: RunnerApplicationSpecification;
+    }): Promise<"created" | "modified" | "unchanged"> {
+      const desired = { ...input.specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
+      if (input.applicationId === null) {
+        const response = await request("/containers/applications", "POST", desired);
+        if (!isObjectRecord(response.result) || typeof response.result.id !== "string") throw unavailable();
+        return "created";
+      }
+      const pathname = `/containers/applications/${encodeURIComponent(input.applicationId)}`;
+      const response = await request(pathname);
+      const live = response.result;
+      if (!isObjectRecord(live) || live.name !== input.name
+        || !isObjectRecord(live.durable_objects) || live.durable_objects.namespace_id !== input.namespaceId) throw unavailable();
+      if (live.active_rollout_id) throw new Error("Candidate native rollout is still in progress; active Worker is unchanged.");
+      // PATCH updates the target for new deployments; an interrupted PATCH/rollout
+      // pair must still roll prefetched instances before readiness is accepted.
+      await request(pathname, "PATCH", desired);
+      await request(`${pathname}/rollouts`, "POST", {
+        description: "Prepare inactive runner release", strategy: "rolling", kind: "full_auto",
+        step_percentage: 100, target_configuration: input.specification.configuration,
+      });
+      return "modified";
+    },
+    async assertApplicationReady(input: {
+      name: string;
+      specification: RunnerApplicationSpecification;
+      listApplications: (name: string) => Promise<unknown>;
+    }): Promise<void> {
+      // Distribution waits belong in CI; member requests never poll native release state.
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const result = await input.listApplications(input.name);
+        if (!Array.isArray(result) || result.length !== 1 || !isObjectRecord(result[0])) throw unavailable();
+        const live = result[0];
+        if (!live.active_rollout_id && runnerApplicationMatches(live, input.specification)) return;
+        if (attempt < 59) await delay(10_000);
+      }
+      throw new Error("Candidate native application did not converge; active Worker is unchanged.");
     },
     async assertDrained(applicationId: string): Promise<void> {
       // This waits in CI, while the active target continues serving messages.
@@ -53,7 +98,7 @@ export function createRunnerReleaseProvider(input: {
       // paginated historical Durable Object identities shown by the dashboard.
       const deadline = Date.now() + 20 * 60_000;
       do {
-        const response = await read(`/containers/applications/${encodeURIComponent(applicationId)}/deployments`);
+        const response = await request(`/containers/applications/${encodeURIComponent(applicationId)}/deployments`);
         if (!Array.isArray(response.result)) throw unavailable();
         const info = response.result_info;
         if (isObjectRecord(info) && info.next_page_token) throw unavailable();

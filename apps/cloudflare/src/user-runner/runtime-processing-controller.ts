@@ -46,6 +46,7 @@ import {
   readHostedRunnerTargetIdentity,
   requireHostedRunnerSlotLifecycle,
   resolveHostedRunnerReleaseId,
+  isSupportedHostedRunnerRelease,
   type HostedRunnerSlotLifecycle,
   type HostedStandbySlotBinding,
   resolveHostedStandbyCoordinatorName,
@@ -1212,7 +1213,8 @@ export class RuntimeProcessingController {
     const binding = resolution.value;
     if (!hostedRunnerSlotBindingMatchesTarget(binding, input.runnerContainerName)) return "retry";
     if (binding.state === "bound") {
-      return binding.releaseId === currentReleaseId && binding.userId === input.userId
+      return isSupportedHostedRunnerRelease(this.input.runnerRuntimeEnvSource, binding.releaseId)
+        && binding.userId === input.userId
         && isHostedStandbyClaimId(binding.claimId) ? "ready" : "retry";
     }
     if (binding.state !== "retired" || binding.claimId !== null || binding.userId !== null) return "retry";

@@ -20,7 +20,8 @@ import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
 import {
   createCloudflareContainerProvider,
-  parseWranglerContainerActions,
+  buildContainerReleaseEntries,
+  type WranglerContainerAction,
   parseWranglerWorkerVersionId,
   readCloudflareContainerApplicationIdentities,
   readRenderedContainerIdentities,
@@ -84,39 +85,44 @@ export async function runDeployWorkerVersionCli(
           currentVersionId,
           listApplications: containerProvider.listApplications,
         });
-        if (staged.mustDrainCandidate) {
-          if (!staged.candidateApplicationId) throw new Error("Previous runner target is missing.");
-          await releaseProvider.assertDrained(staged.candidateApplicationId);
-        }
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         const before = await readCloudflareContainerApplicationIdentities(
-          renderedContainers,
-          containerProvider.listApplications,
-          "before",
-          containerProvider.readRollout,
+          renderedContainers, containerProvider.listApplications, "before", containerProvider.readRollout,
         );
-        const deployOutput = await runWranglerLoggedCaptured([
-          "deploy",
-          "--config",
-          staged.configPath,
-          ...(input.containerRolloutMode === "immediate" ? ["--containers-rollout=immediate"] : []),
-          "--message",
-          input.deploymentMessage,
-          "--name",
-          input.workerName,
-          "--tag",
-          input.versionTag,
-          ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-        ]);
-        const actions = parseWranglerContainerActions(
-          `${deployOutput.stdout}\n${deployOutput.stderr}`,
-          renderedContainers,
-        );
-        if (actions.find((action) => action.applicationName === staged.activeApplicationName)?.action !== "unchanged") {
-          throw new Error("Staging unexpectedly changed the active runner application.");
+        const actions: WranglerContainerAction[] = renderedContainers.map((container) => ({ ...container, action: "unchanged" }));
+        // Native admission, including quota rejection, completes before any Worker upload.
+        for (const application of staged.applications) {
+          const entry = actions.find((entry) => entry.applicationName === application.name);
+          if (!entry || application.name === staged.activeApplicationName) throw new Error("Invalid inactive runner application plan.");
+          if (application.applicationId) await releaseProvider.assertDrained(application.applicationId);
+          const action = await releaseProvider.admitApplication(application);
+          entry.action = action;
+          await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }
-        const stageVersionId = parseWranglerWorkerVersionId(`${deployOutput.stdout}\n${deployOutput.stderr}`);
-        await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+        const containers = await waitForCloudflareContainerReleaseEntries({
+          actions, before, expectedContainers: renderedContainers,
+          listApplications: containerProvider.listApplications, readRollout: containerProvider.readRollout,
+        });
+        const prepared = await readCloudflareContainerApplicationIdentities(
+          renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
+        );
+        await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+        const uploadAndActivate = async (configPath: string, expectedLiveVersion: string): Promise<string> => {
+          const output = await runWranglerLoggedCaptured([
+            "versions", "upload", "--config", configPath, "--name", input.workerName,
+            "--message", input.deploymentMessage, "--tag", input.versionTag,
+            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
+          ]);
+          const versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
+          await runWranglerLogged([
+            "versions", "deploy", `${versionId}@100%`, "--yes", "--config", configPath,
+            "--name", input.workerName, "--message", input.deploymentMessage,
+          ]);
+          await assertLiveVersion(input.workerName, input.configPath, versionId);
+          return versionId;
+        };
+        const stageVersionId = await uploadAndActivate(staged.configPath, currentVersionId);
         await runSmokeHostedDeploy({
           source: {
             ...env,
@@ -126,25 +132,15 @@ export async function runDeployWorkerVersionCli(
           },
         });
         await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
-        const promotionOutput = await runWranglerLoggedCaptured([
-          "deploy", "--config", staged.promotionConfigPath,
-          "--message", input.deploymentMessage, "--name", input.workerName,
-          "--tag", input.versionTag,
-          ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-        ]);
+        const workerVersionId = staged.workerOnly ? stageVersionId
+          : await uploadAndActivate(staged.promotionConfigPath, stageVersionId);
+        const after = await readCloudflareContainerApplicationIdentities(
+          renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
+        );
+        // Version publication must not create or update any native application.
+        buildContainerReleaseEntries({ before: prepared, after, actions: actions.map((entry) => ({ ...entry, action: "unchanged" })) });
         await writeFile(input.configPath, await readFile(staged.promotionConfigPath, "utf8"), "utf8");
-        return {
-          containers: await waitForCloudflareContainerReleaseEntries({
-            actions,
-            before,
-            expectedContainers: renderedContainers,
-            listApplications: containerProvider.listApplications,
-            readRollout: containerProvider.readRollout,
-          }),
-          workerVersionId: parseWranglerWorkerVersionId(
-            `${promotionOutput.stdout}\n${promotionOutput.stderr}`,
-          ),
-        };
+        return { containers, workerVersionId };
       },
       mkdir,
       readCurrentDeployment,
@@ -164,7 +160,7 @@ export async function runDeployWorkerVersionCli(
   });
 
   if (options.log ?? true) {
-    console.log("Deployed Cloudflare Worker with direct Wrangler.");
+    console.log("Deployed Cloudflare Worker after native runner admission.");
     console.log(`Smoke version: ${result.smokeVersionId}`);
   }
 

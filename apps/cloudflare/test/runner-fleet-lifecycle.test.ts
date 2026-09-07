@@ -38,6 +38,9 @@ vi.mock("../src/runner-job-transport.ts", () => ({
 }));
 
 const RELEASE = "release_1";
+const PREVIOUS = { bank: "primary", id: RELEASE, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+const ACTIVE = { bank: "next", id: "next-release_2", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
+const PROMOTED = { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: ACTIVE, previous: PREVIOUS, candidate: null }) };
 const MEMBER = "member-a";
 const GLOBAL_SLOT = `runner--v-${RELEASE}--${"1".repeat(32)}`;
 const LEGACY_SLOT = `standby--v-${RELEASE}--${"2".repeat(32)}`;
@@ -322,7 +325,7 @@ describe("native warm retention and terminal retirement", () => {
     await assert.rejects(container.bindStandbySlot(claimInput(LEGACY_SLOT)), /drain-only/u);
   });
 
-  it("retires prior-release bindings even when their native container is warm", async () => {
+  it("retires unsupported prior-release bindings even when their native container is warm", async () => {
     const { container, sql, calls } = runnerHarness({ running: true, environment: { CF_VERSION_METADATA: { id: "release_2" } } });
     const oldBinding = new RunnerSlotBindingStore(sql);
     oldBinding.initialize(claimInput());
@@ -332,6 +335,47 @@ describe("native warm retention and terminal retirement", () => {
     assert.equal(result.releaseId, RELEASE);
     assert.equal(calls.start, 0);
     assert.equal(calls.destroy, 1);
+  });
+
+  for (const currentReleaseId of [RELEASE, ACTIVE.id]) {
+    it(`retains the exactly bound warm previous process for controller ${currentReleaseId}`, async () => {
+      const h = runnerHarness({ running: true, environment: PROMOTED });
+      const store = new RunnerSlotBindingStore(h.sql);
+      const claim = claimInput();
+      store.initialize(claim);
+      store.bind(claim);
+      assert.deepEqual(await h.container.resolveRetainedStandbySlot({ ...retainedInput(), currentReleaseId }), store.read());
+      await h.container.bindStandbySlot(claim); // exact delayed replay preserves the immutable owner
+      await assert.rejects(h.container.bindStandbySlot({ ...claim, userId: "member-b" }));
+      assert.equal(h.calls.destroy, 0);
+      assert.equal(h.calls.start, 0);
+    });
+  }
+
+  it("never revives a cold previous process or admits new work to its draining bank", async () => {
+    const h = runnerHarness({ environment: PROMOTED });
+    await assert.rejects(h.container.bindStandbySlot(claimInput()), /active runner release/u);
+    await assert.rejects(h.container.prepareStandbySlot({ ...claimInput(), timeoutMs: 1_000 }), /drain-only/u);
+    const store = new RunnerSlotBindingStore(h.sql);
+    const claim = claimInput();
+    store.initialize(claim);
+    store.bind(claim);
+    await assert.rejects(h.container.ensureReadyForProcessing({ timeoutMs: 1_000, userId: MEMBER }), /cannot start/u);
+    assert.equal((await h.container.resolveRetainedStandbySlot({ ...retainedInput(), currentReleaseId: ACTIVE.id })).state, "retired");
+    assert.equal(h.calls.start, 0);
+  });
+
+  it("fences delayed old bindings when a drained namespace is reused for the third release", async () => {
+    const third = { ...PREVIOUS, id: "primary-third", bundleFingerprint: "e".repeat(64), sourceFingerprint: "f".repeat(64) };
+    const h = runnerHarness({ environment: { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: third, previous: ACTIVE, candidate: null }) } });
+    const store = new RunnerSlotBindingStore(h.sql);
+    const claim = claimInput();
+    store.initialize(claim);
+    store.bind(claim);
+    await assert.rejects(h.container.bindStandbySlot(claim), /release is stale/u);
+    await assert.rejects(h.container.resolveRetainedStandbySlot(retainedInput()), /authority is stale/u);
+    assert.equal((await h.container.resolveRetainedStandbySlot({ ...retainedInput(), currentReleaseId: third.id })).state, "retired");
+    assert.equal(h.calls.start, 0);
   });
 
   it("drains legacy ENAM targets only through the legacy namespace with no main fallback", async () => {
@@ -419,6 +463,7 @@ type BindInput = Parameters<HostedRunnerSlotLifecycle["bindStandbySlot"]>[0];
 type BindResult = Awaited<ReturnType<HostedRunnerSlotLifecycle["bindStandbySlot"]>>;
 function allocationHarness(options: {
   mode?: "allocate" | "off" | "shadow"; local?: boolean; pooled?: boolean; failPreparation?: boolean;
+  environment?: Record<string, unknown>;
   bind?: (input: BindInput, original: () => Promise<BindResult>) => Promise<BindResult>;
   read?: (input: BindInput | null, original: () => Promise<HostedStandbySlotBinding>) => Promise<HostedStandbySlotBinding>;
 } = {}) {
@@ -463,7 +508,7 @@ function allocationHarness(options: {
   });
   const controller = new RuntimeProcessingController({
     env: controllerEnvironment(), stateStore: store, runnerContainerNamespace: namespace,
-    runnerRuntimeEnvSource: { ...version, HOSTED_EXECUTION_STANDBY_MODE: options.mode ?? "allocate" },
+    runnerRuntimeEnvSource: { ...version, ...options.environment, HOSTED_EXECUTION_STANDBY_MODE: options.mode ?? "allocate" },
     invocationService: {
       prepareForFreshStart({ input }) {
         return async (token) => {
@@ -630,6 +675,29 @@ describe("fleet allocation policy and ambiguous-outcome recovery", () => {
     assert.equal(target.calls.start, 1);
     assert.equal(target.calls.destroy, 0);
   });
+
+  for (const mode of ["off", "shadow", "allocate"] as const) {
+    it(`preserves a warm previous reservation and write fence through promotion in ${mode} mode`, async () => {
+      const h = allocationHarness({ mode, environment: PROMOTED });
+      const prior = runnerHarness({ running: true, environment: PROMOTED, health: { runnerBundle: { bundleFingerprint: PREVIOUS.bundleFingerprint, sourceFingerprint: PREVIOUS.sourceFingerprint } } });
+      const bindingStore = new RunnerSlotBindingStore(prior.sql);
+      const claim = claimInput();
+      bindingStore.initialize(claim);
+      bindingStore.bind(claim);
+      h.slots.set(GLOBAL_SLOT, prior);
+      await h.store.bindUser(MEMBER);
+      await h.store.reserveRunnerContainerStopTarget({ runnerContainerName: GLOBAL_SLOT, userId: MEMBER });
+      const result = await h.controller.ensureForUser({ userId: MEMBER, orchestrationAttemptId: "after-promotion", conversationWorkPending: true });
+      assert.equal(result.kind, "runtime_processing_accepted");
+      const token = await h.store.readWriteFenceToken();
+      assert.equal(token?.runnerContainerName, GLOBAL_SLOT);
+      assert.equal(h.calls.invoke, 1);
+      assert.equal(h.calls.claim, 0);
+      assert.equal(h.calls.bind, 0);
+      assert.equal(prior.calls.start, 0);
+      assert.equal(prior.calls.destroy, 0);
+    });
+  }
 
   it("pins a pending retirement until the exact native destroy finishes", async () => {
     const h = allocationHarness({ mode: "off" });

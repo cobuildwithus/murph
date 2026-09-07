@@ -57,7 +57,7 @@ import {
   isHostedRunnerTargetName,
   isHostedStandbyClaimId,
   requireHostedRunnerSlotLifecycle,
-  resolveHostedRunnerReleaseId,
+  isSupportedHostedRunnerRelease,
   type HostedStandbySlotBinding,
 } from "../standby-runner-contract.js";
 import {
@@ -1175,8 +1175,7 @@ export class RuntimeInvocationService {
     ) {
       const runnerContainerName = input.runnerContainerName;
       const namespace = this.input.runnerContainerNamespace;
-      const releaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
-      if (!namespace || !releaseId) {
+      if (!namespace) {
         throw new Error("Hosted standby invocation binding is unavailable.");
       }
       const readBinding = async () =>
@@ -1196,7 +1195,7 @@ export class RuntimeInvocationService {
         || binding.state !== "bound"
         || binding.userId !== input.userId
         || !isHostedStandbyClaimId(binding.claimId)
-        || binding.releaseId !== releaseId
+        || !isSupportedHostedRunnerRelease(this.input.runnerRuntimeEnvSource, binding.releaseId)
       ) {
         throw new Error("Hosted standby slot binding did not match the runtime invocation user.");
       }

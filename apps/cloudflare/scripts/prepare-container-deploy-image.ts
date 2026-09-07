@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 import { runWranglerLoggedCaptured } from "./wrangler-runner.ts";
 
-/** Publish before `wrangler deploy`, which activates Worker code before building images. */
+/** Publish the immutable image before native admission or Worker version activation. */
 export async function prepareHostedContainerDeployImage(input: {
   accountId: string;
   configPath: string;

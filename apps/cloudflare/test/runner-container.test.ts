@@ -2004,7 +2004,7 @@ describe("RunnerContainer", () => {
     });
     await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" }))
       .rejects.toThrow("bundle fingerprint mismatch");
-    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(containerFetch).toHaveBeenCalledTimes(1);
     expect(destroy).toHaveBeenCalled();
   });
 
@@ -2017,6 +2017,8 @@ describe("RunnerContainer", () => {
     for (const [containerClass, release] of [[RunnerContainer, previous], [NextRunnerContainer, candidate]] as const) {
       const { container, destroy, startAndWaitForPorts, containerFetch } = createContainerDouble({
         containerClass,
+        initialStatus: phase === "promoted" && release === previous ? "running" : "stopped",
+        platformRunning: phase === "promoted" && release === previous ? true : undefined,
         env: {
           CF_VERSION_METADATA: { id: "worker-new" },
           HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment),
@@ -2030,73 +2032,13 @@ describe("RunnerContainer", () => {
       });
       await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" }))
         .resolves.toMatchObject({ kind: "ready" });
-      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(phase === "promoted" && release === previous ? 0 : 1);
       expect(containerFetch).toHaveBeenCalledOnce();
       expect(destroy).not.toHaveBeenCalled();
     }
   });
 
-  it("replaces one stale rollout image before cold readiness succeeds", async () => {
-    let healthChecks = 0;
-    const events: string[] = [];
-    const replacementProcessStartedAtEpochMs = Date.parse("2026-08-29T20:00:01.000Z");
-    const replacementServerListeningAtEpochMs = Date.parse("2026-08-29T20:00:02.000Z");
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-      env: {
-        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "expected-bundle",
-        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "expected-source",
-      },
-      containerFetch: vi.fn(async (url: string) => {
-        if (!url.endsWith("/health")) {
-          throw new Error(`Unexpected runner request URL: ${url}`);
-        }
-        healthChecks += 1;
-        events.push(healthChecks === 1 ? "health-stale" : "health-current");
-        return new Response(JSON.stringify({
-          ...createRunnerHealthResult(),
-          ...(healthChecks === 1 ? {} : {
-            processStartedAtEpochMs: replacementProcessStartedAtEpochMs,
-            serverListeningAtEpochMs: replacementServerListeningAtEpochMs,
-          }),
-          runnerBundle: {
-            bundleFingerprint: healthChecks === 1
-              ? "stale-bundle"
-              : "expected-bundle",
-            sourceFingerprint: healthChecks === 1
-              ? "stale-source"
-              : "expected-source",
-          },
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }),
-    });
-
-    const result = await container.ensureReadyForProcessing({
-      timeoutMs: 15_000,
-      userId: "member_123",
-    });
-    expect(result).toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
-    if (result.kind !== "ready" || !result.coldStartTiming) {
-      throw new Error("Expected replacement cold readiness timing.");
-    }
-
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(events).toEqual(["health-stale", "health-current"]);
-    expect(result.coldStartTiming.processStartedAtEpochMs)
-      .toBe(replacementProcessStartedAtEpochMs);
-    expect(result.coldStartTiming.serverListeningAtEpochMs)
-      .toBe(replacementServerListeningAtEpochMs);
-  });
-
-  it("fails after one replacement when two cold rollout images are stale", async () => {
+  it("rejects a stale cold image without retrying deployment convergence on the member path", async () => {
     let healthChecks = 0;
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       env: {
@@ -2128,9 +2070,9 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).rejects.toThrow("Hosted runner container bundle fingerprint mismatch.");
 
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    expect(destroy).toHaveBeenCalledTimes(2);
-    expect(healthChecks).toBe(2);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(healthChecks).toBe(1);
   });
 
   it("does not retry an ordinary cold health failure", async () => {
@@ -2291,7 +2233,7 @@ describe("RunnerContainer", () => {
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
 
       releaseDestroy.resolve(undefined);
-      await expect(readiness).rejects.toMatchObject({ name: "TimeoutError" });
+      await expect(readiness).rejects.toMatchObject({ name: "HostedRunnerContainerBundleMismatchError" });
       expect(destroy).toHaveBeenCalledTimes(1);
       expect(healthChecks).toBe(1);
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);

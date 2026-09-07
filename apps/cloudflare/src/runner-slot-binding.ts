@@ -1,8 +1,7 @@
-import { readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import {
   isHostedStandbyClaimId,
+  isSupportedHostedRunnerRelease,
   readHostedRunnerTargetIdentity,
-  resolveHostedRunnerReleaseId,
   type HostedRunnerRegion,
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.js";
@@ -235,7 +234,6 @@ function projectBinding(row: StandbySlotRow): HostedStandbySlotBinding {
 }
 
 interface RetainedStandbyRequest {
-  currentReleaseId: string;
   region: HostedRunnerRegion;
   slotName: string;
   targetReleaseId: string;
@@ -252,9 +250,7 @@ export function requireRetainedRunnerRequest(
     userId: string;
   },
 ): RetainedStandbyRequest {
-  const currentReleaseId = readHostedRunnerDeployment(environment)?.active.id
-    ?? resolveHostedRunnerReleaseId(environment);
-  if (input.currentReleaseId !== currentReleaseId) {
+  if (!isSupportedHostedRunnerRelease(environment, input.currentReleaseId)) {
     throw new Error("Hosted standby retained-slot release authority is stale.");
   }
   const targetIdentity = readHostedRunnerTargetIdentity(input.slotName);
@@ -277,7 +273,6 @@ export function requireRetainedRunnerRequest(
     throw new Error("Hosted standby retained slot belongs to another member.");
   }
   return {
-    currentReleaseId,
     region: input.region,
     slotName: input.slotName,
     targetReleaseId,
@@ -293,7 +288,7 @@ export function assertRetainedRunnerBinding(
   if (
     retained.state !== "bound"
     || retained.claimId !== before.claimId
-    || retained.releaseId !== request.currentReleaseId
+    || retained.releaseId !== request.targetReleaseId
     || retained.region !== request.region
     || retained.slotName !== request.slotName
     || retained.userId !== request.userId

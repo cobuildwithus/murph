@@ -40,4 +40,14 @@ assistant behavior change is intended.
 
 ## Progress
 
-- Architecture consultation running. No live capacity reductions applied.
+- Architecture consultation completed: separate native preparation from Worker
+  publication, preserve valid warm previous sessions, and keep execution identity
+  independent of deployment attempts. No live capacity reductions applied.
+- Focused runtime regression suite: 301 tests passed, including promoted warm
+  retention in all allocation modes, cold previous-release rejection, exact claim
+  replay, and removal of deployment-specific restart retries.
+- Deployment tests cover rejected native admission before Worker publication,
+  interrupted native PATCH/rollout reconciliation, stable execution identity,
+  candidate resumption, and Worker-only promotion. Final verification remains open.
+- Read-only native quota diagnostics have a reviewed PR with green exact-head CI;
+  its additional local acceptance run is queued behind another session's work.
