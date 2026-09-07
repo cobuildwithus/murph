@@ -122,6 +122,7 @@ vi.mock("../app/(dashboard)/home/device-sync-completion-dialog", () => ({
 
 vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
   resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+  HostedMurphChatAction: () => createElement("button", null, "Message Murph"),
 }));
 
 vi.mock("@/src/components/ui/auth-button", () => ({

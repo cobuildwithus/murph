@@ -1,5 +1,8 @@
 import "server-only";
 
+import { MurphChatAction, type MurphChatActionProps } from "./murph-chat-action";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+
 import {
   getHostedMurphContactContext,
 } from "@/src/lib/hosted-onboarding/hosted-contact-context";
@@ -37,4 +40,13 @@ export async function resolveHostedMurphContactOption({
 }: ResolveHostedMurphContactOptionsInput = {}): Promise<MurphContactOption | null> {
   const options = await resolveHostedMurphContactOptions({ message, preferredKind });
   return options[0] ?? null;
+}
+
+export async function HostedMurphChatAction(props: Omit<MurphChatActionProps, "options" | "authenticated"> = {}) {
+  const options = await resolveHostedMurphContactOptions();
+  const authenticated = options.length === 0
+    ? (await getHostedPageAuthSnapshot()).authenticated
+    : true;
+
+  return <MurphChatAction {...props} options={options} authenticated={authenticated} />;
 }

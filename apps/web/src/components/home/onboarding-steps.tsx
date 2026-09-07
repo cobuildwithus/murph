@@ -45,6 +45,7 @@ const steps: {
 
 export interface OnboardingStepsProps {
   showEmptyState?: boolean;
+  emptyStateAction?: ReactNode;
   hideLabsStep?: boolean;
   /**
    * Rendered as the "Message Murph" step's action. Supplying it is what shows
@@ -65,6 +66,7 @@ export function getOnboardingStepActionClass(isPrimary: boolean): string {
 export function OnboardingSteps({
   showDeviceStep = true,
   showEmptyState = true,
+  emptyStateAction = null,
   hideLabsStep = false,
   messageMurphAction = null,
   uploadLabsAction = null,
@@ -78,9 +80,7 @@ export function OnboardingSteps({
   if (visibleSteps.length === 0) {
     return showEmptyState ? (
       <section className="py-16 text-center sm:py-24" data-home-empty-state>
-        <h2 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-          Text Murph
-        </h2>
+        {emptyStateAction}
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
           Ask a question, share an update, or talk through what’s on your mind.
         </p>

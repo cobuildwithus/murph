@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-07",
+  "order": 100,
+  "item": {
+    "id": "home-message-murph-button",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Message Murph from Home",
+    "summary": "Once setup is complete, Home has a Message Murph button that opens your connected messaging channel or lets you choose one.",
+    "relevanceTags": ["home", "messaging"],
+    "sourcePullRequests": [],
+    "tryIt": { "label": "Open Home", "href": "/home" }
+  }
+}
