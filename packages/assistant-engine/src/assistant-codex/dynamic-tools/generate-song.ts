@@ -1,3 +1,4 @@
+import { toolFailureDiagnostic } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -96,6 +97,7 @@ export async function executeGenerateSongDynamicTool(input: {
   if (turnState) {
     if (turnState.attemptCount >= turnState.policy.maxAttempts) {
       return wrapVoiceMemoToolResult({
+        failureDiagnostic: toolFailureDiagnostic('limit_reached'),
         rpcSuccess: false,
         rpcText:
           'song generation attempt limit reached for this turn; no song ran',
