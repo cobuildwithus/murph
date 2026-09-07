@@ -2002,6 +2002,77 @@ describe("runHostedDeviceSyncPass", () => {
     }));
   });
 
+  it("retains completed acknowledgements when the pass deadline meets a fanout overflow", async () => {
+    const actual = await vi.importActual<typeof import("../src/hosted-device-sync-runtime.ts")>(
+      "../src/hosted-device-sync-runtime.ts",
+    );
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-sync-deadline-overflow-"));
+    const store = new SqliteDeviceSyncStore(path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH));
+    const connectionId = "hosted_deadline_overflow";
+    const now = "2026-04-08T00:00:00.000Z";
+    const account = store.upsertAccount({ provider: "strava", externalAccountId: "synthetic-account",
+      scopes: [], tokens: { accessToken: "synthetic-token", accessTokenEncrypted: "enc:synthetic-token" }, connectedAt: now });
+    const pendingDirtyPayloadJobs = Array.from({ length: 100 }, (_, index) => {
+      const job = store.enqueueJob({ accountId: account.id, provider: "strava", kind: "resource",
+        availableAt: now, dedupeKey: `deadline-payload-${index}`, payload: { resourceId: `activity-${index}` } });
+      return { connectionId, dirtyPayloadId: `dsp_deadline_${index}`, jobId: job.id,
+        processedRevision: "100", replayableFromWeb: true, resource: "activity", sourceProviderSlug: "strava" };
+    });
+    const state: import("../src/hosted-device-sync-runtime.ts").HostedDeviceSyncRuntimeSyncState = {
+      dirtyWorkRemaining: false, hostedToLocalAccountIds: new Map([[connectionId, account.id]]),
+      localToHostedAccountIds: new Map([[account.id, connectionId]]), observedTokenVersions: new Map(),
+      pendingDirtyAcks: [{ connectionId, processedRevision: "100", nextWakeAt: null }],
+      pendingDirtyPayloadJobs, snapshot: null,
+    };
+    const deadline = new AbortController();
+    let completedPayloadId: string | undefined;
+    const drainWorker = vi.fn(async () => {
+      const job = store.claimDueJob("deadline-worker", now, 60_000, account.id);
+      assert.ok(job);
+      assert.ok(store.completeJobIfOwned(job.id, "deadline-worker", now));
+      completedPayloadId = pendingDirtyPayloadJobs.find((pending) => pending.jobId === job.id)?.dirtyPayloadId;
+      assert.ok(completedPayloadId);
+      for (let index = 0; index < 25; index += 1) {
+        store.enqueueJob({ accountId: account.id, provider: "strava", kind: "resource", availableAt: now,
+          dedupeKey: `deadline-child-${index}`, payload: { resourceId: `child-${index}` } });
+      }
+      // Model the budget abort after a completed job, as the service returns
+      // its partial drain count to the actual maintenance timeout handler.
+      deadline.abort();
+      return 1;
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({ close: vi.fn(), drainWorker,
+      getNextJobWakeAt: () => now, getNextWakeAt: () => now,
+      listAccounts: () => [], listJobFailureDiagnostics: () => [], runSchedulerOnce: vi.fn() });
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue(store);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue(state);
+    mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValue(null);
+    mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue(account.id);
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockImplementation(actual.resolveHostedDeviceSyncWakeRecovery);
+    mocks.promoteHostedCompletedDirtyPayloadAcks.mockImplementation(actual.promoteHostedCompletedDirtyPayloadAcks);
+    try {
+      const result = await withHostedMaintenanceNow(now, () => runHostedDeviceSyncPass({
+        connectionId, eventId: "device-sync.wake:deadline-overflow", expectedConnectedAt: now,
+        kind: "device-sync.wake", occurredAt: now, provider: "strava", reason: "webhook_hint", userId: "member_123",
+      }, vaultRoot, DEVICE_SYNC_CONFIG, createMaintenanceDeviceSyncPortStub(), 120_000, { signal: deadline.signal }));
+      expect(drainWorker).toHaveBeenCalledTimes(1);
+      expect(result.processedJobs).toBe(1);
+      expect(result.stagedDirtyAcks).toEqual([expect.objectContaining({
+        connectionId, processedDirtyPayloadIds: [completedPayloadId],
+      })]);
+      expect(result.postCheckpointRecord).toEqual(expect.objectContaining({
+        retainedWake: expect.objectContaining({ hint: expect.objectContaining({ jobs: expect.any(Array) }) }),
+      }));
+      const recoveryCall = mocks.resolveHostedDeviceSyncWakeRecovery.mock.results.at(-1)?.value;
+      expect(recoveryCall.wake.hint.jobs).toHaveLength(100);
+      expect(recoveryCall.wake.hint.jobs.filter((job: { dedupeKey: string }) =>
+        job.dedupeKey.startsWith("deadline-child-"))).toHaveLength(25);
+    } finally {
+      store.close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a yielded completion wake outside same-admission completion", async () => {
     let yielded = false;
     const service = {
