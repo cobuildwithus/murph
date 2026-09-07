@@ -115,7 +115,263 @@ vi.mock("@murphai/hosted-execution", async () => {
 const FIXED_NOW = "2026-06-03T00:00:00.000Z";
 const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
+  it("measures the fresh standby handoff with delayed allocation and preparation reads", async () => {
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
+    const standby = createAllocatingStandbyHarness({ slotName, stateStore, bindDelayMs: 100, readDelayMs: 100 });
+    const namespace = createHostedRunnerContainerNamespaceRouter({ exactUser: standby.namespace, standby: null });
+    if (!namespace) throw new Error("Expected synthetic runner namespace.");
+    const source = {
+      CF_VERSION_METADATA: { id: "release_1" },
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
+      OPENAI_API_KEY: "test-openai-key",
+    };
+    const stores = await new TestRunnerStoreCache(source).ensure(TEST_USER_ID);
+    const spans: Record<string, number> = {};
+    const startedAt = performance.now();
+    const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+    vi.spyOn(EmptyRunnerSecretsService.prototype, "readRunnerSecrets").mockImplementation(async () => {
+      await delay(100);
+      return {};
+    });
+    vi.spyOn(TestRunnerStoreCache.prototype, "ensure").mockImplementation(async () => {
+      spans.cryptoStarted = performance.now() - startedAt;
+      await delay(300);
+      spans.cryptoFinished = performance.now() - startedAt;
+      return stores;
+    });
+    const service = createRuntimeInvocationService({
+      beforeWorkspaceRead: async () => {
+        spans.workspaceStarted = performance.now() - startedAt;
+        await delay(200);
+        spans.workspaceFinished = performance.now() - startedAt;
+      },
+      invokedContainerNames: [],
+      runnerContainerNamespace: namespace,
+      runnerRuntimeEnvSource: source,
+      state: durable.state,
+      stateStore,
+    });
+    const invoke = vi.spyOn(service, "invokePreparedWithFence").mockResolvedValue({ status: "idle", nextWakeAt: null });
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(),
+      invocationService: service,
+      runnerContainerNamespace: namespace,
+      runnerRuntimeEnvSource: source,
+      stateStore,
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            async claimReadyStandby() {
+              spans.claimStarted = performance.now() - startedAt;
+              await delay(100);
+              spans.claimFinished = performance.now() - startedAt;
+              return { outcome: "claimed", slotName };
+            },
+            async ensureReadyStandby() { return { accepted: true }; },
+          };
+        },
+      },
+    });
+    const result = await controller.ensureForUser({
+      userId: TEST_USER_ID,
+      orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
+      orchestration: { triggeredByWebDirect: true },
+    });
+    const elapsedMs = Math.round(performance.now() - startedAt);
+    expect(result.kind).toBe("runtime_processing_accepted");
+    expect(standby.bindStandbySlot).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].prepared.input.orchestration).toMatchObject({
+      standbyAllocationOutcome: "claimed",
+      runtimeInvocationOrchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
+      triggeredByWebDirect: true,
+      workspaceReadElapsedMs: expect.any(Number),
+      runtimeStoreEnsureElapsedMs: expect.any(Number),
+    });
+    console.info("synthetic-standby-handoff", JSON.stringify({ elapsedMs, spans }));
+    expect(spans.workspaceStarted).toBeLessThan(spans.claimFinished!);
+    expect(spans.cryptoStarted).toBeLessThan(spans.workspaceFinished!);
+    expect(spans.cryptoStarted).toBeLessThan(spans.claimFinished!);
+  });
+
+  it("loads workspace metadata and runtime crypto concurrently before fenced preparation", async () => {
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: TEST_USER_ID,
+      userId: TEST_USER_ID,
+    });
+    const workspaceGate = createVoidGate();
+    const cryptoGate = createVoidGate();
+    const started: string[] = [];
+    const originalEnsure = TestRunnerStoreCache.prototype.ensure;
+    vi.spyOn(TestRunnerStoreCache.prototype, "ensure").mockImplementation(async function(this: TestRunnerStoreCache, userId) {
+      started.push("crypto");
+      await cryptoGate.promise;
+      return originalEnsure.call(this, userId);
+    });
+    const service = createRuntimeInvocationService({
+      beforeWorkspaceRead: async () => {
+        started.push("workspace");
+        await workspaceGate.promise;
+      },
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      state: durable.state,
+      stateStore,
+    });
+    const prepared = service.prepareWithFence({
+      input: { orchestrationAttemptId: "parallel-inputs", userId: TEST_USER_ID },
+      token,
+    });
+    try {
+      await vi.waitFor(() => expect(started).toEqual(["workspace", "crypto"]), { timeout: 250 });
+      expect((await stateStore.readWriteFenceToken())?.workspaceVersion).toBeNull();
+    } finally {
+      workspaceGate.resolve();
+      cryptoGate.resolve();
+      await prepared;
+    }
+    expect(started).toHaveLength(2);
+  });
+
+  it("verifies the bound slot while runner secrets are still loading", async () => {
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
+    const standby = createAllocatingStandbyHarness({ slotName, stateStore });
+    await stateStore.reserveRunnerContainerStopTarget({ runnerContainerName: slotName, userId: TEST_USER_ID });
+    await standby.namespace.getByName(slotName).bindStandbySlot({
+      claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
+      releaseId: "release_1", region: readHostedRunnerTargetIdentity(slotName)!.region,
+      slotName, userId: TEST_USER_ID,
+    });
+    const token = await stateStore.beginWriteFence({ runnerContainerName: slotName, userId: TEST_USER_ID });
+    const secretsGate = createVoidGate();
+    const readSecrets = vi.spyOn(EmptyRunnerSecretsService.prototype, "readRunnerSecrets")
+      .mockImplementation(async () => { await secretsGate.promise; return {}; });
+    const service = createRuntimeInvocationService({
+      invokedContainerNames: [],
+      runnerContainerNamespace: standby.namespace,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      state: durable.state, stateStore,
+    });
+    const prepared = service.prepareWithFence({
+      input: { orchestrationAttemptId: "parallel-binding", userId: TEST_USER_ID }, token,
+    });
+    try {
+      await vi.waitFor(() => expect(readSecrets).toHaveBeenCalledOnce(), { timeout: 250 });
+      expect(standby.readStandbySlotBinding).toHaveBeenCalledOnce();
+    } finally {
+      secretsGate.resolve();
+      await prepared;
+    }
+  });
+
+  it.each(["workspace failure", "crypto failure", "foreign crypto", "expired budget"] as const)(
+    "rejects early preparation on %s without binding invocation facts",
+    async (scenario) => {
+      const durable = createRunnerDurableState();
+      const stateStore = new RunnerStateStore(durable.state);
+      const token = await stateStore.beginWriteFence({
+        runnerContainerName: TEST_USER_ID,
+        userId: TEST_USER_ID,
+      });
+      const stores = await new TestRunnerStoreCache({}).ensure(TEST_USER_ID);
+      vi.spyOn(TestRunnerStoreCache.prototype, "ensure").mockImplementation(async () => {
+        if (scenario === "crypto failure") throw new Error("Synthetic crypto unavailable.");
+        return scenario === "foreign crypto" ? { ...stores, userId: "member_other" } : stores;
+      });
+      const budget = { deadlineAtMs: Date.now() + 1_000 };
+      const invokedContainerNames: string[] = [];
+      const service = createRuntimeInvocationService({
+        beforeWorkspaceRead: async () => {
+          if (scenario === "workspace failure") throw new Error("Synthetic workspace unavailable.");
+          if (scenario === "expired budget") budget.deadlineAtMs = Date.now() - 1;
+        },
+        invokedContainerNames,
+        runnerRuntimeEnvSource: {},
+        state: durable.state,
+        stateStore,
+      });
+      const consume = service.prepareForFreshStart({
+        commandBudget: budget,
+        input: { orchestrationAttemptId: "early-preparation-failure", userId: TEST_USER_ID },
+      });
+      const expected = {
+        "workspace failure": "Synthetic workspace unavailable.",
+        "crypto failure": "Synthetic crypto unavailable.",
+        "foreign crypto": "Hosted runtime preparation stores belong to another user.",
+        "expired budget": "Hosted runner runtime processing command budget timed out.",
+      }[scenario];
+      await expect(consume(token)).rejects.toThrow(expected);
+      expect((await stateStore.readWriteFenceToken())?.workspaceVersion).toBeNull();
+      expect(invokedContainerNames).toEqual([]);
+    },
+  );
+
+  it("observes unused preparation failure when allocation cannot prove its binding", async () => {
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
+    const standby = createAllocatingStandbyHarness({ slotName, stateStore });
+    standby.bindStandbySlot.mockRejectedValue(new Error("Synthetic bind unavailable."));
+    standby.readStandbySlotBinding.mockRejectedValue(new Error("Synthetic binding unavailable."));
+    const namespace = createHostedRunnerContainerNamespaceRouter({ exactUser: standby.namespace, standby: null });
+    const source = { CF_VERSION_METADATA: { id: "release_1" }, HOSTED_EXECUTION_STANDBY_MODE: "allocate" };
+    const beforeWorkspaceRead = vi.fn(async () => { throw new Error("Synthetic unused read failure."); });
+    const service = createRuntimeInvocationService({
+      beforeWorkspaceRead,
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: source,
+      state: durable.state,
+      stateStore,
+    });
+    const invoke = vi.spyOn(service, "invokePreparedWithFence");
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(),
+      invocationService: service,
+      runnerContainerNamespace: namespace,
+      runnerRuntimeEnvSource: source,
+      stateStore,
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            async claimReadyStandby() { return { outcome: "claimed", slotName }; },
+            async ensureReadyStandby() { return { accepted: true }; },
+          };
+        },
+      },
+    });
+    const result = await controller.ensureForUser({
+      userId: TEST_USER_ID,
+      orchestrationAttemptId: "allocation-failure",
+      orchestration: { triggeredByWebDirect: true },
+    });
+    expect(result.kind).toBe("retry_later");
+    expect(beforeWorkspaceRead).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(await stateStore.readWriteFenceToken()).toBeNull();
+    const pending = (await stateStore.readState()).pendingRunnerContainerName;
+    expect(pending).toBe(standby.bindStandbySlot.mock.calls.at(-1)?.[0].slotName);
+    expect(pending).toMatch(/^runner--v-release_1--/);
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     mocks.emitHostedExecutionStructuredLog.mockReset();
@@ -1577,6 +1833,10 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
     });
   }
 
+  override prepareForFreshStart(input: Parameters<RuntimeInvocationService["prepareForFreshStart"]>[0]) {
+    return (token: RunnerWriteFenceToken) => this.prepareWithFence({ ...input, token });
+  }
+
   override async prepareWithFence(input: {
     input: PreparedRuntimeInvocation["input"];
     token: RunnerWriteFenceToken;
@@ -1672,6 +1932,8 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
 }
 
 function createRuntimeInvocationService(input: {
+  runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
+  beforeWorkspaceRead?: () => Promise<void>;
   hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
@@ -1698,7 +1960,9 @@ function createRuntimeInvocationService(input: {
       workspace: input.workspace ?? null,
     }),
     readHostedWebControlBaseUrl: () => "https://web.example.test",
-    readHostedWorkspaceFromWeb: async () => ({
+    readHostedWorkspaceFromWeb: async () => {
+      await input.beforeWorkspaceRead?.();
+      return ({
       fetchedAt: FIXED_NOW,
       ...(input.platformAiUsageAllowed === undefined
         ? {}
@@ -1731,8 +1995,9 @@ function createRuntimeInvocationService(input: {
               input.hostedAssistantSubagentModelOverridesAllowed,
           }),
       workspace: input.workspace ?? null,
-    }),
-    runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
+      });
+    },
+    runnerContainerNamespace: input.runnerContainerNamespace ?? createHostedRunnerContainerNamespaceRouter({
       exactUser: createRunnerContainerNamespace({ invokedContainerNames: input.invokedContainerNames }),
       standby: input.standbyContainerNamespace ?? null,
     }),
@@ -2066,4 +2331,10 @@ function createEmptyR2Bucket(): R2BucketLike {
     get: async () => null,
     put: async () => {},
   };
+}
+
+function createVoidGate(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
 }
