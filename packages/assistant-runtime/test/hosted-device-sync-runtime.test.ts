@@ -11,6 +11,7 @@ import {
   VaultError,
   withHostedCanonicalWritePort,
 } from "@murphai/core";
+import type { HostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
@@ -5908,6 +5909,172 @@ describe("hosted device-sync runtime", () => {
 
     assert.equal(processedIds.size, 500);
     assert.equal(pendingIndexes.size, 0);
+  });
+
+  test.each(["fresh", "running", "retry", "future", "unowned"] as const)(
+    "overflow defers only Web-owned unstarted payload jobs: %s",
+    async (mode) => {
+      const workspace = await createHostedRuntimeWorkspace("hosted-device-sync-retention-bound-");
+      const service = createDeviceSyncServiceForVault(workspace.vaultRoot);
+      try {
+        const store = getStore(service);
+        const now = "2026-04-04T10:00:00.000Z";
+        const account = store.upsertAccount({
+          connectedAt: now,
+          credential: { credentialMetadata: {}, kind: "none" },
+          externalAccountId: "demo-retention-bound",
+          provider: "demo", scopes: [], status: "active",
+        });
+        const payload = store.enqueueJob({
+          accountId: account.id, kind: "resource", provider: "demo",
+          payload: { resource: "steps" }, priority: 100,
+          availableAt: mode === "future" ? "2099-01-01T00:00:00.000Z" : now,
+        });
+        if (mode === "running" || mode === "retry") {
+          assert.equal(store.claimDueJob("retention-worker", now, 60_000, account.id)?.id, payload.id);
+          if (mode === "retry") {
+            store.failJob(payload.id, now, "RETRY", "Synthetic retry", "2099-01-01T00:00:00.000Z", true);
+          }
+        }
+        for (let index = 0; index < 100; index += 1) {
+          store.enqueueJob({
+            accountId: account.id, kind: "resource", provider: "demo",
+            payload: { resource: "steps" }, dedupeKey: `retained-child-${index}`, availableAt: now,
+          });
+        }
+        const state: HostedDeviceSyncRuntimeSyncState = {
+          dirtyWorkRemaining: false,
+          hostedToLocalAccountIds: new Map([["hosted_bound", account.id]]),
+          localToHostedAccountIds: new Map([[account.id, "hosted_bound"]]),
+          observedTokenVersions: new Map(), pendingDirtyAcks: [], snapshot: null,
+          pendingDirtyPayloadJobs: [{
+            connectionId: "hosted_bound", dirtyPayloadId: mode === "unowned" ? null : "dsp_bound",
+            jobId: payload.id, processedRevision: "1", resource: "steps", sourceProviderSlug: "demo",
+          }],
+        };
+        const pendingRead = vi.spyOn(store, "listPendingJobsForAccount");
+        const recover = () => resolveHostedDeviceSyncWakeRecovery({
+          service, state,
+          wake: buildDeviceSyncWake({ connectionId: "hosted_bound", occurredAt: now, reason: "webhook_hint" }),
+        });
+        if (mode === "fresh") {
+          const result = recover();
+          assert.equal(result?.wake.hint?.jobs?.length, 100);
+          assert.ok(result?.wake.hint?.jobs?.every((job) => job.dedupeKey?.startsWith("retained-child-")));
+          assert.equal(state.dirtyWorkRemaining, true);
+        } else {
+          assert.throws(recover, /retained work exceeds/);
+          assert.equal(state.dirtyWorkRemaining, false);
+        }
+        assert.equal(pendingRead.mock.calls.length, 2);
+        assert.ok(pendingRead.mock.calls.every(([, limit]) => limit <= 201));
+        assert.equal(store.getJobById(payload.id)?.status, mode === "running" ? "running" : "queued");
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await workspace.cleanup();
+      }
+    },
+  );
+
+  test("worker fanout preserves bounded recovery and drains Web payloads across cold restores", async () => {
+    const connectionId = "hosted_strava_fanout";
+    const baseProvider = createFakeProvider();
+    const completedChildren = new Set<string>();
+    let expanded = false;
+    const provider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: { ...baseProvider.descriptor, provider: "strava" },
+      jobExecutor: {
+        async executeJob(_context, job) {
+          if (typeof job.payload.resourceId === "string" && job.payload.resourceId.startsWith("child-")) {
+            completedChildren.add(job.payload.resourceId);
+            return {};
+          }
+          if (expanded) return {};
+          expanded = true;
+          return {
+            scheduledJobs: Array.from({ length: 25 }, (_, index) => ({
+              kind: "resource" as const,
+              dedupeKey: `fanout-child-${index}`,
+              payload: { resourceId: `child-${index}`, resourceType: "activity" },
+              priority: 10,
+            })),
+          };
+        },
+      },
+    };
+    let dirtyResources = Array.from({ length: 100 }, (_, index) => ({
+      count: 1,
+      dirtyPayloadId: `dsp_fanout_${index}`,
+      jobKind: "resource" as const,
+      payload: { resourceId: `activity-${index}`, resourceType: "activity" },
+      resource: "activity",
+      resourceCategory: "activity",
+      sourceProviderSlug: "strava",
+      windowEnd: null,
+      windowStart: null,
+    }));
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "strava-fanout",
+      provider: "strava",
+    });
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() { throw new Error("Unexpected update"); },
+      async createConnectLink() { throw new Error("Unexpected connect"); },
+      async fetchSnapshot() { return snapshot; },
+      async fetchDirtyStates() {
+        return {
+          hasMore: false,
+          items: [buildDirtyState({
+            connectionId, provider: "strava", dirtyRevision: "100", dirtyResources,
+          })],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+    };
+    let wake: HostedExecutionDeviceSyncWake = buildDirtyDeviceSyncWake(connectionId, "2026-04-04T10:00:00.000Z", "strava");
+    const acknowledged = new Set<string>();
+    for (let pass = 0; pass < 3; pass += 1) {
+      const workspace = await createHostedRuntimeWorkspace("hosted-device-sync-fanout-");
+      const service = createDeviceSyncServiceForVault(workspace.vaultRoot, [provider]);
+      try {
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+        });
+        const accountId = state.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(accountId);
+        await service.drainWorker(pass === 0 ? 1 : 100, accountId);
+        promoteHostedCompletedDirtyPayloadAcks({ service, state });
+        if (pass === 0) {
+          assert.equal(getStore(service).listPendingJobsForAccount(accountId, 125).length, 124);
+        }
+        const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+        if (pass === 0) {
+          assert.ok(recovery);
+          assert.equal(recovery.wake.hint?.jobs?.length, 100);
+          assert.equal(recovery.wake.hint?.jobs?.filter((job) =>
+            job.dedupeKey?.startsWith("fanout-child-")).length, 25);
+          assert.equal(state.dirtyWorkRemaining, true);
+        }
+        // This models the existing post-checkpoint Web acknowledgement; only
+        // terminal payload IDs leave the authoritative queue.
+        for (const ack of state.pendingDirtyAcks) {
+          for (const id of ack.processedDirtyPayloadIds ?? []) acknowledged.add(id);
+        }
+        dirtyResources = dirtyResources.filter((resource) => !acknowledged.has(resource.dirtyPayloadId));
+        if (recovery) wake = recovery.wake;
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await workspace.cleanup();
+      }
+    }
+    assert.equal(acknowledged.size, 100);
+    assert.equal(dirtyResources.length, 0);
+    assert.equal(completedChildren.size, 25);
   });
 
   test("a cold-restored full dirty page relinks every retained job before completion", async () => {

@@ -1071,15 +1071,11 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
-  const pendingJobs = store.listPendingJobsForAccount(
-    localAccountId,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-  );
-  if (pendingJobs.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT) {
-    throw new Error(
-      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
-    );
-  }
+  const pendingJobs = listHostedDeviceSyncRetainedJobs({
+    accountId: localAccountId,
+    state: input.state,
+    store,
+  });
   if (pendingJobs.length > 0) {
     let retryAt: string | null = null;
     const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
@@ -1163,6 +1159,50 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
       },
     },
   };
+}
+
+function listHostedDeviceSyncRetainedJobs(input: {
+  accountId: string;
+  state: HostedDeviceSyncRuntimeSyncState;
+  store: HostedRuntimeDeviceSyncStore;
+}): DeviceSyncJobRecord[] {
+  const limit = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+  let pending = input.store.listPendingJobsForAccount(input.accountId, limit + 1);
+  if (pending.length <= limit) return pending;
+
+  // Worker-created continuations can expand a full admission page. Never-started
+  // payload jobs still have their exact authoritative Web row, so defer only
+  // enough of those to retain every continuation and attempted job.
+  const payloadJobIds = new Set(input.state.pendingDirtyPayloadJobs
+    .filter((job) => job.dirtyPayloadId !== null)
+    .map((job) => job.jobId));
+  pending = input.store.listPendingJobsForAccount(
+    input.accountId,
+    limit + Math.min(payloadJobIds.size, limit) + 1,
+  );
+  let overflow = pending.length - limit;
+  const now = Date.now();
+  const retained = [...pending].reverse().filter((job) => {
+    if (
+      overflow > 0
+      && payloadJobIds.has(job.id)
+      && job.status === "queued"
+      && job.attempts === 0
+      && job.startedAt === null
+      && Date.parse(job.availableAt) <= now
+    ) {
+      overflow -= 1;
+      return false;
+    }
+    return true;
+  }).reverse();
+  if (overflow > 0) {
+    throw new Error(
+      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
+    );
+  }
+  input.state.dirtyWorkRemaining = true;
+  return retained;
 }
 
 function resolveHostedDeviceSyncWakeJobDedupeKey(input: {

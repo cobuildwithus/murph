@@ -1442,6 +1442,15 @@ Last verified: 2026-09-04
   reconciliation path. An epoch-less legacy record or a replaced, missing,
   disconnected, or reauthorization-required connection has no cadence authority
   and drains without a Web write.
+  If worker-created continuations expand a full dirty page beyond the 100-job
+  retained-hint limit, recovery defers only enough never-started, currently due
+  payload jobs whose exact Web rows remain authoritative. Attempted, running,
+  future-dated, and worker-created jobs keep their exact retention requirements.
+  Recovery reads at most 101 rows normally and, on overflow, at most 201 more;
+  it leaves deferred payloads unacknowledged and uses the existing dirty-remainder
+  path after the retained work drains. Non-reconstructible overflow still fails
+  closed. This preserves completed payload acknowledgements without widening the
+  mailbox protocol or copying the local queue into hosted snapshots.
   Terminal failure uses the same replayable record. Web dirty rows separately
   remain authoritative until dirty resource/deletion jobs are terminally
   acknowledged. Because the device-sync SQLite store is intentionally excluded
