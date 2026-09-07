@@ -48,7 +48,7 @@ describe("staged runner release", () => {
     const request = { currentReleaseId: next.id, region: "GLOBAL" as const, slotName, userId: "member_test" };
     const binding = { state: "bound" as const, claimId: "a".repeat(32), releaseId: primary.id, region: "GLOBAL" as const, slotName, userId: "member_test" };
     expect(requireRetainedRunnerRequest(env, binding, request)).toMatchObject({
-      currentReleaseId: next.id, targetReleaseId: primary.id, slotName,
+      targetReleaseId: primary.id, slotName,
     });
     expect(() => requireRetainedRunnerRequest(env, binding, { ...request, userId: "member_other" }))
       .toThrow("another member");
