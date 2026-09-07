@@ -177,6 +177,29 @@ describe("runDeployWorkerVersionCli", () => {
     expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledOnce();
   });
 
+  it("forwards explicit retention and records only the effective application set", async () => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath, retainServingRunner }) => {
+      expect(retainServingRunner).toBe(true);
+      return { configPath: `${configPath}.retained`, promotionConfigPath: `${configPath}.retained`,
+        activeApplicationName: "serving", workerOnly: true, applications: [] };
+    });
+    await runDeployWorkerVersionCli([], {
+      deployRoot: "/tmp/synthetic-deploy", log: false,
+      env: { CF_BUNDLES_BUCKET: "synthetic-bundles", CF_WORKER_NAME: "hosted-worker", CLOUDFLARE_ACCOUNT_ID: "account-fixture", CLOUDFLARE_API_TOKEN: "token-fixture" },
+      runHostedWorkerDeployment: async ({ dependencies }) => {
+        await dependencies.deployDirect({ configPath: "/tmp/generated.jsonc", containerRolloutMode: "worker-only",
+          deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json",
+          versionTag: "synthetic", workerName: "hosted-worker" });
+        return createDeploymentResult();
+      },
+    });
+    expect(imageMocks.prepareHostedContainerDeployImage.mock.calls[0]![0]).not.toHaveProperty("release");
+    expect(receiptMocks.readRenderedContainerIdentities).toHaveBeenCalledWith("/tmp/generated.jsonc.retained");
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(fileMocks.writeFile).toHaveBeenCalledWith("/tmp/generated.jsonc", "{}", "utf8");
+  });
+
   it("passes app-root deploy artifact paths to the deploy entrypoint", async () => {
     const repoRoot = path.join("/tmp", "repo");
     const deployRoot = path.join(repoRoot, "apps", "cloudflare");
@@ -319,7 +342,7 @@ describe("runDeployWorkerVersionCli", () => {
       "/tmp/worker-secrets.json",
     ]);
     expect(receiptMocks.readRenderedContainerIdentities).toHaveBeenCalledWith(
-      "/tmp/wrangler.generated.jsonc",
+      "/tmp/wrangler.image-prepared.jsonc",
     );
     expect(receiptMocks.createCloudflareContainerProvider).toHaveBeenCalledWith({
       accountId: "account-fixture",

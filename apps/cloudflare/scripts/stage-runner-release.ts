@@ -65,6 +65,7 @@ export async function stageHostedRunnerRelease(input: {
   configPath: string;
   currentVersion: unknown;
   currentVersionId: string;
+  retainServingRunner?: boolean;
   releaseSha: string;
   listApplications: ListCloudflareContainerApplications;
 }): Promise<StagedRunnerRelease> {
@@ -93,14 +94,17 @@ export async function stageHostedRunnerRelease(input: {
   const target = entries.find((entry) => entry.className === candidateClass);
   const smoke = entries.find((entry) => entry.className === "DeploySmokeRunnerContainer");
   if (!serving || !target || !smoke || !isObjectRecord(serving.live)) throw invalid();
+  if (input.retainServingRunner) assertBoundedSmoke(smoke.live, smoke.specification);
   const bundleFingerprint = requiredString(vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT);
   const sourceFingerprint = requiredString(vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT);
   const executionIdentity = runnerApplicationExecutionIdentity(target.specification);
-  const { deployment, candidate, workerOnly, resumeAdmittedCandidate } = selectDeployment({
+  const { deployment, promoted, workerOnly, resumeAdmittedCandidate } = input.retainServingRunner
+    ? retainDeployment(active, liveDeployment, target.live !== undefined)
+    : selectDeployment({
     active, liveDeployment, executionIdentity, bundleFingerprint, sourceFingerprint, releaseSha: input.releaseSha,
     servingMatches: runnerApplicationMatches(serving.live, serving.specification), candidateExists: target.live !== undefined,
   });
-  const applications = workerOnly ? [] : [target, smoke]
+  const applications = (input.retainServingRunner ? [smoke] : workerOnly ? [] : [target, smoke])
     .filter((entry) => !(resumeAdmittedCandidate && isObjectRecord(entry.live)
       && !entry.live.active_rollout_id && runnerApplicationMatches(entry.live, entry.specification)))
     .map((entry): RunnerApplicationPreparation => ({
@@ -108,8 +112,10 @@ export async function stageHostedRunnerRelease(input: {
     className: entry.className, name: entry.name,
     namespaceId: readNamespaceId(input.currentVersion, entry.className), specification: entry.specification,
   }));
-  const effectiveContainers = entries.map((entry) => {
-    if (entry.className === candidateClass || entry.className === "DeploySmokeRunnerContainer") return entry.rendered;
+  const effectiveContainers = entries
+    .filter((entry) => !input.retainServingRunner || entry.live || entry.className === "DeploySmokeRunnerContainer")
+    .map((entry) => {
+    if ((!input.retainServingRunner && entry.className === candidateClass) || entry.className === "DeploySmokeRunnerContainer") return entry.rendered;
     if (!isObjectRecord(entry.live) || !isObjectRecord(entry.live.configuration)
       || !Number.isSafeInteger(entry.live.max_instances) || Number(entry.live.max_instances) < 0) throw invalid();
     return { ...entry.rendered, image: requiredString(entry.live.configuration.image), max_instances: entry.live.max_instances };
@@ -122,8 +128,22 @@ export async function stageHostedRunnerRelease(input: {
     ...config, containers: effectiveContainers, vars: { ...vars, HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
   }, null, 2)}\n`;
   await writeFile(configPath, render(deployment), { encoding: "utf8", flag: "wx" });
-  await writeFile(promotionConfigPath, render(workerOnly ? deployment : { active: candidate, candidate: null, previous: active }), { encoding: "utf8", flag: "wx" });
+  await writeFile(promotionConfigPath, render(promoted), { encoding: "utf8", flag: "wx" });
   return { activeApplicationName: serving.name, applications, configPath, deployment, promotionConfigPath, workerOnly };
+}
+
+function assertBoundedSmoke(live: unknown, specification: RunnerApplicationSpecification): void {
+  if (!isObjectRecord(live) || live.max_instances !== 1 || specification.max_instances !== 1) throw invalid();
+}
+
+function retainDeployment(active: HostedRunnerRelease, live: HostedRunnerDeployment | null, candidateExists: boolean) {
+  if (live?.previous && !candidateExists) throw invalid();
+  // Retain an existing pending namespace as history so its next reuse proves drain.
+  const deployment: HostedRunnerDeployment = {
+    active, candidate: null,
+    previous: live?.previous ?? (candidateExists ? live?.candidate ?? null : null),
+  };
+  return { deployment, promoted: deployment, workerOnly: true, resumeAdmittedCandidate: false };
 }
 
 function selectDeployment(input: {
@@ -157,9 +177,9 @@ function selectDeployment(input: {
   const deployment: HostedRunnerDeployment = workerOnly
     ? liveDeployment ?? { active, candidate: null, previous: null }
     : { active, candidate, previous: null };
-  const resumeAdmittedCandidate = liveDeployment?.candidate !== null && liveDeployment?.candidate !== undefined
-    && sameExecution(liveDeployment.candidate);
-  return { deployment, candidate, workerOnly, resumeAdmittedCandidate };
+  const resumeAdmittedCandidate = liveDeployment?.candidate ? sameExecution(liveDeployment.candidate) : false;
+  const promoted: HostedRunnerDeployment = workerOnly ? deployment : { active: candidate, candidate: null, previous: active };
+  return { deployment, promoted, workerOnly, resumeAdmittedCandidate };
 }
 
 function readVersionBindings(version: unknown): unknown[] {

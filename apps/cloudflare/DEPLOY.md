@@ -53,6 +53,21 @@ when a native create committed but its response or subsequent Worker publication
 was lost. Its image is never reused as a verified artifact without provenance.
 No deployment-convergence restart retry is added to message processing.
 
+For a compatible Worker coordination change, the protected workflow may explicitly
+select `container_rollout=worker-only`. This retains the serving release's exact
+identity and all existing member application images and capacities, even when the
+new source has different bundle fingerprints. Only the existing one-slot deploy
+smoke application is admitted with the newly built artifact. Signed smoke still
+proves the selected serving namespace and its inventory, then exercises the new
+smoke artifact. There is one Worker activation and no member fleet promotion.
+An existing pending candidate becomes retained history; an absent inactive
+application is omitted from the effective config and exact-state receipt.
+Worker-only mode requires the predeploy gates and does not deploy runner changes.
+The selected runner's old parser may omit new optional diagnostics; Worker-side
+logs remain available. Use a full release for changes that require a new runner.
+This mode does not change account quota or the overlap requirement of full image
+releases. Land the public selector before enabling its private workflow input.
+
 A bound, still-warm previous session retains its exact namespace, member, claim,
 and write fence through promotion. Fresh member allocation selects only the
 active release. Previous inventory cannot prepare, bind new members, or restart
