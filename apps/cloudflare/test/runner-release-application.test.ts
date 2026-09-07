@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runnerApplicationExecutionIdentity, runnerApplicationSpecification } from "../scripts/runner-release-application.ts";
+import { runnerApplicationExecutionIdentity, runnerApplicationSpecification, runnerApplicationMatches } from "../scripts/runner-release-application.ts";
 
 const container = {
   image: `registry.example.test/runner@sha256:${"a".repeat(64)}`,
@@ -11,10 +11,18 @@ describe("rendered runner to native application contract", () => {
   it("preserves custom CPU, memory, decimal disk sizing, placement and capacity", () => {
     expect(runnerApplicationSpecification(container, true)).toEqual({
       configuration: { image: container.image, vcpu: 2, memory_mib: 4096, disk: { size_mb: 6000 }, observability: { logs: { enabled: true } }, wrangler_ssh: { enabled: false } },
-      constraints: { tiers: [1, 2] }, scheduling_policy: "default", instances: 0,
+      constraints: { tiers: [1, 2] }, scheduling_policy: "default",
       max_instances: 12, rollout_active_grace_period: 300,
     });
     expect(runnerApplicationSpecification({ ...container, constraints: { regions: ["ENAM"] } }, true).constraints).toEqual({ tiers: [1, 2], regions: ["ENAM"] });
+  });
+
+  it("recognizes expanded native resources for named presets and rejects different sizing", () => {
+    const expected = runnerApplicationSpecification({ ...container, instance_type: "standard-2" }, true);
+    const actual = { ...expected, configuration: { ...expected.configuration, instance_type: undefined, vcpu: 1, memory_mib: 6144, disk: { size_mb: 12000 } } };
+    expect(runnerApplicationMatches(actual, expected)).toBe(true);
+    expect(runnerApplicationMatches({ ...actual, configuration: { ...actual.configuration, vcpu: 2 } }, expected)).toBe(false);
+    expect(runnerApplicationMatches({ ...actual, configuration: { ...actual.configuration, instance_type: "standard-2", vcpu: 2 } }, expected)).toBe(false);
   });
 
   it.each([

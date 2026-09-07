@@ -57,7 +57,7 @@ export function createRunnerReleaseProvider(input: {
     }): Promise<"created" | "modified" | "unchanged"> {
       const desired = { ...input.specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
       if (input.applicationId === null) {
-        const response = await request("/containers/applications", "POST", desired);
+        const response = await request("/containers/applications", "POST", { ...desired, instances: 0 });
         if (!isObjectRecord(response.result) || typeof response.result.id !== "string") throw unavailable();
         return "created";
       }
@@ -69,7 +69,7 @@ export function createRunnerReleaseProvider(input: {
       if (live.active_rollout_id) throw new Error("Candidate native rollout is still in progress; active Worker is unchanged.");
       // PATCH updates the target for new deployments; an interrupted PATCH/rollout
       // pair must still roll prefetched instances before readiness is accepted.
-      await request(pathname, "PATCH", desired);
+      await request(pathname, "PATCH", input.specification);
       await request(`${pathname}/rollouts`, "POST", {
         description: "Prepare inactive runner release", strategy: "rolling", kind: "full_auto",
         step_percentage: 100, target_configuration: input.specification.configuration,

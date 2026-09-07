@@ -24,7 +24,6 @@ export function runnerApplicationSpecification(container: Record<string, unknown
     configuration: {
       image, ...resources, observability: { logs: { enabled: logsEnabled } }, wrangler_ssh: { enabled: false },
     },
-    instances: 0,
     max_instances: Number(container.max_instances),
     constraints,
     rollout_active_grace_period: Number(grace),
@@ -41,9 +40,28 @@ export function runnerApplicationExecutionIdentity(specification: RunnerApplicat
 export function runnerApplicationMatches(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(expected)) return Array.isArray(actual)
     && actual.length === expected.length && expected.every((value, index) => runnerApplicationMatches(actual[index], value));
-  if (isObjectRecord(expected)) return isObjectRecord(actual)
-    && Object.entries(expected).every(([key, value]) => runnerApplicationMatches(actual[key], value));
+  if (isObjectRecord(expected)) {
+    if (!isObjectRecord(actual)) return false;
+    const desired = expandNamedConfiguration(expected);
+    const observed = expandNamedConfiguration(actual);
+    return Object.entries(desired).every(([key, value]) => runnerApplicationMatches(observed[key], value));
+  }
   return actual === expected;
+}
+
+// Pinned Wrangler 4.90's native preset sizes. The API returns expanded resources.
+const NATIVE_PRESETS: Readonly<Record<string, readonly [number, number, number]>> = {
+  lite: [0.0625, 256, 2000], dev: [0.0625, 256, 2000], basic: [0.25, 1024, 4000],
+  standard: [0.5, 4096, 8000], "standard-1": [0.5, 4096, 8000],
+  "standard-2": [1, 6144, 12000], "standard-3": [2, 8192, 16000], "standard-4": [4, 12288, 20000],
+};
+
+function expandNamedConfiguration(value: Record<string, unknown>): Record<string, unknown> {
+  if (typeof value.instance_type !== "string") return value;
+  const resources = NATIVE_PRESETS[value.instance_type];
+  if (!resources) throw invalid();
+  const { instance_type: _type, ...rest } = value;
+  return { vcpu: resources[0], memory_mib: resources[1], disk: { size_mb: resources[2] }, ...rest };
 }
 
 function runnerApplicationConstraints(constraints: unknown): { tiers: number[]; regions?: unknown } {

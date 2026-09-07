@@ -66,7 +66,7 @@ describe("inactive runner target drain admission", () => {
 
 describe("native candidate admission", () => {
   const specification = {
-    scheduling_policy: "default", instances: 0, max_instances: 12,
+    scheduling_policy: "default", max_instances: 12,
     configuration: { image: `registry.example.test/runner@sha256:${"a".repeat(64)}`, vcpu: 2, memory_mib: 4096, disk: { size_mb: 6000 }, observability: { logs: { enabled: true } }, wrangler_ssh: { enabled: false } },
     constraints: { tiers: [1, 2] }, rollout_active_grace_period: 300,
   };
@@ -78,7 +78,7 @@ describe("native candidate admission", () => {
     await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, applicationId: null })).resolves.toBe("created");
     const [, request] = fetchImpl.mock.calls[0]!;
     expect(request?.method).toBe("POST");
-    expect(JSON.parse(String(request?.body))).toEqual({ ...specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } });
+    expect(JSON.parse(String(request?.body))).toEqual({ ...specification, instances: 0, name: input.name, durable_objects: { namespace_id: input.namespaceId } });
   });
 
   it("reports rejected quota without retrying creation or reducing capacity", async () => {
@@ -93,6 +93,7 @@ describe("native candidate admission", () => {
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => init?.method === "GET" ? envelope(target) : envelope({ id: "native-rollout" }));
     await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication(input)).resolves.toBe("modified");
     expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PATCH", "POST"]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body))).toEqual(specification);
     expect(String(fetchImpl.mock.calls[2]?.[0])).toMatch(/\/candidate\/rollouts$/u);
     expect(JSON.parse(String(fetchImpl.mock.calls[2]?.[1]?.body))).toMatchObject({ target_configuration: specification.configuration, step_percentage: 100 });
   });
