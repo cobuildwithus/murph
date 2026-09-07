@@ -140,6 +140,11 @@ describe("container release receipt", () => {
       )).toBe("version-123");
     });
 
+    it("reads the pinned Worker-only upload receipt", () => {
+      expect(parseWranglerWorkerVersionId("Uploaded hosted-worker\nWorker Version ID: version-uploaded\n")).toBe("version-uploaded");
+      expect(() => parseWranglerWorkerVersionId("Worker Version ID: uploaded\nCurrent Version ID: another\n")).toThrow("exactly one");
+    });
+
     it.each([
       "Uploaded hosted-worker",
       "Current Version ID: first\nCurrent Version ID: second",
