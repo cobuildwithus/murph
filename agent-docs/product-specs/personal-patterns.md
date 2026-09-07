@@ -154,11 +154,12 @@ supported outcome in a matrix. Phones show one card per factor, with coverage
 bars and changed comparisons together. Tapping a mobile result opens a bottom
 drawer with the same comparison details and evidence dates as the desktop
 hover popover, with day counts beside comparison labels and no repeated metric
-eyebrow above the result headline. The coverage bars open a mobile drawer showing
+eyebrow above the result headline. Use `Other` beside a day count so the
+comparison label does not repeat `days`. The coverage bars open a mobile drawer showing
 only the coverage level and recorded-case count for the factor. This count can
-differ from each comparison sample. Neutral measures appear behind a quiet inline
-`No clear change` disclosure without a dividing border. Expanding it reveals the individual comparison controls.
-Cards with only neutral measures use a compact header with the same disclosure.
+differ from each comparison sample. Mobile cards omit neutral comparison controls and footers.
+Cards with only neutral measures use a compact header with a plain
+`No clear changes` status; their coverage bars remain tappable.
 Measures that still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. A recognized factor

@@ -66,7 +66,7 @@ test("pattern cards show available comparisons on phones and retain result detai
   await expect(drawer).toBeFocused();
   await expect(drawer).toContainText("48 ms");
   await expect(drawer).toContainText("42.7 ms");
-  await expect(drawer.locator("dt")).toHaveText(["After running · 9 days", "Other days · 9 days"]);
+  await expect(drawer.locator("dt")).toHaveText(["After running · 9 days", "Other · 9 days"]);
   await expect(drawer).toContainText("Data from");
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
@@ -83,8 +83,8 @@ test("pattern cards show available comparisons on phones and retain result detai
   await sleepQuality.tap();
   await expect(drawer.getByRole("region", { name: "Sleep score", exact: true })).toBeVisible();
   await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true })).toBeVisible();
-  await expect(drawer.getByRole("region", { name: "Sleep score", exact: true }).locator("dt")).toHaveText(["After running · 8 days", "Other days · 8 days"]);
-  await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true }).locator("dt")).toHaveText(["After running · 7 days", "Other days · 7 days"]);
+  await expect(drawer.getByRole("region", { name: "Sleep score", exact: true }).locator("dt")).toHaveText(["After running · 8 days", "Other · 8 days"]);
+  await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true }).locator("dt")).toHaveText(["After running · 7 days", "Other · 7 days"]);
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
     return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;
@@ -94,25 +94,9 @@ test("pattern cards show available comparisons on phones and retain result detai
   }
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  const neutralDisclosure = running.locator("details");
-  const neutral = neutralDisclosure.getByRole("group", { name: "No clear change", exact: true });
-  await expect(neutralDisclosure).not.toHaveAttribute("open", "");
-  await expect(neutral).not.toBeVisible();
-  await neutralDisclosure.locator("summary").tap();
-  await expect(neutralDisclosure).toHaveAttribute("open", "");
-  await expect(neutral.getByRole("button")).toHaveText(["Sleep duration", "Deep sleep", "Respiratory rate"]);
-  await expect(running.locator("dl [data-pattern-state='no-clear-pattern']")).toHaveCount(0);
-  expect(await neutralDisclosure.evaluate((element) => element === element.parentElement?.lastElementChild)).toBe(true);
-  await neutral.getByRole("button").nth(1).tap();
-  await expect(drawer).toContainText("deep sleep");
-  await page.keyboard.press("Escape");
-  await expect(neutral.getByRole("button").nth(1)).toBeFocused();
-  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
-    await running.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-neutral-expanded.png"), style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });
-  }
-  await neutralDisclosure.locator("summary").focus();
-  await page.keyboard.press("Enter");
-  await expect(neutralDisclosure).not.toHaveAttribute("open", "");
+  await expect(running.locator("details")).toHaveCount(0);
+  await expect(running.getByText("No clear change", { exact: true })).toHaveCount(0);
+  await expect(mobile.locator('[data-pattern-state="no-clear-pattern"]')).toHaveCount(0);
   const sparse = mobile.locator('[data-pattern-factor-row="housework"]');
   await expect(mobile.getByText(/More data needed/)).toHaveCount(0);
   await expect(mobile.locator('[data-pattern-state="insufficient"]')).toHaveCount(0);
@@ -121,21 +105,14 @@ test("pattern cards show available comparisons on phones and retain result detai
   await expect(mobile.locator("li")).toHaveCount(19);
   const neutralOnly = mobile.locator('[data-pattern-factor-row="custom-tag"]');
   await expect(neutralOnly.locator('[data-pattern-state="effect"]')).toHaveCount(0);
-  const neutralOnlyDetails = neutralOnly.locator("details");
-  await expect(neutralOnlyDetails).not.toHaveAttribute("open", "");
-  await expect(neutralOnly.getByRole("group", { name: "No clear change", exact: true })).not.toBeVisible();
+  await expect(neutralOnly.getByText("No clear changes", { exact: true })).toBeVisible();
+  await expect(neutralOnly.locator("details")).toHaveCount(0);
+  await expect(neutralOnly.getByRole("button")).toHaveCount(1);
   expect((await neutralOnly.boundingBox())?.height).toBeLessThan(105);
   await neutralOnly.locator("[data-observed-days]").tap();
   await expect(drawer).toBeVisible();
-  await expect(neutralOnlyDetails).not.toHaveAttribute("open", "");
   await page.keyboard.press("Escape");
-  await neutralOnlyDetails.locator("summary").focus();
-  await page.keyboard.press("Enter");
-  await expect(neutralOnly.getByRole("group", { name: "No clear change", exact: true })).toBeVisible();
-  await neutralOnly.getByRole("group").getByRole("button").first().tap();
-  await expect(drawer).toContainText("No clear pattern");
-  await page.keyboard.press("Escape");
-  await neutralOnlyDetails.locator("summary").tap();
+  await expect(neutralOnly.locator("[data-observed-days]")).toBeFocused();
   if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
     await mkdir(process.env.DESIGN_PROOF_OUTPUT_DIR, { recursive: true });
     await neutralOnly.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-neutral-only.png"), style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });

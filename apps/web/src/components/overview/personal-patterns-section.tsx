@@ -5,8 +5,6 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
-  ChevronDown,
-  ChevronRight,
   Ellipsis,
   Minus,
   Moon,
@@ -414,7 +412,7 @@ function MobilePatternCard({
 }) {
   const headingId = useId();
   const measured: PatternOutcomeColumn[] = [];
-  const neutral: PatternOutcomeColumn[] = [];
+  let hasNeutral = false;
   for (const column of outcomeColumns) {
     const entries = column.outcomes.map((outcome) => ({
       cell: findPatternCell(report, factor.id, outcome.id),
@@ -423,11 +421,11 @@ function MobilePatternCard({
     if (entries.some(isPatternEffectEntry)) {
       measured.push(column);
     } else if (entries.some(({ cell }) => cell && cell.stage !== "insufficient")) {
-      neutral.push(column);
+      hasNeutral = true;
     }
   }
 
-  const neutralOnly = measured.length === 0 && neutral.length > 0;
+  const neutralOnly = measured.length === 0 && hasNeutral;
   const heading = (
     <>
       <Image
@@ -448,29 +446,10 @@ function MobilePatternCard({
           {factor.label}
         </h2>
         {neutralOnly ? (
-          <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-            No clear change
-            <ChevronDown aria-hidden="true" className="size-3.5 group-open:rotate-180" />
-          </span>
+          <p className="mt-1 text-xs text-muted-foreground">No clear changes</p>
         ) : null}
       </div>
     </>
-  );
-  const comparisons = (
-    <div aria-label="No clear change" role="group" className="grid grid-cols-2 gap-x-5 px-5 pb-3">
-      {neutral.map((outcome) => (
-        <PatternOutcomeColumnCell
-          card
-          key={outcome.id}
-          neutralLabel={outcome.label}
-          factorLabel={factor.label}
-          factorObservedDays={factor.observedDays}
-          outcomes={outcome.outcomes}
-          report={report}
-          factorId={factor.id}
-        />
-      ))}
-    </div>
   );
 
   return (
@@ -485,30 +464,14 @@ function MobilePatternCard({
         className={cn("absolute right-5 top-5 min-h-11 min-w-11 justify-center", neutralOnly && "top-4")}
         days={factor.observedDays}
       />
-      {neutralOnly ? (
-        <details className="group">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 py-4 pl-5 pr-24 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-            {heading}
-          </summary>
-          {comparisons}
-        </details>
-      ) : (
-        <>
-          <div className="flex items-center gap-3 border-b border-border py-5 pl-5 pr-24">
-            {heading}
-          </div>
-          <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
-          {neutral.length > 0 ? (
-            <details className="group -mt-2 pb-1">
-              <summary className="mx-5 flex min-h-11 w-fit cursor-pointer list-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                No clear change
-                <ChevronDown aria-hidden="true" className="size-3.5 shrink-0 group-open:rotate-180" />
-              </summary>
-              {comparisons}
-            </details>
-          ) : null}
-        </>
-      )}
+      <div className={cn(
+        "flex items-center gap-3 pl-5 pr-24",
+        neutralOnly ? "py-4" : "py-5",
+        measured.length > 0 && "border-b border-border",
+      )}>
+        {heading}
+      </div>
+      <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
     </li>
   );
 }
@@ -724,7 +687,6 @@ function PatternOutcomeHeader({
 
 function PatternOutcomeColumnCell({
   card = false,
-  neutralLabel,
   factorId,
   factorLabel,
   factorObservedDays,
@@ -732,7 +694,6 @@ function PatternOutcomeColumnCell({
   report,
 }: {
   card?: boolean;
-  neutralLabel?: string;
   factorId: string;
   factorLabel: string;
   factorObservedDays: number;
@@ -755,7 +716,6 @@ function PatternOutcomeColumnCell({
       <PatternBubble
         cell={checked?.cell}
         card={card}
-        neutralLabel={neutralLabel}
         factorLabel={factorLabel}
         factorObservedDays={factorObservedDays}
         outcomeId={outcome?.id ?? "unknown"}
@@ -885,7 +845,7 @@ function PatternCompositeBubble({
             </p>
             {cell.exposedMean !== null && cell.comparisonMean !== null ? (
               <PatternComparisonBars
-                comparisonLabel="Other days"
+                comparisonLabel={card ? "Other" : "Other days"}
                 comparisonMean={cell.comparisonMean}
                 comparisonDays={card ? cell.comparisonDays : undefined}
                 exposedLabel={`After ${factor}`}
@@ -909,7 +869,6 @@ function PatternCompositeBubble({
 function PatternBubble({
   cell,
   card = false,
-  neutralLabel,
   factorLabel,
   factorObservedDays,
   outcomeId,
@@ -919,7 +878,6 @@ function PatternBubble({
 }: {
   cell?: PersonalPatternCell;
   card?: boolean;
-  neutralLabel?: string;
   factorLabel: string;
   factorObservedDays: number;
   outcomeId: string;
@@ -958,7 +916,6 @@ function PatternBubble({
   const tone = isFlat
     ? "neutral"
     : getPatternEffectTone(outcomeId, cell.deltaPercent);
-  const cardFlat = card && isFlat;
   const label =
     cell.deltaPercent === null || isFlat
       ? "No clear pattern"
@@ -994,25 +951,17 @@ function PatternBubble({
           className={cn(
             "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
             card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
-            cardFlat && "w-full min-w-0 justify-between gap-2 font-sans text-sm font-normal text-left text-muted-foreground hover:text-foreground",
           )}
           data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
         >
-          {cardFlat ? null : (
-            <PatternEffectIndicator
-              classification={cell.classification ?? null}
-              DirectionIcon={DirectionIcon}
-              isFlat={isFlat}
-              size={18}
-              tone={tone}
-            />
-          )}
-          {cardFlat ? (
-            <>
-              <span>{neutralLabel}</span>
-              <ChevronRight aria-hidden="true" className="size-3.5 shrink-0" />
-            </>
-          ) : isFlat ? null : <span>{label}</span>}
+          <PatternEffectIndicator
+            classification={cell.classification ?? null}
+            DirectionIcon={DirectionIcon}
+            isFlat={isFlat}
+            size={18}
+            tone={tone}
+          />
+          {isFlat ? null : <span>{label}</span>}
         </button>
       }
     />
@@ -1204,7 +1153,7 @@ function PatternDetails({
   const comparisonLabel =
     cell.comparisonBasis === "confirmed_absence"
       ? `Without ${factor}`
-      : "Other days";
+      : card ? "Other" : "Other days";
 
   return (
     <PatternResultDetails

@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Quieter patterns, clearer evidence",
-    "summary": "On phones, comparisons with no clear change stay tucked away until you tap to inspect them.",
+    "summary": "On phones, pattern cards focus on changed results, with compact cards for activities showing no clear changes.",
     "details": "Tap the green coverage bars to see the recorded-case count. Result drawers now show how many days support each average, including separate samples for sleep score and sleep efficiency.",
     "relevanceTags": ["patterns", "mobile"],
     "sourcePullRequests": [],
