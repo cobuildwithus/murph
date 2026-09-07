@@ -156,6 +156,7 @@ type FreshRunnerContainerResolution =
   | {
       kind: "ready";
       runnerContainerName: string;
+      verifiedSlotBinding?: HostedStandbySlotBinding;
       standbyAllocationOutcome: NonNullable<
         RuntimeProcessingOrchestrationDiagnostics["standbyAllocationOutcome"]
       >;
@@ -1136,6 +1137,7 @@ export class RuntimeProcessingController {
     );
     const ready = (): FreshRunnerContainerResolution => ({
       kind: "ready",
+      verifiedSlotBinding: { ...bindingInput, state: "bound" },
       runnerContainerName: slotName,
       standbyAllocationOutcome: input.outcome,
       standbyAllocationReason: input.reason,
@@ -1352,6 +1354,7 @@ export class RuntimeProcessingController {
 
     const preparation = await this.prepareFreshRuntimeStart({
       prepareInvocation,
+      verifiedSlotBinding: resolution.verifiedSlotBinding,
       commandBudget: input.commandBudget,
       input: processingInput,
       runnerContainerName,
@@ -1453,6 +1456,7 @@ export class RuntimeProcessingController {
   }
 
   private async prepareFreshRuntimeStart(input: {
+    verifiedSlotBinding?: HostedStandbySlotBinding;
     prepareInvocation: ReturnType<RuntimeInvocationService["prepareForFreshStart"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
@@ -1476,7 +1480,7 @@ export class RuntimeProcessingController {
         startupConfirmed,
       };
     });
-    const preparationPromise = input.prepareInvocation(token).then(
+    const preparationPromise = input.prepareInvocation(token, input.verifiedSlotBinding).then(
       (prepared) => ({
         kind: "prepared" as const,
         prepared,
