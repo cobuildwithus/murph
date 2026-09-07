@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local smoke stops before standby preparation deadline'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3032'
 ---
 
 ## Expected Behavior
