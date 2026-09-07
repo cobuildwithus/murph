@@ -1,6 +1,6 @@
-# Reproduce and fix foreground runner allocation latency
+# Implement foreground runner handoff timing and diagnostics
 
-Status: active
+Status: completed
 Created: 2026-09-07
 Updated: 2026-09-07
 
@@ -67,3 +67,11 @@ Updated: 2026-09-07
 - Focused allocation/lifecycle suite: 171 tests passed. Hosted execution suite: 633 tests passed. Cloudflare typecheck and complexity diff passed. Existing unrelated complexity hotspots remain unchanged.
 - Product UX: patch; warm foreground allocation, unavailable pool fallback, background exclusion, and uncertain bind recovery are the material journeys. Local proof is ready; deployment and live timing remain pending.
 - Provider input is unchanged for individual and group turns; no prompt, tool schema, or provider configuration is edited.
+
+## Verified implementation and release handoff
+
+- PR #3036 implementation at `541d33eec63650113117b2407647d19966fe5a26` passed all 32 reported CI checks and the final parent review.
+- Final ReviewGPT round 1: full snapshot, exact first-reviewed head above, verified `gpt-6-pro` response model, matching response digest and exact conversation turn, completion marker present, and the wrapper-enforced minimum marked-response interval of 270 seconds. The review covered deadline sharing, fallback, late settlement, exact-target reservation/fencing, background exclusion, coordinator recovery and optional diagnostic propagation. Outcome: PASS, zero findings.
+- This archives the implementation phase only. The user-requested production rollout remains unfinished: the two release banks must fit account capacity, followed by the protected deployment and a live allocation/typing trace. Do not infer deployment or production latency improvement from this record.
+- Release handoff: preserve serving release identity and running invocations; settle the explicit capacity choice, deploy Web and Worker/runner through their existing owners, verify active release convergence, and measure an authorized message using the new diagnostic leaves.
+Completed: 2026-09-07
