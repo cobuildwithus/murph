@@ -1,6 +1,6 @@
 # Let hosted integration smoke observe standby readiness
 
-Status: active
+Status: completed
 Created: 2026-09-06
 Updated: 2026-09-06
 
@@ -47,4 +47,7 @@ Updated: 2026-09-06
 - Hosted foreground-priority E2E with synthetic providers; distinguish setup proof from full scenario proof.
 - Harness composition regression fails on the old default of 30 and passes after deletion. All 82 stack tests pass, including explicit override and proof-recording coverage; harness typecheck passes.
 - All 54 smoke-client tests pass, including the paired 30-attempt failure/canonical-policy success regression, deadlines, explicit limits, manifest checks, and live-turn no-retry behavior.
-- Complexity guard passes with unchanged existing debt and maximum. Real foreground-priority scenarios are still running after successful startup.
+- Complexity guard passes with unchanged existing debt and maximum. Cloudflare typecheck and docs drift pass.
+- The real local foreground run passed managed-container smoke, then could not complete because the available private development worker rejects the current Web reconciliation field `nextDefaultProcessingWakeAt`. Stopped the session-owned launcher through its normal interrupt path. Full released integration must run against matching protected revisions; no full local scenario pass is claimed.
+- Implementation and focused verification are complete. PR review/CI and exact-main hosted integration remain release follow-through.
+Completed: 2026-09-06
