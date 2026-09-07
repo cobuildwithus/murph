@@ -27,6 +27,7 @@ import {
   toIsoTimestamp,
 } from "../shared";
 import { HostedDomainRootPreparationMismatchError } from "../../hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { toNullablePrismaJsonValue } from "./prisma-json";
 import {
   openHostedDeviceSyncDirtyPayloadJson,
@@ -1786,6 +1787,14 @@ async function hydrateDirtyConnectionRecords(input: {
   stagedOverlay?: StagedDirtyAckOverlay;
   userId: string;
 }): Promise<DirtyConnectionHydrationResult> {
+  // Payloads commonly share a root. Reuse its envelope/KMS unwrap only for
+  // this hydration operation; each payload still authenticates its own AAD.
+  return runWithHostedDomainRootUnwrapCache(() => hydrateDirtyConnectionRecordsWithCachedRoots(input));
+}
+
+async function hydrateDirtyConnectionRecordsWithCachedRoots(
+  input: Parameters<typeof hydrateDirtyConnectionRecords>[0],
+): Promise<DirtyConnectionHydrationResult> {
   if (input.records.length === 0) {
     return {
       hasMorePayloads: false,
