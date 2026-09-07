@@ -1,6 +1,6 @@
 # Preserve device-sync progress when follow-up jobs fill retention capacity
 
-Status: active
+Status: completed
 Created: 2026-09-07
 
 ## Outcome and invariant
@@ -46,3 +46,10 @@ then passed with all 100 payloads and 25 child jobs completed across cold restor
 The three focused runtime suites pass (328 tests); package typecheck passes.
 Overflow boundary tests preserve running, attempted, future and unowned jobs.
 Complexity passes with changed-file debt reduced by one.
+
+Web typecheck, nine changelog rendering tests, docs drift and diff checks pass.
+Parent review confirms payload deferral does not acknowledge or mutate queued
+work, and preserves every attempted/leased/future job. PR #3020 carries the
+change; exact-head CI and external review remain delivery gates.
+Updated: 2026-09-07
+Completed: 2026-09-07
