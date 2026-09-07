@@ -4,7 +4,10 @@ import { test } from "vitest";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { buildJournalView } from "../src/journal-view.ts";
-import type { MetricPoint } from "../src/metrics/index.ts";
+import {
+  extractMetricPointsFromCanonicalEntities,
+  type MetricPoint,
+} from "../src/metrics/index.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
 
 test("Journal groups canonical records into human events without copying source data", () => {
@@ -295,7 +298,7 @@ test("Journal turns dense wearable records into main sleep, naps, and grouped ac
       vaultRoot: "test://journal-wearable-density",
     }),
     [
-      metric("total-sleep", "2026-08-25", 450, "min"),
+      metric("total-sleep-minutes", "2026-08-25", 450, "minutes"),
       metric("sleep-efficiency", "2026-08-25", 89, "percent"),
       metric("hrv-rmssd", "2026-08-25", 68.1429, "ms"),
       metric("readiness-score", "2026-08-25", 71, "score"),
@@ -910,6 +913,136 @@ test("Journal folds a long unknown provider duplicate into explicit main sleep",
   assert.equal(events.find((entry) => entry.kind === "nap")?.summary, "25 min");
 });
 
+test("Journal keeps an unlabeled short nap separate from explicit main sleep", () => {
+  const entities = [
+    event("main", "sleep_session", "2026-08-25T08:00:00.000Z", {
+      durationMinutes: 450,
+      sleepType: "main_sleep",
+    }, "Sleep"),
+    event("short", "sleep_session", "2026-08-25T15:00:00.000Z", {
+      durationMinutes: 25,
+    }, "Sleep"),
+  ];
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-short-unknown-nap" }),
+    extractMetricPointsFromCanonicalEntities(entities),
+    { asOf: "2026-08-25" },
+  );
+
+  const events = view.days[0]?.events ?? [];
+  assert.equal(events.length, 2);
+  assert.equal(events.find((entry) => entry.kind === "sleep")?.metrics.sleepMinutes, 450);
+  const nap = events.find((entry) => entry.kind === "nap");
+  assert.equal(nap?.timing, "timed");
+  assert.equal(nap?.summary, "25 min");
+  assert.deepEqual(nap?.records.map((record) => record.id), ["short"]);
+  assert.equal(view.weeks[0]?.sleepNights, 1);
+  assert.equal(view.weeks[0]?.averageSleepMinutes, 450);
+});
+
+test("Journal counts canonical total sleep observations as a sleep night", () => {
+  const entities = [event("total", "observation", "2026-08-25T08:00:00.000Z", {
+    metric: "total-sleep-minutes",
+    value: 450,
+    unit: "minutes",
+  }, "Total sleep")];
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-total-sleep" }),
+    extractMetricPointsFromCanonicalEntities(entities),
+    { asOf: "2026-08-25" },
+  );
+
+  assert.equal(view.eventCount, 1);
+  assert.equal(view.days[0]?.events[0]?.kind, "sleep");
+  assert.equal(view.days[0]?.events[0]?.summary, "7 h 30");
+  assert.equal(view.days[0]?.events[0]?.metrics.sleepMinutes, 450);
+  assert.equal(view.weeks[0]?.sleepNights, 1);
+  assert.equal(view.weeks[0]?.averageSleepMinutes, 450);
+});
+
+test("Journal hides canonical total sleep already represented by a session", () => {
+  const entities = [
+    event("main", "sleep_session", "2026-08-25T08:00:00.000Z", {
+      durationMinutes: 450,
+      sleepType: "main_sleep",
+    }, "Sleep"),
+    event("total", "observation", "2026-08-25T08:00:00.000Z", {
+      metric: "total-sleep-minutes",
+      value: 475,
+      unit: "minutes",
+    }, "Total sleep"),
+  ];
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-total-sleep-session" }),
+    extractMetricPointsFromCanonicalEntities(entities),
+    { asOf: "2026-08-25" },
+  );
+
+  assert.equal(view.eventCount, 1);
+  assert.deepEqual(view.days[0]?.events[0]?.records.map((record) => record.id), ["main"]);
+  assert.equal(view.days[0]?.events[0]?.metrics.sleepMinutes, 450);
+  assert.equal(view.weeks[0]?.sleepNights, 1);
+  assert.equal(view.weeks[0]?.averageSleepMinutes, 450);
+});
+
+test("Journal keeps observation sleep days from merging adjacent nights", () => {
+  const entities = [
+    event("main_24", "sleep_session", "2026-08-24T08:00:00.000Z", {
+      durationMinutes: 420,
+      sleepType: "main_sleep",
+    }, "Sleep"),
+    event("main_25", "sleep_session", "2026-08-25T08:00:00.000Z", {
+      durationMinutes: 480,
+      sleepType: "main_sleep",
+    }, "Sleep"),
+    event("score", "observation", "2026-08-24T23:00:00.000Z", {
+      metric: "sleep-score",
+      value: 80,
+      unit: "score",
+      dayKey: "2026-08-25",
+      observationGrain: "summary",
+      timeZone: "Asia/Tokyo",
+      source: "device",
+    }, "Sleep score"),
+  ];
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-sleep-observation-day" }),
+    extractMetricPointsFromCanonicalEntities(entities),
+    { asOf: "2026-08-25" },
+  );
+
+  assert.deepEqual(view.days.map((day) => day.date), ["2026-08-25", "2026-08-24"]);
+  assert.equal(view.eventCount, 2);
+  const currentSleep = view.days[0]?.events[0];
+  const priorSleep = view.days[1]?.events[0];
+  assert.equal(currentSleep?.metrics.sleepMinutes, 480);
+  assert.equal(currentSleep?.metrics.sleepScore, 80);
+  assert.equal(priorSleep?.metrics.sleepMinutes, 420);
+  assert.equal(priorSleep?.metrics.sleepScore, null);
+  assert.deepEqual(priorSleep?.records.map((record) => record.id), ["main_24"]);
+  assert.equal(view.weeks[0]?.sleepNights, 2);
+  assert.equal(view.weeks[0]?.averageSleepMinutes, 450);
+});
+
+test("Journal uses normalized sleep observation units", () => {
+  const entities = [event("deep", "observation", "2026-08-25T08:00:00.000Z", {
+    metric: "deep-sleep-minutes",
+    value: 1.5,
+    unit: "hours",
+  }, "Deep sleep")];
+  const points = extractMetricPointsFromCanonicalEntities(entities);
+  assert.equal(points[0]?.canonicalValue, 90);
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-sleep-units" }),
+    points,
+    { asOf: "2026-08-25" },
+  );
+
+  assert.equal(view.eventCount, 1);
+  assert.equal(view.days[0]?.events[0]?.kind, "sleep");
+  assert.equal(view.days[0]?.events[0]?.metrics.deepSleepMinutes, 90);
+});
+
 function event(
   id: string,
   kind: string,
@@ -1021,4 +1154,73 @@ test("Journal keeps an explicitly assigned local day when a timestamp is correct
     { asOf: "2026-05-20" },
   );
   assert.equal(view.days[0]?.date, "2026-05-18");
+});
+
+test("Journal clips experiment expansion without resetting phase progress", () => {
+  const experiment = entity("experiment", "year-plan", {
+    attributes: {
+      runPlan: { interventionStart: "2026-01-01", interventionEnd: "2026-12-31" },
+      status: "active",
+      title: "Consistent schedule",
+    },
+    kind: "experiment_entry",
+    title: "Consistent schedule",
+  });
+  const vault = createVaultReadModel({ entities: [experiment], vaultRoot: "test://journal-phase-window" });
+  const view = buildJournalView(vault, [], { asOf: "2026-08-25", windowDays: 7 });
+  assert.equal(view.days.length, 7);
+  assert.equal(view.days[0]?.events[0]?.summary, "Running experiment · day 237");
+  assert.deepEqual(view.days.at(-1)?.events[0]?.details, [
+    "Status: Active", "Progress: Day 231 of 365",
+  ]);
+  assert.equal(buildJournalView(vault, [], { asOf: "2025-12-31" }).eventCount, 0);
+  assert.equal(buildJournalView(vault, [], { asOf: "2027-12-31" }).eventCount, 0);
+});
+
+test("Journal does not treat an incompatible observation unit as minutes", () => {
+  const entities = [event("incompatible", "observation", "2026-08-25T08:00:00.000Z", {
+    metric: "deep-sleep-minutes", value: 90, unit: "km",
+  }, "Deep sleep")];
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-incompatible-unit" }),
+    extractMetricPointsFromCanonicalEntities(entities),
+    { asOf: "2026-08-25" },
+  );
+  assert.equal(view.days[0]?.events[0]?.metrics.deepSleepMinutes, null);
+});
+
+test("Journal retains timestamp-only observations on their canonical metric day", () => {
+  const observation = event("timestamp-only", "observation", "2026-08-25T08:00:00.000Z", {
+    metric: "deep-sleep-minutes", value: 1.5, unit: "hours", source: "manual",
+  }, "Deep sleep");
+  observation.date = null;
+  const view = buildJournalView(
+    createVaultReadModel({ entities: [observation], vaultRoot: "test://journal-view" }),
+    extractMetricPointsFromCanonicalEntities([observation]),
+    { asOf: "2026-08-25T12:00:00.000Z" },
+  );
+  assert.equal(view.days[0]?.date, "2026-08-25");
+  assert.equal(view.days[0]?.events[0]?.metrics.deepSleepMinutes, 90);
+  assert.equal(view.recordCount, 1);
+});
+
+test("Journal preserves WHOOP Recovery when canonical normalization uses Readiness", () => {
+  const entities = [event("whoop-recovery", "observation", "2026-08-25T07:30:00.000Z", {
+    metric: "recovery-score", value: 78, unit: "%", source: "device",
+    dayKey: "2026-08-25", observationGrain: "summary",
+    externalRef: { system: "whoop", resourceType: "summary", resourceId: "recovery-day" },
+  }, "Recovery")];
+  const points = extractMetricPointsFromCanonicalEntities(entities);
+  assert.equal(points[0]?.metricKey, "readiness-score");
+  assert.equal(points[0]?.canonicalValue, 78);
+  const view = buildJournalView(
+    createVaultReadModel({ entities, vaultRoot: "test://journal-whoop-recovery" }),
+    points,
+    { asOf: "2026-08-25" },
+  );
+  const sleep = view.days[0]?.events[0];
+  assert.equal(sleep?.metrics.recoveryScore, 78);
+  assert.equal(sleep?.metrics.readinessScore, null);
+  assert.equal(view.recordCount, 1);
+  assert.deepEqual(sleep?.records.map((record) => record.label), ["Recovery score"]);
 });

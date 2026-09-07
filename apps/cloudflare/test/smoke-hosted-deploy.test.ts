@@ -1120,6 +1120,67 @@ describe("runSmokeHostedDeploy", () => {
     expect(smokeAttempts).toEqual(["1", "2", "3"]);
   });
 
+  it.each(["30", undefined])("observes slow standby readiness with the attempt policy %s", async (maxAttempts) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-standby-readiness-"));
+    const manifestPath = path.join(root, "manifest.json");
+    const runnerBundle = {
+      buildSkipped: false,
+      bundleFingerprint: "standby-bundle",
+      sourceFingerprint: "standby-source",
+    };
+    await writeFile(manifestPath, JSON.stringify(runnerBundle));
+    let elapsedMs = 0;
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => startedAt + elapsedMs);
+    try {
+      const smoke = runSmokeHostedDeploy({
+        fetchImpl: async (url) => {
+          if (String(url).endsWith("/")) {
+            return Response.json({ ok: true, service: "cloudflare-hosted-runner" });
+          }
+          if (String(url).endsWith("/health")) return Response.json({ ok: true });
+          if (!isContainerSmokeRequest(String(url))) throw new Error("Unexpected smoke request.");
+          // Advance one polling interval without slowing down the regression test.
+          elapsedMs += 1_000;
+          if (elapsedMs < 45_000) {
+            return Response.json({
+              ok: false,
+              error: "Deploy standby inventory is not ready.",
+            }, { status: 503 });
+          }
+          return Response.json({
+            ok: true,
+            runnerContainer: {
+              codexShell: createCodexShellSmokeResult(),
+              ok: true,
+              runnerBundle,
+              service: "cloudflare-hosted-runner-node",
+            },
+          });
+        },
+        log() {},
+        source: {
+          HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: maxAttempts,
+          HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+      });
+      if (maxAttempts === "30") {
+        await expect(smoke).rejects.toThrow("Deploy standby inventory is not ready.");
+        expect(elapsedMs).toBe(30_000);
+      } else {
+        await expect(smoke).resolves.toBeUndefined();
+        expect(elapsedMs).toBe(45_000);
+      }
+    } finally {
+      clock.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("retries a pre-rollout container before asserting the current smoke schema", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-stale-schema-"));
     const manifestPath = path.join(

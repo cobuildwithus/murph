@@ -9828,3 +9828,20 @@ function seriesPoint(date: string, value: number): MetricSeriesPoint {
     valueLabel: String(value),
   };
 }
+
+
+test("normalizes percentage-based sleep and recovery scores without treating other score units as equivalent", () => {
+  for (const metricKey of ["sleep-score", "readiness-score", "recovery-score"]) {
+    for (const unit of ["%", "percent", "percentage"]) {
+      const normalized = normalizeMetricValue({ metricKey, unit, value: 78 });
+      assert.equal(normalized.canonicalUnit, "score");
+      assert.equal(normalized.canonicalValue, 78);
+      assert.deepEqual(normalized.warnings, []);
+    }
+    assert.equal(normalizeMetricValue({ metricKey, unit: "score", value: 78 }).canonicalValue, 78);
+    const incompatible = normalizeMetricValue({ metricKey, unit: "kg", value: 78 });
+    assert.equal(incompatible.canonicalValue, null);
+    assert.equal(incompatible.warnings.length, 1);
+  }
+  assert.equal(normalizeMetricValue({ metricKey: "sleep-score", unit: "%", value: Number.NaN }).canonicalValue, null);
+});

@@ -1,3 +1,4 @@
+import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -61,6 +62,7 @@ export interface GenerateImageToolArgs {
 }
 
 export interface GenerateImageToolResult {
+  failureDiagnostic?: ToolFailureDiagnostic
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
@@ -127,6 +129,7 @@ export async function executeGenerateImageTool(input: {
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
   if (!apiKey) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
       rpcText: 'OPENAI_API_KEY is required for image generation',
     }
@@ -138,6 +141,7 @@ export async function executeGenerateImageTool(input: {
     input.requireHostedPrivateImageDelivery === true
   if (requireHostedPrivateImageDelivery && !vaultRoot) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
       rpcText: 'hosted private image delivery requires the owning vault',
     }
@@ -147,6 +151,7 @@ export async function executeGenerateImageTool(input: {
     !input.persistGeneratedImageCapture
   ) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
       rpcText: 'hosted private image delivery requires generated capture persistence',
     }
@@ -158,6 +163,7 @@ export async function executeGenerateImageTool(input: {
     hasVaultReferenceImageRef(referenceImageRefs)
   ) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
       rpcText: 'image references are unavailable for this turn',
     }
@@ -177,8 +183,9 @@ export async function executeGenerateImageTool(input: {
         outputFormat: input.args.outputFormat,
         vaultRoot,
       })
-    } catch {
+    } catch (error) {
       return {
+        failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
         rpcSuccess: false,
         rpcText: 'saved generated image lookup could not be loaded',
       }
@@ -191,6 +198,7 @@ export async function executeGenerateImageTool(input: {
 
   if (existingCapture.status === 'deleted') {
     return {
+      failureDiagnostic: toolFailureDiagnostic('not_found'),
       rpcSuccess: false,
       rpcText: 'saved generated image was deleted; make a new image request',
     }
@@ -214,6 +222,7 @@ export async function executeGenerateImageTool(input: {
         throw error
       }
       return {
+        failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
         rpcSuccess: false,
         rpcText: describeGenerateImageFailure(
           'image references could not be loaded',
@@ -226,6 +235,7 @@ export async function executeGenerateImageTool(input: {
       await input.validateResolvedReferenceImages?.(referenceImages) ?? null
     if (referenceValidationFailure) {
       return {
+        failureDiagnostic: toolFailureDiagnostic('authority_rejected'),
         rpcSuccess: false,
         rpcText: referenceValidationFailure,
       }
@@ -263,6 +273,7 @@ export async function executeGenerateImageTool(input: {
         throw error
       }
       return {
+        failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
         rpcSuccess: false,
         rpcText: describeGenerateImageFailure(
           `${operationLabel} failed`,
@@ -295,6 +306,7 @@ export async function executeGenerateImageTool(input: {
 
     if (!hasValidGeneratedImageBytes) {
       return {
+        failureDiagnostic: toolFailureDiagnostic('invalid_result'),
         rpcSuccess: false,
         rpcText: `${operationLabel} returned invalid image data`,
         usageDraft,
@@ -338,19 +350,22 @@ export async function executeGenerateImageTool(input: {
               savedCapture = resolvedCapture.capture
             } else if (resolvedCapture.status === 'deleted') {
               return {
+                failureDiagnostic: toolFailureDiagnostic('not_found'),
                 rpcSuccess: false,
                 rpcText: 'saved generated image was deleted; make a new image request',
                 usageDraft,
               }
             } else {
               return {
+                failureDiagnostic: toolFailureDiagnostic('not_found'),
                 rpcSuccess: false,
                 rpcText: 'image generated but vault save failed',
                 usageDraft,
               }
             }
-          } catch {
+          } catch (error) {
             return {
+              failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
               rpcSuccess: false,
               rpcText: 'image generated but vault save failed',
               usageDraft,
@@ -358,6 +373,7 @@ export async function executeGenerateImageTool(input: {
           }
         } else {
           return {
+            failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
             rpcSuccess: false,
             rpcText: 'image generated but vault save failed',
             usageDraft,
@@ -370,6 +386,7 @@ export async function executeGenerateImageTool(input: {
   if (requireHostedPrivateImageDelivery) {
     if (!savedCapture) {
       return {
+        failureDiagnostic: toolFailureDiagnostic('invalid_result'),
         rpcSuccess: false,
         rpcText: 'image generated but private vault capture failed',
         usageDraft,
@@ -412,8 +429,9 @@ export async function executeGenerateImageTool(input: {
       savedImageRef: savedCapture?.imageRef ?? null,
       usageDraft,
     }
-  } catch {
+  } catch (error) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
       rpcSuccess: false,
       rpcText: 'image generated but local save failed',
       usageDraft,

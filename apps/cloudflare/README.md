@@ -636,6 +636,24 @@ route-to-RPC aggregate. Other per-phase chronology guards omit unavailable or
 reversed cross-runtime clock samples. The report returns no member, mailbox,
 trace, or attempt identifiers.
 
+Fresh starts overlap workspace metadata and runtime crypto reads with slot
+allocation after admission. The reads use the original command budget and stay
+local to that invocation; unused failures are observed if allocation returns a
+retry. Fenced preparation rechecks the budget and member ownership before
+binding workspace facts. It also overlaps immutable slot-binding verification
+with runner-secret and snapshot-restore preparation. Launch still requires the
+exact active write fence, verified member binding, usage admission and container
+readiness. Warm active-runtime wakes do not start these fresh preparation reads.
+Fresh allocation carries its verified immutable binding result into that same
+request's fenced preparation, avoiding a second binding RPC. The receipt is
+validated against the selected slot, member, claim format, region and release;
+it is neither persisted nor sent to the container. Retained/direct preparation
+still reads binding evidence, and the container still checks its live bound
+member at launch. Exact bind-response recovery can reuse its verified result.
+The individual read timings overlap allocation and each other; they are not
+additive slices of `runtimeInvocationPreparationElapsedMs`, which measures the
+remaining fenced preparation call.
+
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Startup readiness is

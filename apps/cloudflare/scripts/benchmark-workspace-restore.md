@@ -113,6 +113,52 @@ concurrent runtime hydration, or the provider turn.
   decoder/extractor failures, cancellation, and retry exhaustion must never
   replace existing durable files.
 
+## Ciphertext-copy reduction experiment
+
+Baseline source: `78358acae29e470743a4c12f48d69a5c47d80fe0`. The candidate uses
+the ref's existing encrypted byte count to locate the final 16-byte GCM tag.
+Incoming byte views are consumed synchronously, and only tag bytes are copied
+into a fixed buffer. This removes the incoming chunk copy and repeated
+tail-plus-chunk concatenation. The decrypted archive remains buffered until
+GCM authentication, both SHA-256 checks, and byte-count validation succeed;
+native zstd/tar extraction, replacement, cleanup, and retry ownership stay intact.
+There is no new concurrency, dependency, persisted state, or archive format.
+
+The existing paired harness ran seven measured pairs plus one warmup per
+variant for each fixture, alternating order. Both fixtures had 1,000 files and
+64 KiB server chunks, without network pacing. Every restored file passed its
+SHA-256 readback. Baseline and candidate ran sequentially in the same Linux
+container, using the writable container layer, two vCPUs, 6 GiB memory, and
+the pinned Node 24.14.1 runner image
+`sha256:9c10ca59555b728711a62e7aff83d0ceed4d06ab13048e81e5652868ea171f0b`.
+The host was ARM, so these AMD64 runs were emulated; they are relative local
+experiments, not native AMD64 or production latency measurements.
+
+| Median metric | Baseline | Candidate | Difference |
+| --- | ---: | ---: | ---: |
+| 20 MiB fixture restore wall time | 1,171.64 ms | 1,025.50 ms | -146.14 ms |
+| 20 MiB fixture Node CPU | 1,796.77 ms | 1,459.33 ms | -337.44 ms |
+| 50 MiB fixture restore wall time | 2,147.80 ms | 1,856.23 ms | -291.57 ms |
+| 50 MiB fixture Node CPU | 3,164.34 ms | 2,699.63 ms | -464.71 ms |
+
+The actual encrypted/unpacked byte counts were 21,033,206/52,430,000 and
+52,519,845/131,073,000. Node CPU excludes the native child processes and
+includes the loopback HTTP server. Candidate wall time improved in only four
+of seven pairs for each fixture; Node CPU improved in six and five pairs,
+respectively. Median paired wall-time differences were -76.72 ms and
+-281.50 ms. Unchanged extraction also varied, so do not attribute the entire
+wall-time difference to the removed copies or claim a guaranteed latency gain.
+A preceding native macOS run was similarly noisy and is excluded from the
+performance claim. The small implementation removes measurable CPU work, but
+a consistent 300 ms production reduction has not been established.
+
+Focused snapshot, response-body, and platform tests cover split tags, single
+chunks, single-byte chunks, reused nonzero-offset byte views, empty chunks,
+truncated/oversized streams, ciphertext/tag tampering, interruption, and decoder
+or extractor failures. The Cloudflare typecheck also passed. Before making a
+production timing claim, repeat on native AMD64 and compare natural cold
+restores with equivalent snapshot sizes and runtime load.
+
 ## Measurement record
 
 Baseline source: `18b498bc49435c49adb99588754a8a2bf72c4ce6`.

@@ -831,7 +831,6 @@ describe("hosted local dev stack", () => {
         cwd: expect.stringContaining("murph"),
         env: expect.objectContaining({
           HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "30",
           HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "1000",
           HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "http://127.0.0.1:8787",
         }),
@@ -2658,7 +2657,7 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("marks a successful aggregate E2E runner container smoke proof by build id", async () => {
+  it.each([undefined, "80"])("preserves the smoke owner's attempt policy (%s) and records its proof", async (maxAttempts) => {
     vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
     vi.stubEnv(hostedLocalE2eRunnerSmokeProvedBuildIdEnv, "");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
@@ -2685,6 +2684,7 @@ describe("hosted local dev stack", () => {
         MURPH_HOSTED_LOCAL_ARTIFACT_DIR: ".artifacts/hosted-local/test",
         MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
         MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "aggregate-smoke-build",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: maxAttempts,
       },
     });
     await stack.ready;
@@ -2695,6 +2695,8 @@ describe("hosted local dev stack", () => {
       ["--dir", "apps/cloudflare", "deploy:smoke"],
       expect.any(Object),
     );
+    const smokeCall = runCommand.mock.calls.find(([, args]) => args.includes("deploy:smoke"));
+    expect(smokeCall?.[2].env.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS).toBe(maxAttempts);
     expect(process.env[hostedLocalE2eRunnerSmokeProvedBuildIdEnv])
       .toBe(expectedBuildId);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(expect.objectContaining({

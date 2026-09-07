@@ -1001,7 +1001,8 @@ while :; do sleep 0.01; done
     }
   });
 
-  it("restores encrypted snapshots from an encrypted byte stream", async () => {
+  it.each(["split-tag", "single-chunk", "reused-views", "single-bytes"] as const)(
+    "restores encrypted snapshots from an encrypted byte stream (%s)", async (chunkMode) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -1049,7 +1050,11 @@ while :; do sleep 0.01; done
       const restoreTimings = await restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
         durableRoot: restoredDurableRoot,
-        encryptedStream: streamEncryptedChunks(splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes)),
+        encryptedStream: chunkMode === "reused-views" || chunkMode === "single-bytes"
+          ? streamReusedEncryptedViews(encryptedBytes, chunkMode === "single-bytes" ? 1 : 17)
+          : streamEncryptedChunks(chunkMode === "single-chunk"
+            ? [encryptedBytes]
+            : splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes)),
         ref,
       });
 
@@ -1105,7 +1110,8 @@ while :; do sleep 0.01; done
     }
   });
 
-  it("rejects encrypted stream auth failures without replacing durable state", async () => {
+  it.each(["auth-tag", "truncated", "oversized", "ciphertext"] as const)(
+    "rejects invalid encrypted streams without replacing durable state (%s)", async (failure) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-auth-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -1145,8 +1151,14 @@ while :; do sleep 0.01; done
         outputDir: path.join(tempRoot, "scratch"),
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
-      const tamperedEncryptedBytes = Buffer.from(encryptedBytes);
-      tamperedEncryptedBytes[tamperedEncryptedBytes.byteLength - 1] ^= 0xff;
+      const tamperedEncryptedBytes = failure === "truncated"
+        ? encryptedBytes.subarray(0, encryptedBytes.byteLength - 1)
+        : failure === "oversized"
+          ? Buffer.concat([encryptedBytes, Buffer.from([0])])
+          : Buffer.from(encryptedBytes);
+      if (failure === "auth-tag" || failure === "ciphertext") {
+        tamperedEncryptedBytes[failure === "auth-tag" ? tamperedEncryptedBytes.byteLength - 1 : 0] ^= 0xff;
+      }
       const ref = createHostedWorkspaceSnapshotTestRef({
         aad,
         encrypted,
@@ -1645,6 +1657,18 @@ async function* streamEncryptedChunks(chunks: readonly Uint8Array[]): AsyncItera
   for (const chunk of chunks) {
     yield chunk;
   }
+}
+
+async function* streamReusedEncryptedViews(bytes: Uint8Array, chunkSize: number): AsyncIterable<Uint8Array> {
+  const storage = new Uint8Array(chunkSize + 6);
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    storage.fill(0xff);
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    storage.set(chunk, 3);
+    yield storage.subarray(3, 3 + chunk.byteLength);
+    yield new Uint8Array(0);
+  }
+  storage.fill(0xff);
 }
 
 const TEST_HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
