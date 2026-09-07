@@ -17,7 +17,11 @@ import {
   getHostedDomainRootUnwrapCache,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import type { HostedAiUsageGateDecision } from "@/src/lib/hosted-execution/usage-allowance";
-import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import {
+  decryptHostedWebNullableString,
+  encryptHostedWebNullableString,
+} from "@/src/lib/hosted-web/encryption";
+import * as memberIdentityStore from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
@@ -965,6 +969,7 @@ async function createDirectRootPreparationFailureFixture(input: {
 
 async function createDirectPreparationTransitionFixture(input: {
   billingStatus?: HostedBillingStatus;
+  privyUserId?: string;
 } = {}) {
   mocks.enforceDirectMailboxPreparation = true;
   const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
@@ -1059,6 +1064,26 @@ async function createDirectPreparationTransitionFixture(input: {
     hostedMemberRouting,
     hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
   });
+  if (input.privyUserId) {
+    const privyUserIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-identity.privy-user-id",
+      memberId: "member_123",
+      value: input.privyUserId,
+    });
+    const findUnique = vi.mocked(prisma.hostedMemberIdentity!.findUnique!);
+    const readIdentity = findUnique.getMockImplementation()!;
+    findUnique.mockImplementation(async (...args) => {
+      const identity = await readIdentity(...args);
+      if (!identity || typeof identity !== "object") {
+        throw new Error("Expected the existing identity fixture.");
+      }
+      return {
+        ...identity,
+        phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+        privyUserIdEncrypted,
+      };
+    });
+  }
   const unwrapRoot = vi.mocked(unwrapHostedDomainRootForWeb);
   const defaultUnwrapRoot = unwrapRoot.getMockImplementation();
   if (!defaultUnwrapRoot) {
@@ -5438,12 +5463,37 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it("uses control-only preparation for an exact Family acceptance replay", async () => {
+  it("admits ordinary conversation without unused identity preparation", async () => {
+    const { prisma, hostedLinqDeliveryFindMany, restoreRootMock } =
+      await createDirectPreparationTransitionFixture({ privyUserId: "synthetic-login" });
+    hostedLinqDeliveryFindMany.mockResolvedValue([]);
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
+    const projection = vi.spyOn(memberIdentityStore, "projectHostedMemberIdentityState");
+    const identityRoots = vi.spyOn(memberIdentityStore, "readHostedMemberIdentityControlRootKeyIds");
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({ eventId: "evt_ordinary_unused_identity" }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({ reason: "wake-appended-active-member" });
+      expect(projection).not.toHaveBeenCalled();
+      expect(identityRoots).not.toHaveBeenCalled();
+      expect(mocks.unwrapHostedDomainRootsForWebByRootKeyIds).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    } finally {
+      projection.mockRestore();
+      identityRoots.mockRestore();
+      restoreRootMock();
+    }
+  });
+
+  it("uses control-only preparation and preserves login identity on an expired Family acceptance replay", async () => {
     const {
       prisma,
       providerDomainsAfterTransactionStart,
       restoreRootMock,
-    } = await createDirectPreparationTransitionFixture();
+    } = await createDirectPreparationTransitionFixture({ privyUserId: "synthetic-login" });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
     );
@@ -5451,11 +5501,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       inviteCode: "phone_token",
       kind: "accepted_replay",
     });
-    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
-      groupId: "group_family_replay",
-      memberId: "member_123",
-      role: "member",
-      status: "active",
+    const family = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/family-plan")>(
+      "@/src/lib/hosted-onboarding/family-plan",
+    );
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(family.acceptHostedFamilyInviteFromPhoneTx);
+    Object.assign(prisma, {
+      hostedAccountGroupInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "invite_replay", inviteCode: "phone_token", status: "accepted",
+          acceptedByMemberId: "member_123", groupId: "group_family_replay",
+          expiresAt: new Date("2020-01-01T00:00:00Z"),
+          targetPhoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          targetEmailLookupKey: null, targetTelegramUsernameLookupKey: null,
+        }),
+      },
+    });
+    prisma.hostedAccountGroupMembership!.findFirst!.mockResolvedValue({
+      groupId: "group_family_replay", memberId: "member_123", role: "member", status: "active",
     });
     const unusedFamilyProviderError = new Error("unused Family provider operation");
     mocks.prepareHostedFamilyOwnerNotification.mockRejectedValueOnce(
@@ -5512,6 +5574,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }));
       expect(acceptanceInput).not.toHaveProperty("preparedCryptoDomainRoots");
       expect(acceptanceInput).not.toHaveProperty("preparedOwnerNotification");
+      const identityWrite = vi.mocked(prisma.hostedMemberIdentity!.upsert!).mock.calls[0]?.[0];
+      expect(identityWrite).toBeDefined();
+      await expect(decryptHostedWebNullableString({
+        field: "hosted-member-identity.privy-user-id",
+        memberId: "member_123",
+        value: identityWrite!.update.privyUserIdEncrypted as string,
+      })).resolves.toBe("synthetic-login");
       expect(providerDomainsAfterTransactionStart).toEqual([]);
     } finally {
       prepareRootCandidates.mockReset();
