@@ -95,6 +95,7 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     if (!Number.isSafeInteger(input.deadlineAtEpochMs) || input.deadlineAtEpochMs <= 0) {
       throw new TypeError("Hosted standby claim deadline is invalid.");
     }
+    const startedAtMs = Date.now();
     const result = this.transactionSync((): HostedStandbyClaimResult => {
       this.store.initialize(input);
       // A replay is the original handoff, not another allocation. Preserve it
@@ -112,6 +113,17 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       this.rebalance();
       const slotName = this.store.claimReadySlot(input.claimId, Date.now());
       return slotName ? { outcome: "claimed", slotName } : { outcome: "no_ready_slot" };
+    });
+    emitHostedExecutionStructuredLog({
+      component: "cloudflare.standby",
+      eventId: input.claimId,
+      details: {
+        standbyClaimHandlerElapsedMs: Math.max(0, Date.now() - startedAtMs),
+        standbyClaimRemainingBudgetMs: Math.max(0, input.deadlineAtEpochMs - startedAtMs),
+        standbyClaimRpcOutcome: result.outcome,
+      },
+      message: "Hosted standby coordinator answered a claim.",
+      phase: "runtime.starting",
     });
     this.startFill();
     this.startCleanup();

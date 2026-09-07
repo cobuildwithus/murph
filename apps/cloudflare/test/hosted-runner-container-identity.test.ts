@@ -115,6 +115,49 @@ vi.mock("@murphai/hosted-execution", async () => {
 const FIXED_NOW = "2026-06-03T00:00:00.000Z";
 const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
+  it("keeps a ready runner when the distributed claim exceeds the former 250ms budget", async () => {
+    const stateStore = new RunnerStateStore(createRunnerDurableState().state);
+    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
+    const standby = createAllocatingStandbyHarness({ slotName, stateStore, bindDelayMs: 100 });
+    const invocationService = new RecordingRuntimeInvocationService();
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(),
+      invocationService,
+      runnerContainerNamespace: standby.namespace,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      },
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            async claimReadyStandby() {
+              await new Promise((resolve) => setTimeout(resolve, 350));
+              return { outcome: "claimed", slotName } as const;
+            },
+            async ensureReadyStandby() { return { accepted: true } as const; },
+          };
+        },
+      },
+      stateStore,
+    });
+    await expect(controller.ensureForUser({
+      userId: TEST_USER_ID,
+      orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
+      orchestration: { triggeredByWebDirect: true },
+    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    const diagnostics = invocationService.invokedInputs[0]?.orchestration;
+    expect(diagnostics).toMatchObject({
+      standbyAllocationOutcome: "claimed",
+      standbyAllocationReason: "bind_completed",
+      runnerTargetReconcileElapsedMs: 0,
+    });
+    expect(diagnostics?.standbyClaimElapsedMs).toBeGreaterThanOrEqual(349);
+    expect(diagnostics?.runnerTargetBindElapsedMs).toBeGreaterThanOrEqual(99);
+    expect(standby.bindStandbySlot).toHaveBeenCalledOnce();
+    await expect(stateStore.readWriteFenceToken()).resolves.toMatchObject({ runnerContainerName: slotName });
+  });
+
   it.each([
     { name: "balanced reads", bindingReadMs: 100, secretReadMs: 100, recoverBindReply: false },
     { name: "slow binding read", bindingReadMs: 180, secretReadMs: 40, recoverBindReply: false },
@@ -1572,8 +1615,9 @@ describe("hosted runner container identity", () => {
         standbyAllocationReason: "claim_failed",
       });
 
+    let finishLateClaim: ((result: HostedStandbyClaimResult) => void) | undefined;
     const timedOutClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
-      async () => await new Promise<HostedStandbyClaimResult>(() => undefined),
+      async () => await new Promise<HostedStandbyClaimResult>((resolve) => { finishLateClaim = resolve; }),
     );
     const timedOutController = createController(timedOutClaim);
     await expect(timedOutController.controller.ensureForUser({
@@ -1597,6 +1641,18 @@ describe("hosted runner container identity", () => {
       timedOutController.invocationService.invokedInputs[0]?.orchestration
         ?.standbyAllocationElapsedMs,
     ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS - 1);
+    finishLateClaim?.({ outcome: "claimed", slotName: "runner--v-release_1--0123456789abcdef0123456789abcdef" });
+    await vi.waitFor(() => expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted standby claim RPC settled.",
+        details: expect.objectContaining({
+          standbyClaimDeadlineExpired: true,
+          standbyClaimRpcOutcome: "claimed",
+          standbyClaimBudgetMs: HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
+        }),
+      }),
+    ));
+    expect(timedOutController.invocationService.invokedInputs).toHaveLength(1);
   });
 
   it.each([
@@ -1609,8 +1665,8 @@ describe("hosted runner container identity", () => {
     const stateStore = new RunnerStateStore(durable.state);
     const slotName =
       "runner--v-release_1--0123456789abcdef0123456789abcdef";
-    const claimDelayMs = 100;
-    const bindDelayMs = 200;
+    const claimDelayMs = HOSTED_STANDBY_CLAIM_TIMEOUT_MS * 0.4;
+    const bindDelayMs = HOSTED_STANDBY_CLAIM_TIMEOUT_MS * 0.8;
     const standby = createAllocatingStandbyHarness({
       bindDelayMs,
       readDelayMs: 300,

@@ -2427,6 +2427,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     replacementFenceClearElapsedMs?: number;
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
+    runnerTargetReconcileElapsedMs?: number;
+    standbyClaimElapsedMs?: number;
+    runnerTargetBindElapsedMs?: number;
     standbyAllocationElapsedMs?: number;
     standbyAllocationOutcome?: HostedStandbyAllocationOutcome;
     standbyAllocationReason?: HostedStandbyAllocationReason;
@@ -2840,6 +2843,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "replacementFenceClearElapsedMs",
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",
+    "runnerTargetReconcileElapsedMs",
+    "standbyClaimElapsedMs",
+    "runnerTargetBindElapsedMs",
     "standbyAllocationElapsedMs",
     "standbyAllocationOutcome",
     "standbyAllocationReason",

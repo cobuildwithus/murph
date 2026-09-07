@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-07",
+  "order": 100,
+  "item": {
+    "id": "fewer-cold-reply-starts",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer cold starts for replies",
+    "summary": "Murph gives an available warm runner more time to take your message before starting a new one.",
+    "details": "This avoids extra startup work when the warm handoff takes slightly longer. An unavailable runner still falls back within a bounded wait.",
+    "relevanceTags": [
+      "conversations",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3036
+    ]
+  }
+}
