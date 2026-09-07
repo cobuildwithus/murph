@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-07",
+  "order": 100,
+  "item": {
+    "id": "replies-during-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting during updates",
+    "summary": "Murph checks that an update is ready before switching new replies to it.",
+    "details": "A slow or failed update leaves the current version handling your messages.",
+    "relevanceTags": ["conversations", "reliability"],
+    "sourcePullRequests": [3030]
+  }
+}
