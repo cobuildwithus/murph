@@ -6,6 +6,11 @@ Complete safe runner releases without deployment-induced foreground waits or an
 incidental reduction in supported serving capacity. Prefer native Cloudflare
 ordering and existing runtime owners over extra allocation or retry machinery.
 
+Current constraint: keep the existing total CPU and memory budget. A second full
+fleet reservation and quota escalation are not the chosen solution. Preserve
+the reviewed ordering and warm-retention fixes while proving a simpler release
+contract that works within the existing aggregate capacity.
+
 ## Evidence and open questions
 
 - The preceding change separated serving and candidate image targets and proved
@@ -76,3 +81,18 @@ assistant behavior change is intended.
   capacity gate. The separate live Stripe browser matrix on main already failed
   downgrade and family-conversion readiness before the quota diagnostic merged;
   this change does not modify those billing paths.
+
+## Fixed-capacity follow-up
+
+- The reviewed native-admission correction merged, but its two-full-target
+  production activation did not proceed. No quota request was submitted.
+- Revisit a single serving application whose native target changes without a
+  replacement rollout, with consumer-first support for exact approved artifacts.
+  Account for prefetched old instances and immutably pin the artifact actually
+  admitted to an execution target; do not weaken member or write-fence identity.
+- Prove bounded artifact retirement across successive releases. A target PATCH,
+  a stopped instance, and absence of a currently running old process do not alone
+  prove that the platform cannot assign an old prefetched image later.
+- Obtain the requested architecture consultation under this constraint before
+  choosing implementation changes. Distinguish fixing image-mismatch backoff
+  from an unsupported guarantee of zero latency under every capacity condition.
