@@ -101,3 +101,8 @@ mention the deleted generic state.
 
 This package now hard-cuts device-sync runtime snapshot/apply/token exports.
 Consumers that previously imported those symbols from `@murphai/hosted-execution` or `@murphai/hosted-execution/parsers` must import them from `@murphai/device-syncd/hosted-runtime` instead.
+
+Configuration request/response parsers live with the model and provider values
+in `@murphai/hosted-execution/assistant-model`. Consumers that only need those
+parsers should use that entrypoint to avoid initializing unrelated runtime and
+device-sync parsers. The existing `parsers` exports forward to the same functions.
