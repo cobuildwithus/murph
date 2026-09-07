@@ -711,6 +711,22 @@
     {
       "issue": "cobuildwithus/murph#2962",
       "path": ".agents/friction-log/20260905120003-base-ui-composed/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2991",
+      "path": ".agents/friction-log/20260906115227-live-journey-selector/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2994",
+      "path": ".agents/friction-log/20260906125810-cloudflare-composite-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2996",
+      "path": ".agents/friction-log/20260905165216-bounded-daily-runtime/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3001",
+      "path": ".agents/friction-log/20260906122612-package-test-argument/friction.md"
     }
   ],
   "version": 1
