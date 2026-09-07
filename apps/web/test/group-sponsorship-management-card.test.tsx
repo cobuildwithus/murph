@@ -859,3 +859,35 @@ test.each([
     }
   },
 );
+
+test.each([
+  { periodEndTimeZone: "UTC", expected: "Aug 30, 2026" },
+  { periodEndTimeZone: "Pacific/Kiritimati", expected: "Aug 31, 2026" },
+  {
+    periodEndTimeZone: undefined,
+    expected: `Aug ${new Date("2026-08-30T16:00:00.000Z").getDate()}, 2026`,
+  },
+])("renders reset dates in $periodEndTimeZone, retaining the ambient default", async ({
+  periodEndTimeZone,
+  expected,
+}) => {
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      inert: true,
+      management: { ...baseManagement, periodEnd: "2026-08-30T16:00:00.000Z" },
+      periodEndTimeZone,
+    },
+  ));
+  try {
+    const resetLabel = [...rendered.container.querySelectorAll("dt")]
+      .find((element) => element.textContent === "Resets");
+    assert.equal(resetLabel?.nextElementSibling?.textContent, expected);
+  } finally {
+    await rendered.cleanup();
+  }
+});
