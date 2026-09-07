@@ -1,6 +1,6 @@
 # Keep image rollouts off the message path
 
-Status: active
+Status: completed
 Created: 2026-09-07
 Updated: 2026-09-07
 
@@ -32,7 +32,7 @@ Use synthetic evidence; production credentials remain in the protected workflow.
 Effort: Patch. Foreground messages keep the active image throughout candidate
 preparation. Candidate readiness and drain waits belong to deployment only.
 Existing completion and cleanup calls retain their exact container name.
-Status: Ready for final review; protected deployment remains pending.
+Status: completed
 
 ## Decisions
 
@@ -53,8 +53,9 @@ Status: Ready for final review; protected deployment remains pending.
 1. Trace the production failure and reproduce readiness rejection. Complete.
 2. Implement immutable publication and stage/smoke/promote ordering. Complete.
 3. Verify cold/warm readiness, exact-owner routing, candidate failure and drain. Complete.
-4. Update deployment contracts, run typecheck and required candidate review.
-5. Commit, PR, ReviewGPT/CI, merge, protected deploy and verify live state.
+4. Update deployment contracts, run typecheck and required candidate review. Complete.
+5. PR #3030 contains the implementation. Final review passed; exact-head CI,
+   merge, protected deployment and live verification continue as the release handoff.
 
 ## Verification
 
@@ -69,3 +70,18 @@ Local verification: 816 Cloudflare tests and nine changelog rendering tests pass
 Cloudflare and Web typechecks, native Wrangler immutable-image dry run and the
 complexity guard passed. Zero-target/off inventory still proves the actual
 candidate namespace through the existing prepare/retire lifecycle.
+
+## Final review and release handoff
+
+Round one passed at `5f37eb6137c07228d9c0b8c52c9cac08c8c387c5` with no
+qualifying findings and no accepted issues remaining. The Phlebas lane selected
+`gpt-6-pro`; captured model metadata and the response hash agree. One complete
+repository snapshot was attached, and the exact committed turn was captured
+after more than seven minutes. The review identified all 35 changed files and
+examined staging, promotion, drain, routing, retention and receipt owners. This
+is static review evidence; local tests and protected hosted checks own execution.
+
+Only this explanatory plan closure follows the reviewed implementation. PR
+#3030 tracks remaining CI and release evidence. No production deployment is
+claimed by this implementation record.
+Completed: 2026-09-07
