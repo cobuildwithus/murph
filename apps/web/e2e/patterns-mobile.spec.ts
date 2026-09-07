@@ -35,13 +35,13 @@ test("pattern cards show available comparisons on phones and retain result detai
   const running = mobile.locator('[data-pattern-factor-row="running"]');
   await expect(running.getByRole("heading", { name: "Running", exact: true })).toBeVisible();
   const coverage = running.locator("[data-observed-days]");
-  await expect(coverage).toHaveAccessibleName("Good coverage: based on 14 recorded cases");
+  await expect(coverage).toHaveAccessibleName("14 days recorded for Running");
   await expect(running.getByText("14 recorded cases", { exact: true })).toHaveCount(0);
   const drawer = page.locator('[data-slot="drawer-content"]');
   await coverage.tap();
   await expect(drawer).toBeVisible();
-  await expect(drawer).toHaveAccessibleName("Good coverage");
-  await expect(drawer).toContainText("Based on 14 recorded cases");
+  await expect(drawer).toHaveAccessibleName("14 days");
+  await expect(drawer).toHaveAccessibleDescription("Running");
   await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(0);
   if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
     await mkdir(process.env.DESIGN_PROOF_OUTPUT_DIR, { recursive: true });

@@ -1426,12 +1426,11 @@ function ObservedDaysMeter({
     return (
       <PatternResultDetails
         card
-        eyebrow={factorLabel ?? "Patterns"}
-        title={coverageLabel}
-        description={`Based on ${formatCaseCount(days)}.`}
+        title={formatDayCount(days)}
+        description={factorLabel ?? "Recorded days"}
         showDescription
         trigger={
-          <button type="button" aria-label={label} className={triggerClassName} data-observed-days={days}>
+          <button type="button" aria-label={`${formatDayCount(days)} recorded for ${factorLabel ?? "this factor"}`} className={triggerClassName} data-observed-days={days}>
             {bars}
           </button>
         }
