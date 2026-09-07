@@ -1296,11 +1296,20 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox webhook dirty work reaches quiescence without starting provider cadence", async () => {
+  test.each(["none", "superseded", "equal"])("system mailbox retains only necessary device work across restore (schedule: %s)", async (schedule) => {
+    const retainedRetry = schedule !== "none";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const connectionId = "device_sync_connection_webhook_dirty";
+    const retryAt = new Date(Date.parse(TEST_NOW) + 24 * 60 * 60_000).toISOString();
+    const scheduledAt = schedule === "superseded"
+      ? new Date(Date.parse(TEST_NOW) - 60_000).toISOString()
+      : TEST_NOW;
+    let canonicalNextReconcileAt = TEST_NOW;
+    const futureJobs = [{ availableAt: retryAt, dedupeKey: "synthetic-future-resource",
+      kind: "resource" as const, maxAttempts: 1, priority: 30,
+      payload: { resourceType: "sleep", resourceId: "synthetic-retained-sleep" } }];
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:webhook-dirty",
       id: "mailbox_item_system_mailbox_device_webhook_dirty",
@@ -1315,6 +1324,28 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     let fetchDirtyStatesCalls = 0;
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...baseDeviceSyncPort,
+      async fetchSnapshot(request) {
+        const snapshot = await baseDeviceSyncPort.fetchSnapshot(request);
+        for (const entry of snapshot.connections) {
+          entry.localState.nextReconcileAt = canonicalNextReconcileAt;
+        }
+        return snapshot;
+      },
+      async applyUpdates(request) {
+        for (const update of request.updates) {
+          if (typeof update.localState?.nextReconcileAt === "string") {
+            canonicalNextReconcileAt = update.localState.nextReconcileAt;
+          }
+        }
+        return {
+          appliedAt: request.occurredAt ?? new Date().toISOString(),
+          updates: request.updates.map((update) => ({
+            connection: null, connectionId: update.connectionId, status: "updated" as const,
+            tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+          })),
+          userId: TEST_USER_ID,
+        };
+      },
       async fetchDirtyStates() {
         fetchDirtyStatesCalls += 1;
         return {
@@ -1325,12 +1356,19 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         };
       },
     };
-    const providerFetch = vi.fn(async () =>
-      new Response(JSON.stringify({ records: [] }), {
-        headers: { "content-type": "application/json" },
-        status: 200,
-      })
-    );
+    const providerPaths: string[] = [];
+    const providerFetch = vi.fn(async (request: string | URL | Request) => {
+      const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
+      providerPaths.push(pathname);
+      const body = pathname.endsWith("/synthetic-retained-sleep")
+        ? { id: "synthetic-retained-sleep", nap: false,
+            start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
+            updated_at: "2026-04-26T08:00:00.000Z" }
+        : { records: [] };
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" }, status: 200,
+      });
+    });
 
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.stubGlobal("fetch", providerFetch);
@@ -1347,6 +1385,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           hint: {
             occurredAt: TEST_NOW,
             reason: "webhook_dirty_transition",
+            ...(retainedRetry ? { jobs: futureJobs, nextReconcileAt: TEST_NOW } : {}),
           },
           kind: "device-sync.wake",
           occurredAt: TEST_NOW,
@@ -1355,67 +1394,116 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           userId: TEST_USER_ID,
         },
       });
+      if (retainedRetry) {
+        await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+          pending: state.pending.map((item) => ({ ...item, attemptCount: 1,
+            deviceSyncContinuationOwner: true, lastAttemptAt: TEST_NOW, nextAttemptAt: retryAt })),
+        }));
+        for (const [index, reason] of (["reconcile_due", "webhook_hint"] as const).entries()) {
+          const queuedItem = createMailboxItem({
+            dedupeKey: reason === "reconcile_due"
+              ? `device-sync:scheduled-reconcile:v3:${connectionId}:${TEST_NOW}:${scheduledAt}`
+              : `device-sync.wake:synthetic-queued-${index}`,
+            id: `mailbox_synthetic_queued_${index}`,
+            kind: "device-sync.wake", lane: "system", laneSeq: String(index + 2),
+          });
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncSystemMailboxItem(queuedItem), vaultRoot,
+            wake: { connectionId, eventId: queuedItem.dedupeKey, expectedConnectedAt: TEST_NOW,
+              kind: "device-sync.wake", occurredAt: reason === "reconcile_due" ? scheduledAt : TEST_NOW,
+              ...(reason === "reconcile_due" ? { hint: { nextReconcileAt: scheduledAt, occurredAt: scheduledAt } } : {}),
+              provider: "whoop", reason, userId: TEST_USER_ID },
+          });
+        }
+      }
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
+      importState.watermarks.system = retainedRetry ? "3" : "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
-      const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty-before.bundle.json",
-        vaultRoot,
-      });
+      const runPass = async () => {
+        const restoredWorkspace = await createVaultSnapshotBundle({
+          key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty-before.bundle.json",
+          vaultRoot,
+        });
 
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_system_mailbox_webhook_dirty",
-            processingMode: "system_mailbox",
-            workspaceVersion: "0",
-          },
-          resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
-          async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createBundleRef({
-                hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem() {
-            throw new Error("Already-imported system mailbox work should not import a new row.");
-          },
-          platform: createPlatform({
-            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
-            deviceSyncPort,
-            mailboxPort: createMailboxPort({ events, items: [] }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                snapshotRef: restoredWorkspace.snapshotRef,
-                version: "0",
+        return await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_system_mailbox_webhook_dirty",
+              processingMode: "system_mailbox",
+              workspaceVersion: "0",
+            },
+            resolvedConfig: createDeviceSyncResolvedConfig(),
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "8".repeat(64),
+                  key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              throw new Error("Already-imported system mailbox work should not import a new row.");
+            },
+            platform: createPlatform({
+              artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+              deviceSyncPort,
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef: restoredWorkspace.snapshotRef,
+                  version: "0",
+                }),
               }),
             }),
-          }),
-          async runAssistantPhase() {
-            throw new Error("System mailbox device-sync must not enter assistant phase.");
+            async runAssistantPhase() {
+              throw new Error("System mailbox device-sync must not enter assistant phase.");
+            },
+            vaultRoot,
           },
-          vaultRoot,
-        },
-      );
-
+        );
+      };
+      const result = await runPass();
       assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(fetchDirtyStatesCalls, 1);
       assert.equal(providerFetch.mock.calls.length, 0);
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.nextWakeReason ?? null, null);
-      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(result.status, retainedRetry ? "scheduled" : "idle");
+      assert.equal(result.nextWakeAt, retainedRetry ? retryAt : null);
+      assert.equal(result.nextWakeReason ?? null, retainedRetry ? "device-sync.reconcile" : null);
+      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+      if (retainedRetry) {
+        assert.equal(pending.length, schedule === "equal" ? 3 : 1);
+        assert.equal(pending[0]?.itemId, deviceItem.id);
+        assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
+        assert.equal(pending[0]?.nextAttemptAt, retryAt);
+        assert.deepEqual(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.jobs : null, futureJobs);
+        assert.deepEqual(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["1"]);
+      } else {
+        assert.deepEqual(pending, []);
+      }
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "1",
+        schedule === "superseded" ? "3" : "1",
       );
+      if (schedule === "equal") {
+        assert.equal(pending[1]?.wake.kind === "device-sync.wake" ? pending[1].wake.hint?.nextReconcileAt : null, TEST_NOW);
+        assert.equal(canonicalNextReconcileAt, TEST_NOW);
+        vi.setSystemTime(new Date(retryAt));
+        await runPass();
+        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
+        assert.equal(canonicalNextReconcileAt, TEST_NOW);
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.itemId, "mailbox_synthetic_queued_0");
+        await runPass();
+        assert.ok(providerPaths.includes("/developer/v2/activity/sleep"));
+        assert.ok(Date.parse(canonicalNextReconcileAt) > Date.parse(retryAt));
+        await runPass();
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+        assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
+      }
     } finally {
       vi.unstubAllGlobals();
       vi.useRealTimers();

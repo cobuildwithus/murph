@@ -406,7 +406,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       }
 
       const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
-        pending: state.pending,
+        pending: collapseHostedRetainedDeviceSyncWakeHints({
+          now: startedAt,
+          pending: state.pending,
+          selected: pending,
+        }),
         selected: pending,
       });
 
@@ -735,6 +739,83 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
   };
 }
 
+function collapseHostedRetainedDeviceSyncWakeHints(input: {
+  now: string;
+  pending: readonly HostedSystemMailboxPendingItem[];
+  selected: HostedSystemMailboxPendingItem;
+}): HostedSystemMailboxPendingItem[] {
+  const owner = input.selected;
+  const wake = owner.wake;
+  if (
+    owner.deviceSyncContinuationOwner !== true
+    || owner.status !== "pending"
+    || owner.postCheckpointRecord !== null
+    || wake.kind !== "device-sync.wake"
+    || !wake.connectionId
+    || !wake.expectedConnectedAt
+    || owner.mailboxLaneSeq === null
+    || owner.mailboxDedupeKey !== wake.eventId
+  ) {
+    return [...input.pending];
+  }
+
+  const ownerSeq = BigInt(owner.mailboxLaneSeq);
+  const ownerCadence = wake.hint?.nextReconcileAt;
+  let reachedOwner = false;
+  let barrier = false;
+  return input.pending.filter((item) => {
+    if (item.itemId === owner.itemId) {
+      reachedOwner = true;
+      return true;
+    }
+    if (
+      !reachedOwner
+      || barrier
+      || item.wake.kind !== "device-sync.wake"
+      || item.wake.connectionId !== wake.connectionId
+    ) {
+      return true;
+    }
+    const candidate = item.wake;
+    const candidateCadence = candidate.hint?.nextReconcileAt;
+    if (
+      !isHostedPlainDeviceSyncWakeHint(item)
+      || item.mailboxLaneSeq === null
+      || BigInt(item.mailboxLaneSeq) <= ownerSeq
+      || candidate.userId !== wake.userId
+      || candidate.provider !== wake.provider
+      || candidate.expectedConnectedAt !== wake.expectedConnectedAt
+      || (candidate.reason === "reconcile_due" && candidateCadence == null)
+      || (candidateCadence != null && (
+        ownerCadence == null || Date.parse(candidateCadence) >= Date.parse(ownerCadence)
+      ))
+      || Date.parse(candidate.occurredAt) > Date.parse(input.now)
+    ) {
+      barrier = true;
+      return true;
+    }
+    // A copied cadence does not prove its tick ran: only a strictly older
+    // schedule is superseded. The owner fetches dirty work for webhook hints.
+    // Preserve its exact jobs and epoch.
+    return false;
+  });
+}
+
+function isHostedPlainDeviceSyncWakeHint(item: HostedSystemMailboxPendingItem): boolean {
+  const wake = item.wake;
+  return item.routeAction === "run-device-sync-wake"
+    && item.status === "pending"
+    && item.attemptCount === 0
+    && item.postCheckpointRecord === null
+    && item.deviceSyncContinuationOwner !== true
+    && wake.kind === "device-sync.wake"
+    && (wake.reason === "webhook_hint" || wake.reason === "reconcile_due")
+    && (wake.hint?.reason == null || wake.hint.reason === "webhook_dirty_transition")
+    && (wake.hint?.jobs?.length ?? 0) === 0
+    && wake.hint?.scopes === undefined
+    && wake.hint?.revokeWarning == null;
+}
+
 function collapseConsecutiveHostedBrowserVaultRefreshItems(input: {
   pending: readonly HostedSystemMailboxPendingItem[];
   selected: HostedSystemMailboxPendingItem;
@@ -940,6 +1021,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       await retainHostedDeviceSyncSystemMailboxItem({
         immediateDirtyContinuationCanProgress,
         item: input.item,
+        dirtyWakeAt: recordResult.nextWakeAt,
         nextAttemptAt: retainUntil,
         vaultRoot: input.vaultRoot,
       });
@@ -1104,11 +1186,15 @@ function hostedDeviceSyncRetainedWakeHasCapacity(
 }
 
 async function retainHostedDeviceSyncSystemMailboxItem(input: {
+  dirtyWakeAt: string | null;
   immediateDirtyContinuationCanProgress: boolean;
   item: HostedSystemMailboxPendingItem;
   nextAttemptAt: string;
   vaultRoot: string;
 }): Promise<void> {
+  const nextAttemptAt = input.immediateDirtyContinuationCanProgress
+    ? earliestHostedSystemMailboxWakeAt(input.dirtyWakeAt, input.nextAttemptAt) ?? input.nextAttemptAt
+    : input.nextAttemptAt;
   await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
     const retainedIndex = state.pending.findIndex((item) =>
       hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)
@@ -1129,7 +1215,7 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
             deviceSyncContinuationOwner: true,
             lastErrorCode: null,
             lastErrorMessage: null,
-            nextAttemptAt: input.nextAttemptAt,
+            nextAttemptAt,
             postCheckpointRecord: null,
             status: "pending" as const,
             wake: input.item.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch"
