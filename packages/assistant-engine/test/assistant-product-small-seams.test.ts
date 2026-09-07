@@ -1100,8 +1100,12 @@ describe('assistant product small seams', () => {
       actionKind: 'command.execution',
       commandFamily: 'search',
       commandOrdinal: 1,
+      diagnosticRole: 'completion',
       durationMsBucket: 'unknown',
+      errorCategory: 'unknown',
       exitCode: 2,
+      failureReason: 'nonzero_exit',
+      failureStage: 'execution',
       outputBytesBucket: 'lt_1kb',
       recoveredAfterFailure: true,
     })

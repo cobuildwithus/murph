@@ -1,3 +1,4 @@
+import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { randomUUID } from 'node:crypto'
 
 import {
@@ -39,6 +40,7 @@ export interface GenerateSongToolArgs {
 }
 
 export interface GenerateVoiceMemoToolResult {
+  failureDiagnostic?: ToolFailureDiagnostic
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
@@ -190,6 +192,7 @@ export async function executeGenerateVoiceMemoTool(input: {
   })
   if (!voiceId) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
       rpcText: 'MURPH_ELEVENLABS_VOICE_ID is required for voice memo generation',
     }
@@ -198,6 +201,7 @@ export async function executeGenerateVoiceMemoTool(input: {
   const modelId = runtime.elevenLabs.modelId
   if (!modelId) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
       rpcText: 'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
     }
@@ -332,6 +336,7 @@ async function executeGeneratedVoiceMemo(input: {
       throw error
     }
     return {
+      failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
       rpcSuccess: false,
       rpcText: appendFailureDetail(
         `${label} generated but Linq attachment upload failed`,
@@ -342,6 +347,7 @@ async function executeGeneratedVoiceMemo(input: {
 
   if (runtimeResult.ok === false) {
     return {
+      failureDiagnostic: voiceMemoRuntimeFailureDiagnostic(runtimeResult.failure),
       rpcSuccess: false,
       rpcText: describeVoiceMemoRuntimeFailure(label, runtimeResult.failure),
     }
@@ -395,6 +401,7 @@ function rejectIfResponseMediaConflicts(
     return null
   }
   return {
+    failureDiagnostic: toolFailureDiagnostic('conflict'),
     rpcSuccess: false,
     rpcText: `${label} generation cannot be combined with other response media`,
   }
@@ -406,6 +413,7 @@ function validateElevenLabsApiKeyPrecondition(
 ): GenerateVoiceMemoToolResult | null {
   if (!runtime.elevenLabs.apiKeyAvailable) {
     return {
+      failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
       rpcText: `ELEVENLABS_API_KEY is required for ${label} generation`,
     }
@@ -417,6 +425,7 @@ function unavailableVoiceMemoResult(
   label: VoiceMemoGenerationLabel,
 ): GenerateVoiceMemoToolResult {
   return {
+    failureDiagnostic: toolFailureDiagnostic('unavailable'),
     rpcSuccess: false,
     rpcText: `${label} generation is only available for deliverable iMessage or Telegram replies`,
   }
@@ -473,5 +482,20 @@ function describeVoiceMemoGeneration(
       }
     case 'elevenlabs_music':
       return { label: 'song', mediaKind: 'song', transcript: null }
+  }
+}
+
+function voiceMemoRuntimeFailureDiagnostic(
+  failure: VoiceMemoToolRuntimeFailure,
+): ToolFailureDiagnostic {
+  switch (failure.kind) {
+    case 'missing_configuration':
+      return toolFailureDiagnostic('unavailable')
+    case 'invalid_audio':
+      return toolFailureDiagnostic('invalid_result')
+    case 'upload_failed':
+      return { failureStage: 'delivery', failureReason: 'reported_failure' }
+    case 'generation_failed':
+      return { failureStage: 'execution', failureReason: 'reported_failure' }
   }
 }

@@ -2711,6 +2711,8 @@ async function maybeRunRunnerContainerSmoke(input: {
         ...input.env,
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: input.workerBaseUrl,
         HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        // Keep the smoke owner's attempt budget: standby preparation can take
+        // longer than 30 quick polls. Explicit caller limits pass through above.
         HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS:
           input.env.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS?.trim() || "1000",
       },

@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as memberMemoryTextResult } from '../tool-failure-diagnostics.js'
 import {
   memorySectionSchema,
 } from '@murphai/contracts'
@@ -93,22 +95,19 @@ export async function executeMemberMemoryDynamicTool(input: {
   managedMaintenanceAuthorized: boolean
   request: Extract<MemberMemoryDynamicToolRequest, { kind: 'member-memory' }>
   vaultRoot: string | null
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
   if (!input.managedMaintenanceAuthorized) {
     return memberMemoryTextResult(
       false,
       'member-memory maintenance is unavailable for this turn',
+      'authority_rejected',
     )
   }
   if (!input.vaultRoot) {
     return memberMemoryTextResult(
       false,
       'member-memory maintenance requires a vault',
+      'unavailable',
     )
   }
 
@@ -192,28 +191,13 @@ export async function executeMemberMemoryDynamicTool(input: {
       return memberMemoryTextResult(
         false,
         'saved memory changed after show; leave the newer value unchanged and end this maintenance write attempt',
+        'conflict',
       )
     }
     return memberMemoryTextResult(
       false,
       'member-memory maintenance could not be completed',
+      'handler_exception', error,
     )
-  }
-}
-
-function memberMemoryTextResult(
-  success: boolean,
-  text: string,
-): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
   }
 }
