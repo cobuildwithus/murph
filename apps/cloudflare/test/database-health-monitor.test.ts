@@ -1264,6 +1264,44 @@ describe("database health monitor", () => {
     });
   });
 
+  it("reports branch-scoped state provenance for both partial scrapes", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        return buildMetricsBody({ branchId: BRANCH_ID })
+          .split("\n")
+          .map((line) => {
+            if (!line.startsWith("planetscale_postgres_connection_state{")) {
+              return line;
+            }
+            return scrapeAttempt === 1
+              ? line.replace(BRANCH_ID, "branch_other")
+              : line.replace('planetscale_role="primary"', 'planetscale_role="replica"');
+          })
+          .join("\n");
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toMatchObject({
+      sampleStatus: "failed",
+    });
+    expect(warning).toHaveBeenCalledWith(
+      "Database health metrics collection failed.",
+      expect.objectContaining({
+        attempts: 2,
+        missingMetrics: ["planetscale_postgres_connection_state"],
+        postgresStateSeries: [
+          { branch: 0, primary: 0, replica: 0, unrecognizedRole: 0 },
+          { branch: 2, primary: 0, replica: 2, unrecognizedRole: 0 },
+        ],
+      }),
+    );
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.primaryLinqRequests).toEqual([]);
+  });
+
   it("keeps a persistently missing Postgres-state family incomplete after confirmation", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const partialMetricsBody = buildMetricsBody({

@@ -311,6 +311,13 @@ without inventing a named state or discarding other states. This follows
 An absent primary family stays unknown; PgBouncer pool labels still require a
 nonempty value.
 
+Missing Postgres-state warnings include one `postgresStateSeries` entry per
+successfully parsed scrape, in collection order. Each entry counts series for
+the configured branch, split into primary, replica, and missing or unrecognized
+roles. Zero branch series distinguishes provider omission from unusable primary
+provenance. These diagnostics contain no label values or raw metrics, add no
+provider calls, and do not change paging or persisted samples.
+
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
 metric series. Both selectors are required because one organization can have

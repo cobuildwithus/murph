@@ -110,6 +110,13 @@ describe("PlanetScale database health metrics", () => {
       expect(observation.missingMetrics).toEqual(["planetscale_postgres_connection_state"]);
       expect(observation.snapshot.postgresConnections).toBeNull();
       expect(observation.snapshot.postgresConnectionStates).toBeNull();
+      const isOtherBranch = shape === "absent" || shape === "wrong branch";
+      expect(observation.postgresStateSeries).toEqual({
+        branch: isOtherBranch ? 0 : 2,
+        primary: 0,
+        replica: shape === "replica" ? 2 : 0,
+        unrecognizedRole: shape === "missing role" ? 2 : 0,
+      });
     },
   );
 
