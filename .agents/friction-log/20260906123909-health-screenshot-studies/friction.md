@@ -1,6 +1,7 @@
 ---
 title: 'Health screenshot studies open global dialogs over unrelated examples'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3011'
 ---
 
 ## Expected Behavior

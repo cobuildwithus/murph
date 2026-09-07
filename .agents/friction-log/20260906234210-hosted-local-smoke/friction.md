@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local smoke polling ends before standby preparation can finish'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3019'
 ---
 
 ## Expected Behavior
