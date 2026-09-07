@@ -1032,15 +1032,26 @@ test("completed Home setup opens the shared Message Murph picker", async ({ page
     else route.abort();
   });
 
+  await page.setViewportSize({ width: 390, height: 900 });
+  const response = await page.goto("/screenshots/home#home-onboarding-complete", { waitUntil: "load" });
+  expect(response?.status()).toBe(200);
+
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    const response = await page.goto("/screenshots/home#home-onboarding-complete", { waitUntil: "load" });
-    expect(response?.status()).toBe(200);
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     const emptyState = page.locator("#home-onboarding-complete");
     // The public design study stays inert; exercise its real shared action only
     // inside this browser test, with synthetic channels and external requests blocked.
-    await page.locator("#home-onboarding-steps").evaluate((element) => element.removeAttribute("inert"));
+    await expect.poll(() => emptyState.locator("button").evaluate((element) =>
+      Object.keys(element).some((key) => key.startsWith("__reactFiber$"))
+    )).toBe(true);
+    await emptyState.evaluate((element) => {
+      let ancestor = element.closest("[inert]");
+      while (ancestor) {
+        ancestor.removeAttribute("inert");
+        ancestor = ancestor.parentElement?.closest("[inert]") ?? null;
+      }
+    });
     const button = emptyState.getByRole("button", { name: "Message Murph", exact: true });
     await expect(button).toBeVisible();
     await expect(emptyState.locator("[data-onboarding-step]")).toHaveCount(0);

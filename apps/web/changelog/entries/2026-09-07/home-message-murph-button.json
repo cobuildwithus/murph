@@ -8,7 +8,7 @@
     "title": "Message Murph from Home",
     "summary": "Once setup is complete, Home has a Message Murph button that opens your connected messaging channel or lets you choose one.",
     "relevanceTags": ["home", "messaging"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3026],
     "tryIt": { "label": "Open Home", "href": "/home" }
   }
 }
