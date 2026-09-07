@@ -516,6 +516,7 @@ function allocationHarness(options: {
         commandBudget: { deadlineAtMs: Date.now() + timeoutMs },
         initialRecord: await store.readState(),
         input: { orchestrationAttemptId: "background", userId: MEMBER, ...input },
+        timings: { runnerTargetReconcileElapsedMs: 0, standbyClaimElapsedMs: 0, runnerTargetBindElapsedMs: 0 },
       });
     },
   };

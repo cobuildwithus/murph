@@ -152,6 +152,12 @@ type RunnerAllocationReason = NonNullable<
   RuntimeProcessingOrchestrationDiagnostics["standbyAllocationReason"]
 >;
 
+type RunnerAllocationTimings = {
+  runnerTargetReconcileElapsedMs: number;
+  standbyClaimElapsedMs: number;
+  runnerTargetBindElapsedMs: number;
+};
+
 type FreshRunnerContainerResolution =
   | {
       kind: "ready";
@@ -979,6 +985,7 @@ export class RuntimeProcessingController {
     commandBudget: RuntimeProcessingCommandBudget;
     initialRecord: RunnerStateRecord;
     input: RuntimeProcessingInput;
+    timings: RunnerAllocationTimings;
   }): Promise<FreshRunnerContainerResolution> {
     if (!this.input.runnerContainerNamespace) {
       return {
@@ -996,33 +1003,38 @@ export class RuntimeProcessingController {
     }
     const pending = input.initialRecord.pendingRunnerContainerName;
     if (pending) {
-      if (isHostedRunnerTargetName(pending)) {
-        const retained = await this.resolveRetainedRunnerContainer({
-          commandBudget: input.commandBudget,
+      const reconcileStartedAtMs = Date.now();
+      try {
+        if (isHostedRunnerTargetName(pending)) {
+          const retained = await this.resolveRetainedRunnerContainer({
+            commandBudget: input.commandBudget,
+            runnerContainerName: pending,
+            userId,
+          });
+          if (retained === "ready") {
+            return {
+              kind: "ready",
+              runnerContainerName: pending,
+              standbyAllocationOutcome: "retained",
+              standbyAllocationReason: "retained",
+            };
+          }
+          if (retained === "retry") return this.createStandbyRetryResolution(input.input);
+        } else if (!await this.destroyAndClearPendingRunnerContainer({
           runnerContainerName: pending,
           userId,
-        });
-        if (retained === "ready") {
-          return {
-            kind: "ready",
-            runnerContainerName: pending,
-            standbyAllocationOutcome: "retained",
-            standbyAllocationReason: "retained",
-          };
+        })) {
+          // Exact-member names are drain-only. Never restart a stopped old target.
+          return this.createStandbyRetryResolution(input.input);
         }
-        if (retained === "retry") return this.createStandbyRetryResolution(input.input);
-      } else if (!await this.destroyAndClearPendingRunnerContainer({
-        runnerContainerName: pending,
-        userId,
-      })) {
-        // Exact-member names are drain-only. Never restart a stopped old target.
-        return this.createStandbyRetryResolution(input.input);
+      } finally {
+        input.timings.runnerTargetReconcileElapsedMs = Math.max(0, Date.now() - reconcileStartedAtMs);
       }
     }
 
     const releaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
     const cold = (reason: RunnerAllocationReason, outcome: "disabled" | "fallback" = "disabled") =>
-      this.bindFreshRunnerTarget({
+      measureRunnerAllocationStep(input.timings, "runnerTargetBindElapsedMs", () => this.bindFreshRunnerTarget({
         claimId: createHostedStandbyClaimId(),
         commandBudget: input.commandBudget,
         outcome,
@@ -1030,7 +1042,7 @@ export class RuntimeProcessingController {
         releaseId,
         runtimeInput: input.input,
         slotName: createHostedRunnerSlotName(releaseId),
-      });
+      }));
     if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate") {
       return await cold("mode_not_allocate");
     }
@@ -1050,6 +1062,7 @@ export class RuntimeProcessingController {
       coordinatorNamespace,
       releaseId,
       runtimeInput: input.input,
+      timings: input.timings,
     });
   }
 
@@ -1059,24 +1072,47 @@ export class RuntimeProcessingController {
     coordinatorNamespace: HostedStandbyCoordinatorNamespaceLike;
     releaseId: string;
     runtimeInput: RuntimeProcessingInput;
+    timings: RunnerAllocationTimings;
   }): Promise<FreshRunnerContainerResolution> {
     const budget = {
       deadlineAtMs: Math.min(input.commandBudget.deadlineAtMs, Date.now() + HOSTED_STANDBY_CLAIM_TIMEOUT_MS),
     };
     const claimId = createHostedStandbyClaimId();
-    const claim = await settleStandbyOperationWithinBudget(
-      () => input.coordinatorNamespace.getByName(resolveHostedStandbyCoordinatorName({
-        releaseId: input.releaseId,
-        region: HOSTED_RUNNER_REGION,
-      })).claimReadyStandby({
-        claimId,
-        deadlineAtEpochMs: budget.deadlineAtMs,
-        releaseId: input.releaseId,
-        region: HOSTED_RUNNER_REGION,
-      }),
+    const claimStartedAtMs = Date.now();
+    const claim = await measureRunnerAllocationStep(input.timings, "standbyClaimElapsedMs", () => settleStandbyOperationWithinBudget(
+      async () => {
+        let outcome = "failed";
+        try {
+          const result = await input.coordinatorNamespace.getByName(resolveHostedStandbyCoordinatorName({
+            releaseId: input.releaseId,
+            region: HOSTED_RUNNER_REGION,
+          })).claimReadyStandby({
+            claimId,
+            deadlineAtEpochMs: budget.deadlineAtMs,
+            releaseId: input.releaseId,
+            region: HOSTED_RUNNER_REGION,
+          });
+          outcome = result.outcome;
+          return result;
+        } finally {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            eventId: claimId,
+            details: {
+              standbyClaimRpcElapsedMs: Math.max(0, Date.now() - claimStartedAtMs),
+              standbyClaimBudgetMs: Math.max(0, budget.deadlineAtMs - claimStartedAtMs),
+              standbyClaimDeadlineExpired: Date.now() >= budget.deadlineAtMs,
+              standbyClaimRpcOutcome: outcome,
+            },
+            message: "Hosted standby claim RPC settled.",
+            phase: "runtime.starting",
+            userId: input.runtimeInput.userId,
+          });
+        }
+      },
       budget,
       HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
-    );
+    ));
     // A lost memberless claim carries no member data or credentials. Its
     // existing coordinator orphan recovery is independent of cold allocation.
     if (claim.kind !== "completed") return await input.cold(`claim_${claim.kind}`, "fallback");
@@ -1088,15 +1124,16 @@ export class RuntimeProcessingController {
         : "claim_failed";
       return await input.cold(reason, "fallback");
     }
-    return await this.bindFreshRunnerTarget({
+    const slotName = claim.value.slotName;
+    return await measureRunnerAllocationStep(input.timings, "runnerTargetBindElapsedMs", () => this.bindFreshRunnerTarget({
       claimId,
       commandBudget: budget,
       outcome: "claimed",
       reason: "bind_completed",
       releaseId: input.releaseId,
       runtimeInput: input.runtimeInput,
-      slotName: claim.value.slotName,
-    });
+      slotName,
+    }));
   }
 
   private async bindFreshRunnerTarget(input: {
@@ -1279,10 +1316,23 @@ export class RuntimeProcessingController {
     });
 
     const standbyAllocationStartedAtEpochMs = Date.now();
+    const timings: RunnerAllocationTimings = {
+      runnerTargetReconcileElapsedMs: 0,
+      standbyClaimElapsedMs: 0,
+      runnerTargetBindElapsedMs: 0,
+    };
     const resolution = await this.resolveFreshRunnerContainer({
       commandBudget: input.commandBudget,
       initialRecord,
       input: processingInput,
+      timings,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: { ...timings, allocationResolution: resolution.kind },
+      message: "Hosted runner allocation phases completed.",
+      phase: "runtime.starting",
+      userId: processingInput.userId,
     });
     if (resolution.kind === "retry") {
       return resolution.response;
@@ -1292,6 +1342,7 @@ export class RuntimeProcessingController {
       Date.now() - standbyAllocationStartedAtEpochMs,
     );
     processingInput = withRuntimeProcessingOrchestration(processingInput, {
+      ...timings,
       standbyAllocationElapsedMs,
       standbyAllocationOutcome: resolution.standbyAllocationOutcome,
       standbyAllocationReason: resolution.standbyAllocationReason,
@@ -1877,6 +1928,19 @@ export class RuntimeProcessingController {
     const ageMs = Date.now() - heartbeatAtMs;
     return ageMs >= 0
       && ageMs < HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS;
+  }
+}
+
+async function measureRunnerAllocationStep<T>(
+  timings: RunnerAllocationTimings,
+  key: keyof RunnerAllocationTimings,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const startedAtMs = Date.now();
+  try {
+    return await operation();
+  } finally {
+    timings[key] = Math.max(0, Date.now() - startedAtMs);
   }
 }
 

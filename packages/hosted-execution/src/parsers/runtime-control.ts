@@ -7430,6 +7430,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "freshStartRequestedAtEpochMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetReconcileElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "standbyClaimElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetBindElapsedMs", orchestrationLabel),
       ...requireOptionalStandbyAllocationDiagnostics(
         orchestration,
         orchestrationLabel,
