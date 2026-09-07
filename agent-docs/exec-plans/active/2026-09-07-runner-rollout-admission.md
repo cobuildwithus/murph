@@ -49,8 +49,11 @@ assistant behavior change is intended.
 - Deployment tests cover rejected native admission before Worker publication,
   interrupted native PATCH/rollout reconciliation, stable execution identity,
   candidate resumption, and Worker-only promotion. Final verification remains open.
-- Read-only native quota diagnostics have a reviewed PR with green exact-head CI;
-  its additional local acceptance run is in progress with package coverage passed.
+- Read-only native quota diagnostics merged after review, exact-head CI, and
+  local acceptance. Protected production preflight confirmed that account CPU
+  and memory limits cannot admit the declared full release overlap. Native
+  creation has independently failed admission. No serving ceiling was reduced;
+  an external quota increase remains required before production activation.
 - Final ReviewGPT identified a rebuilt-image retry dead end. Accepted and corrected
   in the existing artifact-preparation owner: verify requested public commit,
   fingerprints, execution configuration, and native namespace before reusing the
@@ -63,3 +66,13 @@ assistant behavior change is intended.
   inactive-namespace drain/admission path. The composed test drops the accepted
   create response and proves a retry leaves serving configuration/capacity intact.
   The shipped base staging writer reproduces that fixture's legacy record shape.
+- Final ReviewGPT passed with both recovery findings resolved. Required CI and
+  full local acceptance passed on the reviewed implementation: workspace
+  typechecks and package coverage, Web tests/build/smoke, Cloudflare Node and
+  Worker tests, and scenario coverage. Base integration preserves every reviewed
+  rollout source and test file; only the existing mailbox wake-ownership change
+  is added. Its focused proof and exact integration-head CI gate the merge.
+- Production activation and live release verification remain pending the native
+  capacity gate. The separate live Stripe browser matrix on main already failed
+  downgrade and family-conversion readiness before the quota diagnostic merged;
+  this change does not modify those billing paths.
