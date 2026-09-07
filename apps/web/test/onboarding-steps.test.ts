@@ -74,7 +74,7 @@ test("OnboardingSteps hides the connect devices card when the device step is com
   assert.doesNotMatch(markup, /Connect devices/);
   assert.doesNotMatch(markup, /href="\/connect"/);
   assert.match(markup, /Sync labs/);
-  assert.match(markup, /Start an experiment/);
+  assert.doesNotMatch(markup, /Start an experiment/);
   assert.match(markup, /Step 1/);
   assert.doesNotMatch(markup, /Step 3/);
 });
@@ -88,8 +88,9 @@ test("OnboardingSteps hides the labs card when lab sync is complete", async () =
   assert.match(markup, /Connect devices/);
   assert.doesNotMatch(markup, /Sync labs/);
   assert.doesNotMatch(markup, /href="\/settings"/);
-  assert.match(markup, /Start an experiment/);
-  assert.match(markup, /Step 2/);
+  assert.doesNotMatch(markup, /Start an experiment/);
+  assert.match(markup, /Step 1/);
+  assert.doesNotMatch(markup, /Step 2/);
   assert.doesNotMatch(markup, /Step 3/);
 });
 
@@ -117,7 +118,7 @@ test("OnboardingSteps leads with the message card and takes the primary style", 
   );
 });
 
-test("OnboardingSteps keeps four desktop cards on one horizontal track", async () => {
+test("OnboardingSteps keeps three desktop setup cards on one horizontal track", async () => {
   const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
   const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
     messageMurphAction: createElement("a", { href: "/message" }, "Message"),
@@ -127,10 +128,10 @@ test("OnboardingSteps keeps four desktop cards on one horizontal track", async (
   assert.match(markup, /lg:flex/);
   assert.match(markup, /lg:overflow-x-auto/);
   assert.doesNotMatch(markup, /xl:grid-cols-3/);
-  assert.equal(markup.match(/data-onboarding-step=/gu)?.length, 4);
-  assert.equal(markup.match(/lg:min-w-0/gu)?.length, 4);
+  assert.equal(markup.match(/data-onboarding-step=/gu)?.length, 3);
+  assert.equal(markup.match(/lg:min-w-0/gu)?.length, 3);
   assert.equal(
     markup.match(/lg:basis-\[calc\(\(100%-2\.5rem\)\/3\)\]/gu)?.length,
-    4,
+    3,
   );
 });

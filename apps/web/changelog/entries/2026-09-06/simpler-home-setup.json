@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "simpler-home-setup",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A simpler home screen",
+    "summary": "Home now keeps your remaining setup steps together and points you back to Murph when setup is done.",
+    "details": "Experiment cards and feature promotions no longer appear on Home.",
+    "relevanceTags": [
+      "home"
+    ],
+    "sourcePullRequests": [
+      3017
+    ],
+    "tryIt": {
+      "label": "Open Home",
+      "href": "/home"
+    }
+  }
+}

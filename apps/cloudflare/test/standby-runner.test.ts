@@ -344,6 +344,28 @@ describe("RunnerContainer slot lifecycle", () => {
 });
 
 describe("StandbyRunnerCoordinatorDurableObject", () => {
+  it("warms a candidate without making it claimable, then reuses that inventory on promotion", async () => {
+    const h = createCoordinatorHarness({ target: "2" });
+    const active = { bank: "primary", id: RELEASE_ID, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const candidate = { bank: "next", id: "next-candidate", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
+    const nextGet = vi.fn(h.runnerGet);
+    h.environment.NEXT_RUNNER_CONTAINER = { getByName: nextGet };
+    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active, candidate, previous: null });
+    const input = { releaseId: candidate.id, region: HOSTED_RUNNER_REGION };
+    await h.coordinator.ensureReadyStandby(input);
+    await h.flush();
+    expect(nextGet).toHaveBeenCalled();
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toHaveLength(2);
+    const claim = { ...input, claimId: createHostedStandbyClaimId(), deadlineAtEpochMs: Date.now() + 250 };
+    expect(h.coordinator.claimReadyStandby(claim)).toEqual({ outcome: "stale_release" });
+    const preparedCount = prepareCount(h);
+    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active: candidate, candidate: null, previous: active });
+    expect(h.coordinator.claimReadyStandby(claim)).toMatchObject({ outcome: "claimed" });
+    // Promotion consumes the already-ready slot; it does not await a new startup.
+    expect(prepareCount(h)).toBe(preparedCount);
+    await h.flush();
+  });
+
   it("strictly bounds the configured target and defaults absent or blank values", () => {
     assert.equal(readHostedStandbyTarget({}), 2);
     for (const value of ["", " "]) {

@@ -5984,3 +5984,53 @@ function normalizeWebhookTraceRow(
 ): ReturnType<typeof readWebhookTraceRowForTesting> {
   return row ? { ...row } : null;
 }
+
+
+test("pending recovery streams every accepted job and releases an interrupted read", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-pending-recovery");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  try {
+    const accounts = ["recovery", "unrelated"].map((externalAccountId) => store.upsertAccount({
+      connectedAt: "2026-04-04T09:00:00.000Z",
+      displayName: "Synthetic device",
+      externalAccountId,
+      provider: "demo",
+      scopes: [],
+      status: "active",
+      tokens: { accessToken: "synthetic", accessTokenEncrypted: "enc:synthetic" },
+    }));
+    const [account, unrelated] = accounts;
+    assert.ok(account);
+    assert.ok(unrelated);
+    const pending = Array.from({ length: 201 }, (_, index) => store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-04T10:00:00.000Z",
+      dedupeKey: `recovery-${index}`,
+      kind: "reconcile",
+      payload: {},
+      provider: "demo",
+    }));
+    store.enqueueJob({ accountId: unrelated.id, kind: "reconcile", payload: {}, provider: "demo" });
+    const completed = store.claimDueJob("recovery-worker", "2026-04-04T10:00:00.000Z", 60_000, account.id);
+    assert.ok(completed);
+    store.completeJob(completed.id, "2026-04-04T10:00:00.000Z");
+    const running = store.claimDueJob("recovery-worker", "2026-04-04T10:00:00.000Z", 60_000, account.id);
+    assert.ok(running);
+    const exported = [...store.iteratePendingJobsForAccount(account.id)];
+    assert.deepEqual(
+      exported.map((job) => job.id).sort(),
+      pending.filter((job) => job.id !== completed.id).map((job) => job.id).sort(),
+    );
+    assert.equal(exported.find((job) => job.id === running.id)?.status, "running");
+    assert.equal(store.listPendingJobsForAccount(account.id, 100).length, 100);
+    for (const job of store.iteratePendingJobsForAccount(account.id)) {
+      assert.equal(job.accountId, account.id);
+      break;
+    }
+    store.completeJob(running.id, "2026-04-04T10:00:00.000Z");
+    assert.equal([...store.iteratePendingJobsForAccount(account.id)].length, 199);
+  } finally {
+    store.close();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

@@ -332,6 +332,16 @@ describe("hosted deploy automation helpers", () => {
         ssh: { enabled: false },
       },
       {
+        class_name: "NextRunnerContainer",
+        image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
+        instance_type: "standard-1",
+        max_instances: 648,
+        rollout_active_grace_period: 300,
+        rollout_step_percentage: [10, 25, 50, 100],
+        ssh: { enabled: false },
+      },
+      {
         class_name: "DeploySmokeRunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
@@ -373,6 +383,10 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "RunnerContainer",
         name: "RUNNER_CONTAINER",
+      },
+      {
+        class_name: "NextRunnerContainer",
+        name: "NEXT_RUNNER_CONTAINER",
       },
       {
         class_name: "DeploySmokeRunnerContainer",
@@ -425,6 +439,7 @@ describe("hosted deploy automation helpers", () => {
         ],
         tag: "v7",
       },
+      { new_sqlite_classes: ["NextRunnerContainer"], tag: "v8" },
     ]);
     expect(config).toMatchObject({
       triggers: {
@@ -798,6 +813,7 @@ describe("hosted deploy automation helpers", () => {
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
+      expectedDefaultInstanceType,
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
@@ -984,7 +1000,7 @@ describe("hosted deploy automation helpers", () => {
       "containers_pid_namespace",
       "enable_request_signal",
     ]);
-    expect(config.containers).toHaveLength(3);
+    expect(config.containers).toHaveLength(4);
     for (const container of config.containers) {
       expect(container.ssh).toEqual({ enabled: false });
       expect(container).not.toHaveProperty("authorized_keys");

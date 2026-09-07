@@ -77,6 +77,7 @@ export type HostedRunnerContainerCleanupScope = "all-builds" | "current-build" |
 const HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES = [
   "UserRunnerDurableObject",
   "RunnerContainer",
+  "NextRunnerContainer",
   "DeploySmokeRunnerContainer",
   "StandbyRunnerContainer",
 ] as const;

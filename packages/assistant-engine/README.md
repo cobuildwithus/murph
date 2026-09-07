@@ -386,6 +386,19 @@ read before support questions or effects. Normal recursive skill packaging and
 filesystem reads remain the owners. Keep that reference in focused real-Codex
 fixtures when changing support policy.
 
+## Focused tests
+
+From the repository root, invoke Vitest directly to run selected test files:
+
+```sh
+pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts
+```
+
+Append additional file paths after the Vitest options. Do not put an extra `--`
+before the file paths: `pnpm --dir packages/assistant-engine test -- <file>`
+forwards that separator to Vitest, which drops the file filter and runs the
+package suite.
+
 ## Real-Codex test fixtures
 
 Synthetic real-Codex journeys that need fixture executables can opt into

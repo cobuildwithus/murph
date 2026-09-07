@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-07",
+  "order": 100,
+  "item": {
+    "id": "connected-device-large-sync-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable recovery for larger device syncs",
+    "summary": "Connected-device sync now preserves all pending work when a sync creates additional follow-up tasks.",
+    "details": "If the runtime restarts, those tasks resume with their original retry timing.",
+    "relevanceTags": [
+      "wearables",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3025
+    ]
+  }
+}

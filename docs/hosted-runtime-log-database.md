@@ -381,6 +381,58 @@ nonces belong to a separate primary-database nonce cron at minute 5; its
 callback statements retain the 5,000-row statement cap and use a dedicated
 400-batch catch-up ceiling.
 
+### Bounded event inventories
+
+For an already-authorized aggregate diagnostic that times out over a day, keep
+its fixed UTC window and event filter, then query six adjacent four-hour slices
+sequentially. Use one connection and a separate statement for each slice, with
+the existing ten-second server and twelve-second client query bounds. Combining
+all slices into one statement would retain the original statement-budget limit.
+Do not increase timeouts or infer an index bottleneck from a timeout alone.
+
+For example, the first slice of the synthetic day `[2030-01-01, 2030-01-02)` is:
+
+```sql
+SELECT
+  TIMESTAMPTZ '2030-01-01T00:00:00Z' AS slice_start,
+  TIMESTAMPTZ '2030-01-01T04:00:00Z' AS slice_end,
+  COUNT(*) AS event_count,
+  MIN(at) AS first_at,
+  MAX(at) AS last_at
+FROM hosted_runtime_log
+WHERE at >= TIMESTAMPTZ '2030-01-01T00:00:00Z'
+  AND at < TIMESTAMPTZ '2030-01-01T04:00:00Z'
+  AND event_code = 'outbox.delivery_finished';
+```
+
+Advance both bounds by four hours for each subsequent statement, ending at the
+original window end. Keep all other predicates and grouping keys identical.
+Bound each pass to six sequential slice queries; if a slice still times out,
+record its interval as unknown and use a later bounded pass for smaller slices.
+Retain only aggregate results and their interval, completion status, and
+observation time; never return subject keys or raw JSON.
+
+A successful zero count is different from an unsuccessful query. Report a
+complete interval inventory only when successful, nonoverlapping slices cover
+the entire original window; otherwise list the missing intervals and label the
+total partial. A retry replaces the result for the same interval. If smaller
+slices replace an interval, require their bounds to cover it exactly and do not
+count both the parent interval and its replacements.
+
+For matching groups, sum event counts and combine `MIN`/`MAX` endpoints. Do not
+sum per-slice `COUNT(DISTINCT subject_key)`: a subject can occur in several
+slices. Keep distinct counts per slice unless a separately bounded whole-window
+query establishes the union. Averages and percentiles are not additive either.
+
+Interval coverage describes retained rows observed by those statements, not one
+consistent database snapshot. Appends and retention can change rows between
+[Read Committed statements](https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED).
+Record that limitation with the observation window; do not hold a long snapshot
+transaction merely to combine diagnostic slices. Compare plans with
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` on representative synthetic local data
+before proposing an index change; local timing does not establish production
+performance or the cause of a production timeout.
+
 ## Configuration
 
 Runtime traffic:

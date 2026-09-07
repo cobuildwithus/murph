@@ -295,3 +295,11 @@ returned and total observation scope. Render the public DTO's unknowns directly
 instead of rebuilding evidence completeness in the page. Do not infer sample
 coverage from report or lot metadata. A screened observation must keep its
 measured result, threshold, basis, and authority inspectable.
+
+## Home setup surface
+
+The signed-in `/home` page shows remaining messaging, device, and lab setup
+cards. When none remain, it offers a Message Murph button using the sidebar’s contact action. Experiment runs,
+experiment suggestions, and feature promotions do not appear on Home. Existing
+initial personality onboarding, connection results, usage notices, and load
+errors retain their current owners.

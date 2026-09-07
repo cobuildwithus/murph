@@ -11,7 +11,7 @@ Cloudflare-hosted execution plane for the hosted Murph path.
   OIDC-authenticated browser/session/status/deletion control requests from
   `apps/web`
 - per-user execution coordination in `USER_RUNNER`
-- native runner-container lifecycle in `RUNNER_CONTAINER`
+- native runner-container lifecycle in `RUNNER_CONTAINER` and `NEXT_RUNNER_CONTAINER`
 - encrypted hosted workspace snapshots, legacy encrypted artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run hosted jobs in `BUNDLES`
 
 ## What It Does Not Own
@@ -19,6 +19,28 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 - browser or webhook control-plane flows for onboarding, billing, auth, or member lifecycle
 - canonical hosted product facts or ledgers outside the encrypted execution workspace, including hosted usage and lifecycle state in `apps/web`
 - gateway state or other product truth outside the encrypted workspace snapshot
+
+## Focused tests
+
+Run these commands from the repository root. To run one Node workspace test,
+pass its repository-relative filename directly to Vitest:
+
+```bash
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/workspace-snapshot-local.test.ts
+```
+
+The Containers helper uses a separate configuration and has its own command:
+
+```bash
+pnpm --dir apps/cloudflare test:node:containers-helper
+```
+
+Use `pnpm --dir apps/cloudflare test` for typecheck and both complete Node
+suites, or `pnpm --dir apps/cloudflare test:node` for both suites alone. These
+composite commands do not apply positional file filters to every stage: a
+filename reaches only the final Containers helper command, while the Node
+workspace still runs in full. Use the direct invocation above for focused
+workspace proof.
 
 ## Route Surface
 
@@ -65,7 +87,10 @@ checks.
 
 ### Unified runner fleet and ready inventory
 
-All fresh member execution uses globally eligible `RunnerContainer` instances.
+All fresh member execution uses the selected globally eligible runner target,
+`RunnerContainer` or `NextRunnerContainer`. Deployment prepares the inactive
+target before promotion; both use the same lifecycle implementation. See
+`DEPLOY.md` for preparation, exact-image admission and drain ownership.
 Warm and cold allocations use the same opaque target identity and lifecycle.
 `HOSTED_EXECUTION_STANDBY_TARGET` selects the number of pristine ready slots:
 its default is `2`, and valid values are integers from `0` through `32`. This is

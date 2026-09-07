@@ -1,3 +1,4 @@
+import { readHostedRunnerDeployment, readHostedRunnerBankFromName } from "../hosted-runner-release.ts";
 import { DurableObject } from "cloudflare:workers";
 import {
   deriveHostedExecutionErrorCode,
@@ -41,6 +42,7 @@ type Region = HostedStandbyCoordinatorState["region"];
 
 interface StandbyCoordinatorEnvironment extends Readonly<Record<string, unknown>> {
   RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
+  NEXT_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
 }
 
@@ -135,11 +137,17 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
     await Promise.all([this.startFill(), this.startCleanup()]);
   }
 
+  private currentReleaseId(ownReleaseId: string | null): string | null {
+    const deployment = readHostedRunnerDeployment(this.environment);
+    if (deployment?.candidate?.id === ownReleaseId) return ownReleaseId;
+    return readHostedStandbyReleaseId(this.environment);
+  }
+
   private desiredTarget(): number {
     const target = readHostedStandbyTarget(this.environment);
     const state = this.store.readState();
     return state.releaseId !== null && state.region === HOSTED_RUNNER_REGION
-      && state.releaseId === readHostedStandbyReleaseId(this.environment)
+      && state.releaseId === this.currentReleaseId(state.releaseId)
       && readHostedStandbyMode(this.environment) !== "off" ? target : 0;
   }
 
@@ -314,10 +322,12 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       if (!namespace) throw new Error("Legacy standby cleanup binding is unavailable.");
       return namespace.getByName(slotName, { locationHint: HOSTED_STANDBY_LOCATION_HINT });
     }
-    if (!isHostedRunnerSlotName(slotName) || !this.environment.RUNNER_CONTAINER) {
+    const namespace = readHostedRunnerBankFromName(slotName) === "next"
+      ? this.environment.NEXT_RUNNER_CONTAINER : this.environment.RUNNER_CONTAINER;
+    if (!isHostedRunnerSlotName(slotName) || !namespace) {
       throw new Error("Hosted runner container binding is unavailable.");
     }
-    return this.environment.RUNNER_CONTAINER.getByName(slotName);
+    return namespace.getByName(slotName);
   }
 
   private async retireIfOwned(slotName: string): Promise<boolean> {

@@ -186,7 +186,7 @@ function readHostedRunnerContainerCapacity(
   if (source.CF_STANDBY_CONTAINER_MAX_INSTANCES !== undefined) {
     throw new Error(
       "CF_STANDBY_CONTAINER_MAX_INSTANCES is obsolete. Remove it; set "
-      + "CF_CONTAINER_MAX_INSTANCES to the total member capacity (excluding smoke), "
+      + "CF_CONTAINER_MAX_INSTANCES to the member capacity per active release (excluding smoke), "
       + "and CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES to the temporary legacy reservation.",
     );
   }

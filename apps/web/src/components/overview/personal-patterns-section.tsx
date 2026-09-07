@@ -412,7 +412,7 @@ function MobilePatternCard({
 }) {
   const headingId = useId();
   const measured: PatternOutcomeColumn[] = [];
-  const neutral: PatternOutcomeColumn[] = [];
+  let hasNeutral = false;
   for (const column of outcomeColumns) {
     const entries = column.outcomes.map((outcome) => ({
       cell: findPatternCell(report, factor.id, outcome.id),
@@ -421,52 +421,57 @@ function MobilePatternCard({
     if (entries.some(isPatternEffectEntry)) {
       measured.push(column);
     } else if (entries.some(({ cell }) => cell && cell.stage !== "insufficient")) {
-      neutral.push(column);
+      hasNeutral = true;
     }
   }
+
+  const neutralOnly = measured.length === 0 && hasNeutral;
+  const heading = (
+    <>
+      <Image
+        src={resolvePatternFactorIcon(factor)}
+        alt=""
+        width={44}
+        height={44}
+        className="size-11 shrink-0 object-contain"
+      />
+      <div className="min-w-0 flex-1">
+        <h2
+          id={headingId}
+          className={cn(
+            "break-words font-serif text-xl font-semibold leading-6 tracking-tight text-foreground",
+            neutralOnly && "text-lg",
+          )}
+        >
+          {factor.label}
+        </h2>
+        {neutralOnly ? (
+          <p className="mt-1 text-xs text-muted-foreground">No clear changes</p>
+        ) : null}
+      </div>
+    </>
+  );
 
   return (
     <li
       aria-labelledby={headingId}
-      className="overflow-hidden rounded-2xl border border-border bg-card"
+      className="relative overflow-hidden rounded-2xl border border-border bg-card"
       data-pattern-factor-row={factor.id}
     >
-      <div className="flex items-center gap-3 border-b border-border px-5 py-5">
-        <Image
-          src={resolvePatternFactorIcon(factor)}
-          alt=""
-          width={44}
-          height={44}
-          className="size-11 shrink-0 object-contain"
-        />
-        <h2
-          id={headingId}
-          className="min-w-0 flex-1 break-words font-serif text-xl font-semibold leading-6 tracking-tight text-foreground"
-        >
-          {factor.label}
-        </h2>
-        <ObservedDaysMeter className="min-h-11 shrink-0" days={factor.observedDays} />
+      <ObservedDaysMeter
+        card
+        factorLabel={factor.label}
+        className={cn("absolute right-5 top-5 min-h-11 min-w-11 justify-center", neutralOnly && "top-4")}
+        days={factor.observedDays}
+      />
+      <div className={cn(
+        "flex items-center gap-3 pl-5 pr-24",
+        neutralOnly ? "py-4" : "py-5",
+        measured.length > 0 && "border-b border-border",
+      )}>
+        {heading}
       </div>
       <PatternCardMeasures factor={factor} outcomes={measured} report={report} />
-      {neutral.length > 0 ? (
-        <div aria-label="No clear change" role="group" className="border-t border-border px-5 pb-2 pt-3">
-          <p className="text-xs text-muted-foreground">No clear change</p>
-          <div className="flex flex-wrap gap-x-4">
-            {neutral.map((outcome) => (
-              <PatternOutcomeColumnCell
-                card
-                key={outcome.id}
-                neutralLabel={outcome.label}
-                factorLabel={factor.label}
-                factorObservedDays={factor.observedDays}
-                outcomes={outcome.outcomes}
-                report={report}
-                factorId={factor.id}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
     </li>
   );
 }
@@ -682,7 +687,6 @@ function PatternOutcomeHeader({
 
 function PatternOutcomeColumnCell({
   card = false,
-  neutralLabel,
   factorId,
   factorLabel,
   factorObservedDays,
@@ -690,7 +694,6 @@ function PatternOutcomeColumnCell({
   report,
 }: {
   card?: boolean;
-  neutralLabel?: string;
   factorId: string;
   factorLabel: string;
   factorObservedDays: number;
@@ -713,7 +716,6 @@ function PatternOutcomeColumnCell({
       <PatternBubble
         cell={checked?.cell}
         card={card}
-        neutralLabel={neutralLabel}
         factorLabel={factorLabel}
         factorObservedDays={factorObservedDays}
         outcomeId={outcome?.id ?? "unknown"}
@@ -794,7 +796,7 @@ function PatternCompositeBubble({
   return (
     <PatternResultDetails
       card={card}
-      eyebrow="Sleep quality"
+      eyebrow={card ? undefined : "Sleep quality"}
       title={`You slept ${deltaPercent >= 0 ? "better" : "worse"} after ${factor}.`}
       description="Sleep score and sleep efficiency comparisons."
       trigger={
@@ -843,10 +845,12 @@ function PatternCompositeBubble({
             </p>
             {cell.exposedMean !== null && cell.comparisonMean !== null ? (
               <PatternComparisonBars
-                comparisonLabel="Other days"
+                comparisonLabel={card ? "Other" : "Other days"}
                 comparisonMean={cell.comparisonMean}
+                comparisonDays={card ? cell.comparisonDays : undefined}
                 exposedLabel={`After ${factor}`}
                 exposedMean={cell.exposedMean}
+                exposedDays={card ? cell.exposedDays : undefined}
                 tone={getPatternEffectTone(outcome.id, cell.deltaPercent)}
                 unit={outcome.unit}
               />
@@ -865,7 +869,6 @@ function PatternCompositeBubble({
 function PatternBubble({
   cell,
   card = false,
-  neutralLabel,
   factorLabel,
   factorObservedDays,
   outcomeId,
@@ -875,7 +878,6 @@ function PatternBubble({
 }: {
   cell?: PersonalPatternCell;
   card?: boolean;
-  neutralLabel?: string;
   factorLabel: string;
   factorObservedDays: number;
   outcomeId: string;
@@ -914,7 +916,6 @@ function PatternBubble({
   const tone = isFlat
     ? "neutral"
     : getPatternEffectTone(outcomeId, cell.deltaPercent);
-  const cardFlat = card && isFlat;
   const label =
     cell.deltaPercent === null || isFlat
       ? "No clear pattern"
@@ -950,20 +951,17 @@ function PatternBubble({
           className={cn(
             "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-sans font-semibold text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
             card ? "min-h-11 min-w-11 justify-start gap-2 font-serif text-2xl" : "text-sm",
-            cardFlat && "font-sans text-xs font-normal text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-current",
           )}
           data-pattern-state={isFlat ? "no-clear-pattern" : "effect"}
         >
-          {cardFlat ? null : (
-            <PatternEffectIndicator
-              classification={cell.classification ?? null}
-              DirectionIcon={DirectionIcon}
-              isFlat={isFlat}
-              size={18}
-              tone={tone}
-            />
-          )}
-          {isFlat ? (card ? <span>{neutralLabel}</span> : null) : <span>{label}</span>}
+          <PatternEffectIndicator
+            classification={cell.classification ?? null}
+            DirectionIcon={DirectionIcon}
+            isFlat={isFlat}
+            size={18}
+            tone={tone}
+          />
+          {isFlat ? null : <span>{label}</span>}
         </button>
       }
     />
@@ -1046,7 +1044,7 @@ function PatternResultDetails({
   card: boolean;
   children?: ReactNode;
   description: string;
-  eyebrow: string;
+  eyebrow?: string;
   showDescription?: boolean;
   title: string;
   trigger: ReactElement;
@@ -1059,9 +1057,11 @@ function PatternResultDetails({
   const content = (
     <>
       <div className={cn("flex flex-col gap-1.5", card && "pr-10")}>
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-          {eyebrow}
-        </p>
+        {eyebrow ? (
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+            {eyebrow}
+          </p>
+        ) : null}
         <Title className={cn("font-serif font-semibold", card ? "text-2xl leading-8" : "text-lg leading-6")}>
           {title}
         </Title>
@@ -1153,13 +1153,13 @@ function PatternDetails({
   const comparisonLabel =
     cell.comparisonBasis === "confirmed_absence"
       ? `Without ${factor}`
-      : "Other days";
+      : card ? "Other" : "Other days";
 
   return (
     <PatternResultDetails
       card={card}
       trigger={trigger}
-      eyebrow={outcomeLabel}
+      eyebrow={card ? undefined : outcomeLabel}
       title={isFlat ? "No clear pattern" : describePlainResult({
         cell, factorLabel, outcomeId, outcomeLabel, outcomeLagDays,
       })}
@@ -1174,8 +1174,10 @@ function PatternDetails({
           <PatternComparisonBars
             comparisonLabel={comparisonLabel}
             comparisonMean={cell.comparisonMean}
+            comparisonDays={card ? cell.comparisonDays : undefined}
             exposedLabel={exposedLabel}
             exposedMean={cell.exposedMean}
+            exposedDays={card ? cell.exposedDays : undefined}
             tone={tone}
             unit={outcomeUnit}
           />
@@ -1193,15 +1195,19 @@ function PatternDetails({
 function PatternComparisonBars({
   comparisonLabel,
   comparisonMean,
+  comparisonDays,
   exposedLabel,
   exposedMean,
+  exposedDays,
   tone,
   unit,
 }: {
   comparisonLabel: string;
   comparisonMean: number;
+  comparisonDays?: number;
   exposedLabel: string;
   exposedMean: number;
+  exposedDays?: number;
   tone: PatternEffectTone;
   unit: string;
 }) {
@@ -1225,12 +1231,14 @@ function PatternComparisonBars({
           tone === "neutral" && "bg-muted-foreground/60",
         )}
         label={exposedLabel}
+        days={exposedDays}
         value={formatMean(exposedMean, unit)}
         width={exposedWidth}
       />
       <ComparisonBar
         className="bg-muted-foreground/25"
         label={comparisonLabel}
+        days={comparisonDays}
         value={formatMean(comparisonMean, unit)}
         width={comparisonWidth}
       />
@@ -1241,18 +1249,23 @@ function PatternComparisonBars({
 function ComparisonBar({
   className,
   label,
+  days,
   value,
   width,
 }: {
   className: string;
   label: string;
+  days?: number;
   value: string;
   width: number;
 }) {
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between gap-4">
-        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dt className="text-xs text-muted-foreground">
+          {label}
+          {days !== undefined ? <span className="whitespace-nowrap"> · {formatDayCount(days)}</span> : null}
+        </dt>
         <dd className="font-serif text-sm font-semibold text-foreground">
           {value}
         </dd>
@@ -1381,36 +1394,54 @@ function formatCombinedEvidencePeriod(entries: PatternEffectEntry[]): string {
 
 function ObservedDaysMeter({
   className,
+  card = false,
+  factorLabel,
   days,
 }: {
   className?: string;
+  card?: boolean;
+  factorLabel?: string;
   days: number;
 }) {
   const level = getObservedDaysLevel(days);
   const coverageLabel = getObservedDaysLabel(level);
   const label = `${coverageLabel}: based on ${formatCaseCount(days)}`;
 
+  const bars = (
+    <span aria-hidden="true" className="flex items-center gap-0.5">
+      {Array.from({ length: 5 }, (_, index) => (
+        <span
+          className={cn("h-[5px] w-2 rounded-[2px]", index < level ? "bg-primary" : "bg-border")}
+          key={index}
+        />
+      ))}
+    </span>
+  );
+  const triggerClassName = cn(
+    "flex w-fit items-center rounded-sm py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    className,
+  );
+
+  if (card) {
+    return (
+      <PatternResultDetails
+        card
+        title={formatDayCount(days)}
+        description={factorLabel ?? "Recorded days"}
+        showDescription
+        trigger={
+          <button type="button" aria-label={`${formatDayCount(days)} recorded for ${factorLabel ?? "this factor"}`} className={triggerClassName} data-observed-days={days}>
+            {bars}
+          </button>
+        }
+      />
+    );
+  }
+
   return (
     <Tooltip>
-      <TooltipTrigger
-        aria-label={label}
-        className={cn(
-          "flex w-fit items-center rounded-sm py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-          className,
-        )}
-        data-observed-days={days}
-      >
-        <span aria-hidden="true" className="flex items-center gap-0.5">
-          {Array.from({ length: 5 }, (_, index) => (
-            <span
-              className={cn(
-                "h-[5px] w-2 rounded-[2px]",
-                index < level ? "bg-primary" : "bg-border",
-              )}
-              key={index}
-            />
-          ))}
-        </span>
+      <TooltipTrigger aria-label={label} className={triggerClassName} data-observed-days={days}>
+        {bars}
       </TooltipTrigger>
       <TooltipContent className="max-w-52 flex-col items-start gap-0.5">
         <div className="flex flex-col gap-0.5">

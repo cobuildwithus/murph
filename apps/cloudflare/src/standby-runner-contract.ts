@@ -1,3 +1,4 @@
+import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName } from "./hosted-runner-release.ts";
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
@@ -206,6 +207,8 @@ export function readHostedStandbyTarget(
 export function readHostedStandbyReleaseId(
   source: Readonly<Record<string, unknown>>,
 ): string | null {
+  const configuredReleaseId = readHostedRunnerActiveReleaseId(source);
+  if (configuredReleaseId) return configuredReleaseId;
   const metadata = source.CF_VERSION_METADATA;
   const releaseId = typeof metadata === "object" && metadata !== null && "id" in metadata
     ? metadata.id : undefined;
@@ -221,7 +224,8 @@ export function readHostedStandbyReleaseId(
 export function resolveHostedRunnerReleaseId(
   source: Readonly<Record<string, unknown>>,
 ): string {
-  if (source.CF_VERSION_METADATA === undefined || source.CF_VERSION_METADATA === null) {
+  if (!readHostedRunnerActiveReleaseId(source)
+    && (source.CF_VERSION_METADATA === undefined || source.CF_VERSION_METADATA === null)) {
     return "local";
   }
   const releaseId = readHostedStandbyReleaseId(source);
@@ -336,6 +340,7 @@ function isRunnerBindingRecord(value: unknown): value is Record<string, unknown>
 
 export function createHostedRunnerContainerNamespaceRouter(input: {
   exactUser: HostedExecutionContainerNamespaceLike | null;
+  next?: HostedExecutionContainerNamespaceLike | null;
   standby: HostedStandbyRunnerContainerNamespaceLike | null;
 }): HostedExecutionContainerNamespaceLike | null {
   const runner = input.exactUser;
@@ -345,6 +350,10 @@ export function createHostedRunnerContainerNamespaceRouter(input: {
 
   return {
     getByName(name: string) {
+      if (readHostedRunnerBankFromName(name) === "next") {
+        if (!input.next) throw new Error("Hosted next runner container binding is unavailable.");
+        return input.next.getByName(name);
+      }
       if (isHostedStandbySlotName(name)) {
         if (!input.standby) {
           throw new Error("Hosted standby runner container binding is unavailable.");

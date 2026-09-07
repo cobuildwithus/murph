@@ -1,3 +1,4 @@
+import { readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment } from "../../hosted-runner-release.ts";
 import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -43,10 +44,13 @@ import {
 } from "../public-routes.ts";
 import {
   HOSTED_RUNNER_REGION,
+  HOSTED_STANDBY_READY_TIMEOUT_MS,
+  createHostedRunnerSlotName,
   readHostedStandbyMode,
   readHostedStandbyReleaseId,
   readHostedStandbyTarget,
   resolveHostedStandbyCoordinatorName,
+  requireHostedRunnerSlotLifecycle,
 } from "../../standby-runner-contract.ts";
 
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_BYTES = 160 * 1024 * 1024;
@@ -118,7 +122,7 @@ export async function handleDeployContainerSmokeRoute(
   // The initial smoke proves inventory before running the separate live-model
   // phase. A later foreground claim must not invalidate that model-only probe.
   const standbyInventory = liveModelTurnModel === null
-    ? await readDeployStandbyInventory(context.env)
+    ? await readDeployStandbyInventory(scopeHostedRunnerReleaseEnvironment(context.env, "candidate"))
     : null;
   if (standbyInventory && !standbyInventory.ready) {
     return json({ ok: false, error: "Deploy standby inventory is not ready.", standbyInventory }, 503);
@@ -132,6 +136,9 @@ export async function handleDeployContainerSmokeRoute(
   let primaryError: unknown = null;
 
   try {
+    if (liveModelTurnModel === null && (!standbyInventory || standbyInventory.readyCount === 0)) {
+      await proveDeployRunnerTarget(context.env);
+    }
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
       ...(liveModelTurnModel ? { liveModelTurn: { model: liveModelTurnModel } } : {}),
@@ -192,6 +199,27 @@ export async function handleDeployContainerSmokeRoute(
     ...(standbyInventory ? { standbyInventory } : {}),
     service: "cloudflare-hosted-runner",
   });
+}
+
+/** Even without warm inventory, prove the actual image target before promotion. */
+async function proveDeployRunnerTarget(env: WorkerEnvironmentSource): Promise<void> {
+  const deployment = readHostedRunnerDeployment(env);
+  if (!deployment) return;
+  const release = deployment.candidate ?? deployment.active;
+  const namespace = release.bank === "next" ? env.NEXT_RUNNER_CONTAINER : env.RUNNER_CONTAINER;
+  if (!namespace) throw new Error("Deploy runner target is unavailable.");
+  const slotName = createHostedRunnerSlotName(release.id);
+  const slot = requireHostedRunnerSlotLifecycle(namespace.getByName(slotName));
+  try {
+    await slot.prepareStandbySlot({
+      releaseId: release.id,
+      region: HOSTED_RUNNER_REGION,
+      slotName,
+      timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS,
+    });
+  } finally {
+    await slot.retireStandbySlot({});
+  }
 }
 
 async function readDeployStandbyInventory(env: WorkerEnvironmentSource) {

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { test, vi } from "vitest";
 
+import { MurphContactDialog } from "@/src/components/murph/murph-contact-dialog";
 import { renderClientComponent } from "./render-client-component";
 
 vi.mock("@/src/components/ui/dialog", async () => {
@@ -54,39 +55,10 @@ vi.mock("@/src/components/ui/dialog", async () => {
   };
 });
 
-vi.mock("@/src/components/ui/sidebar", () => ({
-  SidebarMenuButton: ({
-    "aria-label": ariaLabel,
-    children,
-    className,
-    onClick,
-  }: {
-    "aria-label"?: string;
-    children?: ReactNode;
-    className?: string;
-    onClick?: () => void;
-  }) =>
-    createElement(
-      "button",
-      {
-        "aria-label": ariaLabel,
-        className,
-        "data-slot": "sidebar-menu-button",
-        onClick,
-        type: "button",
-      },
-      children,
-    ),
-  SidebarMenuItem: ({ children }: { children?: ReactNode }) =>
-    createElement("li", null, children),
-}));
-
-test("SidebarChatWithMurphContactDialog opens connected contact links", async () => {
-  const { SidebarChatWithMurphContactDialog } = await import(
-    "@/src/components/dashboard/sidebar-chat-contact-dialog"
-  );
+test("MurphContactDialog opens connected contact links", async () => {
   const { button, cleanup, container, window } = await renderClientComponent(
-    <SidebarChatWithMurphContactDialog
+    <MurphContactDialog
+      trigger={<button>Chat with Murph</button>}
       options={[
         {
           copyValue: "+15550100001",
@@ -155,16 +127,14 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
   }
 });
 
-test("SidebarChatWithMurphContactDialog copies hidden contact values", async () => {
+test("MurphContactDialog copies hidden contact values", async () => {
   const writeText = vi.fn(() => Promise.resolve());
   vi.useFakeTimers();
 
   try {
-    const { SidebarChatWithMurphContactDialog } = await import(
-      "@/src/components/dashboard/sidebar-chat-contact-dialog"
-    );
     const { button, cleanup, container, window } = await renderClientComponent(
-      <SidebarChatWithMurphContactDialog
+      <MurphContactDialog
+      trigger={<button>Chat with Murph</button>}
         options={[
           {
             copyValue: "murph+alias123@mail.withmurph.ai",
@@ -211,16 +181,14 @@ test("SidebarChatWithMurphContactDialog copies hidden contact values", async () 
   }
 });
 
-test("SidebarChatWithMurphContactDialog copies the Telegram username", async () => {
+test("MurphContactDialog copies the Telegram username", async () => {
   const writeText = vi.fn(() => Promise.resolve());
   vi.useFakeTimers();
 
   try {
-    const { SidebarChatWithMurphContactDialog } = await import(
-      "@/src/components/dashboard/sidebar-chat-contact-dialog"
-    );
     const { button, cleanup, container, window } = await renderClientComponent(
-      <SidebarChatWithMurphContactDialog
+      <MurphContactDialog
+      trigger={<button>Chat with Murph</button>}
         options={[
           {
             copyValue: "@withmurph_bot",

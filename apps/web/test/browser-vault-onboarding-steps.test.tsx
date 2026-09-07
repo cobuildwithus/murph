@@ -24,7 +24,6 @@ import {
 } from "@murphai/query/browser-replica-client";
 
 import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
-import type { ExperimentProtocol } from "@/src/types/experiments";
 
 import { renderClientComponent } from "./render-client-component";
 
@@ -157,7 +156,7 @@ test("BrowserVaultOnboardingStepsContent hides labs after lab biomarkers are in 
 
   assert.match(markup, /Connect devices/);
   assert.doesNotMatch(markup, /Sync labs/);
-  assert.match(markup, /Start an experiment/);
+  assert.doesNotMatch(markup, /Start an experiment/);
 });
 
 test("BrowserVaultOnboardingStepsContent keeps labs visible for wearable biomarker values", async () => {
@@ -180,180 +179,70 @@ test("BrowserVaultOnboardingStepsContent keeps labs visible for wearable biomark
 });
 
 
-test("BrowserVaultOnboardingStepsContent shows in-progress runs and hides the experiment step", async () => {
+test.each(["active", "planned", "paused", "completed", "stopped"])(
+  "Home omits %s experiment runs while preserving remaining setup",
+  async (status) => {
+    mocks.useBrowserVault.mockReturnValue({
+      client: createClient([], [experimentEntity({
+        id: "exp:sample-run",
+        status,
+        title: "Sample experiment run",
+      })]),
+      status: "ready",
+    });
+    const { BrowserVaultOnboardingStepsContent } = await import(
+      "@/src/components/home/browser-vault-onboarding-steps"
+    );
+    const markup = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent));
+
+    assert.match(markup, /Connect devices/);
+    assert.match(markup, /Sync labs/);
+    assert.doesNotMatch(markup, /Sample experiment run|In progress|Your history|Start an experiment|data-home-empty-state/);
+  },
+);
+
+test("Home shows Message Murph after device and lab setup even with an active experiment", async () => {
   mocks.useBrowserVault.mockReturnValue({
-    client: createClient([], [experimentEntity({
-      id: "exp:red-light-glasses",
-      status: "active",
-      title: "Red light glasses",
-    })]),
+    client: createClient([metricRow({
+      biomarkerKey: "biomarker:hba1c",
+      metricKey: "hba1c",
+      sourceKind: "test-result",
+      value: 5.3,
+    })], [experimentEntity({ id: "exp:sample-run", status: "active", title: "Sample experiment run" })]),
     status: "ready",
   });
-
   const { BrowserVaultOnboardingStepsContent } = await import(
     "@/src/components/home/browser-vault-onboarding-steps"
   );
-  const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
-  );
+  const markup = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent, {
+    showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
+  }));
 
-  assert.match(markup, /In progress/);
-  assert.match(markup, /Red light glasses/);
-  assert.match(markup, /href="\/experiments\/runs\/exp%3Ared-light-glasses"/);
-  assert.match(markup, /Collecting data/);
-  assert.doesNotMatch(markup, /99%/);
-  assert.doesNotMatch(markup, /Start an experiment/);
+  assert.match(markup, /<button>Message Murph<\/button>/);
+  assert.doesNotMatch(markup, /data-onboarding-step|Sample experiment run/);
+
+  const awaitingMessage = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent, {
+    showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
+    messageMurphAction: createElement("button", null, "Message"),
+  }));
+  assert.match(awaitingMessage, /Murph can&#x27;t message you first/);
+  assert.doesNotMatch(awaitingMessage, /data-home-empty-state/);
 });
 
-test("BrowserVaultOnboardingStepsContent treats tracked-only planned runs as in progress", async () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: createClient([], [experimentEntity({
-      id: "exp:private-plan",
-      status: "planned",
-      title: "Private planned run",
-    })]),
-    status: "ready",
-  });
-
+test.each(["loading", "error"])("Home does not show completed setup while vault is %s", async (status) => {
+  mocks.useBrowserVault.mockReturnValue({ client: null, status, error: null });
   const { BrowserVaultOnboardingStepsContent } = await import(
     "@/src/components/home/browser-vault-onboarding-steps"
   );
-  const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
-  );
-
-  assert.match(markup, /In progress/);
-  assert.match(markup, /Private planned run/);
-  assert.doesNotMatch(markup, /Your history/);
-  assert.doesNotMatch(markup, /Start an experiment/);
-});
-
-test("BrowserVaultOnboardingStepsContent hides the experiment step and shows history for finished runs", async () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: createClient([], [experimentEntity({
-      id: "exp:finnish-sauna",
-      status: "completed",
-      title: "Finnish sauna",
-    })]),
-    status: "ready",
-  });
-
-  const { BrowserVaultOnboardingStepsContent } = await import(
-    "@/src/components/home/browser-vault-onboarding-steps"
-  );
-  const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
-  );
-
-  assert.match(markup, /Your history/);
-  assert.match(markup, /Finnish sauna/);
-  assert.doesNotMatch(markup, /Start an experiment/);
-});
-
-test("BrowserVaultOnboardingStepsContent keeps ambiguous tracked-only statuses in history and hides the experiment step", async () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: createClient([], [experimentEntity({
-      id: "exp:private-ambiguous",
-      status: "waiting-for-review",
-      title: "Ambiguous private run",
-    })]),
-    status: "ready",
-  });
-
-  const { BrowserVaultOnboardingStepsContent } = await import(
-    "@/src/components/home/browser-vault-onboarding-steps"
-  );
-  const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
-  );
-
-  assert.match(markup, /Your history/);
-  assert.match(markup, /Ambiguous private run/);
-  assert.doesNotMatch(markup, /In progress/);
-  assert.doesNotMatch(markup, /Start an experiment/);
-});
-
-test("BrowserVaultOnboardingStepsContent shows a protocol-matched active run as the protocol card", async () => {
-  // Resolving a protocol-matched private run needs a real query client, not just the replica.
-  mocks.useBrowserVault.mockReturnValue({
-    client: createBrowserVaultQueryClient(createClient([], [experimentEntity({
-      id: "exp:sauna-run",
-      slug: "sauna-protocol",
-      status: "active",
-      title: "My sauna run",
-    })]).replica),
-    status: "ready",
-  });
-
-  const { BrowserVaultOnboardingStepsContent } = await import(
-    "@/src/components/home/browser-vault-onboarding-steps"
-  );
-  const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [createProtocol()] }),
-  );
-
-  assert.match(markup, /In progress/);
-  assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /href="\/experiments\/sauna-protocol"/);
-  assert.match(markup, /Private data/);
-  // The matched run must not also render as a separate tracked-only card.
-  assert.doesNotMatch(markup, /Private only/);
-  assert.doesNotMatch(markup, /Start an experiment/);
-});
-
-test("BrowserVaultOnboardingStepsContent shows a protocol-matched finished run in history and hides the experiment step", async () => {
-  // Resolving a protocol-matched private run needs a real query client, not just the replica.
-  mocks.useBrowserVault.mockReturnValue({
-    client: createBrowserVaultQueryClient(createClient([], [experimentEntity({
-      id: "exp:sauna-run",
-      slug: "sauna-protocol",
-      status: "completed",
-      title: "My sauna run",
-    })]).replica),
-    status: "ready",
-  });
-
-  const { BrowserVaultOnboardingStepsContent } = await import(
-    "@/src/components/home/browser-vault-onboarding-steps"
-  );
-  const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [createProtocol()] }),
-  );
-
-  assert.match(markup, /Your history/);
-  assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /href="\/experiments\/sauna-protocol"/);
-  assert.match(markup, /Private data/);
-  assert.doesNotMatch(markup, /In progress/);
-  assert.doesNotMatch(markup, /Private only/);
-  assert.doesNotMatch(markup, /Start an experiment/);
-});
-
-test("BrowserVaultOnboardingStepsContent caps history at the six most recent runs", async () => {
-  // Distinct start dates, oldest letter first: A=2026-01-01 ... G=2026-01-07.
-  mocks.useBrowserVault.mockReturnValue({
-    client: createClient([], ["A", "B", "C", "D", "E", "F", "G"].map((letter, index) =>
-      experimentEntity({
-        date: `2026-01-0${index + 1}`,
-        id: `exp:history-${letter}`,
-        status: "completed",
-        title: `History run ${letter}`,
-      })
-    )),
-    status: "ready",
-  });
-
-  const { BrowserVaultOnboardingStepsContent } = await import(
-    "@/src/components/home/browser-vault-onboarding-steps"
-  );
-  const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
-  );
-
-  assert.match(markup, /Your history/);
-  // The newest run is kept and the oldest is the one the cap drops.
-  assert.match(markup, /History run G/);
-  assert.doesNotMatch(markup, /History run A/);
+  const markup = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent, {
+    hideLabsStep: true,
+    showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
+  }));
+  assert.doesNotMatch(markup, /data-home-empty-state/);
+  if (status === "error") assert.match(markup, /Could not load your dashboard/);
 });
 
 test("BrowserVaultOnboardingStepsContent hides the experiment step while the vault is loading", async () => {
@@ -366,14 +255,14 @@ test("BrowserVaultOnboardingStepsContent hides the experiment step while the vau
     "@/src/components/home/browser-vault-onboarding-steps"
   );
   const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
+    createElement(BrowserVaultOnboardingStepsContent),
   );
 
   assert.doesNotMatch(markup, /Start an experiment/);
   assert.match(markup, /Connect devices/);
 });
 
-test("BrowserVaultOnboardingStepsContent keeps the experiment step for empty vault status", async () => {
+test("BrowserVaultOnboardingStepsContent keeps setup cards for empty vault status", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     status: "empty",
@@ -383,10 +272,10 @@ test("BrowserVaultOnboardingStepsContent keeps the experiment step for empty vau
     "@/src/components/home/browser-vault-onboarding-steps"
   );
   const markup = renderToStaticMarkup(
-    createElement(BrowserVaultOnboardingStepsContent, { protocols: [] }),
+    createElement(BrowserVaultOnboardingStepsContent),
   );
 
-  assert.match(markup, /Start an experiment/);
+  assert.doesNotMatch(markup, /Start an experiment/);
 });
 
 test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a stable error", async () => {
@@ -403,7 +292,6 @@ test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a s
   );
   const rendered = await renderClientComponent(
     createElement(BrowserVaultOnboardingStepsContent, {
-      protocols: [],
       showDeviceStep: true,
     }),
     { requireButton: false },
@@ -425,16 +313,17 @@ test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a s
   await rendered.cleanup();
 });
 
-test("OnboardingSteps renders nothing when every step is hidden", async () => {
+test("OnboardingSteps offers Message Murph when every step is complete", async () => {
   const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
 
   const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
-    hideExperimentStep: true,
     hideLabsStep: true,
     showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
   }));
 
-  assert.equal(markup, "");
+  assert.match(markup, /<button>Message Murph<\/button>/);
+  assert.doesNotMatch(markup, /data-onboarding-step/);
 });
 
 test("splitHomeExperimentCards keeps only the member's runs and splits by run status", async () => {
@@ -466,25 +355,6 @@ test("splitHomeExperimentCards orders history most recent first with non-dates l
   ]);
 
   assert.deepEqual(history.map((card) => card.id), ["new-run", "old-run", "undated-run"]);
-});
-
-test("BrowserVaultOnboardingStepsContent without protocols never renders experiment sections", async () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: createClient([], [experimentEntity({
-      id: "exp:red-light-glasses",
-      status: "active",
-      title: "Red light glasses",
-    })]),
-    status: "ready",
-  });
-
-  const { BrowserVaultOnboardingStepsContent } = await import(
-    "@/src/components/home/browser-vault-onboarding-steps"
-  );
-  const markup = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent));
-
-  assert.doesNotMatch(markup, /In progress/);
-  assert.match(markup, /Start an experiment/);
 });
 
 function createClient(
@@ -626,39 +496,5 @@ function libraryCard(input: {
     searchText: input.id,
     startedOn: input.startedOn,
     title: input.id,
-  };
-}
-
-function createProtocol(): ExperimentProtocol {
-  return {
-    baselineDays: 7,
-    category: "Recovery",
-    description: "Simple heat exposure experiment.",
-    durationDays: 21,
-    evidenceLabel: "Field testing · Usable",
-    evidenceLevel: 3,
-    expectedSignals: [],
-    experts: [],
-    id: "sauna-protocol",
-    image: "/design-assets/hero-sauna.png",
-    measurementPaths: [],
-    mechanismChain: [],
-    protocol: [],
-    protocolContractVersion: 1,
-    protocolFacts: [],
-    protocolKeepInMind: [],
-    protocolLogFields: [],
-    protocolTips: [],
-    researchStats: [],
-    researchSummaryLabel: "81 studies",
-    safety: {
-      cautionLevel: 3,
-      precautions: [],
-      whoShouldAvoid: [],
-    },
-    studies: [],
-    studyCount: 81,
-    title: "Finnish Dry Sauna",
-    whyItWorks: "Heat load can act as a stressor.",
   };
 }

@@ -100,6 +100,11 @@ export function buildHostedWranglerDeployConfig(
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
       buildRunnerContainerConfig({
+        className: "NextRunnerContainer",
+        maxInstances: environment.containerMaxInstances - environment.legacyStandbyContainerMaxInstances,
+        rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
+      buildRunnerContainerConfig({
         className: "DeploySmokeRunnerContainer",
         maxInstances: 1,
         rolloutActiveGracePeriodSeconds:
@@ -136,6 +141,10 @@ export function buildHostedWranglerDeployConfig(
         {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
+        },
+        {
+          name: "NEXT_RUNNER_CONTAINER",
+          class_name: "NextRunnerContainer",
         },
         {
           name: "RUNNER_CONTAINER_SMOKE",
@@ -185,6 +194,10 @@ export function buildHostedWranglerDeployConfig(
           "StandbyRunnerCoordinatorDurableObject",
           "StandbyRunnerContainer",
         ],
+      },
+      {
+        tag: "v8",
+        new_sqlite_classes: ["NextRunnerContainer"],
       },
     ],
     triggers: {

@@ -195,6 +195,12 @@ export class RunnerContainer extends BaseRunnerContainer {
   }
 }
 
+export class NextRunnerContainer extends RunnerContainer {
+  constructor(state: unknown, env: Readonly<Record<string, unknown>>) {
+    super(state, env, "next");
+  }
+}
+
 // The hosted-local generated wrangler config omits the Workers AI binding for
 // the test-routes profile (dev profiles get the real binding), so the
 // transcribe egress handler would fail closed in E2E. Inject a
@@ -789,3 +795,4 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
 };
 
 RunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;
+NextRunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;

@@ -241,11 +241,11 @@ export function getDeviceSyncJobById(database: DatabaseSync, jobId: string): Dev
   return mapJobRow(row);
 }
 
-export function listPendingDeviceSyncJobsForAccount(input: {
+export function* iteratePendingDeviceSyncJobsForAccount(input: {
   accountId: string;
   database: DatabaseSync;
-  limit: number;
-}): DeviceSyncJobRecord[] {
+  limit?: number;
+}): Generator<DeviceSyncJobRecord> {
   const rows = input.database.prepare(`
     select *
     from device_job
@@ -253,14 +253,16 @@ export function listPendingDeviceSyncJobsForAccount(input: {
       and status in ('queued', 'running')
     order by created_at asc, id asc
     limit ?
-  `).all(
+  `).iterate(
     input.accountId,
-    input.limit,
-  ).map((row) => decodeStoredJobRow(row));
-  return rows.flatMap((row) => {
-    const job = mapJobRow(row);
-    return job ? [job] : [];
-  });
+    input.limit ?? -1,
+  );
+  for (const row of rows) {
+    const job = mapJobRow(decodeStoredJobRow(row));
+    if (job) {
+      yield job;
+    }
+  }
 }
 
 export function findActiveDeviceSyncJobDedupeKeys(input: {

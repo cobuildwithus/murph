@@ -521,6 +521,61 @@ describe("cloudflare worker routes", () => {
     expect(claimReadyStandby).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { mode: "off", fails: false },
+    { mode: "off", fails: true },
+    { mode: "shadow", fails: false },
+    { mode: "shadow", fails: true },
+  ])("proves the actual candidate with $mode zero inventory (fails=$fails)", async ({ mode, fails }) => {
+    const release = { bank: "next", id: "next-candidate", bundleFingerprint: "b".repeat(64), sourceFingerprint: "c".repeat(64) };
+    const prepareStandbySlot = vi.fn<NonNullable<HostedExecutionContainerStubLike["prepareStandbySlot"]>>(async (input) => {
+      if (fails) throw new Error("Hosted runner container bundle fingerprint mismatch.");
+      return { ...input, prepared: true };
+    });
+    const retireStandbySlot = vi.fn(async () => ({ retired: true as const }));
+    const bindStandbySlot = vi.fn(async () => { throw new Error("Deploy smoke must not bind member work."); });
+    const getByName = vi.fn(() => ({
+      ...createRunnerContainerNamespace().getByName("candidate"),
+      prepareStandbySlot, retireStandbySlot, bindStandbySlot,
+      async readStandbySlotBinding() { throw new Error("Unexpected binding read."); },
+      async readStandbySlotCoordinatorState() { throw new Error("Unexpected coordinator read."); },
+      async resolveRetainedStandbySlot() { throw new Error("Unexpected retention."); },
+    }));
+    const activeGetByName = vi.fn(() => { throw new Error("Deploy smoke must leave the active target alone."); });
+    const claimReadyStandby = vi.fn(async () => ({ outcome: "disabled" as const }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({
+        active: { ...release, bank: "primary", id: "current" }, candidate: release, previous: null,
+      }),
+      HOSTED_EXECUTION_STANDBY_MODE: mode,
+      HOSTED_EXECUTION_STANDBY_TARGET: "0",
+      RUNNER_CONTAINER: { getByName: activeGetByName },
+      NEXT_RUNNER_CONTAINER: { getByName },
+      STANDBY_COORDINATOR: { getByName: () => ({
+        claimReadyStandby,
+        async ensureReadyStandby() { return { accepted: true }; },
+        async readStandbyCoordinatorState() {
+          return { readySlotNames: [], provisioningSlotNames: [], releaseId: release.id, region: HOSTED_RUNNER_REGION };
+        },
+      }) },
+    });
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const response = await worker.fetch(new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning,
+        method: "POST", path: url.pathname, payload: "", search: url.search,
+      }),
+      method: "POST",
+    }), env);
+    expect(response.status).toBe(fails ? 500 : 200);
+    expect(getByName).toHaveBeenCalledWith(expect.stringMatching(/^runner--v-next-candidate--[a-f0-9]{32}$/u));
+    expect(prepareStandbySlot).toHaveBeenCalledWith(expect.objectContaining({ releaseId: release.id, region: HOSTED_RUNNER_REGION }));
+    expect(retireStandbySlot).toHaveBeenCalledWith({});
+    expect(activeGetByName).not.toHaveBeenCalled();
+    expect(claimReadyStandby).not.toHaveBeenCalled();
+    expect(bindStandbySlot).not.toHaveBeenCalled();
+  });
+
   it("returns the signed Temporal worker binding admission without caching it", async () => {
     const env = createWorkerEnv();
     const url = new URL(

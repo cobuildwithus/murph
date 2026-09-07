@@ -32,7 +32,7 @@ describe("Cloudflare container rollout config", () => {
     { total: "3", legacy: "1", expectedMain: 2, expectedLegacy: 1 },
     { total: "5", legacy: "2", expectedMain: 3, expectedLegacy: 2 },
     { total: "7", legacy: "3", expectedMain: 4, expectedLegacy: 3 },
-  ])("conserves one member budget and legacy identity: %j", ({
+  ])("gives each release the member budget while retaining legacy identity: %j", ({
     total, legacy, expectedMain, expectedLegacy,
   }) => {
     const source = {
@@ -52,11 +52,12 @@ describe("Cloudflare container rollout config", () => {
     }>;
     expect(containers.map(({ class_name, max_instances }) => ({ class_name, max_instances }))).toEqual([
       { class_name: "RunnerContainer", max_instances: expectedMain },
+      { class_name: "NextRunnerContainer", max_instances: expectedMain },
       { class_name: "DeploySmokeRunnerContainer", max_instances: 1 },
       { class_name: "StandbyRunnerContainer", max_instances: expectedLegacy },
     ]);
     expect(containers.reduce((sum, container) => sum + container.max_instances, 0))
-      .toBe(Number(total ?? "1000") + 1);
+      .toBe(Number(total ?? "1000") + expectedMain + 1);
     expect(containers[0]).not.toHaveProperty("constraints");
     expect(config.vars).toMatchObject({
       HOSTED_EXECUTION_STANDBY_MODE: "off",
@@ -113,13 +114,14 @@ describe("Cloudflare container rollout config", () => {
       }>;
     };
 
-    expect(renderedConfig.containers[1]).toMatchObject({
+    const smoke = renderedConfig.containers.find((container) => container.class_name === "DeploySmokeRunnerContainer");
+    expect(smoke).toMatchObject({
       class_name: "DeploySmokeRunnerContainer",
       max_instances: 1,
       rollout_step_percentage: [100],
     });
-    expect(renderedConfig.containers[1]?.rollout_step_percentage).toHaveLength(
-      renderedConfig.containers[1]?.max_instances ?? 0,
+    expect(smoke?.rollout_step_percentage).toHaveLength(
+      smoke?.max_instances ?? 0,
     );
   });
 
@@ -153,10 +155,10 @@ describe("Cloudflare container rollout config", () => {
       rollout_active_grace_period: renderedConfig.containers[1]?.rollout_active_grace_period,
       rollout_step_percentage: renderedConfig.containers[1]?.rollout_step_percentage,
     });
-    expect(checkedInConfig.containers[2]).toMatchObject({
-      rollout_active_grace_period: renderedConfig.containers[2]?.rollout_active_grace_period,
+    expect(checkedInConfig.containers[3]).toMatchObject({
+      rollout_active_grace_period: renderedConfig.containers[3]?.rollout_active_grace_period,
     });
-    expect(renderedConfig.containers[2]).not.toHaveProperty("rollout_step_percentage");
-    expect(checkedInConfig.containers[2]).not.toHaveProperty("rollout_step_percentage");
+    expect(renderedConfig.containers[3]).not.toHaveProperty("rollout_step_percentage");
+    expect(checkedInConfig.containers[3]).not.toHaveProperty("rollout_step_percentage");
   });
 });
