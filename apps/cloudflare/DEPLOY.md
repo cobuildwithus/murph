@@ -47,6 +47,10 @@ against the requested commit, fingerprints, configuration, and namespace. A matc
 reuses that immutable image despite rebuilt manifest timestamps, preserving its
 active identity or staged candidate inventory. Candidate promotion still requires
 successful smoke. A conflicting admitted candidate requires reconciliation.
+The legacy staging pointer predates immutable admission receipts. Its inactive
+application is reconciled through the existing drain/admission path, including
+when a native create committed but its response or subsequent Worker publication
+was lost. Its image is never reused as a verified artifact without provenance.
 No deployment-convergence restart retry is added to message processing.
 
 A bound, still-warm previous session retains its exact namespace, member, claim,

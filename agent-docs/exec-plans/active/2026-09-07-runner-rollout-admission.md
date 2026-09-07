@@ -57,3 +57,9 @@ assistant behavior change is intended.
   admitted immutable image. A real manifest rewrite reproduces the old rejection
   and proves candidate identity/inventory survive the corrected resume path.
   Conflicting artifacts remain rejected, and smoke still gates promotion.
+- The correction review identified successful native creation before legacy
+  admission metadata is published. Accepted and corrected by distinguishing the
+  legacy pointer from a fully identified candidate, then using the existing
+  inactive-namespace drain/admission path. The composed test drops the accepted
+  create response and proves a retry leaves serving configuration/capacity intact.
+  The shipped base staging writer reproduces that fixture's legacy record shape.

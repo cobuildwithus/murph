@@ -10,6 +10,7 @@ vi.mock("../scripts/wrangler-runner.ts", () => ({ runWranglerLoggedCaptured: moc
 import { prepareHostedContainerDeployImage } from "../scripts/prepare-container-deploy-image.ts";
 import { stageHostedRunnerRelease } from "../scripts/stage-runner-release.ts";
 import { runnerApplicationSpecification } from "../scripts/runner-release-application.ts";
+import { createRunnerReleaseProvider } from "../scripts/runner-release-provider.ts";
 import { writeRunnerBundleManifest, runnerBundleManifestFileName } from "../scripts/deploy-artifacts.ts";
 
 const accountId = "a".repeat(32);
@@ -156,5 +157,66 @@ describe("container image publication before Worker activation", () => {
     await expect(prepareHostedContainerDeployImage({ accountId, configPath, release: { currentVersion, releaseSha, listApplications: async (name) => (await listApplications(name)).map((entry) => ({ ...entry, durable_objects: { namespace_id: "wrong-namespace" } })) } })).rejects.toThrow("authoritative live configuration");
     expect(mocks.build).not.toHaveBeenCalled();
     expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a committed native create whose response was lost before legacy staging was replaced", async () => {
+    const releaseSha = "1".repeat(40);
+    const classes = ["RunnerContainer", "NextRunnerContainer", "DeploySmokeRunnerContainer", "StandbyRunnerContainer"];
+    const rendered = { ...config,
+      vars: { HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "b".repeat(64), HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "c".repeat(64) },
+      containers: classes.map((class_name) => ({ ...config.containers[0], class_name, instance_type: "standard-1", ssh: { enabled: false }, rollout_active_grace_period: 300 })),
+    };
+    await writeFile(configPath, JSON.stringify(rendered));
+    const active = { bank: "primary", id: "primary-old", bundleFingerprint: "d".repeat(64), sourceFingerprint: "e".repeat(64) };
+    // Exact legacy record shape emitted by the shipped pre-admission staging writer.
+    const legacy = { active, previous: null, candidate: { bank: "next", id: "next-legacy", bundleFingerprint: "f".repeat(64), sourceFingerprint: "a".repeat(64) } };
+    const currentVersion = { resources: { bindings: [
+      { type: "plain_text", name: "HOSTED_EXECUTION_RUNNER_DEPLOYMENT", text: JSON.stringify(legacy) },
+      ...classes.map((class_name) => ({ type: "durable_object_namespace", class_name, namespace_id: `namespace-${class_name}` })),
+    ] } };
+    const native = new Map<string, Record<string, unknown>>(classes.filter((className) => className !== "NextRunnerContainer").map((className) => {
+      const name = `${config.name}-${className}`.toLowerCase();
+      return [name, { id: name, name, max_instances: 1, configuration: { image: `registry.example.test/old@sha256:${"a".repeat(64)}` } }];
+    }));
+    const servingBefore = JSON.stringify(native.get(`${config.name}-runnercontainer`));
+    const listApplications = async (name: string) => native.has(name) ? [native.get(name)] : [];
+    const calls: string[] = [];
+    const provider = createRunnerReleaseProvider({ accountId, apiToken: "synthetic-token", fetchImpl: async (url, init) => {
+      const pathname = new URL(String(url)).pathname;
+      const method = init?.method ?? "GET";
+      calls.push(`${method} ${pathname.split("/").at(-1)}`);
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      if (method === "POST" && pathname.endsWith("/applications")) {
+        native.set(body.name, { ...body, id: body.name });
+        throw new Error("synthetic lost native-create response");
+      }
+      const id = pathname.split("/").at(-1)!;
+      if (method === "PATCH") native.set(id, { ...native.get(id), ...body });
+      const result = pathname.endsWith("/deployments") ? [] : native.get(id) ?? { id: "synthetic-rollout" };
+      return Response.json({ success: true, result });
+    } });
+    const prepare = async () => stageHostedRunnerRelease({
+      configPath: await prepareHostedContainerDeployImage({ accountId, configPath, release: { currentVersion, releaseSha, listApplications } }),
+      currentVersionId: "legacy-staging-worker", currentVersion, releaseSha, listApplications,
+    });
+    const first = await prepare();
+    const application = first.applications[0]!;
+    expect(application.applicationId).toBeNull();
+    await expect(provider.admitApplication(application)).rejects.toThrow("Authoritative runner release state is unavailable");
+    expect(native.has(application.name)).toBe(true);
+    const retry = await prepare();
+    expect(retry.deployment.active).toEqual(active);
+    expect(retry.deployment.candidate?.id).not.toBe(legacy.candidate.id);
+    expect(retry.workerOnly).toBe(false);
+    expect(retry.applications.some((entry) => entry.name === retry.activeApplicationName)).toBe(false);
+    const retryApplication = retry.applications[0]!;
+    expect(retryApplication.applicationId).toBe(application.name);
+    await provider.assertDrained(retryApplication.applicationId!);
+    await provider.admitApplication(retryApplication);
+    await provider.assertApplicationReady({ ...retryApplication, listApplications });
+    expect(calls.filter((entry) => entry === "POST applications")).toHaveLength(1);
+    expect(calls.slice(-4)).toEqual([`GET deployments`, `GET ${application.name}`, `PATCH ${application.name}`, "POST rollouts"]);
+    expect(JSON.stringify(native.get(`${config.name}-runnercontainer`))).toBe(servingBefore);
+    expect(currentVersion.resources.bindings[0]).toMatchObject({ text: JSON.stringify(legacy) });
   });
 });

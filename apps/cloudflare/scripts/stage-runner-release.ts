@@ -31,7 +31,7 @@ export async function readReusableHostedRunnerImage(input: {
   listApplications: ListCloudflareContainerApplications;
 }): Promise<string | null> {
   const deployment = readHostedRunnerDeployment(readReleaseVariables(input.currentVersion));
-  if (!deployment) return null;
+  if (!deployment || isLegacyCandidate(deployment.candidate)) return null;
   const release = deployment.candidate ?? deployment.active;
   const className = release.bank === "primary" ? "RunnerContainer" : "NextRunnerContainer";
   const config = input.config;
@@ -39,12 +39,9 @@ export async function readReusableHostedRunnerImage(input: {
   const container = config.containers.find((entry: unknown) => isObjectRecord(entry) && entry.class_name === className);
   if (!isObjectRecord(container)) throw invalid();
   const name = typeof container.name === "string" ? container.name : `${config.name}-${className}`.toLowerCase();
-  const applications = await input.listApplications(name);
-  if (!Array.isArray(applications) || applications.length > 1) throw invalid();
-  // The legacy interrupted bootstrap has no admitted application to resume.
-  if (applications.length === 0) return null;
-  const live = applications[0];
-  if (!isObjectRecord(live) || live.name !== name || !isObjectRecord(live.configuration)) throw invalid();
+  const live = await readNativeApplication(input.listApplications, name);
+  if (!live) return null;
+  if (!isObjectRecord(live.configuration)) throw invalid();
   const image = requiredString(live.configuration.image);
   const specification = runnerApplicationSpecification({ ...container, image }, readLogsEnabled(config));
   const matches = matchesRunnerArtifact(release, {
@@ -89,10 +86,7 @@ export async function stageHostedRunnerRelease(input: {
     if (!isObjectRecord(value)) throw invalid();
     const className = requiredString(value.class_name);
     const name = typeof value.name === "string" ? value.name : `${config.name}-${className}`.toLowerCase();
-    const result = await input.listApplications(name);
-    if (!Array.isArray(result) || result.length > 1) throw invalid();
-    const live = result[0];
-    if (live !== undefined && (!isObjectRecord(live) || live.name !== name)) throw invalid();
+    const live = await readNativeApplication(input.listApplications, name);
     return { rendered: value, className, name, live, specification: runnerApplicationSpecification(value, logsEnabled) };
   }));
   const serving = entries.find((entry) => entry.className === activeClass);
@@ -149,9 +143,10 @@ function selectDeployment(input: {
   if (workerOnly && (liveDeployment?.candidate || !input.servingMatches)) throw invalid();
   let candidate = liveDeployment?.candidate ?? null;
   if (candidate && !sameExecution(candidate)) {
-    // The interrupted bootstrap uploaded a candidate pointer before native creation.
-    // An absent application has never admitted execution and can be replaced safely.
-    if (input.candidateExists) throw new Error("A different candidate release is pending; reconcile it before preparing another image.");
+    // A legacy staging pointer is not an immutable admission receipt. Native
+    // creation may have committed before its response or Worker publication was lost.
+    // Reconcile that inactive namespace through the existing drain/admission path.
+    if (input.candidateExists && !isLegacyCandidate(candidate)) throw new Error("A different candidate release is pending; reconcile it before preparing another image.");
     candidate = null;
   }
   candidate ??= {
@@ -200,6 +195,19 @@ function requiredString(value: unknown): string {
 function readLogsEnabled(config: Record<string, unknown>): boolean {
   return isObjectRecord(config.observability) && (isObjectRecord(config.observability.logs)
     ? config.observability.logs.enabled === true : config.observability.enabled === true);
+}
+
+function isLegacyCandidate(release: HostedRunnerRelease | null): boolean {
+  return release !== null && release.executionIdentity === undefined && release.releaseSha === undefined;
+}
+
+async function readNativeApplication(listApplications: ListCloudflareContainerApplications, name: string) {
+  const result = await listApplications(name);
+  if (!Array.isArray(result) || result.length > 1) throw invalid();
+  const live: unknown = result[0];
+  if (live === undefined) return undefined;
+  if (!isObjectRecord(live) || live.name !== name) throw invalid();
+  return live;
 }
 
 function matchesRunnerArtifact(release: HostedRunnerRelease, expected: {
