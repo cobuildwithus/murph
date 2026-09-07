@@ -331,6 +331,13 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  return resolveHostedMemberLinqHomeLineRouteBindingWithLockedMemberTx(input);
+}
+
+/** The caller owns this member's row lock for the current transaction. */
+export async function resolveHostedMemberLinqHomeLineRouteBindingWithLockedMemberTx(
+  input: Parameters<typeof resolveHostedMemberLinqHomeLineRouteBindingTx>[0],
+): Promise<HostedLinqHomeLineRouteBindingResult> {
   const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
   if (decision.kind === "done") {
     return decision.result;
