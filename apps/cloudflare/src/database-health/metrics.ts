@@ -73,6 +73,12 @@ export interface DatabaseMetricObservationSnapshot {
 
 export interface DatabaseMetricObservation {
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
+  postgresStateSeries: {
+    branch: number;
+    primary: number;
+    replica: number;
+    unrecognizedRole: number;
+  };
   snapshot: DatabaseMetricObservationSnapshot;
 }
 
@@ -329,6 +335,7 @@ export function parsePlanetScaleDatabaseMetricObservation(
   );
   return {
     missingMetrics,
+    postgresStateSeries: summarizePostgresStateSeries(points),
     snapshot: {
       clientWaitSeconds: clientWaitPoints.length === 0
         ? null
@@ -627,6 +634,25 @@ function parsePrometheusLabels(value: string): Readonly<Record<string, string>> 
     offset += 1;
   }
   return labels;
+}
+
+function summarizePostgresStateSeries(
+  points: readonly PrometheusMetricPoint[],
+): DatabaseMetricObservation["postgresStateSeries"] {
+  const counts = { branch: 0, primary: 0, replica: 0, unrecognizedRole: 0 };
+  for (const point of points) {
+    if (point.name !== "planetscale_postgres_connection_state") {
+      continue;
+    }
+    counts.branch += 1;
+    const role = point.labels[ROLE_LABEL];
+    if (role === "primary" || role === "replica") {
+      counts[role] += 1;
+    } else {
+      counts.unrecognizedRole += 1;
+    }
+  }
+  return counts;
 }
 
 function isPrimaryMetricPoint(point: PrometheusMetricPoint): boolean {
