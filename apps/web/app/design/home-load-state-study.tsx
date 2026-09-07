@@ -2,6 +2,7 @@
 
 import { DashboardCriticalLoadError } from "@/src/components/dashboard/dashboard-critical-load-error";
 import { BrowserVaultUnavailableAlert } from "@/src/components/home/browser-vault-unavailable-alert";
+import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
 import { HomeDataLoadAlert } from "@/src/components/home/home-data-load-alert";
 import { PageHeader } from "@/src/components/ui/page-header";
 
@@ -14,25 +15,13 @@ export function HomeLoadStateStudy() {
         id="home-partial-load-section"
       >
         <PageHeader
-          description="Connect your health data, pick an experiment, and see what actually works for you."
+          description="Your health, with a little help from Murph."
           eyebrow="Live Well"
           title="Welcome to Murph"
         />
         <HomeDataLoadAlert />
-        <div className="grid gap-4 sm:grid-cols-2">
-          {["Sync labs", "Start an experiment"].map((label) => (
-            <div
-              className="rounded-xl border border-border bg-card p-5"
-              key={label}
-            >
-              <p className="font-serif text-lg font-semibold text-foreground">
-                {label}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                This home action remains available while missing details reload.
-              </p>
-            </div>
-          ))}
+        <div inert>
+          <OnboardingSteps showDeviceStep={false} showEmptyState={false} />
         </div>
       </div>
       <div

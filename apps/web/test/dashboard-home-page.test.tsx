@@ -334,7 +334,7 @@ test("HomePage keeps its core content when an independent projection fails", asy
   assert.match(markup, /Some dashboard details are unavailable/);
   assert.doesNotMatch(markup, /Connect devices/);
   assert.match(markup, /Sync labs/);
-  assert.match(markup, /Start an experiment/);
+  assert.doesNotMatch(markup, /Start an experiment|In progress|Your history|Murph helps you be healthier/);
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
 });
 
@@ -660,7 +660,7 @@ test("HomePage hides the connect devices card when device sync is already active
   assert.doesNotMatch(markup, /Connect devices/);
   assert.doesNotMatch(markup, /href="\/connect"/);
   assert.match(markup, /Sync labs/);
-  assert.match(markup, /Start an experiment/);
+  assert.doesNotMatch(markup, /Start an experiment|In progress|Your history|Murph helps you be healthier/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls[0]?.[0]?.member, MEMBER);
   assert.equal(mocks.readHostedAiUsageGate.mock.calls[0]?.[0]?.memberId, MEMBER.id);
   assert.equal(

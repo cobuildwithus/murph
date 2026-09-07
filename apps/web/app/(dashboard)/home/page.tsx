@@ -4,7 +4,6 @@ import type { Metadata } from "next";
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
 import { HomeInitialVisitPersonaPickerClient } from "./initial-visit-persona-picker-client";
 
-import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
 import { HomeDataLoadAlert } from "@/src/components/home/home-data-load-alert";
@@ -29,7 +28,6 @@ import {
   type DeviceSyncCompletionSearchParams,
 } from "@/src/lib/device-sync/connect-completion";
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
-import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import { readHostedMemberMessagingSetupState } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -198,7 +196,7 @@ export default async function HomePage({
       <PageHeader
         eyebrow="Live Well"
         title="Welcome to Murph"
-        description="Connect your health data, pick an experiment, and see what actually works for you."
+        description="Your health, with a little help from Murph."
       />
 
       {hasHomeDataLoadError ? <HomeDataLoadAlert /> : null}
@@ -224,7 +222,7 @@ export default async function HomePage({
       ) : null}
 
       <BrowserVaultOnboardingStepsContent
-        protocols={listHealthCommonsExperimentBrowseProtocols()}
+        showEmptyState={!hasHomeDataLoadError}
         messageMurphAction={
           awaitingFirstMemberMessage ? (
             <Suspense fallback={<MessageMurphActionFallback />}>
@@ -239,7 +237,6 @@ export default async function HomePage({
           </Suspense>
         }
       />
-      <FeatureHighlights />
     </div>
   );
 }
