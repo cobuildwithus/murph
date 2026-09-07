@@ -4,6 +4,7 @@ export type HostedRunnerBank = "primary" | "next";
 export interface HostedRunnerRelease {
   bank: HostedRunnerBank;
   executionIdentity?: string;
+  releaseSha?: string;
   bundleFingerprint: string;
   id: string;
   sourceFingerprint: string;
@@ -65,6 +66,7 @@ export function readHostedRunnerBankFromName(name: string): HostedRunnerBank {
 
 function isRelease(value: unknown): value is HostedRunnerRelease {
   return isRecord(value)
+    && (value.releaseSha === undefined || (typeof value.releaseSha === "string" && /^[a-f0-9]{40}$/u.test(value.releaseSha)))
     && (value.executionIdentity === undefined || (typeof value.executionIdentity === "string" && /^[a-f0-9]{64}$/u.test(value.executionIdentity)))
     && (value.bank === "primary" || value.bank === "next")
     && typeof value.id === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(value.id)

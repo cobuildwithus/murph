@@ -290,7 +290,7 @@ export async function assertPreparedRunnerBundle(input: {
   return manifest;
 }
 
-async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {
+export async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {
   const manifest = await readJsonObjectFile(
     path.join(bundleDir, runnerBundleManifestFileName),
     "runner bundle manifest",

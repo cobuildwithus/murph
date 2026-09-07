@@ -6,11 +6,14 @@ import { promisify } from "node:util";
 
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 import { runWranglerLoggedCaptured } from "./wrangler-runner.ts";
+import { readReusableHostedRunnerImage } from "./stage-runner-release.ts";
+import type { ListCloudflareContainerApplications } from "./container-release-receipt.ts";
 
 /** Publish the immutable image before native admission or Worker version activation. */
 export async function prepareHostedContainerDeployImage(input: {
   accountId: string;
   configPath: string;
+  release?: { currentVersion: unknown; releaseSha: string; listApplications: ListCloudflareContainerApplications };
 }): Promise<string> {
   const source: unknown = JSON.parse(await readFile(input.configPath, "utf8"));
   if (!isObjectRecord(source) || !Array.isArray(source.containers)
@@ -37,7 +40,25 @@ export async function prepareHostedContainerDeployImage(input: {
   }
   // Keep the generated config beside its source so all relative bindings retain meaning.
   const releaseId = randomUUID();
-  const imageTag = `${source.name}:prepared-${releaseId}`;
+  let image = input.release ? await readReusableHostedRunnerImage({ config: source, ...input.release }) : null;
+  if (!image) image = await publishImage({ configDir, first, releaseId, ...input, workerName: source.name });
+  const preparedPath = path.join(configDir, `wrangler.image-${releaseId}.jsonc`);
+  await writeFile(preparedPath, `${JSON.stringify({
+    ...source,
+    containers: containers.map(({ image_build_context: _context, ...container }) => ({
+      ...container,
+      image,
+    })),
+  }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  return preparedPath;
+}
+
+async function publishImage(input: {
+  accountId: string; configPath: string; configDir: string;
+  first: Record<string, unknown>; releaseId: string; workerName: string;
+}): Promise<string> {
+  const { configDir, first, releaseId } = input;
+  const imageTag = `${input.workerName}:prepared-${releaseId}`;
   try {
     await promisify(execFile)("docker", [
       "build", "--platform", "linux/amd64",
@@ -59,14 +80,5 @@ export async function prepareHostedContainerDeployImage(input: {
   if (digests.size !== 1) {
     throw new Error("Runner image publication did not prove one immutable digest; Worker was not activated.");
   }
-  const image = `registry.cloudflare.com/${input.accountId}/${source.name}@${[...digests][0]}`;
-  const preparedPath = path.join(configDir, `wrangler.image-${releaseId}.jsonc`);
-  await writeFile(preparedPath, `${JSON.stringify({
-    ...source,
-    containers: containers.map(({ image_build_context: _context, ...container }) => ({
-      ...container,
-      image,
-    })),
-  }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-  return preparedPath;
+  return `registry.cloudflare.com/${input.accountId}/${input.workerName}@${[...digests][0]}`;
 }

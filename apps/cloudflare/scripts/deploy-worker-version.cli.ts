@@ -7,7 +7,7 @@ import {
   type DeploymentStatusPayload,
   type HostedWorkerDeploymentResult,
 } from "./deploy-worker-version.shared.js";
-import { assertPreparedDeployArtifacts } from "./deploy-artifacts.js";
+import { assertPreparedDeployArtifacts, readRunnerBundleManifest } from "./deploy-artifacts.js";
 import {
   parseJsonValue,
   requireConfiguredString,
@@ -59,15 +59,6 @@ export async function runDeployWorkerVersionCli(
     configPath,
     dependencies: {
       async deployDirect(input) {
-        const preparedConfigPath = await prepareHostedContainerDeployImage({
-          accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
-          configPath: input.configPath,
-        });
-
-        await applyHostedTransientLifecycleRules({
-          deployRoot,
-          source: env,
-        });
         const renderedContainers = await readRenderedContainerIdentities(input.configPath);
         const containerProvider = createCloudflareContainerProvider({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
@@ -79,9 +70,17 @@ export async function runDeployWorkerVersionCli(
         });
         const current = await readCurrentDeployment(input.workerName, input.configPath);
         const currentVersionId = requireSingleLiveVersion(current);
+        const currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
+        const { releaseSha } = await readRunnerBundleManifest(runnerBundleDir);
+        const preparedConfigPath = await prepareHostedContainerDeployImage({
+          accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
+          configPath: input.configPath,
+          release: { currentVersion, releaseSha, listApplications: containerProvider.listApplications },
+        });
+        await applyHostedTransientLifecycleRules({ deployRoot, source: env });
         const staged = await stageHostedRunnerRelease({
           configPath: preparedConfigPath,
-          currentVersion: await releaseProvider.readWorkerVersion(input.workerName, currentVersionId),
+          currentVersion, releaseSha,
           currentVersionId,
           listApplications: containerProvider.listApplications,
         });

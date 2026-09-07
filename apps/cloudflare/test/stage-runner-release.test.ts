@@ -39,7 +39,7 @@ describe("runner deployment staging", () => {
   it.each([false, true])("freezes the live application while preparing the opposite target (reversed=%s)", async (reversed) => {
     const active = reversed ? next : primary;
     const previous = reversed ? primary : next;
-    const staged = await stageHostedRunnerRelease({
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
       configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
       currentVersion: version({ active, candidate: null, previous }), listApplications,
     });
@@ -59,7 +59,7 @@ describe("runner deployment staging", () => {
   });
 
   it("bootstraps from the existing Worker fingerprint without changing its release identity", async () => {
-    const staged = await stageHostedRunnerRelease({
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
       configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
       currentVersion: version(),
       listApplications: async (name) => name.endsWith("-nextrunnercontainer") ? [] : listApplications(name),
@@ -71,26 +71,26 @@ describe("runner deployment staging", () => {
 
   it("preserves release identity and skips native mutations for an identical execution image", async () => {
     const specification = runnerApplicationSpecification(config.containers[0]!, false);
-    const active = { ...primary, bundleFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT, sourceFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT, executionIdentity: runnerApplicationExecutionIdentity(specification) };
+    const active = { ...primary, releaseSha: "1".repeat(40), bundleFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT, sourceFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT, executionIdentity: runnerApplicationExecutionIdentity(specification) };
     const deployment = { active, candidate: null, previous: next };
-    const staged = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "new-worker-attempt", currentVersion: version(deployment), listApplications: async (name) => [{ ...specification, id: `id-${name}`, name }] });
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "new-worker-attempt", currentVersion: version(deployment), listApplications: async (name) => [{ ...specification, id: `id-${name}`, name }] });
     expect(staged.workerOnly).toBe(true);
     expect(staged.applications).toEqual([]);
     expect(staged.deployment).toEqual(deployment);
   });
 
   it("resumes the exact pending candidate and rejects a conflicting admitted image", async () => {
-    const first = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion: version(), listApplications });
-    const second = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications });
+    const first = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion: version(), listApplications });
+    const second = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications });
     expect(second.deployment).toEqual(first.deployment);
     await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config, vars: { ...config.vars, HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "a".repeat(64) } }));
-    await expect(stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications })).rejects.toThrow("different candidate");
+    await expect(stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications })).rejects.toThrow("different candidate");
   });
 
   it("reuses already admitted pending inventory after an interrupted staging smoke", async () => {
-    const first = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion: version(), listApplications });
+    const first = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion: version(), listApplications });
     const specification = runnerApplicationSpecification(config.containers[0]!, false);
-    const resumed = await stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications: async (name) => [{ ...specification, id: `id-${name}`, name }] });
+    const resumed = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications: async (name) => [{ ...specification, id: `id-${name}`, name }] });
     expect(resumed.deployment).toEqual(first.deployment);
     expect(resumed.applications).toEqual([]);
     expect(resumed.workerOnly).toBe(false);
@@ -99,11 +99,11 @@ describe("runner deployment staging", () => {
   it("requires preexisting namespace bindings before a native candidate can be created", async () => {
     const currentVersion = version();
     currentVersion.resources.bindings = currentVersion.resources.bindings.filter((binding) => !("class_name" in binding && binding.class_name === "NextRunnerContainer"));
-    await expect(stageHostedRunnerRelease({ configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion, listApplications })).rejects.toThrow("authoritative live configuration");
+    await expect(stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion, listApplications })).rejects.toThrow("authoritative live configuration");
   });
 
   it("fails closed when the live target's image identity cannot be established", async () => {
-    await expect(stageHostedRunnerRelease({
+    await expect(stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
       configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
       currentVersion: version(), listApplications: async () => [],
     })).rejects.toThrow("authoritative live configuration");

@@ -41,9 +41,12 @@ missing application after activating Worker code.
 
 `HOSTED_EXECUTION_RUNNER_DEPLOYMENT` owns active, candidate, and previous release
 identity. Identity includes the immutable image, exact bundle/source fingerprints,
-and execution configuration, rather than the deployment attempt. Identical
-execution keeps the active identity. A staged identical candidate resumes its
-admitted inventory; a conflicting admitted candidate requires reconciliation.
+public commit provenance, and execution configuration, rather than the deployment
+attempt. Before rebuilding an image, the helper checks the admitted artifact
+against the requested commit, fingerprints, configuration, and namespace. A match
+reuses that immutable image despite rebuilt manifest timestamps, preserving its
+active identity or staged candidate inventory. Candidate promotion still requires
+successful smoke. A conflicting admitted candidate requires reconciliation.
 No deployment-convergence restart retry is added to message processing.
 
 A bound, still-warm previous session retains its exact namespace, member, claim,

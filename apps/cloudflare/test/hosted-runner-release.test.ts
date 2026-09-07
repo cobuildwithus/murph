@@ -59,4 +59,10 @@ describe("staged runner release", () => {
       active: primary, candidate: { ...next, bank: "primary", id: "primary-new" }, previous: null,
     }) })).toThrow("identity is invalid");
   });
+
+  it.each(["branch-name", "a".repeat(39), 42])("rejects invalid artifact commit provenance: %s", (releaseSha) => {
+    expect(() => readHostedRunnerDeployment({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({
+      active: { ...primary, releaseSha }, candidate: null, previous: null,
+    }) })).toThrow("identity is invalid");
+  });
 });

@@ -50,4 +50,10 @@ assistant behavior change is intended.
   interrupted native PATCH/rollout reconciliation, stable execution identity,
   candidate resumption, and Worker-only promotion. Final verification remains open.
 - Read-only native quota diagnostics have a reviewed PR with green exact-head CI;
-  its additional local acceptance run is queued behind another session's work.
+  its additional local acceptance run is in progress with package coverage passed.
+- Final ReviewGPT identified a rebuilt-image retry dead end. Accepted and corrected
+  in the existing artifact-preparation owner: verify requested public commit,
+  fingerprints, execution configuration, and native namespace before reusing the
+  admitted immutable image. A real manifest rewrite reproduces the old rejection
+  and proves candidate identity/inventory survive the corrected resume path.
+  Conflicting artifacts remain rejected, and smoke still gates promotion.

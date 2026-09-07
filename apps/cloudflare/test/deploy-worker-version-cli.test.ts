@@ -12,6 +12,10 @@ const wranglerMocks = vi.hoisted(() => ({
   runWranglerLogged: vi.fn(),
   runWranglerLoggedCaptured: vi.fn(),
 }));
+vi.mock("../scripts/deploy-artifacts.js", async () => ({
+  ...await vi.importActual<typeof import("../scripts/deploy-artifacts.js")>("../scripts/deploy-artifacts.js"),
+  readRunnerBundleManifest: vi.fn(async () => ({ releaseSha: "1".repeat(40) })),
+}));
 const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
 vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({

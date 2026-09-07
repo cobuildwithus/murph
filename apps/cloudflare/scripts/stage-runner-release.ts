@@ -23,11 +23,52 @@ export interface StagedRunnerRelease {
   workerOnly: boolean;
 }
 
+/** Resume an admitted artifact before a rebuild can change timestamp-only image bytes. */
+export async function readReusableHostedRunnerImage(input: {
+  config: Record<string, unknown>;
+  currentVersion: unknown;
+  releaseSha: string;
+  listApplications: ListCloudflareContainerApplications;
+}): Promise<string | null> {
+  const deployment = readHostedRunnerDeployment(readReleaseVariables(input.currentVersion));
+  if (!deployment) return null;
+  const release = deployment.candidate ?? deployment.active;
+  const className = release.bank === "primary" ? "RunnerContainer" : "NextRunnerContainer";
+  const config = input.config;
+  if (!Array.isArray(config.containers) || !isObjectRecord(config.vars)) throw invalid();
+  const container = config.containers.find((entry: unknown) => isObjectRecord(entry) && entry.class_name === className);
+  if (!isObjectRecord(container)) throw invalid();
+  const name = typeof container.name === "string" ? container.name : `${config.name}-${className}`.toLowerCase();
+  const applications = await input.listApplications(name);
+  if (!Array.isArray(applications) || applications.length > 1) throw invalid();
+  // The legacy interrupted bootstrap has no admitted application to resume.
+  if (applications.length === 0) return null;
+  const live = applications[0];
+  if (!isObjectRecord(live) || live.name !== name || !isObjectRecord(live.configuration)) throw invalid();
+  const image = requiredString(live.configuration.image);
+  const specification = runnerApplicationSpecification({ ...container, image }, readLogsEnabled(config));
+  const matches = matchesRunnerArtifact(release, {
+    releaseSha: input.releaseSha,
+    bundleFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT,
+    sourceFingerprint: config.vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT,
+  })
+    && release.executionIdentity === runnerApplicationExecutionIdentity(specification)
+    && runnerApplicationMatches(live, specification);
+  if (!matches) {
+    if (deployment.candidate) throw new Error("A different candidate release is pending; reconcile it before preparing another image.");
+    return null;
+  }
+  if (!isObjectRecord(live.durable_objects)
+    || live.durable_objects.namespace_id !== readNamespaceId(input.currentVersion, className)) throw invalid();
+  return image;
+}
+
 /** Derive execution identity and the inactive target from live authority, never a deploy attempt. */
 export async function stageHostedRunnerRelease(input: {
   configPath: string;
   currentVersion: unknown;
   currentVersionId: string;
+  releaseSha: string;
   listApplications: ListCloudflareContainerApplications;
 }): Promise<StagedRunnerRelease> {
   const config: unknown = JSON.parse(await readFile(input.configPath, "utf8"));
@@ -43,8 +84,7 @@ export async function stageHostedRunnerRelease(input: {
   };
   const activeClass = active.bank === "primary" ? "RunnerContainer" : "NextRunnerContainer";
   const candidateClass = active.bank === "primary" ? "NextRunnerContainer" : "RunnerContainer";
-  const logsEnabled = isObjectRecord(config.observability) && (isObjectRecord(config.observability.logs)
-    ? config.observability.logs.enabled === true : config.observability.enabled === true);
+  const logsEnabled = readLogsEnabled(config);
   const entries = await Promise.all(config.containers.map(async (value: unknown) => {
     if (!isObjectRecord(value)) throw invalid();
     const className = requiredString(value.class_name);
@@ -63,7 +103,7 @@ export async function stageHostedRunnerRelease(input: {
   const sourceFingerprint = requiredString(vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT);
   const executionIdentity = runnerApplicationExecutionIdentity(target.specification);
   const { deployment, candidate, workerOnly, resumeAdmittedCandidate } = selectDeployment({
-    active, liveDeployment, executionIdentity, bundleFingerprint, sourceFingerprint,
+    active, liveDeployment, executionIdentity, bundleFingerprint, sourceFingerprint, releaseSha: input.releaseSha,
     servingMatches: runnerApplicationMatches(serving.live, serving.specification), candidateExists: target.live !== undefined,
   });
   const applications = workerOnly ? [] : [target, smoke]
@@ -100,10 +140,11 @@ function selectDeployment(input: {
   sourceFingerprint: string;
   servingMatches: boolean;
   candidateExists: boolean;
+  releaseSha: string;
 }) {
   const { active, liveDeployment, executionIdentity, bundleFingerprint, sourceFingerprint } = input;
   const sameExecution = (release: HostedRunnerRelease) => release.executionIdentity === executionIdentity
-    && release.bundleFingerprint === bundleFingerprint && release.sourceFingerprint === sourceFingerprint;
+    && matchesRunnerArtifact(release, input);
   const workerOnly = sameExecution(active);
   if (workerOnly && (liveDeployment?.candidate || !input.servingMatches)) throw invalid();
   let candidate = liveDeployment?.candidate ?? null;
@@ -116,6 +157,7 @@ function selectDeployment(input: {
   candidate ??= {
     bank: active.bank === "primary" ? "next" : "primary", id: `${active.bank === "primary" ? "next" : "primary"}-${randomUUID()}`,
     bundleFingerprint, sourceFingerprint, executionIdentity,
+    releaseSha: input.releaseSha,
   };
   const deployment: HostedRunnerDeployment = workerOnly
     ? liveDeployment ?? { active, candidate: null, previous: null }
@@ -153,6 +195,18 @@ function readReleaseVariables(version: unknown): Record<string, string> {
 function requiredString(value: unknown): string {
   if (typeof value !== "string" || !value || value.trim() !== value) throw invalid();
   return value;
+}
+
+function readLogsEnabled(config: Record<string, unknown>): boolean {
+  return isObjectRecord(config.observability) && (isObjectRecord(config.observability.logs)
+    ? config.observability.logs.enabled === true : config.observability.enabled === true);
+}
+
+function matchesRunnerArtifact(release: HostedRunnerRelease, expected: {
+  releaseSha: unknown; bundleFingerprint: unknown; sourceFingerprint: unknown;
+}): boolean {
+  return release.releaseSha === expected.releaseSha && release.bundleFingerprint === expected.bundleFingerprint
+    && release.sourceFingerprint === expected.sourceFingerprint;
 }
 
 function invalid(): Error {
