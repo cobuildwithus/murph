@@ -1119,6 +1119,7 @@ export function buildWranglerLocalDevConfig(
     compatibility_flags: ["nodejs_compat", "containers_pid_namespace", "enable_request_signal"],
     containers: [
       buildRunnerContainerConfig({ className: "RunnerContainer", maxInstances: 50 }),
+      buildRunnerContainerConfig({ className: "NextRunnerContainer", maxInstances: 50 }),
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
       // Keep the legacy binding/application even after its reservation reaches zero.
       buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 0 }),
@@ -1144,6 +1145,10 @@ export function buildWranglerLocalDevConfig(
         {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
+        },
+        {
+          name: "NEXT_RUNNER_CONTAINER",
+          class_name: "NextRunnerContainer",
         },
         {
           name: "RUNNER_CONTAINER_SMOKE",
@@ -1191,6 +1196,7 @@ export function buildWranglerLocalDevConfig(
           "StandbyRunnerContainer",
         ],
       },
+      { tag: "v8", new_sqlite_classes: ["NextRunnerContainer"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],
