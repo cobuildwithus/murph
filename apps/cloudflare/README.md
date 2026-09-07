@@ -20,6 +20,28 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 - canonical hosted product facts or ledgers outside the encrypted execution workspace, including hosted usage and lifecycle state in `apps/web`
 - gateway state or other product truth outside the encrypted workspace snapshot
 
+## Focused tests
+
+Run these commands from the repository root. To run one Node workspace test,
+pass its repository-relative filename directly to Vitest:
+
+```bash
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/workspace-snapshot-local.test.ts
+```
+
+The Containers helper uses a separate configuration and has its own command:
+
+```bash
+pnpm --dir apps/cloudflare test:node:containers-helper
+```
+
+Use `pnpm --dir apps/cloudflare test` for typecheck and both complete Node
+suites, or `pnpm --dir apps/cloudflare test:node` for both suites alone. These
+composite commands do not apply positional file filters to every stage: a
+filename reaches only the final Containers helper command, while the Node
+workspace still runs in full. Use the direct invocation above for focused
+workspace proof.
+
 ## Route Surface
 
 Public routes:
