@@ -25,6 +25,12 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+Runner readiness smoke polls every second locally, while retaining the canonical
+smoke client's attempt and wall-clock budgets. Standby preparation includes
+container startup and Codex CLI proof, so local setup must not replace those
+budgets with a shorter attempt cap. Explicit `HOSTED_EXECUTION_SMOKE_RUNNER_*`
+overrides remain supported. Smoke failure stays fatal for E2E profiles.
+
 `e2e --no-bundle` reuses the existing runner bundle, then builds the Worker's
 production workspace dependency closure once before launching any scenarios.
 This refreshes copied Worker imports without assembling the runner bundle again or
