@@ -16,9 +16,6 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import {
-  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
-} from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
 
 export async function handleHostedRuntimeAssistantConfigurationTool(input: {
@@ -38,6 +35,9 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
     };
   }
   const updateRequest = input.request;
+  const {
+    readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
+  } = await import("../hosted-mailbox/store");
 
   try {
     const updated = await prisma.$transaction(async (tx) => {

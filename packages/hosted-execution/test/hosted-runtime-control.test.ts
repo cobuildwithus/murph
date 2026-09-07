@@ -27,6 +27,9 @@ import {
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
+  parseHostedRuntimeAssistantConfigurationControlRequest as parseConfigurationControlRequest,
+  parseHostedRuntimeAssistantConfigurationToolRequest as parseConfigurationToolRequest,
+  parseHostedRuntimeAssistantConfigurationToolResponse as parseConfigurationToolResponse,
   parseHostedAssistantReasoningEffortOverride,
 } from "../src/assistant-model.ts";
 import {
@@ -104,6 +107,12 @@ import {
   parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceState,
 } from "../src/parsers.ts";
+
+it("preserves configuration parser identity through the legacy export", () => {
+  expect(parseHostedRuntimeAssistantConfigurationControlRequest).toBe(parseConfigurationControlRequest);
+  expect(parseHostedRuntimeAssistantConfigurationToolRequest).toBe(parseConfigurationToolRequest);
+  expect(parseHostedRuntimeAssistantConfigurationToolResponse).toBe(parseConfigurationToolResponse);
+});
 
 describe("hosted runtime control contracts", () => {
   it("parses fail-closed health-data admission and rejects revoked processing", () => {
