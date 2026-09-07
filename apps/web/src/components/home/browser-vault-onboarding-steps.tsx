@@ -1,100 +1,29 @@
 "use client";
 
-import { useMemo } from "react";
-import {
-  selectBrowserVaultTrackedExperiments,
-} from "@murphai/query/browser-overview";
-import type {
-  BrowserVaultCoreCapableQueryClient,
-} from "@murphai/query/browser-replica-client";
+import type { BrowserVaultCoreCapableQueryClient } from "@murphai/query/browser-replica-client";
 
 import { BrowserVaultUnavailableAlert } from "./browser-vault-unavailable-alert";
-import { HomeExperiments } from "./home-experiments";
-import {
-  OnboardingSteps,
-  type OnboardingStepsProps,
-} from "./onboarding-steps";
+import { OnboardingSteps, type OnboardingStepsProps } from "./onboarding-steps";
 
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
-import {
-  buildHomeExperimentLibraryCards,
-  splitHomeExperimentCards,
-  type ExperimentLibraryCard,
-} from "@/src/lib/experiments/library-cards";
-import type { ExperimentProtocol } from "@/src/types/experiments";
 
-export interface BrowserVaultOnboardingStepsProps extends OnboardingStepsProps {
-  /**
-   * Public protocols used to surface the member's own experiment runs above
-   * the onboarding steps. When omitted, only the steps render.
-   */
-  protocols?: ExperimentProtocol[];
-}
-
-export function BrowserVaultOnboardingStepsContent({
-  protocols,
-  ...props
-}: BrowserVaultOnboardingStepsProps) {
+export function BrowserVaultOnboardingStepsContent(props: OnboardingStepsProps) {
   const { client, error, status } = useBrowserVault();
   const vaultUnavailable = status === "error" && client === null;
-  const hideLabsStep =
-    props.hideLabsStep ||
-    (status === "ready" && client
-      ? hasBrowserVaultLabBiomarkers(client)
-      : false);
-  const { history, inProgress } = useHomeExperimentCards({
-    client,
-    protocols,
-  });
-  const hasAnyExperimentRun = inProgress.length > 0 || history.length > 0;
-  // While the vault is still decrypting we cannot know whether a run is in
-  // progress; keep the experiment step hidden until then so returning members
-  // do not see a "Start an experiment" flash for a run they already started.
-  const vaultPending = protocols !== undefined && status === "loading";
-
-  if (vaultUnavailable) {
-    return (
-      <>
-        <BrowserVaultUnavailableAlert message={error} />
-        <OnboardingSteps
-          {...props}
-          hideExperimentStep
-          hideLabsStep
-        />
-      </>
-    );
-  }
+  const hideLabsStep = props.hideLabsStep || vaultUnavailable || (
+    status === "ready" && client ? hasBrowserVaultLabBiomarkers(client) : false
+  );
 
   return (
     <>
-      <HomeExperiments inProgress={inProgress} history={history} />
+      {vaultUnavailable ? <BrowserVaultUnavailableAlert message={error} /> : null}
       <OnboardingSteps
         {...props}
-        hideExperimentStep={props.hideExperimentStep || vaultPending || hasAnyExperimentRun}
         hideLabsStep={hideLabsStep}
+        showEmptyState={props.showEmptyState !== false && (status === "ready" || status === "empty")}
       />
     </>
   );
-}
-
-function useHomeExperimentCards({
-  client,
-  protocols,
-}: {
-  client: BrowserVaultCoreCapableQueryClient | null;
-  protocols?: ExperimentProtocol[];
-}): { history: ExperimentLibraryCard[]; inProgress: ExperimentLibraryCard[] } {
-  return useMemo(() => {
-    if (!client || !protocols) {
-      return { history: [], inProgress: [] };
-    }
-
-    return splitHomeExperimentCards(buildHomeExperimentLibraryCards({
-      client,
-      protocols,
-      trackedExperiments: selectBrowserVaultTrackedExperiments(client),
-    }));
-  }, [client, protocols]);
 }
 
 export function hasBrowserVaultLabBiomarkers(

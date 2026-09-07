@@ -1,3 +1,5 @@
+import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
+export { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
@@ -1712,6 +1714,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_CONVERSATION_ATTACHMENTS_TOOL,
   MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
@@ -1792,6 +1795,7 @@ export interface MurphDynamicToolAvailability {
   voiceMemoGenerationAvailable?: boolean | null
   pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
+  conversationAttachmentsAvailable?: boolean | null
   analyzeVideoAvailable?: boolean | null
   calendarLinkAvailable?: boolean | null
   askGrokAvailable?: boolean | null
@@ -1842,6 +1846,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_IMAGE_TOOL, defaultOn((a) => a.imageGenerationAvailable)],
+    [MURPH_CONVERSATION_ATTACHMENTS_TOOL, defaultOff((a) => a.conversationAttachmentsAvailable)],
     [MURPH_ANALYZE_VIDEO_TOOL, defaultOff((a) => a.analyzeVideoAvailable)],
     [MURPH_CREATE_CALENDAR_LINK_TOOL, defaultOff((a) => a.calendarLinkAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],

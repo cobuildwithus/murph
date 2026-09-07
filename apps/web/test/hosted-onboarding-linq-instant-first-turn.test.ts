@@ -199,6 +199,7 @@ function createPrisma(): PrismaClient {
 function buildOpenAiResponse(input: {
   kind: "answer" | "welcome" | "handoff";
   message: string;
+  serviceTier?: "default" | "fast" | "priority";
 }): globalThis.Response {
   return new Response(JSON.stringify({
     created_at: 1_787_400_000,
@@ -216,6 +217,7 @@ function buildOpenAiResponse(input: {
       status: "completed",
       type: "message",
     }],
+    service_tier: input.serviceTier ?? "priority",
     status: "completed",
     usage: {
       input_tokens: 90,
@@ -230,12 +232,15 @@ function buildOpenAiResponse(input: {
   });
 }
 
-function buildUsageResponse(): OpenAiResponse {
+function buildUsageResponse(
+  serviceTier: "default" | "priority" = "priority",
+): OpenAiResponse {
   // This fixture supplies only fields read by usage accounting.
   // @ts-expect-error -- deliberate narrow provider response fixture.
   return {
     id: "resp_123",
     model: "gpt-5.6-luna-2026-08-01",
+    service_tier: serviceTier,
     usage: {
       input_tokens: 90,
       input_tokens_details: { cached_tokens: 0 },
@@ -707,13 +712,14 @@ describe("hosted Linq instant first turn", () => {
     });
   });
 
-  it("runs one priority medium-reasoning reply from durable claim through the runtime handoff", async () => {
+  it.each(["priority", "fast"] as const)("accounts for a %s reply from durable claim through the runtime handoff", async (serviceTier) => {
     const prisma = createPrisma();
     const reply =
       "A short walk after dinner can help your muscles use glucose, which may soften the post-meal blood-sugar rise.";
     const fetchMock = vi.fn().mockResolvedValue(buildOpenAiResponse({
       kind: "answer",
       message: reply,
+      serviceTier,
     }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -753,6 +759,13 @@ describe("hosted Linq instant first turn", () => {
       }));
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({ message: reply }),
+    );
+    expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usage: [expect.objectContaining({
+          tokenPricingBasis: "openai-priority",
+        })],
+      }),
     );
     expect(mocks.prepareHostedMailboxEnvelopeAppend).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -799,7 +812,7 @@ describe("hosted Linq instant first turn", () => {
         message: "Hey! What would you like help with?",
         usage: {
           requestedModel: "gpt-5.6-luna",
-          response: buildUsageResponse(),
+          response: buildUsageResponse("default"),
         },
       },
       inboundMessageId: "inbound_message_123",
@@ -821,6 +834,13 @@ describe("hosted Linq instant first turn", () => {
       replyToMessageId: "inbound_message_123",
     });
     expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usage: [expect.objectContaining({
+          tokenPricingBasis: "standard",
+        })],
+      }),
+    );
     expect(result).toEqual({
       kind: "accepted",
       wakeHandoff: {

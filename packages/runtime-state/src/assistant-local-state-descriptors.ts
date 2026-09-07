@@ -167,6 +167,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/state/group-participant-display-names.json",
     "Bounded presentation-only group participant display-name cache that moves with hosted workspace continuity.",
   ),
+  definePortableAssistantFile(
+    ".runtime/operations/assistant/state/hosted-mailbox-inputs.sqlite",
+    "Durable hosted mailbox acknowledgement identities and private input context, retained with their assistant input events.",
+  ),
   definePortableRebuildableAssistantFile(
     ".runtime/operations/assistant/state/outbox-dedupe.sqlite",
     "Assistant exact outbox dedupe projection that moves with hosted delivery continuity and can be rebuilt from durable intents.",

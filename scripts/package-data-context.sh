@@ -160,7 +160,7 @@ collect_tree_files() {
 
 is_canonical_integration_ingest_archive() {
   local relative_path="$1"
-  [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl\.(gz|zip)$ ]]
+  [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl\.(gz|br|zip)$ ]]
 }
 
 should_copy_tree_file() {
@@ -241,7 +241,7 @@ assert_single_integration_ingest_shard_representations() {
     relative_path="${source_path#"$staged_vault_root"/}"
     if [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl$ ]]; then
       current_logical_path="$relative_path"
-    elif [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl\.(gz|zip)$ ]]; then
+    elif [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl\.(gz|br|zip)$ ]]; then
       current_logical_path="${relative_path%.*}"
     else
       continue
@@ -254,7 +254,7 @@ assert_single_integration_ingest_shard_representations() {
     previous_logical_path="$current_logical_path"
   done < <(
     find "$staged_vault_root/ledger/integration-ingests" -type f \
-      \( -name '*.jsonl' -o -name '*.jsonl.gz' -o -name '*.jsonl.zip' \) \
+      \( -name '*.jsonl' -o -name '*.jsonl.gz' -o -name '*.jsonl.br' -o -name '*.jsonl.zip' \) \
       -print 2>/dev/null | LC_ALL=C sort || true
   )
 }

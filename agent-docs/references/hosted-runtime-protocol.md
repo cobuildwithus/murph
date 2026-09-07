@@ -49,6 +49,11 @@ The live ownership split is:
   notifications remain excluded. Non-idempotent provider work still waits for
   the resulting durable checkpoint.
   Inherited or committed wakes and durability barriers remain checkpoint-first.
+  When the assistant phase disproves a persisted due default wake and finds an
+  empty maintenance frontier, it requests the existing projection-only checkpoint.
+  That checkpoint clears or advances the schedule even without application
+  progress. Future cron work remains projected; newly pending input and unavailable
+  scheduling authority retain their normal execution or retry paths.
   At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
   state before returning success. When Cloudflare reports container activity
   expiry, the shell yields to any active foreground operation; otherwise it runs
@@ -951,10 +956,14 @@ map only to the `read_shared` member with that exact id. Display name, handle,
 or member order cannot substitute, and the opaque id cannot appear in the
 answer.
 
-When a joined-group request, accepted-input completion, or closed
+When an approved-effect continuation, joined-group request, accepted-input completion, or closed
 `member.action.requested` reaches a dirty warm runtime, the mailbox prefetch may
 import it before the routine idle checkpoint only when the entire fetched
-prefix contains pre-checkpoint-safe system wakes.
+prefix contains pre-checkpoint-safe system wakes, optionally alongside
+queue-only `device-sync.wake` items. At least one foreground-safe wake must be
+present; a device-only prefix remains checkpoint-gated. Ordered import retains
+the device items in the existing system queue, while the foreground-causal
+execution selector services only the eligible continuations.
 One shared import context revalidates the decoded request adapter shape
 throughout that pre-checkpoint pass, including pre-assistant follow-up imports
 and foreground reruns. A consented-member request remains checkpoint-gated;
@@ -962,8 +971,8 @@ every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
 the existing foreground-causal delivery path, and a member action uses its
 existing provider-free foreground-causal service path. Neither starts or advances the
-at-least-180-second idle snapshot. Any unrelated system wake in that prefix
-keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
+at-least-180-second idle snapshot. Any other unrelated system wake in that
+prefix keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
 preceding pass drain before checkpoint. No progress, retryable failure,

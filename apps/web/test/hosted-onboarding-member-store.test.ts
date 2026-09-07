@@ -1825,51 +1825,7 @@ describe("hosted-member-store", () => {
         },
       },
     });
-    expect(updateMany).toHaveBeenCalledTimes(2);
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
-      where: {
-        linqChatLookupKey: null,
-        pendingLinqChatLookupKey: {
-          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
-        },
-        NOT: {
-          memberId: "member_123",
-        },
-      },
-      data: {
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-        pendingLinqParticipantContactEncrypted: null,
-        pendingLinqParticipantContactKind: null,
-        pendingLinqParticipantContactLookupKey: null,
-        pendingLinqParticipantContactObservedAt: null,
-        pendingLinqRecipientPhoneEncrypted: null,
-        pendingLinqRecipientPhoneLookupKey: null,
-      },
-    });
-    expect(updateMany).toHaveBeenNthCalledWith(2, {
-      where: {
-        linqChatLookupKey: {
-          not: null,
-        },
-        pendingLinqChatLookupKey: {
-          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
-        },
-        NOT: {
-          memberId: "member_123",
-        },
-      },
-      data: {
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-        pendingLinqParticipantContactEncrypted: null,
-        pendingLinqParticipantContactKind: null,
-        pendingLinqParticipantContactLookupKey: null,
-        pendingLinqParticipantContactObservedAt: null,
-        pendingLinqRecipientPhoneEncrypted: null,
-        pendingLinqRecipientPhoneLookupKey: null,
-      },
-    });
+    expect(updateMany).not.toHaveBeenCalled();
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith({
@@ -2471,7 +2427,7 @@ describe("hosted-member-store", () => {
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
     }));
-    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("clears pending Linq route state when a different pending chat becomes home", async () => {
@@ -2522,7 +2478,7 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
     });
-    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("rewrites pending Linq chat binding without reading prior route state", async () => {
@@ -2631,7 +2587,7 @@ describe("hosted-member-store", () => {
       },
       hostedMemberRouting: {
         findFirst,
-        findMany: vi.fn().mockResolvedValue([]),
+        findMany: vi.fn().mockResolvedValue([{ memberId: "member_pending_owner" }]),
         findUnique,
         updateMany,
         upsert,
@@ -2655,29 +2611,17 @@ describe("hosted-member-store", () => {
         },
       }),
     }));
-    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      where: expect.objectContaining({
-        linqChatLookupKey: null,
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        NOT: { memberId: "member_123" },
         pendingLinqChatLookupKey: {
           in: expect.arrayContaining([
             expect.stringMatching(/^hbidx:linq-chat:v2:/u),
             expect.stringMatching(/^hbidx:linq-chat:v1:/u),
           ]),
         },
-      }),
-    }));
-    expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      where: expect.objectContaining({
-        linqChatLookupKey: {
-          not: null,
-        },
-        pendingLinqChatLookupKey: {
-          in: expect.arrayContaining([
-            expect.stringMatching(/^hbidx:linq-chat:v2:/u),
-            expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-          ]),
-        },
-      }),
+      },
     }));
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
@@ -2818,7 +2762,7 @@ describe("hosted-member-store", () => {
       code: "P2002",
     });
 
-    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).not.toHaveBeenCalled();
     expect(upsert).toHaveBeenCalledTimes(1);
   });
 

@@ -1,6 +1,7 @@
 ---
 title: 'Personal Patterns live fixture omits scheduled delivery contract'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2980'
 ---
 
 ## Expected Behavior

@@ -312,7 +312,8 @@ describe('executeAnalyzeVideoTool', () => {
 
     expect(result).toEqual({
       rpcSuccess: false,
-      rpcText: 'The selected video message is not available for this action',
+      rpcText: 'The selected video message is unavailable. Use murph.conversation_attachments to select a retained video from this conversation, or ask the participant to resend it.',
+      failureDiagnostic: { failureStage: 'admission', failureReason: 'authority_rejected' },
     })
     expect(fetchImpl).not.toHaveBeenCalled()
   })
@@ -385,20 +386,23 @@ describe('executeAnalyzeVideoTool', () => {
       expected:
         'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
       status: 429,
+      failureDiagnostic: { failureStage: 'result', failureReason: 'reported_failure', errorCategory: 'rate_limited' },
     },
     {
       expected:
         'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
       status: 503,
+      failureDiagnostic: { failureStage: 'result', failureReason: 'reported_failure', errorCategory: 'unavailable' },
     },
     {
       expected:
         'Video analysis returned no usable answer. Please try again later.',
       status: 200,
+      failureDiagnostic: { failureStage: 'result', failureReason: 'empty_result' },
     },
   ])(
     'returns an actionable provider failure for HTTP $status',
-    async ({ expected, status }) => {
+    async ({ expected, status, failureDiagnostic }) => {
       const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
       const fetchImpl = vi.fn<typeof fetch>(async () =>
         status === 200
@@ -414,7 +418,7 @@ describe('executeAnalyzeVideoTool', () => {
         vaultRoot: fixture.vaultRoot,
       })
 
-      expect(result).toEqual({ rpcSuccess: false, rpcText: expected })
+      expect(result).toEqual({ rpcSuccess: false, rpcText: expected, failureDiagnostic })
     },
   )
 
@@ -702,7 +706,7 @@ describe('executeAnalyzeVideoTool', () => {
       vaultRoot: missing.vaultRoot,
     })).resolves.toMatchObject({
       rpcSuccess: false,
-      rpcText: 'The video bytes are no longer available',
+      rpcText: 'The video bytes are no longer available. Ask the participant to resend the video.',
     })
 
     const linked = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
@@ -812,7 +816,7 @@ describe('executeAnalyzeVideoTool', () => {
     expect(result.rpcResult.success).toBe(allowed)
     expect(fetchImpl).toHaveBeenCalledTimes(allowed ? 1 : 0)
 
-    await retireAssistantInputEventContent({ inputId: fixture.inputId, vault: fixture.vaultRoot })
+    await retireAssistantInputEventContent({ inputId: fixture.inputId, vault: fixture.vaultRoot, now: new Date('2026-10-01T00:00:00.000Z') })
     expect(snapshotAnalyzeVideoAttachmentAuthorities(await readAnalyzeVideoConversationEvents({
       acceptedEvents: [followup],
       vaultRoot: fixture.vaultRoot,

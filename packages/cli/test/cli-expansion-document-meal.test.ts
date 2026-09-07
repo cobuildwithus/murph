@@ -524,18 +524,12 @@ test(
   'document and meal command schemas expose the expansion and mutation surfaces',
   async () => {
     const cli = createDocumentMealSchemaCli()
-    const documentImportSchema = JSON.parse(
-      await runRawSourceCli(['document', 'import', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
+    const documentImportSchema = await readCommandSchema(cli, ['document', 'import'])
     const documentEditSchema = await readCommandSchema(cli, ['document', 'edit'])
     const documentDeleteSchema = await readCommandSchema(cli, ['document', 'delete'])
     const documentListSchema = await readCommandSchema(cli, ['document', 'list'])
-    const mealAddSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'add', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
-    const mealImportJsonSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'import-json', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
+    const mealAddSchema = await readCommandSchema(cli, ['meal', 'add'])
+    const mealImportJsonSchema = await readCommandSchema(cli, ['meal', 'import-json'])
     const mealEditSchema = await readCommandSchema(cli, ['meal', 'edit'])
     const mealDeleteSchema = await readCommandSchema(cli, ['meal', 'delete'])
     const mealListSchema = await readCommandSchema(cli, ['meal', 'list'])

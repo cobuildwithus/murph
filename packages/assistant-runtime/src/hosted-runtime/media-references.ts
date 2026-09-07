@@ -24,7 +24,7 @@ import {
   walkVaultFiles,
 } from "@murphai/core";
 import {
-  INBOX_MEDIA_RETENTION_WINDOW_MS,
+  INBOX_IMAGE_RETENTION_WINDOW_MS,
   INBOX_VIDEO_RETENTION_WINDOW_MS,
   listInboxAttachmentRetentionRecords,
 } from "@murphai/inboxd/retention";
@@ -37,10 +37,6 @@ import type {
   HostedRuntimeMediaKind,
   HostedRuntimeMediaStore,
 } from "./platform.ts";
-import {
-  collectHostedPendingAssistantInputMediaRetentionProtections,
-  type HostedPendingAssistantInputMediaRetentionProtections,
-} from "./pending-input-index.ts";
 
 export const HOSTED_MEDIA_REFS_RELATIVE_PATH =
   ".runtime/operations/assistant/hosted-media-refs.json";
@@ -327,14 +323,10 @@ async function collectHostedMediaCandidates(
   vaultRoot: string,
   signal: AbortSignal | null | undefined,
 ): Promise<HostedMediaCandidate[]> {
-  const [eventInventory, pendingProtections] = await Promise.all([
-    collectHostedMediaEventInventory(vaultRoot, signal),
-    collectHostedPendingAssistantInputMediaRetentionProtections({ vaultRoot }),
-  ]);
+  const eventInventory = await collectHostedMediaEventInventory(vaultRoot, signal);
   return dedupeHostedMediaCandidates([
     ...await collectInboxHostedMediaCandidates({
       durableRawInboxRefs: eventInventory.durableRawInboxRefs,
-      pendingProtections,
       signal,
       vaultRoot,
     }),
@@ -344,7 +336,6 @@ async function collectHostedMediaCandidates(
 
 async function collectInboxHostedMediaCandidates(input: {
   durableRawInboxRefs: ReadonlySet<string>;
-  pendingProtections: HostedPendingAssistantInputMediaRetentionProtections;
   signal: AbortSignal | null | undefined;
   vaultRoot: string;
 }): Promise<HostedMediaCandidate[]> {
@@ -373,19 +364,12 @@ async function collectInboxHostedMediaCandidates(input: {
         continue;
       }
       const preserved = input.durableRawInboxRefs.has(storedPath);
-      const pendingProtected = !preserved && inboxAttachmentHasPendingProtection({
-        attachment,
-        capture,
-        pendingProtections: input.pendingProtections,
-        storedPath,
-      });
       candidates.push({
         byteSize: normalizeHostedMediaByteSize(attachment.byteSize),
         expiresAt: preserved
           ? null
           : resolveHostedMediaReferenceExpiresAt({
               mediaKind,
-              pendingProtected,
               recordedAt: capture.recordedAt,
             }),
         mediaKind,
@@ -779,26 +763,14 @@ function readHostedMediaKindFromInboxAttachment(
   return null;
 }
 
-function inboxAttachmentHasPendingProtection(input: {
-  attachment: InboxCaptureAttachmentRecord;
-  capture: InboxCaptureRecord;
-  pendingProtections: HostedPendingAssistantInputMediaRetentionProtections;
-  storedPath: string;
-}): boolean {
-  return input.pendingProtections.protectedStoredPaths.includes(input.storedPath)
-    || input.pendingProtections.protectedAttachmentIds.includes(input.attachment.attachmentId)
-    || input.pendingProtections.protectedCaptureIds.includes(input.capture.captureId);
-}
-
 function resolveHostedMediaReferenceExpiresAt(input: {
   mediaKind: HostedRuntimeMediaKind;
-  pendingProtected: boolean;
   recordedAt: string;
 }): string {
   const recordedAtMs = Date.parse(input.recordedAt);
   const baseMs = Number.isFinite(recordedAtMs) ? recordedAtMs : 0;
-  const windowMs = input.pendingProtected || input.mediaKind === "image"
-    ? INBOX_MEDIA_RETENTION_WINDOW_MS
+  const windowMs = input.mediaKind === "image"
+    ? INBOX_IMAGE_RETENTION_WINDOW_MS
     : INBOX_VIDEO_RETENTION_WINDOW_MS;
   return new Date(baseMs + windowMs).toISOString();
 }

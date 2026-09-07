@@ -1,3 +1,4 @@
+import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts";
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -248,7 +249,12 @@ test("hosted artifact materializer records only paths that restore", async () =>
   }
 });
 
-test("hosted artifact materializer restores retained inbox media from media references", async () => {
+test.each([false, true])("hosted artifact materializer restores retained inbox media without consulting pending protection (pending=%s)", async (pending) => {
+  const pendingProtectionRead = vi.spyOn(pendingInputIndex, "collectHostedPendingAssistantInputMediaRetentionProtections").mockResolvedValue({
+    protectedAttachmentIds: [],
+    protectedCaptureIds: pending ? ["cap_hosted_media_refs"] : [],
+    protectedStoredPaths: [],
+  });
   const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-06-02T00:00:00.000Z"));
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-media-vault-"));
   const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-media-home-"));
@@ -344,6 +350,13 @@ test("hosted artifact materializer restores retained inbox media from media refe
       vaultRoot,
     });
 
+    expect(pendingProtectionRead).not.toHaveBeenCalled();
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.map((entry) => ({
+      kind: entry.mediaKind, expiresAt: entry.expiresAt,
+    }))).toEqual(expect.arrayContaining([
+      { kind: "image", expiresAt: "2026-08-30T00:00:00.000Z" },
+      { kind: "video", expiresAt: "2026-07-01T00:00:00.000Z" },
+    ]));
     assert.equal(published.referenceCount, 2);
     assert.equal(published.uploadedMediaCount, 2);
     assert.deepEqual(published.excludedVaultPaths.sort(), [
@@ -418,6 +431,7 @@ test("hosted artifact materializer restores retained inbox media from media refe
       [textSha256],
     );
     assert.ok("mediaRef" in externalizedReceipt.receipt.actions[0]!);
+    expect(pendingProtectionRead).not.toHaveBeenCalled();
     assert.equal(putCalls.length, 2);
 
     await rm(path.join(vaultRoot, sourceDirectory), {
@@ -458,13 +472,23 @@ test("hosted artifact materializer restores retained inbox media from media refe
       "workspace_media_materialization",
       "workspace_media_materialization",
     ]);
-    clock.mockReturnValue(Date.parse("2026-06-16T00:00:00.000Z"));
+    clock.mockReturnValue(Date.parse("2026-06-30T23:59:59.999Z"));
+    assert.equal((await materialize([imagePath, videoPath])).missingArtifactPaths.size, 0);
+    clock.mockReturnValue(Date.parse("2026-07-01T00:00:00.000Z"));
+    const videoExpired = await materialize([imagePath, videoPath]);
+    assert.deepEqual([...videoExpired.missingArtifactPaths], [`vault:${videoPath}`]);
+    assert.deepEqual(await readFile(path.join(vaultRoot, imagePath)), imageBytes);
+    await assert.rejects(readFile(path.join(vaultRoot, videoPath)), { code: "ENOENT" });
+    clock.mockReturnValue(Date.parse("2026-08-29T23:59:59.999Z"));
+    assert.equal((await materialize([imagePath])).missingArtifactPaths.size, 0);
+    clock.mockReturnValue(Date.parse("2026-08-30T00:00:00.000Z"));
     const expired = await materialize([imagePath, videoPath]);
     assert.equal(expired.missingArtifactPaths.size, 2);
     await assert.rejects(readFile(path.join(vaultRoot, imagePath)), { code: "ENOENT" });
     assert.equal(getCalls.length, 2);
   } finally {
     clock.mockRestore();
+    pendingProtectionRead.mockRestore();
     await rm(vaultRoot, { force: true, recursive: true });
     await rm(operatorHomeRoot, { force: true, recursive: true });
   }
@@ -891,7 +915,7 @@ test.each([
     assert.ok(snapshot);
     const snapshotHash = sha256HostedBundleHex(snapshot);
     await artifactStore.put({ bytes: snapshot, sha256: snapshotHash });
-    const afterExpiry = Date.parse(now) + 15 * 86_400_000;
+    const afterExpiry = Date.parse(now) + 91 * 86_400_000;
     if (scenario.retired) cleanupExpired(afterExpiry);
     const save = () => withHostedCanonicalWritePort({
       async persistCanonicalWrite(persistence) {

@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 100,
+  "item": {
+    "id": "connected-device-wake-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Smoother recovery for connected devices",
+    "summary": "Background sync now clears redundant update requests while a connected device is waiting for a retry.",
+    "details": "New device data can continue through the existing sync process, while provider retries keep their scheduled timing.",
+    "relevanceTags": [
+      "wearables",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3003
+    ]
+  }
+}

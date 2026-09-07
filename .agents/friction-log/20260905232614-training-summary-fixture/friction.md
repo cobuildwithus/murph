@@ -1,6 +1,7 @@
 ---
 title: 'Training summary fixture ages out of its rolling date window'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2977'
 ---
 
 ## Expected Behavior

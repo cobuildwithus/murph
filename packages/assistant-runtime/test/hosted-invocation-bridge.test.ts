@@ -716,8 +716,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const finishedLogGate = new Promise<void>((resolve) => {
       releaseFinishedLog = resolve;
     });
+    let signalFinishedLogStarted!: () => void;
+    const finishedLogStarted = new Promise<void>((resolve) => {
+      signalFinishedLogStarted = resolve;
+    });
     let finishedLogSettled = false;
     calls.logWrite.mockImplementationOnce(async (request) => {
+      signalFinishedLogStarted();
       await finishedLogGate;
       finishedLogSettled = true;
       return { loggedCount: request.entries.length };
@@ -726,23 +731,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       platform,
       vaultRoot,
     });
-    let checkpointSettled = false;
     const checkpoint = Promise.resolve(options.createCheckpointSnapshot(
       createCheckpointInput("idle_shutdown"),
-    )).then((result) => {
-      checkpointSettled = true;
-      return result;
-    });
+    ));
 
     let pendingLogDrain: Promise<void> | null = null;
     try {
-      await vi.waitFor(() => {
-        expect(checkpointSettled).toBe(true);
-      }, { timeout: 250 });
+      await expect(Promise.race([
+        checkpoint.then(() => "checkpoint"),
+        finishedLogStarted.then(() => "log write"),
+      ])).resolves.toBe("checkpoint");
       pendingLogDrain = drainHostedRuntimeLogWritesBestEffort();
-      await vi.waitFor(() => {
-        expect(calls.logWrite).toHaveBeenCalledOnce();
-      });
+      await expect(Promise.race([
+        finishedLogStarted.then(() => "log write"),
+        pendingLogDrain.then(() => "drain"),
+      ])).resolves.toBe("log write");
+      expect(calls.logWrite).toHaveBeenCalledOnce();
       expect(finishedLogSettled).toBe(false);
       await expect(checkpoint).resolves.toMatchObject({
         snapshotRef: {
@@ -755,9 +759,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       await checkpoint;
     }
 
-    await vi.waitFor(() => {
-      expect(finishedLogSettled).toBe(true);
-    });
+    expect(finishedLogSettled).toBe(true);
   });
 
   it("keeps snapshot outcomes independent from an unavailable log port", async () => {

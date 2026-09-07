@@ -2422,7 +2422,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }), {
         async createCheckpointSnapshot() {
           await assert.rejects(access(path.join(vaultRoot, logicalPath)));
-          await access(path.join(vaultRoot, `${logicalPath}.gz`));
+          await access(path.join(vaultRoot, `${logicalPath}.br`));
           return {
             snapshotRef: createWorkspaceSnapshotV2Ref(
               "snapshot-interrupted-ingest-archive-checkpoint",
@@ -2485,7 +2485,7 @@ describe("hosted workspace runtime entrypoint", () => {
       });
 
       await assert.rejects(access(path.join(vaultRoot, logicalPath)));
-      await access(path.join(vaultRoot, `${logicalPath}.gz`));
+      await access(path.join(vaultRoot, `${logicalPath}.br`));
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
     } finally {

@@ -1123,7 +1123,9 @@ test("home onboarding steps keep equal cards across dashboard widths", async ({
     }
 
     expect(layout.display).toBe("flex");
-    expect(layout.scrollWidth).toBeGreaterThan(layout.clientWidth);
+    expect(layout.scrollWidth).toBeLessThanOrEqual(
+      layout.clientWidth + OVERFLOW_TOLERANCE_PX,
+    );
     expect(layout.maxCardWidthDelta).toBeLessThanOrEqual(
       OVERFLOW_TOLERANCE_PX,
     );

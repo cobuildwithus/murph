@@ -926,6 +926,8 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
 })
 
 test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at the provider-visible bound', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-04-22T10:00:03.000Z'))
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-event-steer-',
   )
@@ -1335,6 +1337,10 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
     hostedInput.inputId,
   ])
   expect(videoAuthoritiesBeforePreflight).toEqual([{
+    capturedAt: '2026-04-22T09:59:59.000Z',
+    expiresAt: '2026-05-22T09:59:59.000Z',
+    fileName: 'video.mp4',
+    kind: 'video',
     byteSize: initialVideo.bytes.byteLength,
     messageRef: earlierHostedInput.inputId,
     mimeType: 'video/mp4',
@@ -1344,6 +1350,10 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
   }])
   expect(videoAuthoritiesAfterPreflight).toEqual([
     {
+      capturedAt: '2026-04-22T09:59:59.000Z',
+      expiresAt: '2026-05-22T09:59:59.000Z',
+      fileName: 'video.mp4',
+      kind: 'video',
       byteSize: initialVideo.bytes.byteLength,
       messageRef: earlierHostedInput.inputId,
       mimeType: 'video/mp4',
@@ -1352,6 +1362,10 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       sha256: initialVideo.sha256,
     },
     {
+      capturedAt: '2026-04-22T10:00:00.000Z',
+      expiresAt: '2026-05-22T10:00:00.000Z',
+      fileName: 'video.mp4',
+      kind: 'video',
       byteSize: acceptedVideo.bytes.byteLength,
       messageRef: hostedInput.inputId,
       mimeType: 'video/mp4',

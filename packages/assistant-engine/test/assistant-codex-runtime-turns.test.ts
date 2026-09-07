@@ -1,4 +1,5 @@
 import {
+  cliTimingLaunchArgs,
   CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   MockChildProcess,
   asRecord,
@@ -2893,8 +2894,12 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         actionKind: 'command.execution',
         commandFamily: 'cat',
         commandOrdinal: 1,
+        diagnosticRole: 'completion',
         durationMsBucket: '5_30s',
+        errorCategory: 'unknown',
         exitCode: 2,
+        failureReason: 'nonzero_exit',
+        failureStage: 'execution',
         outputBytesBucket: 'lt_1kb',
       },
     })
@@ -2954,7 +2959,11 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       summary: 'Codex tool call failed during provider turn.',
       details: {
         actionKind: 'mcp.tool.call',
+        diagnosticRole: 'completion',
         durationMsBucket: 'unknown',
+        errorCategory: 'unknown',
+        failureReason: 'unknown',
+        failureStage: 'execution',
         outputBytesBucket: 'lt_1kb',
         tool: 'search_query',
       },
@@ -2993,7 +3002,11 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       summary: 'Codex dynamic tool call failed during provider turn.',
       details: {
         actionKind: 'dynamic.tool.call',
+        diagnosticRole: 'completion',
         durationMsBucket: 'unknown',
+        errorCategory: 'unknown',
+        failureReason: 'reported_failure',
+        failureStage: 'result',
         outputBytesBucket: 'lt_1kb',
         // Names the failing surface without the arguments or output around it.
         tool: 'connected_apps_execute',
@@ -3477,8 +3490,12 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           actionKind: 'command.execution',
           commandFamily: 'search',
           commandOrdinal: 1,
+          diagnosticRole: 'completion',
           durationMsBucket: 'unknown',
+          errorCategory: 'unknown',
           exitCode: 2,
+          failureReason: 'nonzero_exit',
+          failureStage: 'execution',
           outputBytesBucket: 'lt_1kb',
           recoveredAfterFailure: true,
         },
@@ -3632,7 +3649,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.objectContaining({
         cwd: tmpdir(),
         env: expect.objectContaining({
@@ -3653,7 +3670,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const child = new MockChildProcess()
 
       expect(command).toBe(codexCommand)
-      expect(args).toEqual(['app-server'])
+      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         env: expect.objectContaining({
           CODEX_HOME: explicitCodexHome,
@@ -3722,7 +3739,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })
@@ -3774,7 +3791,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       expect(codexMocks.spawn).toHaveBeenCalledWith(
         '/tmp/attacker-controlled-codex',
-        ['app-server'],
+        [...cliTimingLaunchArgs, 'app-server'],
         expect.any(Object),
       )
     } finally {
@@ -3827,7 +3844,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })

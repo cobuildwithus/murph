@@ -466,3 +466,443 @@ first Web deployment that no longer references it. Restoring an older build
 requires re-expanding the primary schema first. Keep both isolated URLs
 configured, do not repoint them at the primary database, and leave the isolated
 schema in place during an incident.
+
+## Shared Vault CLI phase timing (existing usage profile)
+
+`hosted_ai_usage.turn_profile_json.cliTiming` is optional internal telemetry in
+**the existing primary usage database**, not a new runtime-log stream/table.
+The legacy `murph.assistant-turn-profile.v1` / `.v2` request, token, tool call,
+duration, failure and output-byte fields retain their existing meanings. Do not
+sum a native tool's inclusive duration with these CLI phases.
+
+### Ownership and transport
+
+Normal `runMurphCliEntrypoint` / `runMurphCliAction` calls open a timing scope;
+`createVaultCliShell` uses native Incur middleware's resolved registered command
+path and `next()`. Both scoped and full routing use that shell. Identity comes
+from the closed catalog in `runtime-state/cli-timing`, never shell parsing,
+arguments or result data. Unrecognized names and pre-resolution failures use
+`other`. Standalone setup/discovery paths without that middleware remain
+unattributed; persistent interactive/MCP sessions are not per-RPC measurements.
+
+`cli-entry.ts` loads `runtime-state/node/cli-timing` through native dynamic
+imports at its existing asynchronous entry/action and serve-options boundaries.
+This keeps the timing implementation and closed wire catalog out of the runner's
+static startup closure while native module caching preserves one ALS instance
+for entry, middleware, recursive batch actions and query scopes. The timing-owner
+import completes before the entry/action scope opens; that import is **not**
+included in `total` or relabelled as `setup`. No new loader, cached state owner or
+transport await is introduced. Canonical runner assembly still enforces the
+20,000-byte entry and 33,200-byte static-closure budgets.
+
+Web's own `apps/web/tsconfig.json` paths map includes both timing public subpaths
+from source. Its independent paths map must not rely on the root map or a prior
+runtime-state `dist` build. The existing source resolver and Next configuration
+remain the owners; no alias rewriter or compatibility shim is required.
+
+The existing usage extractor has no subprocess phase payload, and stdout/stderr
+are model-visible tool results. The small metadata seam below bridges only that
+missing boundary; it is not a new persisted log or monitoring service.
+
+The existing Codex process owns one unreferenced, loopback-only UDP endpoint and
+one bounded active-attempt collection window. Its explicit shell environment
+setting passes an ephemeral endpoint to naturally occurring CLI subprocesses.
+The existing hosted shell allowlist admits **only this new diagnostic name**;
+per-thread explicit allowlists receive the same narrow addition. Authentication,
+provider variables, sandbox/network permission and tool invocations are unchanged.
+Warm loaded threads may ignore resume overrides, so the endpoint lasts for the
+existing process, not one thread/resume. There is no awaited bind/send/flush,
+filesystem spool, retry, external request, daemon, collector service or keepalive.
+One best-effort datagram is sent when a root CLI scope naturally finishes. Neither
+stdout, stderr, native results nor prompts carry diagnostic text. An attempt with
+no native source events does not receive a diagnostic-only event: telemetry cannot
+turn an empty startup failure into provider activity. No caller flag
+or `--full-output` is required. Without the endpoint, the scope is a no-op.
+
+The complete route is:
+
+```text
+CLI entry + Incur dispatch + shared query-freshness scopes
+ -> runtime-state/node/cli-timing bounded root summary (loopback datagram)
+ -> existing CodexAppServerProcess active collection
+ -> diagnostic-only murph/cliTiming raw event (not model input or a new log)
+ -> buildAssistantCodexTurnProfileJson / extractCodexAssistantProviderUsage
+ -> existing hosted usage reporting, including detached-assistant-ask forwarding
+ -> hosted-execution parseAssistantUsageRecord independent optional normalization
+ -> usage-record-port optional timing fit against the complete HTTP body budget
+ -> existing /api/internal/hosted-execution/usage/record bounded body ingestion
+ -> apps/web hosted-execution/usage.ts JSON normalization
+ -> existing HostedAiUsage.turnProfileJson / hosted_ai_usage.turn_profile_json
+```
+
+No paths, IDs, argv, URLs, SQL, exception text, result values or health/provider
+data are retained. The transport key and same-host monotonic ticks only guard
+local collection-window admission and are stripped before the raw event/profile.
+This is best-effort diagnostic attribution, not an authorization or integrity
+ledger. Existing runtime/version dimensions, usage sampling and retention remain
+unchanged; there is no new subject/correlation label.
+
+### Timing semantics and completeness
+
+All durations use `process.hrtime.bigint()`, floored to integer **microseconds**.
+A command/outcome entry has `calls` and fixed phase summaries with `count`,
+`sumUs`, `maxUs` and eight bucket counts. The phases are **inclusive**, not an
+exclusive partition:
+
+| Phase | Boundary / interpretation |
+| --- | --- |
+| `total` | Entry/action scope until completion or an observed Incur exit. Excludes Node launch and imports before the entry scope opens. |
+| `setup` | Entry scope to first resolved Incur dispatch: lazy module loading, routing and vault selection done there. Later vault resolution remains in dispatch. Not pure startup. |
+| `dispatch` | `await next()` in native middleware: argument/environment validation, command handler and any stream consumption performed there. Not pure handler CPU or query time. |
+| `post-dispatch` | Middleware completion to action completion, including output/filtering/formatting performed there. Not pure serialization and not a guarantee of OS stream flush. |
+| `teardown` | The existing entrypoint warm-Codex cleanup; recursive batch actions do not perform this cleanup. |
+| `unattributed` | Action elapsed when no dispatch boundary was reached. It is not zero-cost setup or a guessed command phase. |
+| `query-freshness` | Shared `ensureFreshQueryProjection`, including its nested phases/rechecks. Applies across query callers/CLI families. |
+| `query-manifest` / `query-status` | Each existing canonical manifest scan / projection-status read, including rechecks. |
+| `query-rebuild` / `query-wait` | Existing single-flight leader rebuild / follower's wait for that same promise. Only the leader owns rebuild time. |
+
+Nested scope summaries must not be added to their inclusive parents. Concurrent
+or overlapping named spans can overlap in time; repeated rechecks increase phase
+`count`, not command `calls`. Remaining dispatch time is **unattributed work**:
+for example stored-row reads, composition or other handler work. This patch does
+not distinguish database, provider, query execution or serialization subphases.
+CPU timing is intentionally omitted: process-wide CPU deltas would mix concurrent
+invocations and single-flight owners, not reliably distinguish one caller's waits.
+
+Outcomes are only `ok`, `error`, `unknown`: a normal return, a thrown exception /
+observed nonzero Incur exit, or an observed thrown EPIPE whose existing bin policy
+handles it separately. There are no invented timeout, cancellation or retry
+classifications. Later asynchronous output failures may occur outside the scope;
+normal return does not certify final pipe delivery. Handler cancellation is an
+ordinary observed error unless the original owner returns normally. Hard kills
+produce **no fabricated completion**; immediate `process.exit`, network-isolated
+shells and late/failed datagrams may produce no report. The existing ordinary-member `murph-member-workspace` profile permits networking;
+that is the built-entry transport proof's profile. Read-only and other profiles
+with networking disabled remain unchanged and can therefore have no phase
+transport. Do not widen a permission profile to obtain telemetry. A denied socket
+in one validation host does not establish a permanent product restriction.
+
+The receiver uses CLI-root start/end ticks against its active window, not a join
+on native command item IDs. Roots begun in a prior window are rejected. A
+background shell starting a **new** CLI root during a later window is counted in
+that later collection window. Do not interpret CLI command outcomes as the outer
+provider attempt's success, or add the native and CLI call counts together.
+
+Structured batch recursively uses the same action boundary. Children have their
+own command, phases and outcomes; the inclusive parent contributes only
+`batchContainers`, never another latency sample. Unexecuted stop-on-error children
+and children rejected before entering the CLI have no invented command timing.
+Legacy batch output, counts, lengths, durations and failure handling are unchanged.
+
+Bounds are source-owned: 32 distinct command/outcome entries per report/active
+window; 11 fixed phase names; 64 started scoped spans per invocation (plus fixed
+lifecycle samples); at most 8,192 bytes per complete UDP envelope (including the
+ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
+the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
+changed. The sender trims before sending, and the receiver rejects envelopes
+over that same cap. No per-call list is retained. Known omitted/overflowed calls increment
+`droppedCalls`; capped or unfinished scoped spans increment `droppedSpans`.
+Payload trimming removes whole command summaries from the end of the bounded
+collection and includes their full call counts in `droppedCalls`; the retained
+samples are not a random sample. No packet splitting or retry is added.
+Arithmetic overflow drops the incoming command's contribution without changing
+legacy accounting. Packet-budget
+exhaustion sets `transportTruncated`; rejected cross-window roots increment
+`outOfWindowReports`. `reportCount` counts accepted root reports, not commands.
+These counters cannot quantify unreceived packets or hard-killed processes.
+A missing optional object/phase is **unknown**, never a duration of zero. An empty
+activated-window report is not proof every CLI invocation was observed.
+
+The complete usage-request ceiling is separately **16,384 UTF-8 bytes**, owned by
+`HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES` in `hosted-execution/runtime-control` and
+shared by the sender and Web route. Individually bounded datagrams can merge into
+an oversized HTTP payload. `runtime-platform/usage-record-port.ts` therefore
+normalizes/copies only `cliTiming` and measures the entire JSON body, including
+`usage`, the legacy profile and any notice target, before transport serialization
+and signing. It removes whole summaries from the end until the request fits,
+adding their calls to the existing saturating `droppedCalls`. Other counters and
+retained phases are unchanged; HTTP trimming does **not** set `transportTruncated`
+(which describes the packet budget). A counters-only timing object can remain.
+
+If even those counters do not fit, the optional `cliTiming` field is omitted.
+Absence then means unavailable timing, not zero work, and does not distinguish
+body-budget omission from older producers or missing transport. `droppedCalls`
+can only quantify omissions where the timing object survives. All legacy usage,
+provider-request, token, tool and notice-target fields are preserved; the queued
+record is not mutated. An already-oversized legacy request remains oversized and
+follows its existing rejection path rather than sacrificing accounting to fit.
+No request/packet cap, retry or flush behavior changes. The corrected sender works
+with the existing Web ceiling; this fix does not require coordinated deployment.
+
+The exact histogram intervals in milliseconds are `[0,250)`, `[250,1000)`,
+`[1000,2500)`, `[2500,5000)`, `[5000,10000)`, `[10000,30000)`,
+`[30000,60000)`, `[60000,+infinity)`. Measured zero is in bucket 0.
+For percentile rank `ceil(p * count)`, locate the first cumulative bucket covering
+that rank and report its **interval**, not its midpoint as a precise percentile.
+For the final bucket, the observed maximum supplies a finite upper bound on the
+retained sample. Histograms merge by summing corresponding counts; never compute
+per-call percentiles from per-profile averages. Truncation/loss means even those
+bounds describe the retained samples, not the complete population.
+
+### Bounded latest-72h / prior-72h inspection
+
+Run on the **primary usage database**. This example uses one stable UTC anchor,
+144 hours and a 50,000-row cap. A row-cap hit invalidates claims of complete period
+coverage (inspect narrower fixed windows instead). It selects a small closed
+operation subset; add only literal registered names from the contract, not argv
+or user-supplied labels. Arrays/numbers below come from the independently validated
+`murph.cli-timing.v1` object. No identifiers or free-text fields are selected.
+Coverage columns are per-period and repeated alongside phase rows; **do not sum
+them across phase rows**. Repeated query phases have sample counts, not unique
+command coverage. `total` is the per-command timing distribution.
+
+```sql
+WITH anchor AS (SELECT now() AT TIME ZONE 'UTC' AS end_at),
+rows AS MATERIALIZED (
+  SELECT CASE WHEN occurred_at >= end_at - interval '72 hours'
+              THEN 'latest72' ELSE 'prior72' END AS period,
+         turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage CROSS JOIN anchor
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= end_at - interval '144 hours' AND occurred_at < end_at
+  ORDER BY occurred_at DESC
+  LIMIT 50000
+), valid AS MATERIALIZED (
+  SELECT period, t FROM rows
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+), coverage AS (
+  SELECT r.period, count(*) AS usage_rows,
+         count(v.t) AS rows_with_timing,
+         sum((v.t ->> 'reportCount')::numeric) AS accepted_root_reports,
+         sum((v.t ->> 'droppedCalls')::numeric) AS dropped_calls,
+         sum((v.t ->> 'droppedSpans')::numeric) AS dropped_spans,
+         sum((v.t ->> 'outOfWindowReports')::numeric) AS cross_window_reports,
+         bool_or((v.t ->> 'transportTruncated')::boolean) AS packet_cap_hit
+  FROM rows r LEFT JOIN LATERAL (
+    SELECT r.t WHERE r.t ->> 'schema' = 'murph.cli-timing.v1'
+  ) v ON true
+  GROUP BY r.period
+), wanted(command) AS (
+  VALUES ('goal list'), ('family list'), ('memory show'), ('wearables latest'), ('wearables day'),
+         ('wearables activity list'), ('wearables sources list'), ('other')
+), commands AS (
+  SELECT v.period, c FROM valid v
+  CROSS JOIN LATERAL jsonb_array_elements(v.t -> 'commands') c
+  JOIN wanted w ON w.command = (c ->> 'command')
+  WHERE c ->> 'outcome' IN ('ok', 'error', 'unknown')
+), samples AS (
+  SELECT period, c ->> 'command' AS command, c ->> 'outcome' AS outcome, p
+  FROM commands CROSS JOIN LATERAL jsonb_array_elements(c -> 'phases') p
+  WHERE p ->> 'phase' IN ('total', 'setup', 'dispatch', 'post-dispatch',
+    'teardown', 'unattributed', 'query-freshness', 'query-manifest',
+    'query-status', 'query-rebuild', 'query-wait')
+), totals AS (
+  SELECT period, command, outcome, p ->> 'phase' AS phase,
+         sum((p ->> 'count')::numeric) AS phase_samples,
+         sum((p ->> 'sumUs')::numeric) / 1000 AS sum_ms,
+         max((p ->> 'maxUs')::numeric) / 1000 AS max_ms
+  FROM samples GROUP BY period, command, outcome, p ->> 'phase'
+), bins AS (
+  SELECT period, command, outcome, p ->> 'phase' AS phase,
+         b.ordinality - 1 AS bucket,
+         sum((b.value #>> '{}')::numeric) AS bucket_count
+  FROM samples
+  CROSS JOIN LATERAL jsonb_array_elements(p -> 'buckets')
+    WITH ORDINALITY AS b(value, ordinality)
+  GROUP BY period, command, outcome, p ->> 'phase', b.ordinality
+)
+SELECT t.*, t.sum_ms / nullif(t.phase_samples, 0) AS mean_ms,
+       b.bucket, b.bucket_count,
+       c.usage_rows, c.rows_with_timing, c.accepted_root_reports,
+       c.dropped_calls, c.dropped_spans, c.cross_window_reports, c.packet_cap_hit,
+       (SELECT count(*) = 50000 FROM rows) AS row_cap_hit
+FROM totals t JOIN bins b USING (period, command, outcome, phase)
+JOIN coverage c USING (period)
+ORDER BY period, command, outcome, phase, bucket
+LIMIT 4096;
+```
+
+To inspect coverage-only periods, including an all-legacy baseline with no timing
+samples, use the same `anchor`, `rows`, `valid`, `coverage` CTEs and finish with
+`SELECT * FROM coverage ORDER BY period LIMIT 2;`. A zero-count accepted report
+and absent telemetry are different; neither establishes complete native-call
+coverage. Do not filter exclusively to succeeded provider attempts when assessing
+CLI errors or aborted-attempt missingness.
+
+### Compatibility, rollout and proof
+
+Deploy the updated hosted `parseAssistantUsageRecord` consumer **first**, then
+publish runtime-state, query, CLI and the Codex-process producer/hosted allowlist
+in the usual runtime image. No migration, deployment workflow/configuration or
+release-contract bypass is needed. The allowlist edit is existing runtime shell
+metadata admission, not expanded tool/network permission. Older v1/v2 profiles
+remain readable. Old consumers drop the new optional key while retaining legacy
+profile/token accounting. New consumers accept old producers. A new CLI with an
+old launcher has no endpoint; a new launcher with an old CLI has no report. An
+unknown future diagnostic schema/name or malformed optional object is dropped
+independently, not a reason to reject valid legacy usage. Closed vocabulary
+expansions likewise require consumer-first admission. Rollback can lose optional
+coverage without changing tool execution or billing.
+
+Focused proof lives in runtime-state `cli-timing.test.ts`, CLI
+`cli-timing.test.ts`, query `query-projection-concurrency.test.ts`, and engine
+`cli-timing-{transport,profile}.test.ts`. Real transport tests send valid envelopes
+at exactly 8,192 bytes and at 8,193 bytes, so rejection exercises the receiver
+rather than the host UDP size limit. The natural sender test requires receipt
+of a trimmed report with nonempty summaries and conserved retained/dropped call
+counts. Datagram loss still leaves unquantified missingness. The runtime
+`hosted-runtime-codex-config.test.ts` built-entry test is an explicit opt-in:
+`MURPH_RUN_HOSTED_CLI_TIMING_E2E=1`. Default source/coverage shards do not build a
+CLI and skip only this artifact-dependent integration gate; deterministic fixture
+parsing/failure/parity tests and existing production-surface tests remain enabled.
+The parent must run the enabled gate successfully before marking the PR Ready.
+Once enabled, missing artifacts, native failures, blocked reads/networking and
+missing telemetry are hard failures, not reasons to skip.
+
+The gate uses the pinned real Codex binary and a synthetic local Responses
+provider, `buildHostedCodexConfigToml`, the unchanged `murph-member-workspace`
+profile and production shell allowlist, with only the synthetic vault as a
+workspace root. `MURPH_HOSTED_CLI_TIMING_CLI_BIN` optionally selects an absolute
+path to the freshly packaged `@murphai/murph` **`dist/bin.js`**. Without it, the
+test uses the checkout's `packages/cli/dist/bin.js`; this works only when that
+layout is already readable by the profile. The test checks the built entry and
+package name, but does not establish artifact freshness from the path: prepare
+from the current candidate immediately before the run. Both test variables are
+read by the test process only, not added to production environment admission.
+
+Prepare the actual package/closure under an already permitted temporary root,
+not a broad source-checkout copy or symlinks back to unreadable workspace files.
+The existing release packer retains built workspace payloads and patched bundled
+dependencies; native installation resolves the host's platform dependencies.
+This avoids the runner installer's intentional Linux-only platform target on
+macOS. The release packer's existing manifest also requires the public plugin
+build; that plugin is not installed into this CLI fixture. No staging owner or
+CI build is added. From the repository root on supported Node/pnpm:
+
+```sh
+set -eu
+pnpm --filter @murphai/murph... --filter @murphai/openclaw-plugin... build
+export MURPH_CLI_TIMING_ARTIFACT_ROOT="$(mktemp -d /tmp/murph-cli-timing.XXXXXX)"
+node scripts/pack-publishables.mjs \
+  --out-dir "$MURPH_CLI_TIMING_ARTIFACT_ROOT/tarballs" \
+  --pack-output "$MURPH_CLI_TIMING_ARTIFACT_ROOT/pack-output.json"
+node --input-type=module <<'NODE'
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const root = process.env.MURPH_CLI_TIMING_ARTIFACT_ROOT;
+const install = path.join(root, 'installed');
+mkdirSync(install);
+writeFileSync(path.join(install, 'package.json'), '{"private":true}\n');
+const manifest = JSON.parse(readFileSync(path.join(root, 'pack-output.json'), 'utf8'));
+const tarballs = manifest.packages
+  .filter(entry => entry.name !== '@murphai/openclaw-plugin')
+  .map(entry => path.resolve(entry.tarball));
+execFileSync('npm', ['install', '--prefix', install, '--omit=dev',
+  '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs], { stdio: 'inherit' });
+NODE
+export MURPH_HOSTED_CLI_TIMING_CLI_BIN="$MURPH_CLI_TIMING_ARTIFACT_ROOT/installed/node_modules/@murphai/murph/dist/bin.js"
+MURPH_RUN_HOSTED_CLI_TIMING_E2E=1 \
+  pnpm --dir packages/assistant-runtime exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/hosted-runtime-codex-config.test.ts -t 'shared CLI timing'
+```
+
+Packing/installing uses existing local package assets and ordinary public
+package dependencies, not provider credentials or production traffic. The test
+itself uses local synthetic providers only. Preparation failures must be fixed
+before running the gate; no registry package may substitute for the candidate's
+local Murph tarballs. Remove the temporary artifact root after validation. This
+is a local artifact operation, not a deploy command or release-contract bypass.
+
+All test homes, vaults, working directories and provider keys are synthetic.
+The shell sets test-only `OPENSSL_CONF=/dev/null`; initialization and both parity
+children use it, without widening the production allowlist. There is no source
+loader, unrestricted sandbox substitution, new filesystem grant or extra runtime
+workspace root. A readable CLI artifact does not prove every installed Node or
+dependency read is permitted; subsequent native failures remain explicit.
+
+The fixture runs telemetry-disabled and enabled built children inside the **same**
+hosted shell/profile, comparing their completed exit status and each stdout/stderr
+stream byte-for-byte. It checks the current call's authoritative
+`custom_tool_call_output` selected by the current call ID, rather than assuming
+nested `tools.exec_command` emits `commandExecution` events. The fixture emits
+one fixed `MURPH_CLI_TIMING_SHELL_RESULT=` line inside that native output; native
+status/wall-time/Output framing need not start with JSON. Missing/duplicate or
+malformed sentinel lines, shell failure and child failure all fail the proof.
+This sentinel is test-only output, never production tool text or telemetry. The
+disabled child has no endpoint and must contribute no report. Scoped `goal list` and full-router
+`family list` must expose lifecycle phases, **not** query freshness. A separate
+built `wearables latest` invocation reaches the real query owner and must expose
+`query-manifest`, `query-status`, and `query-freshness` on the synthetic vault.
+No query calls are added to non-query commands. A nonempty session, unchanged
+session on continuation, and native `warm-reused` traces are required.
+
+Passing this gate establishes built CLI -> hosted shell -> Codex raw diagnostic
+transport; the engine profile test composes it with the actual extractor -> hosted
+normalization boundary. Separate startup cases distinguish no native event from
+an actual native RPC error and retain the latter. Their receiver fixture mirrors
+the one-shot production close contract: catch and finally can both finish cleanup,
+but only the first can return a diagnostic. Empty startup failures remain empty;
+native error evidence remains present exactly once. The profile token fixture is a valid
+native notification, so request accounting is tested as well as tool accounting.
+The history-dependent profile test loads the consumer source from the exact Git
+base supplied in `MURPH_CLI_TIMING_COMPAT_BASE`; no copy of the old parser is kept
+in the repository. Run that explicit gate from the active plan. A current-parser
+roundtrip of field-stripped data is only legacy-shape proof, not mixed-version
+proof. Ordinary runs without the base variable explicitly skip this additional
+history-dependent case.
+
+For source-resolution and startup-loading corrections, run the focused guards
+from the repository root before the existing built hosted proof:
+
+```sh
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+  apps/web/test/next-config.test.ts
+pnpm --dir apps/web typecheck:prepared
+pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage \
+  packages/cli/test/cli-timing.test.ts packages/cli/test/cli-entry.test.ts \
+  packages/cli/test/batch.test.ts packages/cli/test/batch-protocol-error-stages.test.ts \
+  packages/cli/test/assistant-codex.test.ts \
+  packages/cli/test/vault-cli-import-surface-contract.test.ts
+pnpm --dir packages/cli typecheck
+# Canonical production assembly on Linux x86_64; no deploy and no budget override.
+pnpm --dir apps/cloudflare runner:bundle
+```
+
+The Web typecheck uses the normal generated-data preparation prerequisites, not
+prebuilt timing declarations as a substitute for source resolution. Import
+laziness tests are not a replacement for the assembly byte budgets or bundled
+parity probes. Refresh the test CLI artifact after the loading change and rerun
+the enabled hosted gate above; CI still owns exact-head Linux assembly and the
+existing exact-first-parent total-output comparison.
+
+For the merged-profile HTTP budget, run the composed sender/ingestion regression
+and the route's exact byte-limit checks (no built CLI or external service needed):
+
+```sh
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage \
+  apps/cloudflare/test/usage-record-port.test.ts
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+  apps/web/test/hosted-execution-usage-route.test.ts
+pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts \
+  --no-coverage test/assistant-usage.test.ts
+```
+
+The composed test uses real timing scopes/merge, sender and transport serialization,
+then Web's actual bounded body reader and request parser through the existing
+`#hosted-web-testing` seam. Providers, callback authentication, fetch and persistence
+are synthetic; the fixture does not execute CLI handlers or make network requests.
+It covers 24 distinct root summaries, maximum admitted cardinality, UTF-8/notice
+headroom, counters-only and absent timing, and unchanged oversized legacy failure.
+The separate route test checks both declared-length and streamed-byte enforcement
+before allowance settlement. Ordinary source CI runs both owners without a new gate.
+
+The warm `packages/runtime-state/bench/cli-timing.ts` microbenchmark rotates
+baseline, disabled and enabled timing over warm blocks; it excludes transport
+and actual CLI/query work and reports block means, not per-call percentiles or a
+production speedup. Run it with `node --import tsx` (no tsx CLI IPC). Parent
+validation must run repository tests/typechecks/builds, the actual complexity
+guard and the built hosted lane on supported Node/pnpm and pinned Codex versions
+before promotion. This telemetry patch does not authorize merging, deployment,
+or bypassing the protected public-main release contract.

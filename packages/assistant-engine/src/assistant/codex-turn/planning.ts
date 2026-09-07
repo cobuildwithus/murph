@@ -1077,9 +1077,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           currentAudienceDeliveryFields.channel === 'linq' &&
           currentAudienceDeliveryFields.threadIsDirect === true &&
           userActionAcceptedInputIds.length > 0,
+        conversationAttachmentsAvailable:
+          isConversationMediaTurn(privateInteractiveProviderTurn, authenticatedGroupProviderTurn, userActionAcceptedInputIds) &&
+          input.hostedToolContext?.currentConversationAttachmentAuthorities !== undefined,
         analyzeVideoAvailable:
-          (privateInteractiveProviderTurn || authenticatedGroupProviderTurn) &&
-          userActionAcceptedInputIds.length > 0 &&
+          isConversationMediaTurn(privateInteractiveProviderTurn, authenticatedGroupProviderTurn, userActionAcceptedInputIds) &&
           normalizeNullableString(
             input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],
           ) !== null,
@@ -1660,4 +1662,12 @@ function resolveAssistantEffectiveCodexResumeThreadId(input: {
   resumeCodexThreadId: string | null
 }): string | null {
   return normalizeNullableString(input.resumeCodexThreadId)
+}
+
+function isConversationMediaTurn(
+  privateTurn: boolean,
+  groupTurn: boolean,
+  acceptedInputIds: readonly string[],
+): boolean {
+  return (privateTurn || groupTurn) && acceptedInputIds.length > 0
 }

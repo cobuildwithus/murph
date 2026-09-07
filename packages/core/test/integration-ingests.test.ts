@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
+import { brotliDecompressSync, crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
 import { test } from "vitest";
 
 import type { IntegrationIngestRecord } from "@murphai/contracts";
@@ -525,7 +525,7 @@ test("closed integration ingest months archive deterministically while current a
   });
 
   assert.deepEqual(firstResult, {
-    archivedByteCount: (await fs.stat(path.join(firstVaultRoot, `${closedPath}.gz`))).size,
+    archivedByteCount: (await fs.stat(path.join(firstVaultRoot, `${closedPath}.br`))).size,
     archivedShardCount: 1,
     blockedShardCount: 0,
     repairedShardCount: 0,
@@ -537,12 +537,12 @@ test("closed integration ingest months archive deterministically while current a
   await fs.access(path.join(firstVaultRoot, currentPath));
   await fs.access(path.join(firstVaultRoot, futurePath));
   assert.deepEqual(
-    gunzipSync(await fs.readFile(path.join(firstVaultRoot, `${closedPath}.gz`))),
+    brotliDecompressSync(await fs.readFile(path.join(firstVaultRoot, `${closedPath}.br`))),
     closedContent,
   );
   assert.deepEqual(
-    await fs.readFile(path.join(firstVaultRoot, `${closedPath}.gz`)),
-    await fs.readFile(path.join(secondVaultRoot, `${closedPath}.gz`)),
+    await fs.readFile(path.join(firstVaultRoot, `${closedPath}.br`)),
+    await fs.readFile(path.join(secondVaultRoot, `${closedPath}.br`)),
   );
   assert.deepEqual(
     (await readIntegrationIngestEntries(firstVaultRoot)).map((entry) => entry.record.id),
@@ -575,9 +575,9 @@ test("automatic integration ingest archiving blocks invalid shards without delay
   assert.equal(result.archivedShardCount, 1);
   assert.equal(result.blockedShardCount, 1);
   await fs.access(path.join(vaultRoot, invalidPath));
-  await assert.rejects(fs.access(path.join(vaultRoot, `${invalidPath}.gz`)));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${invalidPath}.br`)));
   await assert.rejects(fs.access(path.join(vaultRoot, validPath)));
-  await fs.access(path.join(vaultRoot, `${validPath}.gz`));
+  await fs.access(path.join(vaultRoot, `${validPath}.br`));
 });
 
 test("automatic integration ingest archive recovery removes only an exact interrupted raw duplicate", async () => {
@@ -684,7 +684,7 @@ test("automatic integration ingest archiving makes no change when already aborte
     vaultRoot,
   }));
   await fs.access(path.join(vaultRoot, logicalPath));
-  await assert.rejects(fs.access(path.join(vaultRoot, `${logicalPath}.gz`)));
+  await assert.rejects(fs.access(path.join(vaultRoot, `${logicalPath}.br`)));
 });
 
 test("integration evidence novelty reads bounded gzip and zip target archives", async () => {
@@ -1664,7 +1664,7 @@ test("integration ingest archive amendments roll back with canonical write batch
   assert.equal(await fs.readFile(path.join(vaultRoot, conflictPath), "utf8"), "existing\n");
 });
 
-test("automatic gzip integration ingest archive amendments stream and roll back", async () => {
+test("automatic Brotli integration ingest archive amendments stream and roll back", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-gzip-amendment");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
 
@@ -1680,8 +1680,8 @@ test("automatic gzip integration ingest archive amendments stream and roll back"
     vaultRoot,
   })).archivedShardCount, 1);
 
-  const gzipPath = path.join(vaultRoot, `${logicalPath}.gz`);
-  const originalGzip = await fs.readFile(gzipPath);
+  const archivePath = path.join(vaultRoot, `${logicalPath}.br`);
+  const originalGzip = await fs.readFile(archivePath);
   const newRecord = makeIntegrationIngestRecord({
     id: "xfm_GzipAmendment2",
     eventId: "evt_GzipAmendment2",
@@ -1712,7 +1712,7 @@ test("automatic gzip integration ingest archive amendments stream and roll back"
   );
 
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
-  assert.deepEqual(await fs.readFile(gzipPath), originalGzip);
+  assert.deepEqual(await fs.readFile(archivePath), originalGzip);
   assert.deepEqual(
     (await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id),
     ["xfm_GzipAmendment1"],
@@ -1729,7 +1729,7 @@ test("automatic gzip integration ingest archive amendments stream and roll back"
 
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
   assert.deepEqual(
-    gunzipSync(await fs.readFile(gzipPath)).toString("utf8"),
+    brotliDecompressSync(await fs.readFile(archivePath)).toString("utf8"),
     `${JSON.stringify(archivedRecord)}\n${JSON.stringify(newRecord)}\n`,
   );
   assert.deepEqual(

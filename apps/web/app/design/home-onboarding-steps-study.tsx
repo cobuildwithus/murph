@@ -36,6 +36,9 @@ export function HomeOnboardingStepsStudy() {
         messageMurphAction={<StudyAction primary>Message</StudyAction>}
         uploadLabsAction={<StudyAction>Sync</StudyAction>}
       />
+      <div id="home-onboarding-complete" className="mt-8" data-design-section="home-onboarding-complete">
+        <OnboardingSteps showDeviceStep={false} hideLabsStep />
+      </div>
     </div>
   );
 }

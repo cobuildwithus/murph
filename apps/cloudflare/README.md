@@ -304,6 +304,20 @@ Postgres and PgBouncer families require the provider's explicit
 `planetscale_role="primary"` label; missing role metadata makes that family
 incomplete instead of treating mixed or replica data as primary.
 
+Postgres connection-state series with empty or omitted state labels retain their
+observed counts under the empty state key. They contribute to total utilization
+without inventing a named state or discarding other states. This follows
+[Prometheus empty-label semantics](https://prometheus.io/docs/concepts/data_model/).
+An absent primary family stays unknown; PgBouncer pool labels still require a
+nonempty value.
+
+Missing Postgres-state warnings include one `postgresStateSeries` entry per
+successfully parsed scrape, in collection order. Each entry counts series for
+the configured branch, split into primary, replica, and missing or unrecognized
+roles. Zero branch series distinguishes provider omission from unusable primary
+provenance. These diagnostics contain no label values or raw metrics, add no
+provider calls, and do not change paging or persisted samples.
+
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
 metric series. Both selectors are required because one organization can have
@@ -486,6 +500,22 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ## Private Operational Telemetry
 
+Existing hosted fetch-failure logs may include `fetchNetworkErrorCode`: the first
+exact allowlisted code (`ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND`, `EPIPE`,
+`ETIMEDOUT`, `UND_ERR_SOCKET`, `UND_ERR_CONNECT_TIMEOUT`, `UND_ERR_HEADERS_TIMEOUT`,
+`UND_ERR_BODY_TIMEOUT`) in at most four cause-chain objects, including the direct
+fetch error. Capture reads only own `code`/`cause` data properties, stops on cycles
+or unsafe inspection, and revalidates the optional wrapper field before safe
+metadata projection; unavailable or unapproved values are omitted, not inferred.
+It adds no error text, stack, endpoint, socket, header, or payload data and changes
+no classification, abort, retry, authority, persistence, request, or event count.
+Existing Workers log volume, sampling, and retention settings remain unchanged;
+see the documented [maximum seven-day Workers Logs retention](https://developers.cloudflare.com/workers/observability/logs/workers-logs/#limits).
+After a separately gated rollout, observe existing
+aggregates for 24 hours for known socket/DNS/connection/timeout codes versus
+unavailable; do not induce production failures or replay. Retain the field only
+while it has diagnostic value under that policy.
+
 ### Web-control preflight rejections
 
 Ordinary runtime callers select a branded route descriptor from the same
@@ -612,6 +642,24 @@ timestamp; a warm instance therefore remains eligible only for the existing
 route-to-RPC aggregate. Other per-phase chronology guards omit unavailable or
 reversed cross-runtime clock samples. The report returns no member, mailbox,
 trace, or attempt identifiers.
+
+Fresh starts overlap workspace metadata and runtime crypto reads with slot
+allocation after admission. The reads use the original command budget and stay
+local to that invocation; unused failures are observed if allocation returns a
+retry. Fenced preparation rechecks the budget and member ownership before
+binding workspace facts. It also overlaps immutable slot-binding verification
+with runner-secret and snapshot-restore preparation. Launch still requires the
+exact active write fence, verified member binding, usage admission and container
+readiness. Warm active-runtime wakes do not start these fresh preparation reads.
+Fresh allocation carries its verified immutable binding result into that same
+request's fenced preparation, avoiding a second binding RPC. The receipt is
+validated against the selected slot, member, claim format, region and release;
+it is neither persisted nor sent to the container. Retained/direct preparation
+still reads binding evidence, and the container still checks its live bound
+member at launch. Exact bind-response recovery can reuse its verified result.
+The individual read timings overlap allocation and each other; they are not
+additive slices of `runtimeInvocationPreparationElapsedMs`, which measures the
+remaining fenced preparation call.
 
 ## Runner Container Lifecycle
 

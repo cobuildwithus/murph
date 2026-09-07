@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { type AddressInfo } from "node:net";
@@ -6,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { afterEach, test } from "vitest";
 
@@ -66,6 +68,10 @@ import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
 } from "../src/hosted-runtime/codex-shell-env-policy.ts";
 
+import {
+  CLI_TIMING_EVENT_METHOD, normalizeCliTiming,
+} from "@murphai/runtime-state/cli-timing";
+
 const temporaryPaths: string[] = [];
 
 test("selects the expanded catalog only with explicit workspace Astra authority", () => {
@@ -80,6 +86,10 @@ const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E ==
 const RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E =
   process.env.MURPH_RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E === "1";
 const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
+const testHostedCliTimingE2e = process.env.MURPH_RUN_HOSTED_CLI_TIMING_E2E === "1"
+  ? test
+  : test.skip;
+const CLI_TIMING_SHELL_RESULT_PREFIX = "MURPH_CLI_TIMING_SHELL_RESULT=";
 const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
   ? test
   : test.skip;
@@ -103,6 +113,263 @@ const EXPECTED_SUBAGENT_USAGE_HINT = [
   "Complete only the self-contained assignment and stop.",
   "Do not spawn or delegate to another child.",
 ].join(" ");
+
+// Explicit artifact-dependent acceptance gate; ordinary source/coverage shards
+// do not build a CLI. When enabled, missing artifacts and permission/transport
+// failures are hard failures. The optional path selects a freshly packaged CLI
+// in an ALREADY permitted location, never a source loader or an extra grant.
+testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions and environment on cold and warm turns", {
+  timeout: 240_000,
+}, async () => {
+  const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  const cliBin = process.env.MURPH_HOSTED_CLI_TIMING_CLI_BIN ??
+    path.join(repositoryRoot, "packages/cli/dist/bin.js");
+  assert.ok(path.isAbsolute(cliBin), "MURPH_HOSTED_CLI_TIMING_CLI_BIN must be absolute.");
+  assert.equal(path.basename(cliBin), "bin.js", "Use the actual packaged dist/bin.js entry.");
+  assert.equal(path.basename(path.dirname(cliBin)), "dist");
+  assert.equal((await stat(cliBin)).isFile(), true, "Prepare the built CLI artifact before enabling this gate.");
+  const cliPackage = parseJsonObject(await readFile(path.resolve(cliBin, "../../package.json"), "utf8"));
+  assert.equal(cliPackage?.name, "@murphai/murph", "The entry must belong to the real CLI package.");
+  const codexCommand = path.join(repositoryRoot, "packages/assistant-engine/node_modules/.bin/codex");
+  const directory = await createTemporaryDirectory();
+  const vaultRoot = path.join(directory, "PRIVATE_SENTINEL-vault");
+  const codexHome = path.join(directory, "codex-home");
+  await mkdir(codexHome, { recursive: true });
+  // Never inherit developer/provider credentials. OPENSSL_CONF is fixture-only:
+  // avoid a host-specific config read outside the existing filesystem grants.
+  // The scripted shell sets it explicitly below, NOT through a widened allowlist.
+  const env = {
+    HOME: directory, CODEX_HOME: codexHome, TMPDIR: directory,
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH, VAULT: vaultRoot,
+    OPENSSL_CONF: "/dev/null",
+    [HOSTED_RUNTIME_PROCESS_ENV]: "1",
+    OPENAI_API_KEY: "synthetic-local-provider",
+  };
+  await promisify(execFile)(process.execPath, [
+    cliBin, "init", "--vault", vaultRoot, "--timezone", "UTC", "--format", "json",
+  ], { cwd: directory, env, encoding: "utf8", timeout: 30_000 });
+  const requests: string[] = [];
+  let command = "";
+  const server = await startResponsesStubServer({
+    requests,
+    requiredAuthorization: "Bearer synthetic-local-provider",
+    responseText: "CLI_TIMING_PARITY_OK",
+    customToolCallForRequest: (_body, requestIndex) => requestIndex % 2 === 1
+      ? { name: "exec", input: `const result = await tools.exec_command({cmd: ${JSON.stringify(command)}, yield_time_ms: 30000}); text(${JSON.stringify(CLI_TIMING_SHELL_RESULT_PREFIX)} + JSON.stringify({exitCode: result.exit_code, output: result.output}));` }
+      : undefined,
+  });
+  try {
+    const config = buildHostedCodexConfigToml({
+      exposeSpawnAgentModelOverrides: false,
+      model: "gpt-5.6-terra",
+      reasoningEffort: "low",
+      provider: {
+        id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+        name: "Synthetic local provider",
+        baseUrl: `${readServerBaseUrl(server)}/v1`,
+        envKey: "OPENAI_API_KEY",
+        wireApi: "responses",
+        supportsWebSockets: false,
+      },
+    });
+    await writeFile(path.join(codexHome, "config.toml"), config, { mode: 0o600 });
+    let resumeSessionId: string | undefined;
+    for (const route of [
+      { args: ["goal", "list"], command: "goal list", query: false },
+      { args: ["family", "list"], command: "family list", query: false },
+      { args: ["wearables", "latest", "--date", "2026-09-04"], command: "wearables latest", query: true },
+    ]) {
+      command = buildCliTimingParityCommand([
+        cliBin, ...route.args, "--vault", vaultRoot, "--format", "json",
+      ]);
+      const priorSessionId = resumeSessionId;
+      const stages: string[] = [];
+      const requestStart = requests.length;
+      const result = await executeCodexAppServerTurn({
+        abortSignal: AbortSignal.timeout(60_000),
+        approvalPolicy: "never", codexCommand, codexHome, env,
+        permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+        sandbox: undefined,
+        runtimeWorkspaceRoots: [vaultRoot], vaultRoot, workingDirectory: vaultRoot,
+        resumeSessionId,
+        prompt: "Execute the synthetic local command and report its scripted result.",
+        onTraceEvent: ({ rawEvent }) => {
+          if (isJsonObject(rawEvent) && typeof rawEvent.codexTimingStage === "string") {
+            stages.push(rawEvent.codexTimingStage);
+          }
+        },
+      });
+      assert.ok(result.sessionId, "A nonempty native session is required for the warm-turn proof.");
+      resumeSessionId = result.sessionId;
+      if (priorSessionId !== undefined) {
+        assert.equal(result.sessionId, priorSessionId);
+        assert.ok(stages.includes("warm-reused"), "Later invocations must reuse the live Codex process.");
+      }
+      assert.equal(result.finalMessage, "CLI_TIMING_PARITY_OK");
+      assert.equal(requests.length - requestStart, 2);
+      // exec's authoritative custom output exists even when Node fails before
+      // a CLI launch. Do not assume nested tools emit commandExecution items.
+      const output = readCliTimingShellOutput(requests[requestStart + 1]!,
+        `call_resp_hosted_codex_config_${requestStart + 1}`);
+      assertCliTimingChildParity(output);
+      const diagnostic = result.jsonEvents.find((event) =>
+        isJsonObject(event) && event.method === CLI_TIMING_EVENT_METHOD);
+      assert.ok(isJsonObject(diagnostic) && isJsonObject(diagnostic.params));
+      assert.equal(diagnostic.params.turnId, result.turnId);
+      const timing = normalizeCliTiming(diagnostic.params.timing);
+      assert.ok(timing, "A real subprocess report must traverse hosted shell admission and permissions.");
+      assert.deepEqual(timing.commands.map((entry) => entry.command), [route.command]);
+      // The baseline child has NO endpoint. Only the enabled child contributes.
+      assert.equal(timing.reportCount, 1);
+      assert.equal(timing.commands[0]!.calls, 1);
+      assert.equal(timing.commands[0]!.outcome, "ok");
+      assert.equal(timing.transportTruncated, false);
+      const phases = timing.commands[0]!.phases.map((phase) => phase.phase);
+      for (const phase of ["setup", "dispatch", "post-dispatch", "teardown", "total"] as const) {
+        assert.ok(phases.includes(phase), `Missing real ${route.command} phase ${phase}.`);
+      }
+      // goal is scoped, family full; neither route uses projection freshness.
+      // wearables latest reaches the actual query owner on the synthetic vault.
+      for (const phase of ["query-freshness", "query-manifest", "query-status"] as const) {
+        assert.equal(phases.includes(phase), route.query, `${route.command}: ${phase}`);
+      }
+      assert.equal(JSON.stringify(timing).includes("PRIVATE_SENTINEL"), false);
+      assert.doesNotMatch(output, /murph\/cliTiming|MURPH_CLI_TIMING_ENDPOINT/u);
+    }
+  } finally {
+    await stopWarmCodexAppServer();
+    await closeHttpServer(server);
+  }
+});
+
+function quoteCliTimingShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function buildCliTimingParityCommand(argv: readonly string[]): string {
+  // Fixture launcher only: run the ACTUAL built entry twice, under the SAME
+  // hosted shell/profile. Packaging happens before the gate, not by copying a
+  // source checkout into it. No source loader or extra runtime roots.
+  // Base64 preserves each output stream's exact bytes, including empty output.
+  const fixture = `
+    const { spawnSync } = require("node:child_process");
+    if (!process.env.MURPH_CLI_TIMING_ENDPOINT) throw Error("Missing diagnostic admission");
+    const baselineEnv = { ...process.env };
+    delete baselineEnv.MURPH_CLI_TIMING_ENDPOINT;
+    function run(env) {
+      const child = spawnSync(process.execPath, process.argv.slice(1), {
+        env, timeout: 25000, maxBuffer: 1024 * 1024,
+      });
+      return { status: child.status, signal: child.signal,
+        error: child.error?.message ?? null,
+        stdout: child.stdout?.toString("base64") ?? null,
+        stderr: child.stderr?.toString("base64") ?? null };
+    }
+    process.stdout.write(JSON.stringify({ baseline: run(baselineEnv), enabled: run(process.env) }) + "\\n");
+  `;
+  return "OPENSSL_CONF=/dev/null " + [process.execPath, "-e", fixture, "--", ...argv]
+    .map(quoteCliTimingShellLiteral).join(" ");
+}
+
+function readCliTimingShellOutput(request: string, callId: string): string {
+  const input = parseJsonObject(request)?.input;
+  assert.ok(Array.isArray(input));
+  const items = input.filter((item) => isJsonObject(item) &&
+    item.type === "custom_tool_call_output" && item.call_id === callId);
+  assert.equal(items.length, 1, "Require the current call's native output, not prior warm history.");
+  const value: unknown = items[0]!.output;
+  const text = typeof value === "string" ? value : Array.isArray(value)
+    ? value.flatMap((part) => isJsonObject(part) && typeof part.text === "string" ? [part.text] : []).join("\n")
+    : "";
+  // Native exec wraps text with status/wall-time/Output headers. Read only our
+  // single fixture-owned line, never arbitrary JSON from a child or warm history.
+  const resultLines = text.split(/\r?\n/u).filter((line) => line.startsWith(CLI_TIMING_SHELL_RESULT_PREFIX));
+  assert.equal(resultLines.length, 1, `Expected one current-call fixture result in native output: ${text}`);
+  const result = parseJsonObject(resultLines[0]!.slice(CLI_TIMING_SHELL_RESULT_PREFIX.length));
+  assert.ok(result, `Malformed fixture result in native output: ${text}`);
+  assert.equal(result.exitCode, 0, `Hosted shell failed before parity proof: ${text}`);
+  assert.equal(typeof result.output, "string");
+  return result.output as string;
+}
+
+function assertCliTimingChildParity(output: string): void {
+  const proof = parseJsonObject(output);
+  assert.ok(proof && isJsonObject(proof.baseline) && isJsonObject(proof.enabled), output);
+  for (const child of [proof.baseline, proof.enabled]) {
+    assert.equal(child.error, null, "The built child must launch, not just return a shell success.");
+    assert.equal(child.signal, null);
+    assert.equal(typeof child.stdout, "string");
+    assert.equal(typeof child.stderr, "string");
+    assert.equal(child.status, 0, `Built CLI failed under hosted permissions: ${Buffer.from(child.stderr as string, "base64").toString("utf8")}`);
+  }
+  assert.equal(proof.enabled.stdout, proof.baseline.stdout, "Built stdout bytes changed.");
+  assert.equal(proof.enabled.stderr, proof.baseline.stderr, "Built stderr bytes changed.");
+  // Both the result and its byte representation survive. A fixture accidentally
+  // invoking an empty shell is not useful parity evidence.
+  const stdout = Buffer.from(proof.enabled.stdout as string, "base64").toString("utf8");
+  const stderr = Buffer.from(proof.enabled.stderr as string, "base64").toString("utf8");
+  assert.doesNotMatch(stdout + stderr, /murph\/cliTiming|MURPH_CLI_TIMING_ENDPOINT/u);
+  assert.doesNotThrow(() => JSON.parse(stdout));
+}
+
+// These deterministic source tests stay mandatory when the built gate is off.
+test("shared CLI timing fixture reads native framing and selects only the current call", () => {
+  const output = "synthetic stdout\n";
+  const line = CLI_TIMING_SHELL_RESULT_PREFIX + JSON.stringify({ exitCode: 0, output });
+  for (const wrapped of [
+    `Script completed\nWall time 3.3 seconds\nOutput:\n\n${line}\n`,
+    [{ type: "text", text: `Script completed\r\nOutput:\r\n${line}\r\n` }],
+  ]) {
+    const request = JSON.stringify({ input: [
+      { type: "custom_tool_call_output", call_id: "prior", output: line.replace("synthetic", "stale") },
+      { type: "custom_tool_call_output", call_id: "current", output: wrapped },
+    ] });
+    assert.equal(readCliTimingShellOutput(request, "current"), output);
+  }
+});
+
+test("shared CLI timing fixture rejects missing, malformed and failed current-call evidence", () => {
+  const line = CLI_TIMING_SHELL_RESULT_PREFIX + JSON.stringify({ exitCode: 0, output: "proof" });
+  for (const text of [
+    'Script failed\nOutput:\nOperation not permitted',
+    JSON.stringify({ exitCode: 0, output: "Unframed JSON is not our fixture." }),
+    `${line}\n${line}`,
+    CLI_TIMING_SHELL_RESULT_PREFIX + "{broken",
+    CLI_TIMING_SHELL_RESULT_PREFIX + JSON.stringify({ exitCode: 1, output: "MODULE_NOT_FOUND" }),
+    CLI_TIMING_SHELL_RESULT_PREFIX + JSON.stringify({ output: "No terminal shell status." }),
+    CLI_TIMING_SHELL_RESULT_PREFIX + JSON.stringify({ exitCode: 0, output: null }),
+  ]) {
+    const request = JSON.stringify({ input: [
+      { type: "custom_tool_call_output", call_id: "prior", output: line },
+      { type: "custom_tool_call_output", call_id: "current", output: text },
+    ] });
+    assert.throws(() => readCliTimingShellOutput(request, "current"));
+  }
+  const current = { type: "custom_tool_call_output", call_id: "current", output: line };
+  assert.throws(() => readCliTimingShellOutput(JSON.stringify({ input: [current, current] }), "current"));
+  assert.throws(() => readCliTimingShellOutput(JSON.stringify({ input: [current] }), "missing"));
+});
+
+test("shared CLI timing fixture requires completed children and exact per-stream parity", () => {
+  const child = { status: 0, signal: null, error: null,
+    stdout: Buffer.from('{"ok":true}\n').toString("base64"), stderr: "" };
+  assert.doesNotThrow(() => assertCliTimingChildParity(JSON.stringify({ baseline: child, enabled: child })));
+  // Identical failures are not successful parity, even when the shell exits 0.
+  for (const failed of [
+    { ...child, status: 1, stderr: Buffer.from("MODULE_NOT_FOUND").toString("base64") },
+    { ...child, status: null, signal: "SIGTERM" },
+    { ...child, error: "spawn EPERM" },
+    { ...child, stdout: "" },
+  ]) {
+    assert.throws(() => assertCliTimingChildParity(JSON.stringify({ baseline: failed, enabled: failed })));
+  }
+  for (const changed of [
+    { ...child, stdout: Buffer.from('{"ok":true}').toString("base64") },
+    { ...child, stderr: Buffer.from("unexpected stderr").toString("base64") },
+  ]) {
+    assert.throws(() => assertCliTimingChildParity(JSON.stringify({ baseline: child, enabled: changed })));
+  }
+});
 
 test("hosted Codex memory diagnostics expose only safe config metadata", () => {
   assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
@@ -393,6 +660,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /include_only = \[/u);
   assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
+  assert.match(config, /"MURPH_CLI_TIMING_ENDPOINT"/u);
   assert.doesNotMatch(config, /"MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
@@ -2125,7 +2393,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[shell_environment_policy]",
       'inherit = "all"',
       "ignore_default_excludes = true",
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_CLI_TIMING_ENDPOINT", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
@@ -2375,6 +2643,9 @@ function isRetryableTemporaryCleanupError(error: unknown): boolean {
 }
 
 async function startResponsesStubServer(input: {
+  customToolCallForRequest?: (
+    body: string, requestIndex: number,
+  ) => { name: string; input: string } | undefined;
   authorizationHeaders?: string[];
   captureWebSocketMemoryMarkers?: boolean;
   compactionOutputKind?: "compaction" | "message";
@@ -2465,6 +2736,7 @@ async function startResponsesStubServer(input: {
       const parsedBody = parseJsonObject(body);
       if (parsedBody?.stream === true) {
         writeResponsesStubStream({
+          customToolCall: input.customToolCallForRequest?.(body, requestIndex),
           outputKind: input.compactionRequestIndexes?.has(requestIndex)
             ? input.compactionOutputKind ?? "compaction"
             : "message",
@@ -2692,6 +2964,7 @@ function enableCodexNativeMemoryForRegression(
 }
 
 function writeResponsesStubStream(input: {
+  customToolCall?: { name: string; input: string };
   outputKind: "compaction" | "message";
   response: ServerResponse;
   responseId: string;
@@ -2699,7 +2972,16 @@ function writeResponsesStubStream(input: {
   usage: ResponsesStubUsage;
 }): void {
   const messageId = `msg_${input.responseId}`;
-  const outputItem = input.outputKind === "compaction"
+  const outputItem = input.customToolCall
+    ? {
+        call_id: `call_${input.responseId}`,
+        id: `ctcall_${input.responseId}`,
+        input: input.customToolCall.input,
+        name: input.customToolCall.name,
+        status: "completed",
+        type: "custom_tool_call",
+      }
+    : input.outputKind === "compaction"
     ? {
         encrypted_content: input.responseText,
         type: "compaction",
@@ -2737,6 +3019,13 @@ function writeResponsesStubStream(input: {
     },
     type: "response.created",
   });
+  if (input.customToolCall) {
+    writeResponsesStubSseEvent(input.response, "response.output_item.added", {
+      item: { ...outputItem, status: "in_progress" },
+      output_index: 0,
+      type: "response.output_item.added",
+    });
+  }
   writeResponsesStubSseEvent(input.response, "response.output_item.done", {
     item: outputItem,
     output_index: 0,

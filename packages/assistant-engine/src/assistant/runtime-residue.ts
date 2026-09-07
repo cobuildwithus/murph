@@ -1,3 +1,4 @@
+import { hasRetainedAssistantInputMedia } from './input-media-retention.js'
 import { createHash } from 'node:crypto'
 import { createReadStream, type Dirent, type Stats } from 'node:fs'
 import { lstat, readdir, readFile, rm, rmdir, unlink } from 'node:fs/promises'
@@ -34,7 +35,8 @@ import {
 } from './automation/intent-provenance.js'
 import { assistantInputIdFromInboxCaptureId } from './input-source.js'
 import {
-  readHostedMailboxAssistantInputItemInventory,
+  consolidateHostedMailboxAssistantInputItemsAtPaths,
+  removeHostedMailboxAssistantInputItemsAtPaths,
   resolveHostedMailboxAssistantInputItemsDirectory,
   type HostedMailboxAssistantInputItemInventory,
 } from './hosted-mailbox-input-items.js'
@@ -140,7 +142,7 @@ interface AssistantRuntimeResiduePrunePlan {
   evidenceGroups: EvidenceGroup[]
   inputEventPaths: string[]
   journalPaths: string[]
-  hostedMailboxInputItemPaths: string[]
+  hostedMailboxInputItemIds: string[]
   provenancePaths: string[]
   receiptPaths: string[]
 }
@@ -333,9 +335,11 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   for (const filePath of plan.inputEventPaths) {
     await removeAssistantStateFile(filePath, input.signal)
   }
-  for (const filePath of plan.hostedMailboxInputItemPaths) {
-    await removeAssistantStateFile(filePath, input.signal)
-  }
+  await removeHostedMailboxAssistantInputItemsAtPaths({
+    inputIds: plan.hostedMailboxInputItemIds,
+    paths: input.paths,
+    signal: input.signal,
+  })
   for (const filePath of plan.receiptPaths) {
     await removeAssistantStateFile(filePath, input.signal)
   }
@@ -368,7 +372,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     autoReplyEvidenceGroupsPruned: plan.evidenceGroups.length,
     autoReplyIntentProvenancePruned: plan.provenancePaths.length,
     hostedMailboxInputItemMappingsPruned:
-      plan.hostedMailboxInputItemPaths.length,
+      plan.hostedMailboxInputItemIds.length,
     inputEventsPruned: plan.inputEventPaths.length,
     receiptsPruned: plan.receiptPaths.length,
   }
@@ -839,7 +843,9 @@ function planAssistantRuntimeResiduePrune(input: {
 
   const inputEventPaths = new Set<string>()
   const inputEventsById = new Map(
-    input.inventory.inputEvents.records.map((entry) => [
+    input.inventory.inputEvents.records
+      .filter((entry) => !hasRetainedAssistantInputMedia(entry.record, input.now.getTime()))
+      .map((entry) => [
       entry.record.inputId,
       entry,
     ] as const),
@@ -862,6 +868,7 @@ function planAssistantRuntimeResiduePrune(input: {
     const orphanEvents = input.inventory.inputEvents.records
       .filter(({ filePath, record }) =>
         !inputEventPaths.has(filePath) &&
+        !hasRetainedAssistantInputMedia(record, input.now.getTime()) &&
         !pendingInputIds.has(record.inputId) &&
         !retainedJournalInputIds.has(record.inputId) &&
         !activeAutoReplyInputIds.has(record.inputId) &&
@@ -889,12 +896,12 @@ function planAssistantRuntimeResiduePrune(input: {
       .filter(({ filePath }) => !inputEventPaths.has(filePath))
       .map(({ record }) => record.inputId),
   )
-  const hostedMailboxInputItemPaths =
+  const hostedMailboxInputItemIds =
     input.inventory.inputEvents.trusted &&
     input.inventory.hostedMailboxInputItems.trusted
       ? input.inventory.hostedMailboxInputItems.records
           .filter(({ inputId }) => !survivingInputIds.has(inputId))
-          .map(({ filePath }) => filePath)
+          .map(({ inputId }) => inputId)
       : []
 
   const receiptPaths: string[] = []
@@ -949,7 +956,7 @@ function planAssistantRuntimeResiduePrune(input: {
 
   return {
     evidenceGroups: prunableEvidenceGroups,
-    hostedMailboxInputItemPaths,
+    hostedMailboxInputItemIds,
     inputEventPaths: [...inputEventPaths],
     journalPaths,
     provenancePaths,
@@ -1129,7 +1136,7 @@ async function readAssistantRuntimeResidueInventory(input: {
         input.vault,
         input.signal,
       ),
-      readHostedMailboxAssistantInputItemInventory(input.paths, input.signal),
+      consolidateHostedMailboxAssistantInputItemsAtPaths(input.paths, input.signal),
       readInputEventInventory(
         input.directories.inputEvents,
         input.paths,

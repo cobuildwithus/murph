@@ -121,24 +121,45 @@ function normalizeMetricValueForScope(
     case "sleep-midpoint-variability-minutes":
     case "total-sleep-minutes":
       return normalizeDurationMinutes(input.value, unit, definition.displayName);
-    default: {
-      if (definition.canonicalUnit === null) {
-        const commonCustomValue = normalizeCommonCustomValue(input.value, unit);
-        if (commonCustomValue) return commonCustomValue;
-      }
-      const canonicalUnit = definition.canonicalUnit && (!unit || unitsEquivalent(unit, definition.canonicalUnit))
-        ? definition.canonicalUnit
-        : null;
-      return {
-        canonicalUnit,
-        canonicalValue: canonicalUnit ? input.value : null,
-        unit: unit ?? definition.displayUnit,
-        warnings: canonicalUnit || !definition.canonicalUnit
-          ? []
-          : [unitWarning(definition.displayName, unit, definition.canonicalUnit)],
-      };
-    }
+    case "sleep-score":
+    case "readiness-score":
+      return normalizeHundredPointScore(input.value, unit, definition.displayName);
+    default:
+      return normalizeDeclaredMetricUnit(input.value, unit, definition);
   }
+}
+
+function normalizeDeclaredMetricUnit(
+  value: number,
+  unit: string | null,
+  definition: MetricDefinition,
+): MetricValueNormalization {
+  if (definition.canonicalUnit === null) {
+    const commonCustomValue = normalizeCommonCustomValue(value, unit);
+    if (commonCustomValue) return commonCustomValue;
+  }
+  const canonicalUnit = definition.canonicalUnit && (!unit || unitsEquivalent(unit, definition.canonicalUnit))
+    ? definition.canonicalUnit
+    : null;
+  return {
+    canonicalUnit,
+    canonicalValue: canonicalUnit ? value : null,
+    unit: unit ?? definition.displayUnit,
+    warnings: canonicalUnit || !definition.canonicalUnit
+      ? []
+      : [unitWarning(definition.displayName, unit, definition.canonicalUnit)],
+  };
+}
+
+function normalizeHundredPointScore(
+  value: number,
+  unit: string | null,
+  label: string,
+): MetricValueNormalization {
+  if (unit === "percent") {
+    return { canonicalUnit: "score", canonicalValue: value, unit, warnings: [] };
+  }
+  return normalizeExactUnit(value, unit, "score", label);
 }
 
 export function resolveComparableMetricPointValue(

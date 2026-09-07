@@ -1279,9 +1279,9 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       });
 
       await expect(fs.access(malformedRawAbsolutePath)).resolves.toBeUndefined();
-      await expect(fs.access(`${malformedRawAbsolutePath}.gz`)).rejects.toThrow();
+      await expect(fs.access(`${malformedRawAbsolutePath}.br`)).rejects.toThrow();
       await expect(fs.access(rawAbsolutePath)).rejects.toThrow();
-      const archiveBytes = await fs.readFile(`${rawAbsolutePath}.gz`);
+      const archiveBytes = await fs.readFile(`${rawAbsolutePath}.br`);
       expect(archiveBytes.byteLength).toBeLessThan(sourceBytes.byteLength);
       expect(archiveClosedIntegrationIngestShards).toHaveBeenCalledOnce();
       expect(
@@ -1327,7 +1327,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       );
       const wakeSignal = createCoalescingRuntimeWakeSignal();
       const wakeAt = Date.now();
-      const archiveFileName = `${path.basename(rawAbsolutePath)}.gz`;
+      const archiveFileName = `${path.basename(rawAbsolutePath)}.br`;
       const shardDirectory = path.dirname(rawAbsolutePath);
 
       const maintenance = runHostedIdleCheckpointMaintenance({
@@ -1351,7 +1351,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         threadContextTokensBefore: null,
       });
       await expect(fs.access(rawAbsolutePath)).resolves.toBeUndefined();
-      await expect(fs.access(`${rawAbsolutePath}.gz`)).rejects.toThrow();
+      await expect(fs.access(`${rawAbsolutePath}.br`)).rejects.toThrow();
       expect((await fs.readdir(shardDirectory)).filter(
         (entry) => entry.startsWith(`.${archiveFileName}.`) && entry.endsWith(".tmp"),
       )).toEqual([]);

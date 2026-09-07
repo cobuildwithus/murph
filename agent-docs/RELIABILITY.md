@@ -428,6 +428,14 @@ Last verified: 2026-09-04
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Wearable recovery-notice materialization serializes on its existing source
+  row before revalidating eligibility and rereading the episode's mailbox key.
+  A pending item keeps its original immutable payload and is re-signaled after
+  commit; retries never rebuild it with a later timestamp, copy, or route.
+  Consumed items remain terminal. Crypto preparation stays outside the bounded
+  database-only transaction, and strict mailbox payload-conflict checks remain
+  unchanged. Each serial candidate adds one exact source-row lock and at most
+  one unique mailbox read, with no new external calls or pooled concurrency.
 - Exact Cloudflare runtime completion sends `runtime_owner_released` only when
   Web observes actionable work. Its opaque runtime-attempt pointer may clear the
   accepted-processing horizon only for that same owner; stale callbacks cannot
@@ -1459,15 +1467,24 @@ Last verified: 2026-09-04
   recoverable when that exact owner set names its sequence, independently of
   another connection's position in the global frontier. A later due webhook for that same connection may
   admit the older exact retained mailbox item so newly dirty data can enter the
-  local worker without waiting behind a historical retry. That webhook remains
-  available for an exact continuation only when post-checkpoint
-  acknowledgement reports a newer dirty revision and the retained job hints prove the next pass has
-  admission capacity. Every accepted dirty append advances that revision,
+  local worker without waiting behind a historical retry. At preparation, that
+  selected retained owner absorbs already-queued, unattempted plain webhook
+  hints and superseded scheduled ticks for its exact member, provider,
+  connection, and connection epoch. A scheduled tick is superseded only when
+  its explicit cadence is strictly earlier than the retained owner's; equal or
+  missing cadence cannot prove reconciliation ran. This transfers the hints to
+  the existing durable continuation before dirty input is fetched; it never discards its provider jobs or backoff. A
+  distinct epoch, lifecycle event, explicit job, manual request, recording or
+  attempted item, or newer cadence remains a same-connection ordering barrier.
+  New hints arriving after admission remain independently queued. On a newer
+  dirty revision, the post-checkpoint acknowledgement directly advances the
+  retained owner's next attempt when the retained job hints prove capacity;
+  continuation therefore needs no leftover webhook signal. Every accepted dirty append advances that revision,
   including payload-only work accepted after the pass fetched its input, while
   ingress still coalesces mailbox delivery for an already-dirty connection.
   Revision inequality is therefore the existing authoritative observed-work
   frontier rather than a second scheduling state. Otherwise, the existing
-  mailbox retention update atomically defers the webhook to the retained retry,
+  mailbox retention update atomically defers any unabsorbed legacy webhook to the retained retry,
   including payload-only backoff and a full retained queue that cannot yet admit
   distinct dirty work.
   The retained wake's job hints suppress provider scheduling,

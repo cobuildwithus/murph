@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "large-dashboard-refresh-memory",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable refreshes for larger dashboards",
+    "summary": "Larger private dashboards use less temporary memory during updates, reducing a cause of failed refreshes.",
+    "details": "Each update becomes available only after all of its data has been saved successfully.",
+    "relevanceTags": [
+      "dashboard",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      2966
+    ],
+    "tryIt": {
+      "label": "View Patterns",
+      "href": "/patterns"
+    }
+  }
+}

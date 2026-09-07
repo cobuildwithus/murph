@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer'
 
+import { classifyToolFailureCode, type ToolErrorCategory, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
+
 import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
 import type {
   AssistantRuntimeIssueInput,
@@ -9,6 +11,7 @@ import type {
 } from './command-family.js'
 import {
   resolveCodexCommandFamily,
+  resolveCodexVaultCliCommandArgv,
 } from './command-family.js'
 import {
   isCodexActionStructurallyFailed,
@@ -28,6 +31,7 @@ const TOOL_DIAGNOSTIC_LIMIT = 16
 const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
 const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
 const COMMAND_ORDINAL_MAX = 10_000
+const VAULT_CLI_ERROR_OUTPUT_MAX_BYTES = 16_384
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
 
 type CodexActionKind =
@@ -54,6 +58,7 @@ type BytesBucket =
   | 'gt_100kb'
 
 type TrackedCommandDiagnostic = {
+  vaultCli: boolean
   commandOrdinal: number
   commandFamily: CodexCommandFamily
 }
@@ -143,6 +148,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
   ): TrackedCommandDiagnostic => ({
     commandOrdinal: nextCommandOrdinal(),
     commandFamily: resolveDiagnosticCommandFamily(normalizedEvent),
+    vaultCli: isVaultCliCommandEvent(normalizedEvent),
   })
 
   return {
@@ -202,6 +208,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
             commandFamily: resolveDiagnosticCommandFamily(
               input.normalizedEvent,
             ),
+            vaultCli: isVaultCliCommandEvent(input.normalizedEvent),
           }
         : startedDiagnostic ?? nextCommandDiagnostic(input.normalizedEvent)
       const exitCode = readCommandExitCode({
@@ -576,6 +583,9 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
   // without pulling the web tier's request logs.
   const toolIdentity = resolveToolDiagnosticIdentity(kind, item)
   const commonDetails = {
+    ...completedActionFailureDiagnostic(kind, item),
+    diagnosticRole: 'completion',
+    errorCategory: 'unknown',
     actionKind: kind,
     durationMsBucket: durationMsBucket(durationMs),
     outputBytesBucket: bytesBucket(output.bytesTotal),
@@ -605,6 +615,7 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
           ? {
               commandFamily: input.commandDiagnostic.commandFamily,
               commandOrdinal: input.commandDiagnostic.commandOrdinal,
+              ...commandFailureCategory(input.commandDiagnostic, item),
               ...(input.commandDiagnostic.commandFamily === 'search'
                 ? { recoveredAfterFailure: false }
                 : {}),
@@ -638,6 +649,68 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
     summary: 'Codex tool call failed during provider turn.',
     details: commonDetails,
   }
+}
+
+function readVaultCliErrorCategory(
+  item: Record<string, unknown> | null,
+): ToolErrorCategory {
+  const output = readFirstString(item?.aggregatedOutput, item?.aggregated_output)
+  if (
+    output === null
+    || output.length > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
+    || Buffer.byteLength(output, 'utf8') > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
+  ) {
+    return 'unknown'
+  }
+
+  try {
+    // CLI entry/formatting owns both direct and --full-output JSON envelopes.
+    // Parse the entire bounded output, never an excerpt or nested error prose.
+    const envelope = asRecord(JSON.parse(output))
+    const error = envelope?.ok === false
+      ? asRecord(envelope.error)
+      : envelope?.ok === undefined && envelope?.error === undefined ? envelope : null
+    if (
+      typeof error?.code !== 'string'
+      || typeof error.message !== 'string'
+      || (error.retryable !== undefined && typeof error.retryable !== 'boolean')
+    ) {
+      return 'unknown'
+    }
+    return classifyToolFailureCode(error.code, error.stage)
+  } catch {
+    return 'unknown'
+  }
+}
+
+function completedActionFailureDiagnostic(
+  kind: CodexActionKind,
+  item: Record<string, unknown> | null,
+): ToolFailureDiagnostic {
+  if (kind === 'command.execution') {
+    return { failureStage: 'execution', failureReason: 'nonzero_exit' }
+  }
+  // An explicit returned failure differs from an opaque failed-status event.
+  // Do not interpret provider error bodies, names, codes or prose.
+  return item?.success === false
+    ? { failureStage: 'result', failureReason: 'reported_failure' }
+    : { failureStage: 'execution', failureReason: 'unknown' }
+}
+
+function commandFailureCategory(
+  command: TrackedCommandDiagnostic,
+  item: Record<string, unknown> | null,
+): Record<string, ToolErrorCategory> {
+  if (!command.vaultCli) return {}
+  const category = readVaultCliErrorCategory(item)
+  return { errorCategory: category, vaultCliErrorCategory: category }
+}
+
+function isVaultCliCommandEvent(event: CodexNormalizedEvent): boolean {
+  return event.kind === 'status_item' && resolveCodexVaultCliCommandArgv({
+    allowKnownShellWrapper: true,
+    commandLabel: event.commandLabel,
+  }) !== null
 }
 
 function resolveDiagnosticCommandFamily(

@@ -10498,20 +10498,37 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     const delayedPutStarted = new Promise<void>((resolve) => {
       markDelayedPutStarted = resolve;
     });
+    let releaseChildPut = (): void => {};
+    const childPutGate = new Promise<void>((resolve) => {
+      releaseChildPut = resolve;
+    });
+    let activeChildPuts = 0;
+    let settledChildPuts = 0;
+    let rootActiveChildPuts: number | undefined;
     let delayedPutCompleted = false;
     const bucket = {
       ...defaultEnv.BUNDLES,
       async put(key: string, value: R2PutValueLike) {
         putKeys.push(key);
-        if (key.endsWith(".metric-bucket-00.json")) {
-          throw new Error("synthetic metric bucket write failure");
-        }
-        if (key.endsWith(".labs.json")) {
+        if (key === runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock.calls[0]?.[0]?.objectKey) {
+          rootActiveChildPuts = activeChildPuts;
           markDelayedPutStarted();
           await delayedPutGate;
+          await defaultEnv.BUNDLES.put(key, value);
           delayedPutCompleted = true;
+          return;
         }
-        await defaultEnv.BUNDLES.put(key, value);
+        activeChildPuts += 1;
+        try {
+          if (key.endsWith(".labs.json")) await childPutGate;
+          if (key.endsWith(".core.json")) {
+            throw new Error("synthetic core write failure");
+          }
+          await defaultEnv.BUNDLES.put(key, value);
+        } finally {
+          activeChildPuts -= 1;
+          settledChildPuts += 1;
+        }
       },
     };
     const env = createRunnerOutboundEnv({
@@ -10530,13 +10547,26 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       "member_123",
     );
 
-    await delayedPutStarted;
-    expect(putKeys.some((key) => key.endsWith(".labs.json"))).toBe(true);
-    expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
-    expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
-
-    releaseDelayedPut();
-    await expect(writePromise).rejects.toThrow("synthetic metric bucket write failure");
+    try {
+      await vi.waitFor(() => expect(settledChildPuts).toBe(34), { timeout: 5_000 });
+      expect(activeChildPuts).toBe(1);
+      expect(rootActiveChildPuts).toBeUndefined();
+      expect(putKeys).toHaveLength(35);
+      expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+      expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
+      releaseChildPut();
+      await Promise.race([delayedPutStarted, writePromise]);
+      expect(rootActiveChildPuts).toBe(0);
+      expect(settledChildPuts).toBe(35);
+      expect(putKeys).toHaveLength(36);
+      expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+      expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
+    } finally {
+      releaseChildPut();
+      releaseDelayedPut();
+      await writePromise.catch(() => {});
+    }
+    await expect(writePromise).rejects.toThrow("synthetic core write failure");
 
     const plannedReplicaCandidate = runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock
       .calls[0]?.[0];

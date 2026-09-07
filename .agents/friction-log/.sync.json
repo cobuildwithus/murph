@@ -689,12 +689,28 @@
       "path": ".agents/friction-log/20260903235348-reviewgpt-snapshot-listing/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2900",
+      "path": ".agents/friction-log/20260901162111-retire-worktree-partial/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2903",
       "path": ".agents/friction-log/20260905003755-reviewgpt-minimum-duration/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#2907",
       "path": ".agents/friction-log/20260904202051-fresh-worktree-web/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2930",
+      "path": ".agents/friction-log/20260904203503-document-and-meal/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2934",
+      "path": ".agents/friction-log/20260905051606-checkpoint-log-independence/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2962",
+      "path": ".agents/friction-log/20260905120003-base-ui-composed/friction.md"
     }
   ],
   "version": 1

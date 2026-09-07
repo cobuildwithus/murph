@@ -1,3 +1,4 @@
+import { CLI_TIMING_EVENT_METHOD, normalizeCliTiming } from '@murphai/runtime-state/cli-timing'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 
@@ -507,6 +508,20 @@ interface AssistantTurnProfileToolAggregateRead {
   attributionTruncated: boolean
 }
 
+// The receiver appends this event; never inspect tool result text for diagnostics.
+// Keep optional validation outside the legacy aggregate/accounting reducer.
+function readAssistantCliTiming(input: { rawEvents: readonly unknown[]; turnId: string | null }) {
+  for (let index = input.rawEvents.length - 1; index >= 0; index -= 1) {
+    const record = readCodexRecord(input.rawEvents[index])
+    const params = readCodexRecord(record?.params)
+    if (record?.method === CLI_TIMING_EVENT_METHOD && params?.turnId === input.turnId) {
+      const cliTiming = normalizeCliTiming(params?.timing)
+      return cliTiming ? { cliTiming } : {}
+    }
+  }
+  return {}
+}
+
 // Compact per-turn profile derived entirely from notifications Codex already
 // emits (thread/tokenUsage/updated per provider request, item/completed per
 // tool call). This is what lets prod answer "which tool calls and which
@@ -576,6 +591,7 @@ export function buildAssistantCodexTurnProfileJson(input: {
   })
 
   return {
+    ...readAssistantCliTiming(input),
     modelContextWindow,
     requestCount: requests.length,
     requests: requests.slice(-ASSISTANT_TURN_PROFILE_MAX_REQUESTS),

@@ -1169,6 +1169,7 @@ function buildHostedLinqInstantFirstTurnUsageRecord(input: {
     input.eventId,
   )}`;
   const usage = input.response.usage;
+  const serviceTier: unknown = input.response.service_tier;
   return {
     apiKeyEnv:
       "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY",
@@ -1200,7 +1201,9 @@ function buildHostedLinqInstantFirstTurnUsageRecord(input: {
     sessionId: turnId,
     stripeMeterSource: "murph",
     surface: "hosted-web",
-    tokenPricingBasis: "standard",
+    tokenPricingBasis: serviceTier === "fast" || serviceTier === "priority"
+      ? "openai-priority"
+      : "standard",
     totalTokens: usage?.total_tokens ?? null,
     triggerKind: "linq-instant-first-turn",
     turnId,

@@ -74,7 +74,7 @@ interface PrepareVerifiedTargetOptions {
   createParentDirectory: boolean;
 }
 
-const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".zip"] as const;
+export const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".br", ".zip"] as const;
 
 async function pathExists(absolutePath: string): Promise<boolean> {
   try {

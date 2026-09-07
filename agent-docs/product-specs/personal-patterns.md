@@ -86,14 +86,28 @@ day outcome windows. It does not search every threshold, delay, combination, or
 context.
 
 For a factor day, the query first uses a confirmed-absence comparison when one
-exists. Otherwise, eligible device-backed factors can use the nearest unused
-weekday-matched comparison day within 35 days. A manual or inferred factor that
-uses this weaker baseline cannot receive a grade above D.
+exists. Otherwise, eligible device-backed factors can use an unobserved
+weekday-matched comparison day within 35 days. Within each weekday, the query
+maximizes the number of usable pairs, then minimizes their total date distance.
+Both sides stay inside the factor report window; next-day outcomes may extend
+one day past its end. Matching uses dates and outcome availability, never
+outcome values. No exposed
+or comparison day is reused for the same factor and outcome. A manual or
+inferred factor that uses this weaker baseline cannot receive a grade above D.
 
-One comparison case supports one pair for a factor and outcome. The query
-averages several matched days from one episode into one case. A result must
-keep the same direction across its independent cases before it can receive a
-repeated-evidence grade.
+The query averages several matched days from one episode into one case.
+Episode records that share a factor day are merged transitively, including
+an ordinary note that overlaps a named episode. Duplicate records therefore
+cannot inflate independent evidence or reuse the same daily outcome.
+
+A repeated-evidence grade requires at least 75% of independent cases to agree
+with the overall direction (all cases when there are two or three). The median
+paired difference must also meet the outcome's meaningful-difference threshold.
+For four or more cases, both chronological halves must retain that direction.
+Grade A requires the median paired difference to clear the larger-effect floor
+as well, so one unusual case cannot promote an otherwise modest pattern.
+Displayed means and deltas still include every matched case. These are bounded
+product evidence rules, not significance tests or causal estimates.
 
 ## Result levels and grades
 
@@ -135,11 +149,16 @@ pending and publishes a report for the newer hash.
 
 ## Presentation
 
-The current `/patterns` matrix remains the main view. It shows the first 15
-factors and every supported outcome present in the member's data. `Show more`
+The `/patterns` page shows the first 15 factors. Desktop compares every
+supported outcome in a matrix. Phones show one card per factor, with coverage
+bars and changed comparisons together. Tapping a mobile result opens a bottom
+drawer with the same comparison details and evidence dates as the desktop
+hover popover. Neutral measures appear
+as compact links under one `No clear change` label at the bottom. Measures that
+still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. A recognized factor
-stays visible when it has no suitable comparison day. Its cells explain that
+stays visible when it has no suitable comparison day. Its desktop cells explain that
 Murph needs more comparable data. Observations can appear with grade E. The
 page shows the evidence count, comparison basis, date range, and the factor and
 comparison dates needed to inspect the result.

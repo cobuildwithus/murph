@@ -1773,6 +1773,153 @@ test("browser-vault provider preserves readable stale data when bounded observat
   await rendered.cleanup();
 });
 
+test.each(["published", "pending"] as const)(
+  "Journal bounds first-import observation when publication remains %s",
+  async (publication) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
+    mocks.usePathname.mockReturnValue("/journal");
+    const occurredAt = "2026-04-30T09:15:00.000Z";
+    const replica = createReplica({
+      journal: {
+        days: [{ date: "2026-04-30", events: [{
+          date: "2026-04-30", details: [], id: "stretching-note", kind: "note",
+          metrics: {
+            activityMinutes: 0, deepSleepMinutes: null, hrvMs: null,
+            readinessScore: null, recoveryScore: null, remSleepMinutes: null,
+            respiratoryRate: null, restingHeartRateBpm: null,
+            sleepEfficiencyPercent: null, sleepMinutes: null, sleepScore: null,
+            spo2Percent: null,
+          },
+          occurredAt,
+          records: [{
+            id: "stretching-note", kind: "note", label: "Stretching",
+            occurredAt, source: "manual", summary: "10 min", tags: [], timeZone: "UTC",
+          }],
+          summary: "10 min", timing: "timed", timeZone: "UTC", title: "Stretching",
+        }] }],
+        eventCount: 1, recordCount: 1, weeks: [], windowDays: 120,
+      },
+    });
+    let published = false;
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+      return jsonResponse(published ? {
+        deviceSyncImportPending: false,
+        encryptedReplica: createReplicaEnvelope(),
+        freshness: "fresh",
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: createReplicaRef({
+          byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
+        }),
+        refreshPending: false,
+        state: "ready",
+      } : {
+        deviceSyncImportPending: true,
+        encryptedReplica: null,
+        freshness: "stale",
+        memberId: "member_123",
+        replicaAad: null,
+        replicaKeyEnvelope: null,
+        replicaRef: null,
+        refreshPending: true,
+        state: "empty",
+        workspaceVersion: "1",
+      });
+    });
+    installBrowserVaultCryptoMocks();
+    mocks.decryptHostedStoragePayload.mockResolvedValue(
+      new TextEncoder().encode(JSON.stringify(replica)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const rendered = await renderClientComponent(
+      createAuthenticatedBrowserVaultElement(createElement(JournalPageClient)),
+      { requireButton: false },
+    );
+    try {
+      await waitForText(rendered.container, "Preparing your Journal");
+      published = publication === "published";
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(published ? 1_500 : 60_000);
+      });
+      if (published) {
+        await waitForText(rendered.container, "Stretching");
+        assert.match(rendered.container.textContent ?? "", /10 min/);
+      } else {
+        await waitForText(rendered.container, "Build your health timeline");
+      }
+      assert.equal(rendered.container.textContent?.includes("Preparing your Journal"), false);
+      assert.equal(requestBodies.filter((body) => body.requestRefresh === true).length, 1);
+      assert.ok(requestBodies.some((body) => body.refreshObservationOnly === true));
+      assert.ok(requestBodies.slice(2).every((body) => body.refreshObservationOnly === true));
+      const requestCount = requestBodies.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      assert.equal(requestBodies.length, requestCount);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test("Journal unavailable retry preserves the active refresh deadline", async () => {
+  vi.useFakeTimers();
+  mocks.usePathname.mockReturnValue("/journal");
+  const replica = createReplica();
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+    requestBodies.push(JSON.parse(String(init?.body)));
+    return jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      freshness: "fresh",
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef({
+        byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
+      }),
+      refreshPending: false,
+      state: "ready",
+    });
+  });
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(JournalPageClient)),
+    { requireButton: false },
+  );
+  try {
+    await waitForText(rendered.container, "Journal is not ready yet");
+    await waitForCondition(() => requestBodies.length === 2, "automatic Journal request");
+    const retry = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Refresh Journal");
+    assert.ok(retry);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    const requestCount = requestBodies.length;
+    await act(async () => retry.click());
+    await act(async () => retry.click());
+    assert.equal(requestBodies.length, requestCount);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    const countAtDeadline = requestBodies.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    assert.equal(requestBodies.length, countAtDeadline);
+    assert.equal(requestBodies.filter((body) => body.requestRefresh === true).length, 1);
+    await act(async () => retry.click());
+    assert.equal(requestBodies.filter((body) => body.requestRefresh === true).length, 2);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("Journal retry admits the recovered session and renders its timeline", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));

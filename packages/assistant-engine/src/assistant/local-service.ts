@@ -143,8 +143,8 @@ import {
 import {
   createAnalyzeVideoTurnState,
   readAnalyzeVideoConversationEvents,
-  snapshotAnalyzeVideoAttachmentAuthorities,
-  type AnalyzeVideoAttachmentAuthority,
+  snapshotConversationAttachmentAuthorities,
+  type ConversationAttachmentAuthority,
 } from '../assistant-codex/analyze-video-tool.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
@@ -750,7 +750,7 @@ export async function sendAssistantMessageLocal(
         const runtimeState = createAssistantRuntimeStateService(input.vault)
         const analyzeVideoAttachmentAuthorities = new Map<
           string,
-          AnalyzeVideoAttachmentAuthority
+          ConversationAttachmentAuthority
         >()
         const analyzeVideoTurnState = createAnalyzeVideoTurnState()
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
@@ -764,7 +764,7 @@ export async function sendAssistantMessageLocal(
             snapshottedAnalyzeVideoInputIds.add(event.inputId)
             return true
           })
-          const authorities = snapshotAnalyzeVideoAttachmentAuthorities(newEvents)
+          const authorities = snapshotConversationAttachmentAuthorities(newEvents)
           for (const authority of authorities) {
             const key = JSON.stringify([
               authority.messageRef,
@@ -1018,7 +1018,7 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getAnalyzeVideoAttachmentAuthorities: () => {
+              getConversationAttachmentAuthorities: () => {
                 const acceptedInputIds = new Set(resolveAssistantUserActionAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
                   turnTrigger: currentInput.turnTrigger ?? null,

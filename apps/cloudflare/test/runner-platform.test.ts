@@ -10356,28 +10356,88 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(rejectedError).toMatchObject({ retryable });
   });
 
-  it("classifies artifact upload transport failures as retryable", async () => {
-    const fetchMock = vi.fn(async () => {
-      throw new Error("fetch failed");
-    });
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-    });
-
-    let rejectedError: unknown;
-    try {
-      await platform.artifactStore.put({
-        bytes: new Uint8Array([1, 2, 3]),
-        sha256: "a".repeat(64),
+  it.each([undefined, "ECONNRESET", "UND_ERR_SOCKET"])(
+    "keeps artifact upload behavior and existing logs with network code %s",
+    async (code) => {
+      const cause = {
+        code,
+        address: "192.0.2.10",
+        port: 43210,
+        socket: { remoteAddress: "192.0.2.11" },
+        url: "https://example.invalid/private",
+        headers: { authorization: "synthetic-private-credential" },
+        payload: "synthetic-private-payload",
+      };
+      const failure = code
+        ? new TypeError("fetch failed", { cause })
+        : new Error("fetch failed");
+      let fail = true;
+      const fetchMock = vi.fn(async () => {
+        if (fail) {
+          throw failure;
+        }
+        return new Response(null, { status: 204 });
       });
-    } catch (error) {
-      rejectedError = error;
-    }
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+      const artifact = { bytes: new Uint8Array([1, 2, 3]), sha256: "a".repeat(64) };
 
-    expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
-    expect(rejectedError).toMatchObject({ retryable: true });
-  });
+      let rejectedError: unknown;
+      try {
+        await platform.artifactStore.put(artifact);
+      } catch (error) {
+        rejectedError = error;
+      }
+      expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
+      expect(rejectedError).toMatchObject({ retryable: true, cause: { cause: failure } });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const logs = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([input]) => input);
+      expect(logs.map((input) => input.message)).toEqual([
+        "Hosted runtime artifact upload started.",
+        "Hosted runtime artifact upload authority headers prepared.",
+        "Hosted runtime internal request started.",
+        "Hosted runtime internal request failed.",
+        "Hosted runtime upstream request failed.",
+        "Hosted runtime artifact upload failed before response.",
+      ]);
+      expect(logs[5]).toMatchObject({
+        component: "hosted.runtime.artifact-store",
+        level: "warn",
+        phase: "checkpoint",
+        details: {
+          errorCode: code ? "type_error" : "runtime_error",
+          fetchCauseCode: code ? "type_error" : "runtime_error",
+          fetchCauseKind: "fetch_failed",
+          fetchCauseName: code ? "TypeError" : "Error",
+          fetchCallerSignalAborted: false,
+          fetchRequestSignalAborted: false,
+          fetchTimeoutSignalAborted: false,
+          ...(code ? { fetchNetworkErrorCode: code } : {}),
+        },
+      });
+      if (!code) {
+        expect(logs[5].details).not.toHaveProperty("fetchNetworkErrorCode");
+      }
+      const serialized = JSON.stringify(logs);
+      for (const hidden of [
+        "192.0.2.10", "43210", "192.0.2.11", "example.invalid",
+        "synthetic-private-credential", "synthetic-private-payload", artifact.sha256,
+      ]) {
+        expect(serialized).not.toContain(hidden);
+      }
+
+      fail = false;
+      await platform.artifactStore.put(artifact);
+      await platform.artifactStore.put(artifact);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(12);
+      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(6)) {
+        expect(input.details).not.toHaveProperty("fetchNetworkErrorCode");
+      }
+    },
+  );
 
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({

@@ -123,7 +123,58 @@ import {
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("reports mailbox budget exhaustion only after deferring an overflow item", async () => {
+describe("hosted workspace runtime entrypoint", () => {
+  test("persists a disproved default wake without claiming assistant progress", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-empty-default-wake-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const staleWakeAt = "2026-04-01T00:00:00.000Z";
+    let assistantPasses = 0;
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1 } }),
+        {
+          vaultRoot,
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests, events,
+              workspace: createWorkspaceState({
+                version: "0", nextWakeAt: staleWakeAt, nextWakeReason: "assistant",
+                nextDefaultProcessingWakeAt: staleWakeAt,
+                nextDefaultProcessingWakeReason: "assistant",
+                systemMailboxProgressGeneration: "1",
+              }),
+            }),
+          }),
+          async importItem() {
+            throw new Error("Empty mailbox must not import an item.");
+          },
+          async runAssistantPhase() {
+            assistantPasses += 1;
+            return assistantPasses === 1
+              ? { progressed: false, runtimeProjectionCheckpointRequested: true }
+              : { progressed: false };
+          },
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createBundleRef({
+              hash: "c".repeat(64), size: 512,
+              key: "users/bundles/member-synthetic/empty-default.bundle.json",
+            }) };
+          },
+        },
+      );
+      assert.ok(checkpointRequests.length > 0);
+      for (const checkpoint of checkpointRequests) {
+        assert.notEqual(checkpoint.nextWakeAt, staleWakeAt);
+        assert.equal(checkpoint.nextDefaultProcessingWakeAt, null);
+        assert.equal(checkpoint.nextDefaultProcessingWakeReason, null);
+      }
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+test("reports mailbox budget exhaustion only after deferring an overflow item", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];

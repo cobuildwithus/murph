@@ -642,19 +642,19 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.match(markup, /aria-label="You slept longer after sauna\./);
   assert.match(markup, /data-patterns-layout="mobile"/u);
   assert.match(markup, /data-patterns-layout="desktop"/u);
-  assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 1);
+  assert.doesNotMatch(markup, /<select/u);
   assert.equal(
     (markup.match(/data-pattern-factor-row="running"/gu) ?? []).length,
     1,
   );
   assert.match(
     markup,
-    /aria-label="Pattern results\. Swipe horizontally to compare health measures\."/u,
+    /aria-label="Personal patterns"/u,
   );
   assert.equal(
     (markup.match(/data-pattern-outcome-column="sleep-quality"/gu) ?? [])
       .length,
-    2,
+    1,
   );
   assert.doesNotMatch(
     markup,

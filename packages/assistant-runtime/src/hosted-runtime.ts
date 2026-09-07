@@ -679,7 +679,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyBrowserVaultRefreshWakes: boolean;
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
-  containsOnlySafeSystemWakes: boolean;
+  canImportForPreCheckpointSystemWork: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -744,13 +744,17 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         && item.kind === "device-sync.wake"
       ),
     containsOnlyInitialMemberActivation,
-    containsOnlySafeSystemWakes: containsOnlyInitialMemberActivation
+    canImportForPreCheckpointSystemWork: containsOnlyInitialMemberActivation
       || (
-        response.items.length > 0
+        // Device wakes only enqueue pending work at import. Admit them with a
+        // foreground continuation; the causal execution selector leaves device
+        // service deferred. Device-only batches still wait for checkpointing.
+        response.items.some((item) => item.kind !== "device-sync.wake")
         && response.items.every((item) =>
           item.lane === "system"
           && (
-            item.kind === "runtime.pending-effects-reconcile-requested"
+            item.kind === "device-sync.wake"
+            || item.kind === "runtime.pending-effects-reconcile-requested"
             || item.kind === "member.action.requested"
             || item.kind === "assistant.ask.requested"
             || item.kind === "assistant.ask.completed"
@@ -6038,7 +6042,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return true;
         }
         const shouldImportSystemMailbox = input.systemMailboxAdmission === "all"
-          || preCheckpointSystemPrefetch?.containsOnlySafeSystemWakes === true;
+          || preCheckpointSystemPrefetch?.canImportForPreCheckpointSystemWork === true;
         if (!shouldImportSystemMailbox) {
           if (preCheckpointSystemPrefetch?.hasSystemWork !== true) {
             deferCheckpointAfterEmptyForegroundProbe(conversationImport);

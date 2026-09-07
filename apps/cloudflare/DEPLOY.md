@@ -237,12 +237,27 @@ together.
 
 Browser Vault publication also participates in account-deletion draining. The
 UserRunner admits each publication under the exact runtime write fence, all 36
-bounded-concurrency object writes settle before that admission is released, and
+object writes settle before that admission is released, and
 deletion stops the runner before inspecting the durable admission. If the
 publishing request died without releasing it, deletion establishes a 60-second
 post-stop drain before its final prefix sweep; this is longer than the Workers
 30-second post-disconnect extension window and prevents a late encrypted object
 from recreating member data after deletion completes.
+
+The replica write owner encodes the complete plan before `beforeWrite` admits
+any PUT or records its top-level orphan candidate. Temporary parsed/split
+projection copies are scoped to encoding; only their encoded children escape
+into the write phase.
+It consumes child descriptors in the existing bounded four-worker PUT pool,
+releasing each payload reference when its write settles. Only after every child
+worker finishes does it encrypt and write the retained full compatibility root,
+even if a child failed. Do not overlap root/base64 envelope serialization with
+child writes or retain consumed payloads: these full-buffer copies share the
+Worker's isolate budget. Admission remains held through the final root write.
+Every planned write is still attempted and settled on failure, and the reference
+is returned only if all 36 writes succeed. This ordering changes neither the
+50 MiB decoded size guard nor root/child formats, key ownership or AAD. It is a
+per-publication memory reduction, not an isolate-wide concurrency limit.
 
 ## Vault-Share Delivery Contract Rollout
 

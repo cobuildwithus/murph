@@ -2851,6 +2851,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "response_schema_invalid",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "invalid_result",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID",
         issueKind: "schema_rejection",
@@ -2871,6 +2875,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "http_5xx",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unavailable",
+          diagnosticRole: "classification",
           retryable: true,
           statusClass: "5xx",
         },
@@ -2893,6 +2901,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "http_4xx",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "rate_limited",
+          diagnosticRole: "classification",
           retryable: false,
           statusClass: "4xx",
         },
@@ -2914,6 +2926,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "timeout",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TIMEOUT",
         issueKind: "timeout",
@@ -2933,6 +2949,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "transport",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
         issueKind: "tool_error",
@@ -2952,6 +2972,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "transport",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
         issueKind: "tool_error",
@@ -2970,6 +2994,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "transport",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
         issueKind: "tool_error",
@@ -2988,6 +3016,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "unknown",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_FAILED",
         issueKind: "tool_error",
@@ -3031,7 +3063,7 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(result)).not.toContain("PRIVATE_");
   });
 
-  it("does not report caller-owned group-tool cancellation as a runtime failure", async () => {
+  it("keeps returned caller cancellation out of group-specific failure classification", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "read_usage",
     }));
@@ -3057,7 +3089,20 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
-    expect(result.runtimeIssueInputs).toBeUndefined();
+    expect(result.runtimeIssueInputs).toEqual([{
+      component: "assistant.codex-dynamic-tool",
+      operation: "group",
+      phase: "tool_call",
+      issueKind: "tool_error",
+      severity: "warning",
+      errorCode: "ASSISTANT_DYNAMIC_TOOL_FAILED",
+      summary: "Murph dynamic tool execution failed.",
+      details: {
+        requestKind: "group", failureStage: "execution",
+        failureReason: "handler_exception", errorCategory: "unknown",
+        diagnosticRole: "classification",
+      },
+    }]);
     expect(JSON.stringify(result)).not.toContain(privateDetail);
   });
 
@@ -3092,6 +3137,8 @@ describe("murph.group dynamic tool", () => {
       details: {
         action: "read_usage",
         failureCategory: "timeout",
+        failureStage: "execution", failureReason: "handler_exception",
+        errorCategory: "unknown", diagnosticRole: "classification",
       },
       errorCode: "HOSTED_GROUP_TOOL_TIMEOUT",
       issueKind: "timeout",

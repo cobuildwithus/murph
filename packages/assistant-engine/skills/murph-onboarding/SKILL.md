@@ -104,8 +104,10 @@ vault-cli assistant onboarding resume-context --format json
 ```
 
 A non-retryable `memory_document_invalid` memory surface is terminal: do not
-read, write, or advance. Reply with its hint, keeping file, line, and field;
-stop until repaired.
+read, write, or advance; stop until repaired. Briefly explain that you cannot
+read their saved information and need to pause setup. Keep the diagnostic hint,
+file, line, field, and error code internal. Do not ask the member to repair
+files or promise a repair, retry, or support escalation that has not happened.
 
 Treat every useful saved fact in the snapshot as known evidence for the open
 health threads and foundation checkpoints. Never re-ask it.
