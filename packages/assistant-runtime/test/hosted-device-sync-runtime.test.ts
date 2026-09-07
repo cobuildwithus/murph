@@ -5817,6 +5817,7 @@ describe("hosted device-sync runtime", () => {
         });
         const store = getStore(service);
         const listPendingJobsForAccount = vi.spyOn(store, "listPendingJobsForAccount");
+      const iteratePendingJobsForAccount = vi.spyOn(getStore(service), "iteratePendingJobsForAccount");
         const wake = buildDirtyDeviceSyncWake(
           connectionId,
           `2026-04-04T10:0${pass}:00.000Z`,
@@ -5888,7 +5889,8 @@ describe("hosted device-sync runtime", () => {
         const recoveryRequestedAtMs = Date.now();
         const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
         const recoveryResolvedAtMs = Date.now();
-        assert.equal(listPendingJobsForAccount.mock.calls.length, 2);
+        assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+        assert.deepEqual(iteratePendingJobsForAccount.mock.calls, [[localAccountId]]);
         assert.equal(recovery?.wake.hint?.jobs?.length ?? 0, 0);
         assert.equal(
           recovery?.wake.hint?.reason ?? null,
@@ -6226,6 +6228,128 @@ describe("hosted device-sync runtime", () => {
       if (!firstClosed) {
         closeHostedRuntimeDeviceSyncService(firstService);
       }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("retains provider fanout beyond one pass through cold reconstruction", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace("hosted-device-sync-fanout-first-");
+    const restoredWorkspace = await createHostedRuntimeWorkspace("hosted-device-sync-fanout-restored-");
+    const occurredAt = "2026-04-04T10:00:00.000Z";
+    const retryAt = "2026-04-04T10:10:00.000Z";
+    const connectionId = "hosted_fanout_connection";
+    const children = ["child-a", "child-b"].map((dedupeKey) => ({
+      availableAt: retryAt,
+      dedupeKey,
+      kind: "reconcile",
+      maxAttempts: 3,
+      priority: 40,
+    }));
+    const executeJob = vi.fn(async () => ({ scheduledJobs: children }));
+    const firstService = createDeviceSyncServiceForVault(firstWorkspace.vaultRoot, [
+      createFakeProvider({ jobExecutor: { executeJob } }),
+    ]);
+    const restoredExecuteJob = vi.fn(async () => ({}));
+    const restoredService = createDeviceSyncServiceForVault(restoredWorkspace.vaultRoot, [
+      createFakeProvider({ jobExecutor: { executeJob: restoredExecuteJob } }),
+    ]);
+    const jobs = Array.from({ length: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT }, (_, index) => ({
+      availableAt: index === 0 ? occurredAt : retryAt,
+      dedupeKey: `fanout-parent-${index}`,
+      kind: "reconcile",
+      maxAttempts: 3,
+      priority: 30,
+    }));
+    const wake = buildDeviceSyncWake({
+      connectionId,
+      hint: { jobs },
+      occurredAt,
+      reason: "webhook_hint",
+    });
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() { throw new Error("No control-plane write expected"); },
+      async createConnectLink() { throw new Error("No connection request expected"); },
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({ connectionId, externalAccountId: "fanout-account" });
+      },
+    };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(occurredAt));
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: firstService, wake,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      assert.equal(await firstService.drainWorker(HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT, accountId), 1);
+      assert.equal(executeJob.mock.calls.length, 1);
+      const recovery = resolveHostedDeviceSyncWakeRecovery({ service: firstService, state, wake });
+      assert.ok(recovery);
+      assert.equal(recovery.retryAt, retryAt);
+      assert.deepEqual(
+        [...(recovery.wake.hint?.jobs ?? [])].sort((a, b) => a.dedupeKey!.localeCompare(b.dedupeKey!)),
+        [...jobs.slice(1), ...children].sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey)),
+      );
+      assert.deepEqual(parseHostedExecutionWake(JSON.parse(JSON.stringify(recovery.wake))), recovery.wake);
+      const item: HostedSystemMailboxPendingItem = {
+        attemptCount: 1,
+        itemId: "fanout-mailbox-owner",
+        lastAttemptAt: occurredAt,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        mailboxDedupeKey: wake.eventId,
+        mailboxLaneSeq: "1",
+        nextAttemptAt: null,
+        occurredAt,
+        postCheckpointRecord: {
+          kind: "device-sync.dirty-processed-batch",
+          nextWakeAt: retryAt,
+          records: [],
+          retainedWake: recovery.wake,
+          retainMailboxItemUntil: retryAt,
+        },
+        preferenceCausalSeq: null,
+        requestId: null,
+        routeAction: "run-device-sync-wake",
+        status: "recording",
+        wake,
+      };
+      await updateHostedSystemMailboxState(firstWorkspace.vaultRoot, () => ({ pending: [item] }));
+      await recordHostedSystemMailboxItemAfterCheckpoint({
+        item,
+        runtime: createDeviceSyncPostCheckpointRuntime(port),
+        vaultRoot: firstWorkspace.vaultRoot,
+      });
+      const [retainedItem] = (await readHostedSystemMailboxState(firstWorkspace.vaultRoot)).pending;
+      assert.equal(retainedItem?.status, "pending");
+      assert.equal(retainedItem.postCheckpointRecord, null);
+      assert.equal(retainedItem.nextAttemptAt, retryAt);
+      const restoredWake = retainedItem.wake;
+      assert.deepEqual(restoredWake, recovery.wake);
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: restoredService, wake: restoredWake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      assert.equal(await restoredService.drainWorker(HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT, restoredAccountId), 0);
+      vi.setSystemTime(new Date(retryAt));
+      assert.equal(await restoredService.drainWorker(HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT, restoredAccountId), 100);
+      assert.equal(restoredExecuteJob.mock.calls.length, 100);
+      const nextRecovery = resolveHostedDeviceSyncWakeRecovery({
+        service: restoredService, state: restoredState, wake: restoredWake,
+      });
+      assert.equal(nextRecovery?.wake.hint?.jobs?.length, 1);
+      assert.equal(await restoredService.drainWorker(HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT, restoredAccountId), 1);
+      assert.equal(restoredExecuteJob.mock.calls.length, 101);
+      assert.equal(resolveHostedDeviceSyncWakeRecovery({
+        service: restoredService, state: restoredState, wake: restoredWake,
+      }), null);
+    } finally {
+      vi.useRealTimers();
+      closeHostedRuntimeDeviceSyncService(firstService);
       closeHostedRuntimeDeviceSyncService(restoredService);
       await firstWorkspace.cleanup();
       await restoredWorkspace.cleanup();

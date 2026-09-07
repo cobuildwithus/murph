@@ -1071,42 +1071,31 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
-  const pendingJobs = store.listPendingJobsForAccount(
-    localAccountId,
-    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
-  );
-  if (pendingJobs.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT) {
-    throw new Error(
-      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
-    );
+  // A provider job can create multiple follow-ups. The execution/admission
+  // budget must never truncate or reject work already accepted by the queue.
+  let retryAt: string | null = null;
+  const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
+  for (const job of store.iteratePendingJobsForAccount(localAccountId)) {
+    const dedupeKey = job.dedupeKey
+      ?? `hosted-device-sync-job:${createHash("sha256").update(job.id).digest("hex")}`;
+    const payload = shapeHostedDeviceSyncJobHintPayload(account.provider, job);
+    const jobRetryAt = job.status === "running"
+      ? job.leaseExpiresAt ?? job.availableAt
+      : job.availableAt;
+    const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
+    retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
+      ? jobRetryAt
+      : retryAt;
+    retryHints.push({
+      availableAt: jobRetryAt,
+      dedupeKey,
+      kind: job.kind,
+      maxAttempts: remainingAttempts,
+      ...(Object.keys(payload).length > 0 ? { payload } : {}),
+      priority: job.priority,
+    });
   }
-  if (pendingJobs.length > 0) {
-    let retryAt: string | null = null;
-    const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
-    for (const job of pendingJobs) {
-      const dedupeKey = job.dedupeKey
-        ?? `hosted-device-sync-job:${createHash("sha256").update(job.id).digest("hex")}`;
-      const payload = shapeHostedDeviceSyncJobHintPayload(account.provider, job);
-      const jobRetryAt = job.status === "running"
-        ? job.leaseExpiresAt ?? job.availableAt
-        : job.availableAt;
-      const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
-      retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
-        ? jobRetryAt
-        : retryAt;
-      retryHints.push({
-        availableAt: jobRetryAt,
-        dedupeKey,
-        kind: job.kind,
-        maxAttempts: remainingAttempts,
-        ...(Object.keys(payload).length > 0 ? { payload } : {}),
-        priority: job.priority,
-      });
-    }
-    if (!retryAt) {
-      return null;
-    }
-
+  if (retryAt) {
     return {
       retryAt,
       wake: {
