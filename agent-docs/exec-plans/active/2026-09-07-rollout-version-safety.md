@@ -32,7 +32,7 @@ Use synthetic evidence; production credentials remain in the protected workflow.
 Effort: Patch. Foreground messages keep the active image throughout candidate
 preparation. Candidate readiness and drain waits belong to deployment only.
 Existing completion and cleanup calls retain their exact container name.
-Status: Hold pending complete verification and deployment.
+Status: Ready for final review; protected deployment remains pending.
 
 ## Decisions
 
@@ -51,8 +51,8 @@ Status: Hold pending complete verification and deployment.
 ## Tasks
 
 1. Trace the production failure and reproduce readiness rejection. Complete.
-2. Implement immutable publication and stage/smoke/promote ordering. In progress.
-3. Verify cold/warm readiness, exact-owner routing, candidate failure and drain.
+2. Implement immutable publication and stage/smoke/promote ordering. Complete.
+3. Verify cold/warm readiness, exact-owner routing, candidate failure and drain. Complete.
 4. Update deployment contracts, run typecheck and required candidate review.
 5. Commit, PR, ReviewGPT/CI, merge, protected deploy and verify live state.
 
@@ -64,3 +64,8 @@ Run the existing runner, standby, deployment and artifact regressions, native
 Wrangler bundle/config proof, typecheck, complexity guard and exact-head CI.
 Production rollout timing remains a hosted verification boundary; local tests
 model the provider ordering and exercise the real application owners.
+
+Local verification: 816 Cloudflare tests and nine changelog rendering tests passed.
+Cloudflare and Web typechecks, native Wrangler immutable-image dry run and the
+complexity guard passed. Zero-target/off inventory still proves the actual
+candidate namespace through the existing prepare/retire lifecycle.
