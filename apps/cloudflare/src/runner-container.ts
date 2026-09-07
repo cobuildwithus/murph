@@ -1,3 +1,4 @@
+import { readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
 import type {
   CloudflareHostedControlRuntimeShellPrewarmSource,
@@ -685,7 +686,12 @@ export class RunnerContainer extends Container {
     RunnerWorkspaceInvocationNoPointerAbort | null = null;
   private containerInteractionGeneration = 0;
 
-  constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
+  constructor(
+    state: unknown,
+    source: RunnerContainerEnvironmentSource,
+    target: HostedRunnerBank | "candidate" = "primary",
+  ) {
+    const env = scopeHostedRunnerReleaseEnvironment(source, target);
     super(state as never, env as never);
     this.environment = env;
     this.durableObjectName = readRunnerDurableObjectName(state);
@@ -818,7 +824,8 @@ export class RunnerContainer extends Container {
     const identity = readHostedRunnerTargetIdentity(input.slotName);
     if (
       !identity || identity.region !== input.region
-      || input.currentReleaseId !== resolveHostedRunnerReleaseId(this.environment)
+      || input.currentReleaseId !== (readHostedRunnerDeployment(this.environment)?.active.id
+        ?? resolveHostedRunnerReleaseId(this.environment))
     ) {
       throw new Error("Hosted runner retained-slot identity or release authority is stale.");
     }
@@ -3969,7 +3976,17 @@ function classifyRunnerContainerStop(input: {
   return input.cleanExit ? "unrequested-clean-stop" : "unrequested-nonzero-stop";
 }
 
+export class NextRunnerContainer extends RunnerContainer {
+  constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
+    super(state, env, "next");
+  }
+}
+
 export class DeploySmokeRunnerContainer extends RunnerContainer {
+  constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
+    super(state, env, "candidate");
+  }
+
   private liveModelTurnSmokeFence: {
     expiresAtMs: number;
     model: string;
@@ -4067,6 +4084,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
 }
 
 registerHostedRunnerContainerOutboundInterception(RunnerContainer);
+registerHostedRunnerContainerOutboundInterception(NextRunnerContainer);
 registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
 
 export function registerHostedRunnerContainerOutboundInterception(

@@ -23,6 +23,20 @@
       "ssh": { "enabled": false }
     },
     {
+      "class_name": "NextRunnerContainer",
+      "image": "../../Dockerfile.cloudflare-hosted-runner",
+      "image_build_context": ".",
+      "instance_type": {
+        "vcpu": 2,
+        "memory_mib": 6144,
+        "disk_mb": 6000
+      },
+      "max_instances": 1000,
+      "rollout_active_grace_period": 300,
+      "rollout_step_percentage": [10, 25, 50, 100],
+      "ssh": { "enabled": false }
+    },
+    {
       "class_name": "DeploySmokeRunnerContainer",
       "image": "../../Dockerfile.cloudflare-hosted-runner",
       "image_build_context": ".",
@@ -78,6 +92,10 @@
         "class_name": "RunnerContainer"
       },
       {
+        "name": "NEXT_RUNNER_CONTAINER",
+        "class_name": "NextRunnerContainer"
+      },
+      {
         "name": "RUNNER_CONTAINER_SMOKE",
         "class_name": "DeploySmokeRunnerContainer"
       },
@@ -125,6 +143,10 @@
         "StandbyRunnerCoordinatorDurableObject",
         "StandbyRunnerContainer"
       ]
+    },
+    {
+      "tag": "v8",
+      "new_sqlite_classes": ["NextRunnerContainer"]
     }
   ],
   "triggers": {

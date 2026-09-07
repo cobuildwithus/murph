@@ -22,6 +22,36 @@ That rendered surface is then used by:
 
 The rendered deploy helper path is the canonical direct Wrangler deploy contract consumed from the private deployment workflow. The checked-in Wrangler scaffold remains useful for local development, but production deploys must run from private Murph Cloud and use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
+The production helper publishes one immutable registry image before activating
+Worker code. It then prepares the inactive `RunnerContainer` or
+`NextRunnerContainer` application while `HOSTED_EXECUTION_RUNNER_DEPLOYMENT`
+keeps the current release selected. The serving application and retained legacy
+application use Wrangler's per-application `rollout_kind: none`; preparation
+cannot replace their running instances. Signed deploy smoke verifies the
+candidate image and fills its existing ready-slot inventory. Only after that
+proof does a second Worker deployment select the candidate, with container
+rollout disabled for every application. No readiness wait or new retry policy
+is added to message processing.
+
+Release identity is independent of the two Worker activations. Each container
+namespace admits its own exact bundle/source fingerprints. Persisted opaque
+slot names retain their original namespace for completion, cancellation and
+cleanup. Before reusing the previous namespace, deployment waits for provider
+instance evidence that it has drained; unknown state stops deployment while
+the active release keeps serving. Both targets have the configured member
+capacity, allowing old in-flight work and new work to overlap; the standby
+inventory remains bounded per release and Cloudflare account limits still apply.
+
+Preparation upgrades the shared Worker controller before changing the selected
+runner. Worker/controller changes therefore still require consumer-first
+compatibility with the serving runner. This procedure does not permit a
+breaking protocol change to skip its compatibility release. A failed candidate
+leaves the old image selected. Do not manually publish a generated config that
+bypasses this helper, or recycle an inactive namespace before drain proof.
+After promotion the helper records the effective config at the canonical
+generated path so private convergence verification checks retained capacities
+and exact image receipts. Rollback remains an explicitly authorized operation.
+
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Every protected deploy must set `HOSTED_EXECUTION_DEPLOY_TAG` to the private
 workflow run and attempt identity. The direct deploy emits one ephemeral

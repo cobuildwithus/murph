@@ -11,7 +11,7 @@ Cloudflare-hosted execution plane for the hosted Murph path.
   OIDC-authenticated browser/session/status/deletion control requests from
   `apps/web`
 - per-user execution coordination in `USER_RUNNER`
-- native runner-container lifecycle in `RUNNER_CONTAINER`
+- native runner-container lifecycle in `RUNNER_CONTAINER` and `NEXT_RUNNER_CONTAINER`
 - encrypted hosted workspace snapshots, legacy encrypted artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run hosted jobs in `BUNDLES`
 
 ## What It Does Not Own
@@ -87,7 +87,10 @@ checks.
 
 ### Unified runner fleet and ready inventory
 
-All fresh member execution uses globally eligible `RunnerContainer` instances.
+All fresh member execution uses the selected globally eligible runner target,
+`RunnerContainer` or `NextRunnerContainer`. Deployment prepares the inactive
+target before promotion; both use the same lifecycle implementation. See
+`DEPLOY.md` for preparation, exact-image admission and drain ownership.
 Warm and cold allocations use the same opaque target identity and lifecycle.
 `HOSTED_EXECUTION_STANDBY_TARGET` selects the number of pristine ready slots:
 its default is `2`, and valid values are integers from `0` through `32`. This is

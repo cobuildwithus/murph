@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +14,10 @@ import {
 } from "./deploy-automation/shared.ts";
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
+import { stageHostedRunnerRelease } from "./stage-runner-release.ts";
+import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
+import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
+import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
 import {
   createCloudflareContainerProvider,
   parseWranglerContainerActions,
@@ -54,9 +58,10 @@ export async function runDeployWorkerVersionCli(
     configPath,
     dependencies: {
       async deployDirect(input) {
-        const containerRolloutArgs = input.containerRolloutMode === "immediate"
-          ? ["--containers-rollout=immediate"]
-          : [];
+        const preparedConfigPath = await prepareHostedContainerDeployImage({
+          accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
+          configPath: input.configPath,
+        });
 
         await applyHostedTransientLifecycleRules({
           deployRoot,
@@ -67,6 +72,23 @@ export async function runDeployWorkerVersionCli(
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
         });
+        const releaseProvider = createRunnerReleaseProvider({
+          accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
+          apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
+        });
+        const current = await readCurrentDeployment(input.workerName, input.configPath);
+        const currentVersionId = requireSingleLiveVersion(current);
+        const staged = await stageHostedRunnerRelease({
+          configPath: preparedConfigPath,
+          currentVersion: await releaseProvider.readWorkerVersion(input.workerName, currentVersionId),
+          currentVersionId,
+          listApplications: containerProvider.listApplications,
+        });
+        if (staged.mustDrainCandidate) {
+          if (!staged.candidateApplicationId) throw new Error("Previous runner target is missing.");
+          await releaseProvider.assertDrained(staged.candidateApplicationId);
+        }
+        await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         const before = await readCloudflareContainerApplicationIdentities(
           renderedContainers,
           containerProvider.listApplications,
@@ -76,8 +98,8 @@ export async function runDeployWorkerVersionCli(
         const deployOutput = await runWranglerLoggedCaptured([
           "deploy",
           "--config",
-          input.configPath,
-          ...containerRolloutArgs,
+          staged.configPath,
+          ...(input.containerRolloutMode === "immediate" ? ["--containers-rollout=immediate"] : []),
           "--message",
           input.deploymentMessage,
           "--name",
@@ -90,6 +112,27 @@ export async function runDeployWorkerVersionCli(
           `${deployOutput.stdout}\n${deployOutput.stderr}`,
           renderedContainers,
         );
+        if (actions.find((action) => action.applicationName === staged.activeApplicationName)?.action !== "unchanged") {
+          throw new Error("Staging unexpectedly changed the active runner application.");
+        }
+        const stageVersionId = parseWranglerWorkerVersionId(`${deployOutput.stdout}\n${deployOutput.stderr}`);
+        await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+        await runSmokeHostedDeploy({
+          source: {
+            ...env,
+            HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+            HOSTED_EXECUTION_SMOKE_VERSION_ID: stageVersionId,
+            HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: path.join(runnerBundleDir, ".murph-runner-bundle-manifest.json"),
+          },
+        });
+        await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+        const promotionOutput = await runWranglerLoggedCaptured([
+          "deploy", "--config", staged.promotionConfigPath,
+          "--message", input.deploymentMessage, "--name", input.workerName,
+          "--tag", input.versionTag,
+          ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
+        ]);
+        await writeFile(input.configPath, await readFile(staged.promotionConfigPath, "utf8"), "utf8");
         return {
           containers: await waitForCloudflareContainerReleaseEntries({
             actions,
@@ -99,7 +142,7 @@ export async function runDeployWorkerVersionCli(
             readRollout: containerProvider.readRollout,
           }),
           workerVersionId: parseWranglerWorkerVersionId(
-            `${deployOutput.stdout}\n${deployOutput.stderr}`,
+            `${promotionOutput.stdout}\n${promotionOutput.stderr}`,
           ),
         };
       },
@@ -185,4 +228,17 @@ async function readCurrentDeployment(
 
 function isWranglerNoDeploymentsError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("has no deployments");
+}
+
+function requireSingleLiveVersion(deployment: DeploymentStatusPayload | null): string {
+  if (deployment?.versions.length !== 1 || deployment.versions[0]?.percentage !== 100) {
+    throw new Error("Staged runner deployment requires one authoritative live Worker version.");
+  }
+  return deployment.versions[0].version_id;
+}
+
+async function assertLiveVersion(workerName: string, configPath: string, expected: string): Promise<void> {
+  if (requireSingleLiveVersion(await readCurrentDeployment(workerName, configPath)) !== expected) {
+    throw new Error("Live Worker changed during runner preparation; promotion stopped.");
+  }
 }

@@ -250,6 +250,7 @@ function createHostedUserRunner(
 ): HostedUserRunner {
   const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
     exactUser: env.RUNNER_CONTAINER,
+    next: env.NEXT_RUNNER_CONTAINER,
     standby: env.STANDBY_RUNNER_CONTAINER ?? null,
   });
   return new HostedUserRunner(
