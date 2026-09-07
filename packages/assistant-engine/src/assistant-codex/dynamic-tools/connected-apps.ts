@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as connectedAppsTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
@@ -162,12 +164,7 @@ export async function executeConnectedAppsDynamicTool(input: {
     ConnectedAppsDynamicToolRequest,
     { kind: 'invalid-connected-apps-arguments' }
   >
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
   const requestBody: HostedConnectedAppsRequest = toHostedConnectedAppsRequest(input.request)
   const ambiguousWriteMessage = readConnectedAppsAmbiguousWriteMessage(requestBody)
 
@@ -175,6 +172,7 @@ export async function executeConnectedAppsDynamicTool(input: {
     return connectedAppsTextResult(
       false,
       'email sending requires current user input in a private conversation',
+      'authority_rejected',
     )
   }
 
@@ -193,6 +191,7 @@ export async function executeConnectedAppsDynamicTool(input: {
         false,
         ambiguousWriteMessage
           ?? 'connected apps result is too large; narrow the query or request a smaller page',
+        'oversized_result',
       )
     }
 
@@ -202,15 +201,16 @@ export async function executeConnectedAppsDynamicTool(input: {
       ambiguousWriteMessage
       && isConnectedAppsAmbiguousWriteFailure(error)
     ) {
-      return connectedAppsTextResult(false, ambiguousWriteMessage)
+      return connectedAppsTextResult(false, ambiguousWriteMessage, 'handler_exception', error)
     }
     if (isConnectedAppsOfficialAlertRequest(requestBody)) {
       return connectedAppsTextResult(
         false,
         `${describeConnectedAppsFailure(error, 'none')} Do not retry this optional alert read; continue without alert context.`,
+        'handler_exception', error,
       )
     }
-    return connectedAppsTextResult(false, describeConnectedAppsFailure(error))
+    return connectedAppsTextResult(false, describeConnectedAppsFailure(error), 'handler_exception', error)
   }
 }
 
@@ -336,14 +336,5 @@ function toHostedConnectedAppsRequest(
       return { input: request.args, operation: 'search' }
     case 'connected-apps-execute':
       return { input: request.args, operation: 'execute' }
-  }
-}
-
-function connectedAppsTextResult(success: boolean, text: string) {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' as const }],
-      success,
-    },
   }
 }

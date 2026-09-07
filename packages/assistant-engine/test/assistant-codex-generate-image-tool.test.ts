@@ -494,6 +494,7 @@ describe('executeGenerateImageTool', () => {
       rpcSuccess: false,
       rpcText:
         'image generation failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 502, request req_image_unstructured)',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'handler_exception', errorCategory: 'unavailable' },
     })
   })
 
@@ -656,6 +657,7 @@ describe('executeGenerateImageTool', () => {
     expect(result).toEqual({
       rpcSuccess: false,
       rpcText: 'hosted private image delivery requires the owning vault',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
     })
   })
 
@@ -686,6 +688,7 @@ describe('executeGenerateImageTool', () => {
       rpcSuccess: false,
       rpcText:
         'hosted private image delivery requires generated capture persistence',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
     })
   })
 })

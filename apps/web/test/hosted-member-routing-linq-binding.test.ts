@@ -4,7 +4,10 @@ import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
-import { upsertHostedMemberHomeLinqBindingTx } from "../src/lib/hosted-onboarding/hosted-member-routing-linq";
+import {
+  readUnchangedHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberHomeLinqBindingTx,
+} from "../src/lib/hosted-onboarding/hosted-member-routing-linq";
 
 const mocks = vi.hoisted(() => ({ encrypt: vi.fn() }));
 vi.mock("../src/lib/hosted-onboarding/member-private-codecs", async (importOriginal) => ({
@@ -55,7 +58,15 @@ function createFixture() {
       recipientPhone: "+15550000000",
       ...overrides,
     });
-  return { bind, prisma, routing };
+  const retain = () => readUnchangedHostedMemberHomeLinqBindingTx({
+    chatId: "synthetic-chat",
+    homeLineAssignedAt: new Date(assignedAt),
+    memberId: "synthetic-member",
+    prisma: prisma as never,
+    recipientPhone: "+15550000000",
+    routingRecord: routing,
+  });
+  return { bind, prisma, retain, routing };
 }
 
 beforeEach(() => {
@@ -66,6 +77,23 @@ beforeEach(() => {
 });
 
 describe("established Linq home binding", () => {
+  it("retains a validated clean binding with only the pending-conflict read", async () => {
+    const { prisma, retain } = createFixture();
+    await expect(retain()).resolves.toEqual(participant);
+    expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+  });
+
+  it("defers a competing pending route to the repair writer", async () => {
+    const { prisma, retain } = createFixture();
+    prisma.hostedMemberRouting.findFirst.mockResolvedValue({ memberId: "other-owner" });
+    await expect(retain()).resolves.toBeNull();
+    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+  });
+
   it("keeps the stored participant and ciphertext without rewriting an unchanged route", async () => {
     const { bind, prisma } = createFixture();
     await expect(bind()).resolves.toEqual(participant);
@@ -74,7 +102,7 @@ describe("established Linq home binding", () => {
     expect(prisma.$queryRaw).toHaveBeenCalled();
     expect(prisma.hostedThreadRoute.findFirst).toHaveBeenCalledOnce();
     expect(prisma.hostedMemberRouting.findFirst).toHaveBeenCalledOnce();
-    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -91,8 +119,9 @@ describe("established Linq home binding", () => {
     ["missing ciphertext", { linqChatIdEncrypted: "" }],
     ["missing participant", { linqParticipantContactKind: null, linqParticipantContactLookupKey: null }],
   ])("still writes for %s", async (_name, change) => {
-    const { bind, prisma, routing } = createFixture();
+    const { bind, prisma, retain, routing } = createFixture();
     Object.assign(routing, change);
+    await expect(retain()).resolves.toBeNull();
     await bind();
     expect(mocks.encrypt).toHaveBeenCalledOnce();
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalledOnce();
@@ -130,6 +159,25 @@ describe("established Linq home binding", () => {
       code: owner === "thread" ? "HOSTED_LINQ_CHAT_THREAD_ROUTE_CONFLICT" : "HOSTED_LINQ_CHAT_HOME_ROUTE_CONFLICT",
     });
     expect(mocks.encrypt).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+  });
+
+  it("repairs pending conflicts with one cleanup after locking the conflicting member", async () => {
+    const { bind, prisma } = createFixture();
+    prisma.hostedMemberRouting.findMany.mockResolvedValue([{ memberId: "other-owner" }]);
+    prisma.$queryRaw.mockResolvedValue([{ id: "other-owner" }]);
+    await expect(bind()).resolves.toEqual(participant);
+    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+  });
+
+  it("leaves pending conflicts untouched when their member lock is busy", async () => {
+    const { bind, prisma } = createFixture();
+    prisma.hostedMemberRouting.findMany.mockResolvedValue([{ memberId: "other-owner" }]);
+    prisma.$queryRaw.mockResolvedValue([]);
+    await expect(bind()).rejects.toMatchObject({ code: "HOSTED_LINQ_PENDING_ROUTE_BUSY", retryable: true });
+    expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 });

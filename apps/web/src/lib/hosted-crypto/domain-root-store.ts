@@ -152,9 +152,10 @@ export class HostedDomainRootPreparationMismatchError extends Error {
 export async function prepareHostedDomainRootForWeb(input: {
   domain: HostedCryptoDomain;
   prepareMissing?: boolean;
+  /** Already-discovered candidates; exact active-root authority is still revalidated. */
+  preparedCandidates?: PreparedHostedCryptoDomainRootCandidates;
   prisma?: HostedCryptoClient;
   reason: string;
-  reusableCandidates?: PreparedHostedCryptoDomainRootCandidates;
   signal?: AbortSignal;
   userId: string;
 }): Promise<PreparedHostedDomainRootForWeb> {
@@ -171,12 +172,9 @@ export async function prepareHostedDomainRootForWeb(input: {
   }
   const preparedCandidates = input.prepareMissing === false
     ? new Map<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>()
-    : await prepareHostedCryptoDomainRootCandidates({
+    : input.preparedCandidates ?? await prepareHostedCryptoDomainRootCandidates({
         domains: [input.domain],
         prisma: input.prisma,
-        ...(input.reusableCandidates
-          ? { reusableCandidates: input.reusableCandidates }
-          : {}),
         userId: input.userId,
       });
   const candidate = preparedCandidates.get(input.domain);

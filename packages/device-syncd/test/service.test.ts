@@ -6720,6 +6720,50 @@ test("device sync service counts provider batch rows against drainWorker limits"
   close();
 });
 
+test("device sync scopes provider execution to each drain and standalone worker call", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-pass");
+  const scopes: number[] = [];
+  let scopeCount = 0;
+  const provider = createFakeProvider();
+  assert.ok(provider.jobExecutor);
+  provider.jobExecutor.createPassExecutor = () => {
+    const scope = ++scopeCount;
+    return { async executeJob() { scopes.push(scope); return {}; } };
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot, publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [provider],
+  });
+  const account = store.upsertAccount({
+    provider: "demo", externalAccountId: "demo-pass", displayName: "Demo",
+    scopes: [], tokens: {
+      accessToken: "pass-token",
+      accessTokenEncrypted: encryptStoredAccessToken("demo", "demo-pass", "pass-token"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  try {
+    for (let index = 0; index < 5; index += 1) {
+      store.enqueueJob({
+        accountId: account.id, provider: "demo", kind: "resource",
+        payload: { resource: `resource-${index}` }, availableAt: "2026-03-17T10:00:00.000Z",
+      });
+    }
+    assert.equal(await service.drainWorker(2, account.id), 2);
+    assert.equal(await service.drainWorker(1, account.id), 1);
+    await service.runWorkerOnce(account.id);
+    await service.runWorkerOnce(account.id);
+    assert.deepEqual(scopes, [1, 1, 2, 3, 4]);
+    assert.equal(scopeCount, 4);
+  } finally {
+    close();
+  }
+});
+
 test("device sync drain shares one bounded import session and reports cumulative progress", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-import-session");
   const importSessions: unknown[] = [];

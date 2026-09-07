@@ -1,3 +1,4 @@
+import { toolFailureDiagnostic, type ToolFailureDiagnostic, type ToolFailureReason } from './tool-failure-diagnostics.js'
 import {
   resolveXaiApiKey,
   resolveXaiXSearchModel,
@@ -11,6 +12,7 @@ export interface AskGrokToolArgs {
 }
 
 export interface AskGrokToolResult {
+  failureDiagnostic?: ToolFailureDiagnostic
   rpcSuccess: boolean
   rpcText: string
 }
@@ -101,13 +103,14 @@ export async function executeAskGrokTool(input: {
 }): Promise<AskGrokToolResult> {
   const runtime = input.runtime ?? null
   if (!runtime) {
-    return failure('X search is not configured (XAI_API_KEY is missing); no search ran')
+    return failure('X search is not configured (XAI_API_KEY is missing); no search ran', 'unavailable')
   }
 
   const turnState = input.turnState ?? createAskGrokTurnState()
   if (turnState.providerCallCount >= ASK_GROK_MAX_PROVIDER_CALLS_PER_TURN) {
     return failure(
       `X search limit of ${ASK_GROK_MAX_PROVIDER_CALLS_PER_TURN} searches reached for this turn; no search ran`,
+      'limit_reached',
     )
   }
   turnState.providerCallCount += 1
@@ -141,24 +144,24 @@ export async function executeAskGrokTool(input: {
       signal: timeout.signal,
     })
     if (response.status === 429) {
-      return failure('X search provider rate-limited this request; no answer was retrieved')
+      return failure('X search provider rate-limited this request; no answer was retrieved', 'reported_failure', { status: response.status })
     }
     if (!response.ok) {
-      return failure('X search provider is unavailable right now; no answer was retrieved')
+      return failure('X search provider is unavailable right now; no answer was retrieved', 'reported_failure', { status: response.status })
     }
     payload = await response.json()
   } catch (error) {
     if (input.abortSignal?.aborted) {
       throw error
     }
-    return failure('X search provider is unavailable right now; no answer was retrieved')
+    return failure('X search provider is unavailable right now; no answer was retrieved', 'handler_exception', error)
   } finally {
     timeout.cleanup()
   }
 
   const answer = readAnswer(payload)
   if (!answer.text) {
-    return failure('X search returned no answer; nothing can be shown')
+    return failure('X search returned no answer; nothing can be shown', 'empty_result')
   }
   const cutOff = answer.truncated || stoppedBeforeFinishing(payload)
   const murphFraming = cutOff
@@ -170,8 +173,12 @@ export async function executeAskGrokTool(input: {
   }
 }
 
-function failure(rpcText: string): AskGrokToolResult {
-  return { rpcSuccess: false, rpcText }
+function failure(
+  rpcText: string,
+  failureReason: ToolFailureReason,
+  error?: unknown,
+): AskGrokToolResult {
+  return { rpcSuccess: false, rpcText, failureDiagnostic: toolFailureDiagnostic(failureReason, error) }
 }
 
 /**
