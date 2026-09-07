@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
@@ -110,6 +111,8 @@ export interface HostedDeviceSyncRuntimeDirtyAck {
 }
 
 export interface HostedDeviceSyncRuntimeDirtyPayloadJob {
+  /** Transient admission proof; a cold restore must derive it again from Web. */
+  replayableFromWeb?: boolean;
   connectionId: string;
   dirtyPayloadId: string | null;
   jobId: string;
@@ -1170,11 +1173,11 @@ function listHostedDeviceSyncRetainedJobs(input: {
   let pending = input.store.listPendingJobsForAccount(input.accountId, limit + 1);
   if (pending.length <= limit) return pending;
 
-  // Worker-created continuations can expand a full admission page. Never-started
-  // payload jobs still have their exact authoritative Web row, so defer only
-  // enough of those to retain every continuation and attempted job.
+  // Worker-created continuations can expand a full admission page. Defer only
+  // enough Web-reconstructible, untouched payload jobs to retain every
+  // continuation and attempted job, including cold-restored retries.
   const payloadJobIds = new Set(input.state.pendingDirtyPayloadJobs
-    .filter((job) => job.dirtyPayloadId !== null)
+    .filter((job) => job.dirtyPayloadId !== null && job.replayableFromWeb === true)
     .map((job) => job.jobId));
   pending = input.store.listPendingJobsForAccount(
     input.accountId,
@@ -1426,10 +1429,10 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
     0,
     HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingJobs.length,
   );
-  const jobIdsByDedupeKey = new Map<string, string>();
+  const jobsByDedupeKey = new Map<string, DeviceSyncJobRecord>();
   for (const job of pendingJobs) {
     if (job.provider === input.provider && job.dedupeKey) {
-      jobIdsByDedupeKey.set(job.dedupeKey, job.id);
+      jobsByDedupeKey.set(job.dedupeKey, job);
     }
   }
   const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
@@ -1437,12 +1440,12 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
 
   for (const job of input.jobs) {
     const dedupeKey = job.input.dedupeKey;
-    let jobId = dedupeKey ? jobIdsByDedupeKey.get(dedupeKey) ?? null : null;
-    if (!jobId) {
+    let localJob = dedupeKey ? jobsByDedupeKey.get(dedupeKey) ?? null : null;
+    if (!localJob) {
       if (availableSlots === 0) {
         continue;
       }
-      const enqueued = input.store.enqueueJob({
+      localJob = input.store.enqueueJob({
         accountId: input.accountId,
         availableAt: job.input.availableAt,
         dedupeKey,
@@ -1452,10 +1455,9 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
         priority: job.input.priority ?? 0,
         provider: input.provider,
       });
-      jobId = enqueued.id;
       availableSlots -= 1;
       if (dedupeKey) {
-        jobIdsByDedupeKey.set(dedupeKey, jobId);
+        jobsByDedupeKey.set(dedupeKey, localJob);
       }
     }
     admittedJobCount += 1;
@@ -1467,7 +1469,8 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
       pendingDirtyPayloadJobs.push({
         connectionId: input.connectionId,
         dirtyPayloadId: job.dirtyPayloadId,
-        jobId,
+        jobId: localJob.id,
+        replayableFromWeb: hostedDirtyJobCanReplayFromWeb(localJob, job.input),
         processedRevision: input.processedRevision,
         resource: job.resource.resource,
         sourceProviderSlug: job.resource.sourceProviderSlug,
@@ -1477,6 +1480,21 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
   }
 
   return { admittedJobCount, pendingDirtyPayloadJobs };
+}
+
+function hostedDirtyJobCanReplayFromWeb(
+  localJob: DeviceSyncJobRecord,
+  webJob: DeviceSyncJobInput,
+): boolean {
+  // enqueueJob defaults new Web jobs to five attempts. A restored row starts
+  // at attempts=0 too, but its retained budget and execution payload may differ.
+  return localJob.kind === webJob.kind
+    && localJob.maxAttempts === (webJob.maxAttempts ?? 5)
+    && localJob.priority === (webJob.priority ?? 0)
+    && isDeepStrictEqual(
+      shapeHostedDeviceSyncJobHintPayload(localJob.provider, localJob),
+      shapeHostedDeviceSyncJobHintPayload(localJob.provider, webJob),
+    );
 }
 
 function withHostedDirtyPayloadAckIds(

@@ -1448,8 +1448,13 @@ Last verified: 2026-09-04
   separate, so the larger buffer does not enlarge a runtime pass.
   If worker-created continuations expand a full dirty page beyond the 100-job
   retained-hint limit, recovery defers only enough never-started, currently due
-  payload jobs whose exact Web rows remain authoritative. Attempted, running,
-  future-dated, and worker-created jobs keep their exact retention requirements.
+  payload jobs whose exact Web rows remain authoritative. Admission re-derives
+  a transient replay proof from the local job's kind, manifest-safe execution
+  payload, priority and attempt budget against the Web input. Cold-restored jobs
+  reset local attempt counters, so those counters alone cannot prove a payload
+  is untouched: saved cursors and reduced retry budgets must remain retained.
+  Attempted, running, future-dated, and worker-created jobs keep their exact
+  retention requirements.
   Recovery reads at most 101 rows normally and, on overflow, at most 201 more;
   it leaves deferred payloads unacknowledged and uses the existing dirty-remainder
   path after the retained work drains. Non-reconstructible overflow still fails
