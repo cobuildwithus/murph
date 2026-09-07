@@ -53,7 +53,7 @@ import {
   findActiveDeviceSyncJobDedupeKeys,
   getDeviceSyncJobById,
   listDueDeviceSyncJobBatchCandidates,
-  listPendingDeviceSyncJobsForAccount,
+  iteratePendingDeviceSyncJobsForAccount,
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
@@ -643,11 +643,16 @@ export class SqliteDeviceSyncStore {
   }
 
   listPendingJobsForAccount(accountId: string, limit: number): DeviceSyncJobRecord[] {
-    return listPendingDeviceSyncJobsForAccount({
+    return [...iteratePendingDeviceSyncJobsForAccount({
       accountId,
       database: this.database,
       limit,
-    });
+    })];
+  }
+
+  // Export every accepted job for recovery, independently of worker pass size.
+  iteratePendingJobsForAccount(accountId: string): Generator<DeviceSyncJobRecord> {
+    return iteratePendingDeviceSyncJobsForAccount({ accountId, database: this.database });
   }
 
   findActiveJobDedupeKeys(input: {

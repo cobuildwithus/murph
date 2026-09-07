@@ -1424,7 +1424,18 @@ Last verified: 2026-09-04
   mailbox item stays pending while that account has queued or running work and
   is narrowed before checkpoint publication from the actual job rows to each
   manifest-safe payload/window, dedupe identity, priority, next retry time, and
-  remaining attempt limit, including worker-created child jobs. The same wake
+  remaining attempt limit, including worker-created child jobs. Recovery streams
+  all queued/running rows for that account through one SQLite statement; it
+  performs no credential decryption, external calls, concurrent reads, or writes
+  while that cursor is open. Only the required manifest-safe retry hints are
+  accumulated. Completed jobs and other accounts are excluded. The 100-job
+  execution and dirty-admission budgets do not cap recovery: one completed job
+  can create multiple accepted follow-ups. The existing workspace snapshot byte
+  envelope bounds publication; recovery never truncates accepted work to a pass
+  budget or adds another persisted queue. Dirty admission uses the same complete
+  account stream to count capacity and relink already-owned jobs anywhere in the
+  queue. Its dedupe map retains only identities from the bounded current dirty
+  page; a full queue blocks new jobs, never acknowledgement of existing jobs. The same wake
   carries the provider's advanced cadence, but Web does not receive that
   cadence until the post-record checkpoint has made the exact completion state
   durable. Before exposing that completion record, the pass requires Web to
