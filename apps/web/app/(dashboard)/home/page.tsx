@@ -4,13 +4,14 @@ import type { Metadata } from "next";
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
 import { HomeInitialVisitPersonaPickerClient } from "./initial-visit-persona-picker-client";
 
-import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import { HostedMurphChatAction, resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
 import { HomeDataLoadAlert } from "@/src/components/home/home-data-load-alert";
 import {
   MessageMurphActionFallback,
   MessageMurphContactAction,
 } from "@/src/components/home/message-murph-action";
+import { MurphChatActionFallback } from "@/src/components/murph/murph-chat-action";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
 import {
@@ -223,6 +224,11 @@ export default async function HomePage({
 
       <BrowserVaultOnboardingStepsContent
         showEmptyState={!hasHomeDataLoadError}
+        emptyStateAction={
+          <Suspense fallback={<MurphChatActionFallback />}>
+            <HostedMurphChatAction />
+          </Suspense>
+        }
         messageMurphAction={
           awaitingFirstMemberMessage ? (
             <Suspense fallback={<MessageMurphActionFallback />}>

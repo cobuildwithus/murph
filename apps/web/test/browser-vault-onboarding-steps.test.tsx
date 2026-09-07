@@ -201,7 +201,7 @@ test.each(["active", "planned", "paused", "completed", "stopped"])(
   },
 );
 
-test("Home shows Text Murph after device and lab setup even with an active experiment", async () => {
+test("Home shows Message Murph after device and lab setup even with an active experiment", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: createClient([metricRow({
       biomarkerKey: "biomarker:hba1c",
@@ -216,13 +216,15 @@ test("Home shows Text Murph after device and lab setup even with an active exper
   );
   const markup = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent, {
     showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
   }));
 
-  assert.match(markup, /Text Murph/);
+  assert.match(markup, /<button>Message Murph<\/button>/);
   assert.doesNotMatch(markup, /data-onboarding-step|Sample experiment run/);
 
   const awaitingMessage = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent, {
     showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
     messageMurphAction: createElement("button", null, "Message"),
   }));
   assert.match(awaitingMessage, /Murph can&#x27;t message you first/);
@@ -237,6 +239,7 @@ test.each(["loading", "error"])("Home does not show completed setup while vault 
   const markup = renderToStaticMarkup(createElement(BrowserVaultOnboardingStepsContent, {
     hideLabsStep: true,
     showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
   }));
   assert.doesNotMatch(markup, /data-home-empty-state/);
   if (status === "error") assert.match(markup, /Could not load your dashboard/);
@@ -310,15 +313,16 @@ test("BrowserVaultOnboardingStepsContent replaces misleading data steps with a s
   await rendered.cleanup();
 });
 
-test("OnboardingSteps offers Text Murph when every step is complete", async () => {
+test("OnboardingSteps offers Message Murph when every step is complete", async () => {
   const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
 
   const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
     hideLabsStep: true,
     showDeviceStep: false,
+    emptyStateAction: createElement("button", null, "Message Murph"),
   }));
 
-  assert.match(markup, /Text Murph/);
+  assert.match(markup, /<button>Message Murph<\/button>/);
   assert.doesNotMatch(markup, /data-onboarding-step/);
 });
 

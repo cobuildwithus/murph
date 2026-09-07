@@ -1,6 +1,8 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
+import { MurphChatAction } from "@/src/components/murph/murph-chat-action";
+
 import {
   getOnboardingStepActionClass,
   OnboardingSteps,
@@ -37,7 +39,16 @@ export function HomeOnboardingStepsStudy() {
         uploadLabsAction={<StudyAction>Sync</StudyAction>}
       />
       <div id="home-onboarding-complete" className="mt-8" data-design-section="home-onboarding-complete">
-        <OnboardingSteps showDeviceStep={false} hideLabsStep />
+        <OnboardingSteps
+          showDeviceStep={false}
+          hideLabsStep
+          emptyStateAction={
+            <MurphChatAction authenticated options={[
+              { kind: "text", label: "Messages", href: "sms:+15550100001" },
+              { kind: "email", label: "Email", href: "mailto:example@example.test" },
+            ]} />
+          }
+        />
       </div>
     </div>
   );
