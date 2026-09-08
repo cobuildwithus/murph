@@ -105,6 +105,7 @@ describe("dedicated hosted runtime log store", () => {
     expect(count).toBe(recent === 12 ? 0 : 1);
     const quota = database.client.calls[2]!;
     expect(compactSql(quota.text)).toContain("LIMIT 12");
+    expect(compactSql(quota.text)).toContain("at >= statement_timestamp() - interval '1 minute'");
     expect(quota.values).toEqual([hostedRuntimeLogSubjectKey("member_fixture")]);
     expect(database.client.calls.some((call) => call.text.includes("INSERT INTO"))).toBe(recent < 12);
     expect(compactSql(database.client.calls.at(-1)!.text)).toBe("COMMIT");

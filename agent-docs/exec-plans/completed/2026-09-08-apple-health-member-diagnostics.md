@@ -1,6 +1,6 @@
 # Member-scoped Apple Health diagnostics
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -55,4 +55,8 @@ Updated: 2026-09-08
 - Web: 34 focused tests passed, 37 hosted runtime-control parser tests passed; Web and hosted-execution typechecks passed. Complexity and raw-health-log guards passed.
 - Native: seven shared transport regression checks passed under strict concurrency with warnings as errors; XcodeGen and SwiftFormat passed.
 - Full native command `xcodebuild test -scheme MurphCompanion -destination 'platform=iOS Simulator,name=iPhone 17'` cannot run because this host has Command Line Tools without Xcode. The standalone Foundation runner proves transport behavior only; UIKit/SDK/AppSession compilation, simulator tests and physical-device behavior remain unverified.
-- Parent privacy and diff review completed. Paired PR review remains pending; no merge, deployment, or release performed.
+- Parent privacy and diff review completed. Backend PR 3042 first-head independent review returned PASS; the tool's response-model artifact and content hash verified the configured model despite the response's self-reported UNKNOWN marker.
+- A direct synthetic probe passed actual production Swift JSON encoding into the actual backend parser, including an unfinished attempt with its optional end time omitted.
+- Parent follow-up: use statement-stable receipt time in the quota predicate. Read-only EXPLAIN with a synthetic nonexistent subject confirmed that both subject and time become index conditions; the volatile clock form applied time as a post-scan filter. The correction passed all 34 focused Web tests and Web typecheck.
+- Final-head backend review and native PR 148 review/build gates remain tracked on the PRs. No merge, deployment, or release performed.
+Completed: 2026-09-08

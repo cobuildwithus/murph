@@ -137,7 +137,7 @@ export async function recordHostedRuntimeLogs(input: {
         SELECT count(*)::int AS count FROM (
           SELECT 1 FROM hosted_runtime_log
           WHERE subject_key = $1
-            AND at >= clock_timestamp() - interval '1 minute'
+            AND at >= statement_timestamp() - interval '1 minute'
             AND event_code = 'device-sync.companion_diagnostic'
           LIMIT 12
         ) recent
