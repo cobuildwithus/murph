@@ -834,11 +834,16 @@ closure, and a subsequent workout start. Monitor bounded hosted-runtime error
 aggregates for strict workout parse failures and rejected workout CLI commands.
 
 The repetition-rule recovery update uses `memberRepsPerSet: null` for an
-explicit withdrawal; omission remains unestablished legacy state. Deploy every
-strict reader with this nullable contract before emitting a clear, and treat
-that compatible bundle as the rollback floor after the first null write. The
-controlled workout check must also clear a rule, reread it, and confirm a later
-countless completion cannot recover the withdrawn number from saved context.
+explicit withdrawal; omission remains unestablished legacy state. Use the full
+Worker-and-runner immediate rollout above. Existing member pinning and write
+fences allow a previous warm runtime to keep its own workspace until normal
+retirement; fresh allocation uses the promoted compatible bundle. Every reader
+of a workspace must support null before that workspace emits a clear. The first
+null write establishes its compatible-bundle rollback floor; do not send that
+workspace back to an older image. A Worker-only release does not ship this fix.
+The controlled workout check must also clear a rule, reread it, and confirm a
+later completion without a count cannot recover the withdrawn number from saved
+context.
 
 ## Public Goal Lineage Rollout
 

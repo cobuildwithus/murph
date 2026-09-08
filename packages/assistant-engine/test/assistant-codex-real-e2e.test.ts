@@ -26014,6 +26014,44 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(message).not.toContain('thread_sensitive')
   })
 
+  it.each([
+    ['httpConnectionFailed', 'httpConnectionFailed'],
+    ['request_sensitive_123', 'unrecognized'],
+  ])('preserves only safe structured live failure diagnostics for %s', (errorInfo, expectedErrorInfo) => {
+    const error = Object.assign(new Error('Provider detail for request_sensitive_123'), {
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexErrorInfo: errorInfo,
+        codexErrorInfoPresent: true,
+        codexErrorHttpStatusCode: 502,
+        codexFailureDetailPresent: true,
+        codexProviderRequestStarted: false,
+        codexAbortRequested: false,
+        codexShutdownRequested: true,
+        codexLiveTurnOpen: false,
+        retryable: true,
+        codexThreadId: 'thread_sensitive_123',
+        codexStderr: 'stderr_sensitive_123',
+      },
+    })
+
+    expect(buildRealCodexE2eFailureMessage(error)).toBe([
+      'Real Codex turn failed: code=ASSISTANT_CODEX_FAILED',
+      `errorInfo=${expectedErrorInfo}`,
+      'httpStatus=502',
+      'errorInfoPresent=true',
+      'detailPresent=true',
+      'providerRequestStarted=false',
+      'abortRequested=false',
+      'shutdownRequested=true',
+      'liveTurnOpen=false',
+      'retryable=true',
+    ].join(' '))
+    expect(buildRealCodexE2eFailureMessage({
+      context: { codexErrorHttpStatusCode: '502', retryable: 'secret_sensitive_123' },
+    })).toBe('Real Codex turn failed: code=UNKNOWN')
+  })
+
   it('distinguishes turn/start result ids from turn/started event ids', () => {
     const events = [
       {
@@ -36509,6 +36547,43 @@ function buildRealCodexE2eFailureMessage(error: unknown): string {
   const providerActionCount = readNonNegativeInteger(context?.providerActionCount)
   if (providerActionCount !== null) {
     parts.push(`providerActionCount=${providerActionCount}`)
+  }
+
+  const errorInfo = context?.codexErrorInfo
+  if (typeof errorInfo === 'string') {
+    const knownErrorKinds = [
+      'contextWindowExceeded',
+      'usageLimitExceeded',
+      'serverOverloaded',
+      'httpConnectionFailed',
+      'responseStreamConnectionFailed',
+      'internalServerError',
+      'unauthorized',
+      'badRequest',
+      'threadRollbackFailed',
+      'responseStreamDisconnected',
+      'responseTooManyFailedAttempts',
+      'other',
+    ]
+    parts.push(`errorInfo=${knownErrorKinds.includes(errorInfo) ? errorInfo : 'unrecognized'}`)
+  }
+  const httpStatus = readNonNegativeInteger(context?.codexErrorHttpStatusCode)
+  if (httpStatus !== null && httpStatus >= 100 && httpStatus <= 599) {
+    parts.push(`httpStatus=${httpStatus}`)
+  }
+  for (const [key, label] of [
+    ['codexErrorInfoPresent', 'errorInfoPresent'],
+    ['codexFailureDetailPresent', 'detailPresent'],
+    ['codexProviderRequestStarted', 'providerRequestStarted'],
+    ['codexAbortRequested', 'abortRequested'],
+    ['codexShutdownRequested', 'shutdownRequested'],
+    ['codexLiveTurnOpen', 'liveTurnOpen'],
+    ['retryable', 'retryable'],
+  ] as const) {
+    const value = context?.[key]
+    if (typeof value === 'boolean') {
+      parts.push(`${label}=${value}`)
+    }
   }
 
   return `Real Codex turn failed: ${parts.join(' ')}`
