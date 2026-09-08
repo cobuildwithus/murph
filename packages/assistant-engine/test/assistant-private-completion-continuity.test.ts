@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -84,6 +84,66 @@ afterEach(async () => {
 })
 
 describe('private completion continuity', () => {
+  it('does not prepare transcript or secret directories when there is no completion to import', async () => {
+    const fixture = await createBoundContinuityFixture('private-continuity-empty-directories-')
+    const paths = resolveAssistantStatePaths(fixture.vaultRoot)
+    await rm(paths.transcriptsDirectory, { force: true, recursive: true })
+    await rm(paths.secretsDirectory, { force: true, recursive: true })
+    await chmod(paths.sessionsDirectory, 0o755)
+
+    await expect(reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
+      sessionId: fixture.ordinarySession.sessionId,
+      vault: fixture.vaultRoot,
+    })).resolves.toMatchObject({
+      sessionId: fixture.ordinarySession.sessionId,
+      turnCount: 0,
+    })
+
+    expect((await stat(paths.sessionsDirectory)).mode & 0o777).toBe(0o700)
+    await expect(access(paths.transcriptsDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(paths.secretsDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['sessionsDirectory', 'transcriptsDirectory', 'sessionSecretsDirectory'] as const)(
+    'rejects symlinked %s before continuity can read or mutate its target',
+    async (directoryKey) => {
+      const fixture = await createBoundContinuityFixture('private-continuity-directory-symlink-')
+      const delivered = await createDeliveredPrivateCompletion({
+        continuitySessionId: fixture.ordinarySession.sessionId,
+        deliverySession: fixture.ordinarySession,
+        vault: fixture.vaultRoot,
+      })
+      const paths = resolveAssistantStatePaths(fixture.vaultRoot)
+      const directory = paths[directoryKey]
+      await mkdir(directory, { recursive: true, mode: 0o700 })
+      const filename = `${fixture.ordinarySession.sessionId}.${directoryKey === 'transcriptsDirectory' ? 'jsonl' : 'json'}`
+      if (directoryKey !== 'sessionsDirectory') {
+        await writeFile(path.join(directory, filename), 'Synthetic protected content')
+      }
+      const targetDirectory = path.join(fixture.vaultRoot, 'outside-continuity')
+      await rename(directory, targetDirectory)
+      await chmod(targetDirectory, 0o755)
+      await symlink(targetDirectory, directory)
+      const targetPath = path.join(targetDirectory, filename)
+      const original = await readFile(targetPath, 'utf8')
+      const originalEntries = await readdir(targetDirectory)
+      const intentPath = path.join(paths.outboxDirectory, `${delivered.intentId}.json`)
+      const originalIntent = await readFile(intentPath, 'utf8')
+
+      await expect(reconcileAssistantPrivateCompletionContinuityForSession({
+        allowUnbound: false,
+        sessionId: fixture.ordinarySession.sessionId,
+        vault: fixture.vaultRoot,
+      })).rejects.toThrow('symlinks')
+
+      expect(await readFile(targetPath, 'utf8')).toBe(original)
+      expect(await readdir(targetDirectory)).toEqual(originalEntries)
+      expect((await stat(targetDirectory)).mode & 0o777).toBe(0o755)
+      expect(await readFile(intentPath, 'utf8')).toBe(originalIntent)
+    },
+  )
+
   it('claims pending unbound ownership without importing before delivery authority', async () => {
     const fixture = await createContinuityFixture('private-continuity-rejected-')
     const pending = await createPrivateCompletionIntent({
