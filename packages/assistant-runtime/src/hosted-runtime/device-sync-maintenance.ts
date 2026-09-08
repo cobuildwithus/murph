@@ -1653,6 +1653,15 @@ function summarizeHostedDeviceSyncJobTimings(
       credentialRefreshCount: diagnostic.credentialRefreshCount,
       credentialRefreshElapsedMs: diagnostic.credentialRefreshElapsedMs,
       durableProgressCommitted: diagnostic.durableProgressCommitted,
+      ...(diagnostic.historicalPullReadiness
+        ? { historicalPullReadiness: toHostedRuntimeLogCode(diagnostic.historicalPullReadiness) }
+        : {}),
+      ...(diagnostic.scheduledJobCount === undefined
+        ? {}
+        : {
+            scheduledJobCount: diagnostic.scheduledJobCount,
+            nextScheduledJobDelayMs: diagnostic.nextScheduledJobDelayMs ?? null,
+          }),
       elapsedMs: diagnostic.elapsedMs,
       jobCount: diagnostic.jobCount,
       jobKind: toHostedRuntimeLogCode(diagnostic.jobKind),

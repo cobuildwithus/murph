@@ -872,21 +872,6 @@ describe.skipIf(!runPostgresProof)(
             ),
           });
           await seedProgressLane({
-            createdAt: now,
-            lane: "system",
-            tx,
-            userId: freshHead,
-          });
-          await seedProgressLaneItems({
-            lane: "system",
-            rows: [
-              { createdAt: staleAt, laneSeq: 1n },
-              { createdAt: freshSuffixAt, laneSeq: 2n },
-            ],
-            tx,
-            userId: freshSuffix,
-          });
-          await seedProgressLane({
             createdAt: staleAt,
             lane: "system",
             tx,
@@ -921,6 +906,36 @@ describe.skipIf(!runPostgresProof)(
             ],
           });
 
+          // Isolate imported=2 above the durable high water of 1 before
+          // adding the fresh-head/suffix characterization lanes.
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({
+              stalledSystemLaneCount: 1,
+              systemDiagnostics: {
+                fullyImportedLaneCount: 0,
+                importedUnhandledItemCount: 0,
+                partiallyImportedLaneCount: 0,
+                unimportedHeadLaneCount: 0,
+                unknownImportLaneCount: 1,
+              },
+            });
+
+          await seedProgressLane({
+            createdAt: now,
+            lane: "system",
+            tx,
+            userId: freshHead,
+          });
+          await seedProgressLaneItems({
+            lane: "system",
+            rows: [
+              { createdAt: staleAt, laneSeq: 1n },
+              { createdAt: freshSuffixAt, laneSeq: 2n },
+            ],
+            tx,
+            userId: freshSuffix,
+          });
+
           await expect(readHostedRuntimeProgressHealth({
             now,
             prisma: tx,
@@ -951,6 +966,13 @@ describe.skipIf(!runPostgresProof)(
             stalledLaneCount: 2,
             stalledRuntimeCount: 2,
             stalledSystemLaneCount: 2,
+            systemDiagnostics: {
+              fullyImportedLaneCount: 1,
+              importedUnhandledItemCount: 2,
+              partiallyImportedLaneCount: 1,
+              unimportedHeadLaneCount: 0,
+              unknownImportLaneCount: 0,
+            },
           });
 
           await expect(readHostedRuntimeProgressHealth({

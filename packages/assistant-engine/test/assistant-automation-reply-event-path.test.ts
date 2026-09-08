@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,6 +24,7 @@ import {
   readAssistantAutoReplyRouteState,
   resolveAssistantAutoReplyInputExactRoute,
   resolveAssistantAutoReplyOutboxExactRoute,
+  resolveAssistantAutoReplyRouteMigrationPath,
 } from '../src/assistant/automation/cross-session-route-state.ts'
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
@@ -5847,6 +5848,103 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
+  it.each(
+    (['missing', 'corrupt', 'ready'] as const).flatMap((migration) =>
+      [false, true].map((anchored) => ({ migration, anchored })),
+    ),
+  )('preserves optional context with $migration migration and anchored=$anchored', async ({
+    migration,
+    anchored,
+  }) => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-route-preflight-context',
+        message: 'earlier reminder for this conversation',
+        providerMessageId: 'message-route-preflight-context',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    if (migration === 'ready') {
+      await completeAutoReplyRouteMigration(vault)
+    } else if (migration === 'corrupt') {
+      const migrationPath = resolveAssistantAutoReplyRouteMigrationPath(
+        resolveAssistantStatePaths(vault),
+      )
+      await mkdir(path.dirname(migrationPath), { recursive: true })
+      await writeFile(migrationPath, '{invalid migration')
+    }
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        occurredAt: '2026-04-08T00:10:00.000Z',
+        optionalInboxCaptureId: null,
+        source: 'linq',
+        sourceMetadata: {
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: false,
+          replyToMessageId: anchored ? 'message-route-preflight-context' : null,
+          service: 'iMessage',
+        },
+        text: 'Tell me more',
+        threadIsDirect: true,
+      })),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({ failed: 0, replied: 1, skipped: 0 })
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    if (anchored || migration === 'ready') {
+      expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+      expect(sendInput.turnContext).toContain('earlier reminder for this conversation')
+      expect(sendInput.receiptMetadata).toMatchObject({
+        [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+          'intent-route-preflight-context',
+      })
+    } else {
+      expect(replyEventPathMocks.listAssistantOutboxIntents).not.toHaveBeenCalled()
+      expect(sendInput).not.toHaveProperty('turnContext')
+      expect(sendInput.receiptMetadata).not.toHaveProperty(
+        AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+      )
+    }
+  })
+
+  it('keeps ready-route history failures on the input retry path', async () => {
+    const vault = await createTempVault()
+    await completeAutoReplyRouteMigration(vault)
+    replyEventPathMocks.listAssistantOutboxIntents.mockRejectedValue(
+      new Error('Synthetic outbox history unavailable'),
+    )
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        optionalInboxCaptureId: null,
+        source: 'email',
+        text: 'Follow up on the earlier reminder',
+        threadIsDirect: true,
+      })),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({ advanceCursor: false, failed: 1, replied: 0 })
+    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
   it('never calls receipt inventory for steady-state unanchored resolution after one-time migration', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
@@ -5898,6 +5996,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('skips receipts in hosted queue-only mode when no outbox context exists', async () => {
     const vault = await createTempVault()
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -5930,6 +6029,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('keeps provider-anchored self-echo and unanchored route context distinct', async () => {
     const vault = await createTempVault()
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       actorIsSelf: true,
       occurredAt: '2026-04-08T00:10:00.000Z',
@@ -6067,6 +6167,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId,
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,

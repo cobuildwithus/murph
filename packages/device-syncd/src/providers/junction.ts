@@ -1427,6 +1427,20 @@ export function createJunctionDeviceSyncProvider(
     }
   }
 
+  async function readHistoricalPullReadiness(
+    context: ProviderJobContext,
+    resource: string,
+    sourceProviderSlug: string | null,
+  ): Promise<JunctionHistoricalPullReadiness> {
+    const readiness = resolveJunctionHistoricalPullReadiness({
+      resource,
+      snapshot: await loadJunctionHistoricalPullSnapshot(context),
+      sourceProviderSlug,
+    });
+    context.recordHistoricalPullReadiness?.(readiness);
+    return readiness;
+  }
+
   /**
    * Asks Junction to re-run the provider's historical pull for one stalled
    * source. Junction gates this endpoint per team, so a gated answer records a
@@ -2275,6 +2289,11 @@ export function createJunctionDeviceSyncProvider(
           userId: context.account.externalAccountId,
         })
       );
+      const providers = context.sourceProviderSlug
+        ? await runJunctionDiagnosticCall(() =>
+            client.listUserProviders(context.account.externalAccountId)
+          )
+        : null;
 
       return {
         generatedAt: context.now,
@@ -2288,6 +2307,7 @@ export function createJunctionDeviceSyncProvider(
             timeoutSeconds,
           },
           response: describeJunctionRefreshUserData(payloadResult),
+          selectedSource: describeJunctionSelectedSource(providers, context.sourceProviderSlug),
         },
       };
     }
@@ -2393,6 +2413,7 @@ export function createJunctionDeviceSyncProvider(
         generatedAt: context.now,
         provider: "junction",
         result: {
+          selectedSource: describeJunctionSelectedSource(providerSnapshot, context.sourceProviderSlug),
           request: {
             endpoint: "providers",
             endpointKind: "junction_user_providers",
@@ -3046,11 +3067,11 @@ export function createJunctionDeviceSyncProvider(
           requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && window.windowStart === historicalWindowStart
         ) {
-          const historicalPullReadiness = resolveJunctionHistoricalPullReadiness({
-            resource: effectiveResource,
-            snapshot: await loadJunctionHistoricalPullSnapshot(context),
+          const historicalPullReadiness = await readHistoricalPullReadiness(
+            context,
+            effectiveResource,
             sourceProviderSlug,
-          });
+          );
           if (historicalPullReadiness === "no_obligation") {
             return withJunctionExtendedTimeseriesBackfillFollowUp({
               context,
@@ -3375,11 +3396,11 @@ export function createJunctionDeviceSyncProvider(
         const historicalPullReadiness =
           requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && timeseriesImport.fetchComplete
-            ? resolveJunctionHistoricalPullReadiness({
-                resource: effectiveResource,
-                snapshot: await loadJunctionHistoricalPullSnapshot(context),
+            ? await readHistoricalPullReadiness(
+                context,
+                effectiveResource,
                 sourceProviderSlug,
-              })
+              )
             : undefined;
         if (
           extendedHistoricalBackfill
@@ -7308,6 +7329,7 @@ async function runJunctionRestDiagnosticMatrix(input: {
           shape: describeJunctionDiagnosticShape(providers.records ?? []),
         },
       },
+      selectedSource: describeJunctionSelectedSource(providers, sourceProviderSlug),
       devices: {
         request: {
           endpoint: "devices",
@@ -7600,11 +7622,17 @@ function describeJunctionRefreshUserData(
   const success = typeof data.success === "boolean"
     ? data.success
     : typeof root.success === "boolean" ? root.success : null;
+  const errorCode = classifyJunctionRefreshError(
+    data.error ?? root.error,
+    success,
+    refreshedSources.length + inProgressSources.length + failedSources.length,
+  );
 
   return {
-    ok: true,
+    ok: errorCode === null,
+    errorCode,
     responseStatus: result.responseStatus ?? 200,
-    success,
+    success: errorCode ? false : success,
     refreshedSourceCount: refreshedSources.length,
     inProgressSourceCount: inProgressSources.length,
     failedSourceCount: failedSources.length,
@@ -7613,6 +7641,16 @@ function describeJunctionRefreshUserData(
     failedSources: redactJunctionRefreshSourceNames(failedSources, sourceKeyMap),
     shape: describeJunctionDiagnosticShape([data]),
   };
+}
+
+function classifyJunctionRefreshError(error: unknown, success: boolean | null, sourceCount: number): string | null {
+  if (normalizeString(error)?.toLowerCase().includes("no connected sources")) {
+    return "JUNCTION_REFRESH_NO_CONNECTED_SOURCES";
+  }
+  if ((error !== undefined && error !== null && error !== false && error !== "") || success === false) {
+    return "JUNCTION_REFRESH_FAILED";
+  }
+  return sourceCount === 0 ? "JUNCTION_REFRESH_NO_SOURCES" : null;
 }
 
 function describeJunctionDiagnosticPayloadFailure(
@@ -7822,6 +7860,25 @@ function isSafeJunctionDiagnosticShapeKey(key: string): boolean {
     && !normalized.includes("secret")
     && !normalized.includes("authorization")
     && !normalized.includes("raw");
+}
+
+function describeJunctionSelectedSource(
+  result: JunctionDiagnosticCallResult | null,
+  sourceProviderSlug: string | null | undefined,
+): Record<string, unknown> | null {
+  const slug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
+  if (!slug || !result) {
+    return null;
+  }
+  const sources = (result.records ?? []).filter(isJunctionProviderConnectionRecord)
+    .filter((source) => canonicalizeJunctionProviderSlug(source.slug) === slug);
+  const source = sources.length === 1 ? sources[0] : null;
+  return {
+    status: source ? mapJunctionSourceStatus(source.status) : "unknown",
+    errorCode: result.ok
+      ? readJunctionDiagnosticToken(source?.errorDetails?.errorType)
+      : result.errorCode ?? "JUNCTION_PROVIDER_LIST_FAILED",
+  };
 }
 
 function describeJunctionDiagnosticSourceProviders(

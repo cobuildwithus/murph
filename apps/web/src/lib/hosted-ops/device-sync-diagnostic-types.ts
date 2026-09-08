@@ -1,4 +1,5 @@
 export interface HostedOpsJunctionDiagnosticInput {
+  statusOnly?: boolean;
   connectionId?: string | null;
   lookbackDays?: number | string | null;
   memberId?: string | null;
@@ -32,11 +33,20 @@ export interface HostedOpsJunctionRecoveryResult {
   response: Record<string, unknown> | null;
   generatedAt: string;
   memberId: string;
-  ok: true;
+  ok: boolean;
+  selectedSource: HostedOpsJunctionSourceStatus | null;
   sourceProvider: string;
 }
 
+export interface HostedOpsJunctionSourceStatus {
+  status: string;
+  errorCode: string | null;
+  /** Latest data receipt in Murph, independent of provider connection status. */
+  lastDataAt: string | null;
+}
+
 export interface HostedOpsJunctionDiagnosticResult {
+  selectedSource: HostedOpsJunctionSourceStatus | null;
   backfill: {
     hasUsefulHistoricalRecords: boolean | null;
     scope: "all_sources";
@@ -59,6 +69,7 @@ export interface HostedOpsJunctionDiagnosticResult {
   memberId: string;
   ok: true;
   selectedConnection: {
+    id: string;
     connectionMatchCount: number;
     lastErrorCode: string | null;
     lastSyncCompletedAt: string | null;

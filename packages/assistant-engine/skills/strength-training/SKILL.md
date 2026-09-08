@@ -1,7 +1,7 @@
 ---
 name: strength-training
 description: |
-  Design, explain, adapt, or review evidence-informed strength and resistance training for generally healthy adults. Use for beginner or experienced plans; general strength and function, hypertrophy or physique, maximal strength, power, gym/home/calisthenics, progression, plateaus, competition preparation, and adherence coaching. Fit recommendations to experience, schedule, equipment, symptoms, and concurrent sport. Do not use for diagnosis or rehabilitation, medical clearance, rapid weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.
+  Draft, save, retrieve, or troubleshoot missing saved workout routines. Design, explain, adapt, or review evidence-informed strength and resistance training for generally healthy adults. Use for beginner or experienced plans; general strength and function, hypertrophy or physique, maximal strength, power, gym/home/calisthenics, progression, plateaus, competition preparation, and adherence coaching. Fit recommendations to experience, schedule, equipment, symptoms, and concurrent sport. Do not use for diagnosis or rehabilitation, medical clearance, rapid weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.
 ---
 
 # Strength Training
@@ -81,6 +81,40 @@ Preserve useful stable elements. Identify the bottleneck—progression, dose, te
 Planning is not activation. Do not silently create a protocol, reminder, check-in, or persisted record. Obtain explicit consent for side effects and keep them bounded to the chosen block.
 
 Treat physique photos, body measurements, pain and symptom notes, training logs, and competition health data as private by default. Sharing requires explicit user intent.
+
+### Routine planning, saving, and retrieval
+
+Give the requested routine in this conversation. A proposed plan, a reusable saved
+routine, and a live workout are different states; a title or response card proves
+none of them was saved. When providing an unsaved plan, call it a proposal or draft
+and say it has not been saved. Never imply it is saved, available elsewhere, or
+ready to start from storage without canonical evidence.
+
+An explicit request to save or update a routine authorizes that bounded write;
+do not ask for the same permission again. In a private conversation, use
+`vault-cli workout format save` with typed exercises and set templates, or
+`vault-cli workout format import-json` for the full structured payload. Before
+the first save, read `vault-cli workout format save --help` and use its declared
+field values, including exercise modes and activity-type slugs. Preserve exact
+exercise order, planned sets, repetition targets, and any stated loads and units; prose-only template text is
+not a substitute for structured exercise and set fields. Then run
+`vault-cli workout format show <returned-slug> --format json` and check that the
+saved template matches the request before confirming it is saved. A failed or
+ambiguous write or readback means say what remains unconfirmed; inspect the exact
+record before retrying so recovery does not create a duplicate.
+
+For “show my routine” or missing-routine questions, read the exact saved format
+by its known id, slug, or title and present it here. Use a bounded
+`vault-cli workout format list --limit 20 --format json` only when its identity
+is unknown; a limited list is not proof that no other routine exists. If an exact
+read says it is missing, say it is not saved and show any available conversational
+draft as a draft. If the read fails, say the saved state could not be checked.
+Do not turn a missing-content question into a new save without authorization,
+and do not claim that reporting feedback repaired the routine.
+
+Saving or reviewing a routine does not start or complete a workout, log sets,
+or schedule reminders. Use `tracked-table` only when the member requests live
+workout actions. Keep private reads and writes out of group conversations.
 
 ### Canonical owner for set confirmations
 

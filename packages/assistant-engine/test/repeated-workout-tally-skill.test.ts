@@ -21,6 +21,19 @@ async function readSkill(slug: string) {
 }
 
 describe('repeated workout tally guidance', () => {
+  it('distinguishes routine drafts, verified saves, retrieval, and live workouts', async () => {
+    const strength = await readSkill('strength-training')
+    expect(strength).toContain('say it has not been saved')
+    expect(strength).toContain('vault-cli workout format save')
+    expect(strength).toContain('vault-cli workout format show <returned-slug> --format json')
+    expect(strength).toContain('saved template matches the request before confirming')
+    expect(strength).toContain('inspect the exact\nrecord before retrying')
+    expect(strength).toContain('a limited list is not proof that no other routine exists')
+    expect(strength).toContain('read fails, say the saved state could not be checked')
+    expect(strength).toContain('does not start or complete a workout')
+    expect(strength).toContain('Keep private reads and writes out of group conversations')
+  })
+
   it('requires explicit occurrence logs and separates actual from theoretical totals', async () => {
     const experiment = await readSkill('experiment-onboarding')
     const behavior = await readSkill('behavior-followthrough')

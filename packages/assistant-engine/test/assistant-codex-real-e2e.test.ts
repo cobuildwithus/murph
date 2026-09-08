@@ -32,6 +32,8 @@ import {
   addMeal,
   initializeVault,
   listGoals,
+  listAutomations,
+  listWorkoutFormats,
   listWriteOperationMetadataPaths,
   readHabitatAspect,
   readMemoryDocument,
@@ -55,6 +57,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import type { HostedRuntimeGroupSummary, HostedRuntimeGroupToolRequest } from '@murphai/hosted-execution/runtime-control'
 import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -64,6 +67,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
+import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
 import {
   listEntitySchema,
   showResultSchema,
@@ -3502,6 +3506,124 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
     },
     480_000,
   )
+})
+
+describeRealCodex('real Codex routine chat readiness e2e', () => {
+  it('keeps routine drafts, verified saves, and retrieval in chat', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-routine-chat-e2e-'))
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic routine proof', timezone: 'UTC', vaultRoot: workingDirectory })
+      await writeFile(commandLogPath, '', 'utf8')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+        materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
+        materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
+      ])
+      const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-09-08',
+          currentTimeZone: 'UTC',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          murphProductBaseUrl: 'https://www.withmurph.ai',
+          onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }
+      const scenarios = [
+        { kind: 'draft', prompt: 'Draft a routine called Practice A using exactly two sets of six air squats. Plain text only; keep my exercise choice, no form tutorial. I only want a proposal, not a save or a workout start.' },
+        { kind: 'save', prompt: 'Save Practice A as a reusable strength routine: air squats, bodyweight, two sets of six reps. Keep those exact details, no form tutorial. Just save the routine; no workout start or reminders. Confirm in plain text.' },
+        { kind: 'show', prompt: 'Show my saved Practice A routine in plain text. An old announcement says I can review workouts on the Training page; should I go there or can you show the routine here?' },
+        { kind: 'missing', prompt: 'Show my saved Friday Strength routine here in plain text. Do not create or change anything.' },
+        { kind: 'unreadable', prompt: 'Show my saved Practice A routine here in plain text. Do not create or change anything.' },
+      ] as const
+      let previousCommandCount = 0
+      for (const scenario of scenarios) {
+        let unreadablePath: string | null = null
+        const malformedTemplate = '---\nworkoutFormatId: [unterminated\n'
+        if (scenario.kind === 'unreadable') {
+          const [format] = await listWorkoutFormats(workingDirectory)
+          expect(format).toBeDefined()
+          unreadablePath = path.join(workingDirectory, format!.relativePath)
+          await writeFile(unreadablePath, malformedTemplate, 'utf8')
+        }
+        const result = await executeRealCodexAppServerTurn({ ...commonInput, prompt: scenario.prompt })
+        const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        const turnCommands = expandRecordedVaultCommands(commands.slice(previousCommandCount)).filter((command) => !command.includes('--help'))
+        previousCommandCount = commands.length
+        const writes = turnCommands.filter((command) => /workout (?:format (?:save|import-json|log)|start|add|finish|set |exercise )/u.test(command))
+        process.stdout.write(`[routine-chat-readiness-e2e] ${JSON.stringify({ scenario: scenario.kind, reply: result.finalMessage, mutationCount: writes.length })}\n`)
+        expect(result.finalMessage).not.toMatch(/https?:\/\/\S*\/training|(?:go to|open|visit|head to|check) (?:the |your )?(?:web )?Training (?:page|tab)/iu)
+        expect(result.responseCard).toBeNull()
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toEqual([])
+        if (scenario.kind === 'save') {
+          expect(writes).toHaveLength(1)
+          expect(writes[0]).toMatch(/^workout format (?:save|import-json) /u)
+          const showIndex = turnCommands.findIndex((command) => /^workout format show /u.test(command))
+          expect(showIndex).toBeGreaterThan(turnCommands.indexOf(writes[0]!))
+          const formats = await listWorkoutFormats(workingDirectory)
+          expect(formats).toHaveLength(1)
+          expect(formats[0]?.title).toBe('Practice A')
+          expect(formats[0]?.template.exercises).toHaveLength(1)
+          expect(formats[0]?.template.exercises[0]).toMatchObject({ name: expect.stringMatching(/^air squats?$/iu), mode: 'bodyweight', plannedSets: [{ order: 1, targetReps: 6 }, { order: 2, targetReps: 6 }] })
+          expect(result.finalMessage).toMatch(/saved/iu)
+        } else {
+          expect(writes).toEqual([])
+        }
+        if (scenario.kind === 'draft') {
+          expect(await listWorkoutFormats(workingDirectory)).toEqual([])
+          expect(result.finalMessage).toMatch(/draft|propos|not saved|haven[’']t saved|unsaved/iu)
+        }
+        if (scenario.kind === 'draft' || scenario.kind === 'show') {
+          expect(result.finalMessage).toMatch(/air squats?/iu)
+          expect(result.finalMessage).toMatch(/(?:2|two).*?(?:6|six)/iu)
+        }
+        if (scenario.kind === 'show' || scenario.kind === 'missing' || scenario.kind === 'unreadable') {
+          expect(turnCommands.some((command) => /^workout format show /u.test(command)), JSON.stringify(turnCommands)).toBe(true)
+        }
+        if (scenario.kind === 'missing') {
+          expect(result.finalMessage).toMatch(/(?:couldn[’']t|could not|cannot|can[’']t|didn[’']t|did not|don[’']t|do not).*find|not (?:found|saved)|no saved|isn[’']t saved/iu)
+        }
+        if (scenario.kind === 'unreadable') {
+          expect(result.finalMessage).toMatch(/can[’']t|cannot|couldn[’']t|could not|unable|unreadable/iu)
+          expect(result.finalMessage).not.toMatch(/not saved|no saved|successfully saved|ready to (?:use|start)/iu)
+          expect(await readFile(unreadablePath!, 'utf8')).toBe(malformedTemplate)
+        }
+        const vault = await readVaultRawTolerant(workingDirectory)
+        expect(vault.events.filter((event) => event.kind === 'activity_session')).toEqual([])
+        expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 600_000)
 })
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
@@ -7926,6 +8048,146 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(['direct', 'repost', 'unavailable', 'explain', 'already_granted', 'private'] as const)(
+    'group permission recovery handles %s with existing grants and a different prior offer',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-permission-recovery-e2e-'))
+      const messageRef = `ain_${'c'.repeat(32)}`
+      const groupRequests: HostedRuntimeGroupToolRequest[] = []
+      const durationScope = { projectionKind: 'sleep-duration-days.v0' as const }
+      const sharedRequests: unknown[] = []
+      const granted = ['profile-name.v0', 'sleep-times.v0', 'activity-days.v0', 'device-sync-status.v0', ...(scenario === 'already_granted' ? ['sleep-duration-days.v0' as const] : [])] as const
+      const group: HostedRuntimeGroupSummary = {
+        displayName: 'Weekend walkers',
+        id: 'group_synthetic_permissions', kind: 'friends', memberCount: 2,
+        members: [{
+          memberId: 'member_synthetic_speaker', handle: 'participant-a', role: 'member',
+          grantedVaultShareProjectionKinds: [...granted],
+          grantedVaultShareProjectionScopes: granted.map(projectionKind => ({ projectionKind })),
+        }, {
+          memberId: 'member_synthetic_owner', handle: 'participant-b', role: 'owner',
+          grantedVaultShareProjectionKinds: ['profile-name.v0'],
+          grantedVaultShareProjectionScopes: [{ projectionKind: 'profile-name.v0' }],
+        }],
+        requestedVaultShareProjectionKinds: ['vo2-max-days.v0' as const],
+        requestedVaultShareProjectionScopes: [{ projectionKind: 'vo2-max-days.v0' as const }],
+        status: 'active',
+      }
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: scenario === 'private' ? buildDirectConversationDeveloperInstructions() : buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL, ...(scenario === 'private' ? [MURPH_GROUP_CONSULT_TOOL] : [MURPH_GROUP_DATA_TOOL]), MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          excludeResumeTurns: true, groupConversation: scenario !== 'private',
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef], conversationId: 'conversation-permission-recovery',
+              conversationScope: scenario === 'private' ? 'direct' : 'group', inboundMailboxItemIds: ['mailbox-permission-recovery'],
+              originSessionId: 'session-permission-recovery', recipientKey: 'recipient-permission-recovery',
+            }),
+            groupTool: { request: async request => {
+              groupRequests.push(request)
+              if (request.action === 'list_memberships') return {
+                action: 'list_memberships', result: {
+                  disclosureGrants: [], nextCursor: null, status: 'ok', truncated: false,
+                  memberships: [{
+                    membershipId: 'membership_synthetic', displayName: group.displayName,
+                    kind: 'friends', memberCount: 2, role: 'member',
+                    availability: { status: 'available' }, permissionsUrl: null, sponsorshipUrl: null,
+                    grantedVaultShareProjectionScopes: granted.map(projectionKind => ({ projectionKind })),
+                    requestedVaultShareProjectionScopes: [{ projectionKind: 'vo2-max-days.v0' }],
+                  }],
+                },
+              }
+              if (request.action === 'read_current') return {
+                action: 'read_current', result: { group, status: 'ok' },
+              }
+              if (request.action === 'post_join_offer') return scenario === 'unavailable'
+                ? { action: 'post_join_offer', result: { group: null, status: 'unavailable', unavailableReason: 'send_failed' } }
+                : { action: 'post_join_offer', result: {
+                    group, joinUrl: 'https://example.test/groups/join/synthetic',
+                    offeredAt: '2026-08-26T18:00:00.000Z', offerState: 'posted', status: 'sent',
+                  } }
+              throw new Error(`Unexpected group request: ${request.action}`)
+            } },
+            groupSharedReader: { request: async request => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
+                members: [{
+                  memberId: 'member_synthetic_speaker', participantId: 'participant-a',
+                  currentTurnHandles: ['participant-a'], displayName: null,
+                  projections: [{ projectionScope: durationScope, projectionScopeKey: 'sleep-duration-days.v0',
+                    grantStatus: 'granted', dataStatus: 'missing', records: [],
+                  }],
+                }],
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
+            vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Existing group context: participant-a is the member asking. The last native offer concerned VO2 max.',
+            scenario === 'repost' ? 'Earlier Murph offer: I can show a fresh permission prompt for total sleep duration.' : '',
+            `Message ref: ${messageRef}`, 'Sender: participant-a', 'Current member message:',
+            scenario === 'private' ? 'Please add sleep-duration sharing for Weekend walkers from this private chat.'
+              : scenario === 'repost' ? 'Please put that new permission prompt here.'
+              : scenario === 'explain' ? 'Explain which sleep permission I already have and which is needed for total sleep.'
+              : 'Add my total sleep duration to this group’s sharing.',
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        process.stdout.write(`[group-permission-recovery-e2e] ${JSON.stringify({ scenario, groupRequests, sharedRequests, reply: result.finalMessage })}\n`)
+        if (scenario !== 'private') expect(groupRequests[0]?.action).toBe('read_current')
+        const offers = groupRequests.filter(request => request.action === 'post_join_offer')
+        expect(offers).toHaveLength(['explain', 'already_granted', 'private'].includes(scenario) ? 0 : 1)
+        if (['direct', 'repost', 'unavailable'].includes(scenario)) expect(offers[0]).toMatchObject({
+          joinOffer: { projectionScopes: [durationScope] }, repostOriginAssistantInputId: messageRef,
+        })
+        expect(groupRequests.every(request => (scenario === 'private' ? ['list_memberships'] : ['read_current', 'post_join_offer']).includes(request.action))).toBe(true)
+        expect(sharedRequests).toHaveLength(scenario === 'already_granted' ? 1 : 0)
+        expect(result.finalMessage).not.toMatch(/scope.change|repost_scope|projection|VO.?2|Garmin|Apple Health/i)
+        if (scenario !== 'private') expect(result.finalMessage).not.toMatch(/private (?:chat|conversation)/i)
+        if (scenario === 'private') {
+          expect(result.finalMessage).toMatch(/group chat|in (?:the|that) group/i)
+          expect(result.finalMessage).not.toMatch(/\b(?:sent|posted|handed|passed|enabled|updated)\b|https?:|right now|temporar|only.*(?:there|group)/i)
+        }
+        if (scenario === 'already_granted') {
+          expect(result.finalMessage).toMatch(/already|enabled|permission|sharing is on/i)
+          expect(result.finalMessage).toMatch(/no |missing|not .*available|not .*arrived|don.t.*(?:data|record)|haven.t/i)
+          expect(result.finalMessage).not.toMatch(/like|heart|grant .*permission|reconnect|you haven.t granted/i)
+        }
+        if (scenario === 'direct' || scenario === 'repost') expect(result.finalMessage.trim()).toBe('')
+        if (scenario === 'unavailable') {
+          expect(result.finalMessage).toMatch(/couldn.t|can.t|unable|failed|could not/i)
+          expect(result.finalMessage).toMatch(/retry|try again/i)
+          expect(result.finalMessage).not.toMatch(/https?:|sharing is (?:on|enabled)|successfully|has been enabled/i)
+        }
+        if (scenario === 'explain') {
+          expect(result.finalMessage).toMatch(/sleep timing|start and end/i)
+          expect(result.finalMessage).toMatch(/duration|total sleep/i)
+          expect(result.finalMessage).toMatch(/already|granted|enabled|have|sharing/i)
+          expect(result.finalMessage).toMatch(/separate|not|need|missing/i)
+        }
+        expect(result.finalMessage.split(/\s+/u).length).toBeLessThan(130)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    480_000,
+  )
+
   it(
     'binds a requested native access repost to the current group message',
     async () => {
@@ -7952,7 +8214,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedGroupStatusDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL, MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -7974,6 +8236,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             groupTool: {
               request: async (request) => {
                 groupRequests.push(request)
+                if (request.action === 'read_current') return {
+                  action: 'read_current', result: { status: 'ok', group: {
+                    displayName: null, id: 'group_synthetic_repost', kind: 'friends',
+                    memberCount: 1, members: [], status: 'active',
+                    requestedVaultShareProjectionKinds: [], requestedVaultShareProjectionScopes: [],
+                  } },
+                }
                 return {
                   action: 'post_join_offer',
                   result: {
@@ -8033,8 +8302,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             message_ref: messageRef,
           },
         })
-        expect(groupRequests).toHaveLength(1)
-        expect(groupRequests[0]).toMatchObject({
+        expect(groupRequests).toHaveLength(2)
+        expect(groupRequests[0]).toMatchObject({ action: 'read_current' })
+        expect(groupRequests[1]).toMatchObject({
           action: 'post_join_offer',
           repostOriginAssistantInputId: messageRef,
         })
@@ -8500,6 +8770,175 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(result.finalMessage).not.toMatch(
           /no (?:usable |visible |shared )?workouts?|not (?:available|shared|showing)|sync (?:failed|error)/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'keeps four-person scheduled sleep and steps reports in separate participant rows',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-report-rows-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildScheduledAutomationDeveloperInstructions(
+              'group',
+              'shared_read',
+            ),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  status: 'ok',
+                  requestedProjectionScopeKeys: ['sleep-duration-days.v0', 'steps-days.v0'],
+                  members: ['Avery', 'Jordan', 'Casey', 'Morgan'].map((displayName, index) => ({
+                    displayName,
+                    currentTurnHandles: [],
+                    memberId: `member_report_${index}`,
+                    participantId: `participant_report_${index}`,
+                    projections: [
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'sleep-duration-days.v0' },
+                        projectionScopeKey: 'sleep-duration-days.v0',
+                        records: ['2026-08-03', '2026-08-04'].map((date, day) => ({
+                          recordKey: date,
+                          occurredAt: `${date}T00:00:00.000Z`,
+                          data: {
+                            date,
+                            metricKey: 'total-sleep-minutes',
+                            unit: 'minutes',
+                            value: 395 + index * 17 + day * 30,
+                          },
+                        })),
+                      },
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'steps-days.v0' },
+                        projectionScopeKey: 'steps-days.v0',
+                        records: [{
+                          recordKey: '2026-08-04',
+                          occurredAt: '2026-08-04T00:00:00.000Z',
+                          data: { date: '2026-08-04', metricKey: 'steps', unit: 'count', value: 6100 + index * 1320 },
+                        }],
+                      },
+                    ],
+                  })),
+                } satisfies AssistantHostedGroupSharedReadResponse
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation recipe:',
+            'Prepare the daily group check-in using the shared data. Cover sleep on August 3 and August 4 separately, then steps on August 4. Include every member and their values. The agreed targets are at least 7 hours of sleep and at least 8,000 steps.',
+            'Room preference: keep the recap brief, label what each part covers, and use ✅ for meeting a target and ❌ for falling short.',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name
+        )
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: expect.arrayContaining([
+              { projectionKind: 'sleep-duration-days.v0' },
+              { projectionKind: 'steps-days.v0' },
+            ]),
+          },
+        })
+        expect(sharedRequests).toHaveLength(1)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) => action.kind === 'dynamic',
+        )).toHaveLength(1)
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a group report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        expect(reply).not.toMatch(/·|\|[^\n]+\||^\s*---\s*$/mu)
+        const names = ['Avery', 'Jordan', 'Casey', 'Morgan']
+        const sections = reply.split(/\n\s*\n/u).filter(
+          (section) => names.some((name) => section.includes(name)),
+        )
+        expect(sections).toHaveLength(3)
+        for (const [sectionIndex, section] of sections.entries()) {
+          const lines = section.split('\n')
+          const heading = lines[0] ?? ''
+          expect(heading).toMatch(sectionIndex < 2 ? /sleep/iu : /steps/iu)
+          expect(heading).toMatch(sectionIndex === 0 ? /(?:Aug(?:ust)?\.?\s+0?3|0?8[/-]0?3)\b/iu : /(?:Aug(?:ust)?\.?\s+0?4|0?8[/-]0?4)\b/iu)
+          const rows = lines.filter((line) => names.some((name) => line.includes(name)))
+          expect(rows).toHaveLength(4)
+          for (const [index, name] of names.entries()) {
+            const matches = rows.filter((line) => line.includes(name))
+            expect(matches).toHaveLength(1)
+            const row = matches[0] ?? ''
+            expect(names.filter((candidate) => row.includes(candidate))).toEqual([name])
+            const value = sectionIndex < 2
+              ? 395 + index * 17 + sectionIndex * 30
+              : 6100 + index * 1320
+            if (sectionIndex < 2) {
+              const hours = Math.floor(value / 60)
+              const minutes = value % 60
+              expect(row).toMatch(new RegExp(`${hours}\\s*(?:h(?:ours?)?\\s*0?${minutes}\\s*m(?:in(?:utes?)?)?|:0?${minutes})`, 'iu'))
+            } else {
+              expect(row.replaceAll(',', '')).toContain(String(value))
+            }
+            expect(row).toContain(value >= (sectionIndex < 2 ? 420 : 8000) ? '✅' : '❌')
+          }
+        }
+        process.stdout.write(`[group-report-rows-e2e] ${JSON.stringify({
+          model: config.model, sharedReadCount: sharedReads.length, reply,
+        })}\n`)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

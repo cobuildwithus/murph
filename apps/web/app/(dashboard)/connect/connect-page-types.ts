@@ -66,7 +66,7 @@ export type ConnectIntentRecoveryRequest = {
 
 export type ConnectCallbackNotice = {
   errorCode?: string | null;
-  kind: "error" | "success" | "warning";
+  kind: "error" | "success" | "warning" | "info";
   message: string;
   sourceLabel?: string | null;
   title: string;

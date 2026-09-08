@@ -200,6 +200,9 @@ export interface DeviceSyncJobTimingDiagnostic {
   credentialRefreshElapsedMs: number;
   durableProgressCommitted: boolean;
   elapsedMs: number;
+  historicalPullReadiness?: "ready" | "pending" | "terminal_failure" | "no_obligation" | "unavailable";
+  scheduledJobCount?: number;
+  nextScheduledJobDelayMs?: number | null;
   jobCount: number;
   jobKind: string;
   outcome: DeviceSyncJobTimingOutcome;
@@ -1004,6 +1007,10 @@ export interface ProviderJobContext {
   recordProviderRequestTiming?(
     category: "inventory" | "resource",
     elapsedMs: number,
+  ): void;
+  /** Finite upstream readiness classification; never a provider response. */
+  recordHistoricalPullReadiness?(
+    readiness: NonNullable<DeviceSyncJobTimingDiagnostic["historicalPullReadiness"]>,
   ): void;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.

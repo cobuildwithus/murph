@@ -67,12 +67,12 @@ describe("hosted device connect failure alert", () => {
     expect(new Set(keys).size).toBe(1);
   });
 
-  it("skips benign replayed-state callbacks", async () => {
+  it.each(["OAUTH_STATE_REPLAYED", "CALLBACK_PROOF_INVALID"])("skips callback recovery %s", async (errorCode) => {
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
 
     await expect(sendHostedDeviceConnectFailureAlert({
       env: alertEnv,
-      errorCode: "OAUTH_STATE_REPLAYED",
+      errorCode,
       provider: "junction",
       sendEmail,
     })).resolves.toBe("ignored_code");

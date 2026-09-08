@@ -2183,6 +2183,17 @@ describe('assistant user-facing wording guidance', () => {
 })
 
 describe('assistant system prompt cache stability', () => {
+  it.each(['direct', 'group', 'unverified-external'] as const)('keeps %s workout access in chat without a Training destination', (conversationScope) => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope,
+      murphProductBaseUrl: 'https://www.withmurph.ai',
+    }))
+    expect(prompt).toContain('never recommend or link to it')
+    expect(prompt).toContain('even when older messages or changelog entries mention it')
+    expect(prompt).not.toContain('/training')
+    expect(prompt).not.toContain('the signed-in Training page is available')
+  })
+
   it('keeps the always-on kernel and non-CLI route guidance bounded', () => {
     const layers = buildAssistantSystemPromptLayers(
       // Pin the product base URL to the production origin so this size bound is
@@ -2218,7 +2229,9 @@ describe('assistant system prompt cache stability', () => {
     // Luna journeys cover clean saved instructions and retained user controls.
     // Journal recovery adds 1,456 characters for verified saves, honest page
     // visibility, and workspace-safe launch recovery; focused Terra proof owns it.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(72_194)
+    // Private group-consent recovery adds 609 characters; focused Terra journeys
+    // verify the actionable next step and prevent ineffective context handoffs.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(72_803)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2280,13 +2293,13 @@ describe('assistant system prompt cache stability', () => {
     expect(layers.threadContextPrompt).toContain(
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
-    expect(layers.threadContextPrompt).toContain('Private Training page:')
+    expect(layers.threadContextPrompt).toContain('Workout access:')
+    expect(layers.threadContextPrompt).toContain('Label unsaved plans as drafts')
     expect(layers.threadContextPrompt).toContain(
-      'the signed-in Training page is available at http://localhost:3000/training',
+      'never recommend or link to it',
     )
-    expect(layers.threadContextPrompt).toContain(
-      'read-only and intentionally absent from the Home sidebar',
-    )
+    expect(layers.prompt).not.toContain('/training')
+    expect(layers.prompt).not.toContain('the signed-in Training page is available')
     expect(layers.threadContextPrompt).not.toContain(
       'Layer partition assistant context snapshot.',
     )

@@ -19,7 +19,6 @@ import type {
   AssistantProviderAcceptedInputsRelease,
 } from '../service-contracts.js'
 import { isMissingFileError, normalizeNullableString } from '../shared.js'
-import { ensureAssistantState } from '../store/persistence.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { readAssistantTurnReceiptAtPaths } from '../turns.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
@@ -256,7 +255,10 @@ export async function readAssistantAutoReplyRouteState(
     DEFAULT_ROUTE_STATE_DEPENDENCIES,
 ): Promise<AssistantAutoReplyRouteReadResult> {
   return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await Promise.all([
+      ensureAssistantStateDir(resolveAssistantAutoReplyRoutesDirectory(paths)),
+      ensureAssistantStateDir(paths.turnsDirectory),
+    ])
     const migrationStatus =
       await readAssistantAutoReplyRouteMigrationStatusAtPaths(paths)
     if (migrationStatus !== 'complete') {
@@ -324,7 +326,10 @@ export async function claimAssistantAutoReplyRouteContext(
   }
 
   await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await Promise.all([
+      ensureAssistantStateDir(resolveAssistantAutoReplyRoutesDirectory(paths)),
+      ensureAssistantStateDir(paths.turnsDirectory),
+    ])
     const consumingReceipt = await dependencies.readReceiptAtPaths(
       paths,
       turnId,

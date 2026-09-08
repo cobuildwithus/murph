@@ -271,16 +271,6 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   )}`;
 }
 
-function hostedGroupProjectionScopeSetsEqual(
-  left: readonly HostedVaultShareProjectionScope[],
-  right: readonly HostedVaultShareProjectionScope[],
-): boolean {
-  const leftKeys = new Set(left.map(buildHostedVaultShareProjectionScopeKey));
-  const rightKeys = new Set(right.map(buildHostedVaultShareProjectionScopeKey));
-  return leftKeys.size === rightKeys.size
-    && [...leftKeys].every((scopeKey) => rightKeys.has(scopeKey));
-}
-
 export type HostedRuntimeGroupToolAccessClassification =
   | "owner_active"
   | "personal_active"
@@ -1636,9 +1626,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const requestedProjectionScopes = input.joinOffer?.projectionScopes
-    ?? input.joinOffer?.projectionKinds;
-  const newProjectionScopes = input.repostOriginAssistantInputId === null
+  const joinOffer = input.joinOffer ?? {};
+  const requestedProjectionScopes = joinOffer.projectionScopes ?? joinOffer.projectionKinds;
+  const newProjectionScopes = requestedProjectionScopes != null
+    || input.repostOriginAssistantInputId === null
     ? resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes)
     : null;
   const created = await prisma.$transaction(async (tx) => {
@@ -1649,8 +1640,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
-    const result = input.repostOriginAssistantInputId === null
+    const result = newProjectionScopes !== null
       ? await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+          additiveOnly: true,
           actorMemberId: ownerAccess.ownerMemberId,
           containerMemberId: input.memberId,
           displayName: input.joinOffer?.displayName ?? null,
@@ -1665,17 +1657,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         });
     const projectionScopes = newProjectionScopes
       ?? result.group.requestedVaultShareProjectionScopes;
-    if (
-      input.repostOriginAssistantInputId !== null
-      && requestedProjectionScopes !== undefined
-      && requestedProjectionScopes !== null
-      && !hostedGroupProjectionScopeSetsEqual(
-        resolveHostedGroupAccessOfferProjectionScopes(requestedProjectionScopes),
-        projectionScopes,
-      )
-    ) {
-      return { kind: "repost_scope_change_unavailable" as const };
-    }
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
       now,

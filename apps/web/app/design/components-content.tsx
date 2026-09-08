@@ -171,6 +171,8 @@ import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
+import { CONNECT_NOTICE_PRESENTATION } from "../(dashboard)/connect/connect-page-client";
+import { createConnectCallbackNotice } from "../(dashboard)/connect/connect-page-helpers";
 import {
   HostedAccountDeletionErrorAlert,
 } from "@/src/components/settings/hosted-data-privacy-settings";
@@ -631,6 +633,11 @@ const DESIGN_NO_RECENT_GROUP_PRIVATE_CONVERSIONS = {
   })),
   total: 7,
 } satisfies HostedGrowthDashboard["groupPrivateConversions"];
+
+const callbackRecoveryNotice = createConnectCallbackNotice({
+  status: "error", errorCode: "CALLBACK_PROOF_INVALID", provider: "junction",
+  connectSource: null, connectTarget: null,
+}, []);
 
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
@@ -1486,11 +1493,22 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section id="device-connection-return" title="Device Connection Return">
+          {callbackRecoveryNotice ? (
+            <Alert {...CONNECT_NOTICE_PRESENTATION.info}>
+              <AlertTitle>{callbackRecoveryNotice.title}</AlertTitle>
+              <AlertDescription>{callbackRecoveryNotice.message}</AlertDescription>
+            </Alert>
+          ) : null}
+        </Section>
+
+        <Separator />
+
         <Section title="Connect Callback Error Notice">
           <div className="flex flex-col gap-4" inert>
             <ConnectCallbackErrorNotice
-              errorCode="CALLBACK_PROOF_INVALID"
-              message="That return link did not match the browser you started in, so nothing was connected. Start Oura again from this page."
+              errorCode="OAUTH_CALLBACK_REJECTED"
+              message="Oura was not connected this time. You can try again whenever you're ready."
               sourceLabel="Oura"
               title="Unable to finish connection"
             />

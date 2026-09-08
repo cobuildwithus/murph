@@ -83,6 +83,12 @@ export type {
 } from "./connect-page-types";
 export { filterConnectSourcesForSearch } from "./connect-page-helpers";
 
+export const CONNECT_NOTICE_PRESENTATION = {
+  success: { role: "alert", className: "border-emerald-200 bg-emerald-50 text-emerald-900" },
+  warning: { role: "alert", className: "border-amber-200 bg-amber-50 text-amber-900" },
+  info: { role: "status", className: "border-border bg-background text-foreground" },
+} as const;
+
 export function ConnectSourcesGrid({
   authenticated = true,
   appleHealthRelaySyncContactActions = {},
@@ -613,13 +619,8 @@ export function ConnectSourcesGrid({
       ) : null}
 
       {visibleNotice ? (
-        visibleNotice.kind === "success" ? (
-          <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900">
-            <AlertTitle>{visibleNotice.title}</AlertTitle>
-            <AlertDescription>{visibleNotice.message}</AlertDescription>
-          </Alert>
-        ) : visibleNotice.kind === "warning" ? (
-          <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+        visibleNotice.kind !== "error" ? (
+          <Alert {...CONNECT_NOTICE_PRESENTATION[visibleNotice.kind]}>
             <AlertTitle>{visibleNotice.title}</AlertTitle>
             <AlertDescription>{visibleNotice.message}</AlertDescription>
           </Alert>

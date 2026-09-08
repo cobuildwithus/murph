@@ -5,6 +5,7 @@ import {
   type WorkoutFormatUpsertPayload,
   type WorkoutSession,
   workoutFormatUpsertPayloadSchema,
+  workoutExerciseModeSchema,
   workoutImportPayloadSchema,
 } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
@@ -1436,7 +1437,7 @@ export function registerWorkoutCommands(
       exercise: z
         .array(z.string().min(1))
         .optional()
-        .describe(`Compact exercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
+        .describe(`Compact exercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Mode must be one of: ${workoutExerciseModeSchema.options.join(', ')}. Shell-quote each semicolon-separated value. Supported keys: ${workoutFormatExerciseFieldList}. Repeat --exercise for multiple exercises.`),
       setTemplate: z
         .array(z.string().min(1))
         .optional()
@@ -1456,7 +1457,7 @@ export function registerWorkoutCommands(
         .max(120)
         .optional()
         .describe(
-          'Typed default workout type such as "run" or "strength training".',
+          'Typed default workout type slug such as "run" or "strength-training".',
         ),
       distanceKm: z
         .number()
