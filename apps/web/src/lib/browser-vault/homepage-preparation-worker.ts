@@ -7,10 +7,7 @@ import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
 
-import {
-  signalHostedBrowserVaultRefreshRuntime,
-} from "@/src/lib/hosted-orchestration/signal-runtime";
-import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
+import { readHostedBrowserVaultReplicaState } from "@/src/lib/hosted-workspace/store";
 import { getPrisma } from "@/src/lib/prisma";
 
 import { assertBrowserVaultMemberAuthority } from "./authority";
@@ -24,7 +21,7 @@ export async function prepareHomepageBrowserVaultBestEffort(input: {
     prisma,
   });
 
-  const workspace = await readHostedWorkspace({
+  const workspace = await readHostedBrowserVaultReplicaState({
     prisma,
     userId: input.memberId,
   });
@@ -40,6 +37,9 @@ export async function prepareHomepageBrowserVaultBestEffort(input: {
     return;
   }
 
+  const { signalHostedBrowserVaultRefreshRuntime } = await import(
+    "@/src/lib/hosted-orchestration/signal-runtime"
+  );
   await signalHostedBrowserVaultRefreshRuntime({
     prisma,
     userId: input.memberId,

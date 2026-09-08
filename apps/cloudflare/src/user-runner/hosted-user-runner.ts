@@ -40,7 +40,6 @@ import {
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
   HostedStandbyCoordinatorNamespaceLike,
-  HostedStandbyRunnerContainerNamespaceLike,
 } from "../standby-runner-contract.js";
 import {
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
@@ -94,6 +93,14 @@ import {
 import {
   createRuntimeProcessingRetryLater,
 } from "./runtime-processing-responses.js";
+import {
+  createHostedMediaRetentionService,
+  type HostedMediaAssetDeletionInput,
+  type HostedMediaAssetDescriptor,
+  type HostedMediaAssetReadAdmissionResult,
+  type HostedMediaAssetRegistrationInput,
+  type HostedMediaRetentionService,
+} from "./hosted-media-retention.ts";
 export type { DurableObjectStateLike } from "./types.js";
 
 export interface HostedRuntimeHealthDataConsentReconcileResult {
@@ -151,6 +158,7 @@ export class HostedUserRunner {
   protected readonly stateStore: RunnerStateStore;
   protected readonly runtimeInvocation: RuntimeInvocationService;
   protected readonly runtimeProcessing: RuntimeProcessingController;
+  private readonly hostedMediaRetention: HostedMediaRetentionService;
   private readonly state: DurableObjectStateLike;
   private readonly userDataDeletionInput: HostedRunnerUserDataDeletionServiceInput;
   private readonly workspaceSnapshotSessions: WorkspaceSnapshotSessionService;
@@ -174,7 +182,6 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
     runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null = null,
     standbyCoordinatorNamespace: HostedStandbyCoordinatorNamespaceLike | null = null,
-    standbyContainerNamespace: HostedStandbyRunnerContainerNamespaceLike | null = null,
   ) {
     // Keep this first. The schema floor must reject an older Worker before it
     // can construct any service capable of waking a runner or reading a workspace.
@@ -194,7 +201,6 @@ export class HostedUserRunner {
     const runtimeInvocation = new RuntimeInvocationService({
       env,
       runnerContainerNamespace,
-      standbyContainerNamespace,
       runnerRuntimeEnvSource,
       runnerStoreCache: this.runnerStoreCache,
       stateStore: this.stateStore,
@@ -218,6 +224,11 @@ export class HostedUserRunner {
       },
       readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
     });
+    this.hostedMediaRetention = createHostedMediaRetentionService({
+      bucket,
+      state,
+      stateStore: this.stateStore,
+    });
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
@@ -226,7 +237,6 @@ export class HostedUserRunner {
         await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
       runnerRuntimeEnvSource,
       runtimeRetryAnalytics,
-      standbyContainerNamespace,
       standbyCoordinatorNamespace,
       stateStore: this.stateStore,
     });
@@ -254,6 +264,7 @@ export class HostedUserRunner {
   async alarm(): Promise<void> {
     const record = await this.stateStore.readState();
     await this.workspaceSnapshotSessions.cleanupOrphanCandidates(record.userId);
+    await this.hostedMediaRetention.cleanupExpired(record.userId);
   }
 
   async runnerStatus(input: { logLimit?: number } = {}): Promise<HostedRunnerStatusResponse> {
@@ -558,6 +569,24 @@ export class HostedUserRunner {
       });
     }
     return validation.owns;
+  }
+
+  async admitHostedMediaRead(
+    input: HostedMediaAssetDescriptor,
+  ): Promise<HostedMediaAssetReadAdmissionResult> {
+    return await this.hostedMediaRetention.admitRead(input);
+  }
+
+  async recordHostedMediaAsset(
+    input: HostedMediaAssetRegistrationInput,
+  ): Promise<boolean> {
+    return await this.hostedMediaRetention.record(input);
+  }
+
+  async forgetHostedMediaAsset(
+    input: HostedMediaAssetDeletionInput,
+  ): Promise<boolean> {
+    return await this.hostedMediaRetention.delete(input);
   }
 
   async recordRuntimeCompletionFromContainer(

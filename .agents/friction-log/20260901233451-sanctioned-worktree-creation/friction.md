@@ -1,6 +1,7 @@
 ---
 title: 'Sanctioned worktree creation returns before the checkout index stabilizes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2732'
 ---
 
 ## Expected Behavior

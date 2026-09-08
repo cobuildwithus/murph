@@ -74,7 +74,7 @@ import {
 import { readHostedMemberIdentity } from "./hosted-member-identity-store";
 import { readActiveHostedMemberAccess } from "./member-access";
 import type { HostedPostVerificationStage } from "./stage";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import type {
   HostedSignupNotificationContextV1,
 } from "./signup-notification-context";
@@ -573,7 +573,11 @@ async function syncHostedPrivySecondaryEmailBindingBestEffort(
   try {
     await syncBinding();
   } catch (error) {
-    if (!isHostedPrivyEmailBindingUniqueConstraintError(error)) {
+    if (
+      !isHostedPrivyEmailBindingUniqueConstraintError(error)
+      && !(isHostedOnboardingError(error)
+        && error.code === "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT")
+    ) {
       throw error;
     }
 

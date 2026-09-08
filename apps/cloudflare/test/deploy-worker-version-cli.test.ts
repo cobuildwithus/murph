@@ -2,14 +2,31 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const fileMocks = vi.hoisted(() => ({ readFile: vi.fn(async () => "{}"), writeFile: vi.fn(async () => {}) }));
+vi.mock("node:fs/promises", async () => ({
+  ...await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises"),
+  ...fileMocks,
+}));
 const wranglerMocks = vi.hoisted(() => ({
   runWranglerJson: vi.fn(),
   runWranglerLogged: vi.fn(),
   runWranglerLoggedCaptured: vi.fn(),
 }));
+vi.mock("../scripts/deploy-artifacts.js", async () => ({
+  ...await vi.importActual<typeof import("../scripts/deploy-artifacts.js")>("../scripts/deploy-artifacts.js"),
+  readRunnerBundleManifest: vi.fn(async () => ({ releaseSha: "1".repeat(40) })),
+}));
+const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
+vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
+const releaseMocks = vi.hoisted(() => ({
+  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), assertDrained: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
+}));
+vi.mock("../scripts/stage-runner-release.ts", () => ({ stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease }));
+vi.mock("../scripts/runner-release-provider.ts", () => ({ createRunnerReleaseProvider: () => releaseMocks }));
+vi.mock("../scripts/smoke-hosted-deploy.shared.ts", () => ({ runSmokeHostedDeploy: releaseMocks.runSmokeHostedDeploy }));
 const receiptMocks = vi.hoisted(() => ({
   createCloudflareContainerProvider: vi.fn(),
-  parseWranglerContainerActions: vi.fn(),
+  buildContainerReleaseEntries: vi.fn(),
   parseWranglerWorkerVersionId: vi.fn(),
   readCloudflareContainerApplicationIdentities: vi.fn(),
   readRenderedContainerIdentities: vi.fn(),
@@ -23,7 +40,7 @@ vi.mock("../scripts/wrangler-runner.js", () => ({
 }));
 vi.mock("../scripts/container-release-receipt.js", () => ({
   createCloudflareContainerProvider: receiptMocks.createCloudflareContainerProvider,
-  parseWranglerContainerActions: receiptMocks.parseWranglerContainerActions,
+  buildContainerReleaseEntries: receiptMocks.buildContainerReleaseEntries,
   parseWranglerWorkerVersionId: receiptMocks.parseWranglerWorkerVersionId,
   readCloudflareContainerApplicationIdentities:
     receiptMocks.readCloudflareContainerApplicationIdentities,
@@ -36,7 +53,25 @@ import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.
 
 describe("runDeployWorkerVersionCli", () => {
   beforeEach(() => {
+    releaseMocks.stageHostedRunnerRelease.mockReset();
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`,
+      activeApplicationName: "hosted-worker-runnercontainer", applications: [], workerOnly: false,
+    }));
+    releaseMocks.readWorkerVersion.mockReset();
+    releaseMocks.readWorkerVersion.mockResolvedValue({});
+    releaseMocks.admitApplication.mockReset();
+    releaseMocks.admitApplication.mockResolvedValue("created");
+    releaseMocks.assertApplicationReady.mockReset();
+    releaseMocks.assertApplicationReady.mockResolvedValue(undefined);
+    releaseMocks.assertDrained.mockReset();
+    releaseMocks.assertDrained.mockResolvedValue(undefined);
+    releaseMocks.runSmokeHostedDeploy.mockReset();
+    releaseMocks.runSmokeHostedDeploy.mockResolvedValue(undefined);
+    imageMocks.prepareHostedContainerDeployImage.mockReset();
+    imageMocks.prepareHostedContainerDeployImage.mockImplementation(async ({ configPath }) => configPath);
     wranglerMocks.runWranglerJson.mockReset();
+    wranglerMocks.runWranglerJson.mockResolvedValue(JSON.stringify({ versions: [{ percentage: 100, version_id: "version-direct" }] }));
     wranglerMocks.runWranglerLogged.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockResolvedValue({ stderr: "", stdout: "deploy" });
@@ -45,8 +80,7 @@ describe("runDeployWorkerVersionCli", () => {
       listApplications: vi.fn(),
       readRollout: vi.fn(),
     });
-    receiptMocks.parseWranglerContainerActions.mockReset();
-    receiptMocks.parseWranglerContainerActions.mockReturnValue([]);
+    receiptMocks.buildContainerReleaseEntries.mockReset();
     receiptMocks.parseWranglerWorkerVersionId.mockReset();
     receiptMocks.parseWranglerWorkerVersionId.mockReturnValue("version-direct");
     receiptMocks.readCloudflareContainerApplicationIdentities.mockReset();
@@ -55,6 +89,142 @@ describe("runDeployWorkerVersionCli", () => {
     receiptMocks.readRenderedContainerIdentities.mockResolvedValue(renderedContainers);
     receiptMocks.waitForCloudflareContainerReleaseEntries.mockReset();
     receiptMocks.waitForCloudflareContainerReleaseEntries.mockResolvedValue(releasedContainers);
+  });
+
+  it("does not activate a Worker while its image is still publishing or after publication fails", async () => {
+    let rejectPublication!: (error: Error) => void;
+    imageMocks.prepareHostedContainerDeployImage.mockImplementation(() => new Promise<string>((_resolve, reject) => {
+      rejectPublication = reject;
+    }));
+    const deployment = runDeployWorkerVersionCli([], {
+      deployRoot: "/tmp/repo/apps/cloudflare",
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CLOUDFLARE_ACCOUNT_ID: "account-fixture",
+        CLOUDFLARE_API_TOKEN: "token-fixture",
+      },
+      log: false,
+      runHostedWorkerDeployment: async ({ dependencies }) => {
+        await dependencies.deployDirect({
+          configPath: "/tmp/repo/apps/cloudflare/.deploy/wrangler.generated.jsonc",
+          containerRolloutMode: "immediate",
+          deploymentMessage: "synthetic release",
+          includeSecrets: true,
+          secretsFilePath: "/tmp/worker-secrets.json",
+          versionTag: "synthetic-release",
+          workerName: "hosted-worker",
+        });
+        return createDeploymentResult();
+      },
+    });
+    const failure = deployment.catch((error: unknown) => error);
+    await vi.waitFor(() => expect(imageMocks.prepareHostedContainerDeployImage).toHaveBeenCalledOnce());
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    rejectPublication(new Error("synthetic image publication failed"));
+    expect(await failure).toEqual(new Error("synthetic image publication failed"));
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(receiptMocks.waitForCloudflareContainerReleaseEntries).not.toHaveBeenCalled();
+  });
+
+  it.each(["pending", "failed"])("does not promote when candidate readiness is %s", async (state) => {
+    let rejectSmoke!: (error: Error) => void;
+    releaseMocks.runSmokeHostedDeploy.mockImplementation(() => new Promise<void>((_resolve, reject) => { rejectSmoke = reject; }));
+    const deployment = runDeployWorkerVersionCli([], {
+      deployRoot: "/tmp/repo/apps/cloudflare", log: false,
+      env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture" },
+      runHostedWorkerDeployment: async ({ dependencies }) => {
+        await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode: "immediate", deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
+        return createDeploymentResult();
+      },
+    });
+    const failure = deployment.catch((error: unknown) => error);
+    await vi.waitFor(() => expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce());
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(1);
+    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0]).toContain("/tmp/config.jsonc");
+    rejectSmoke(new Error(state === "failed" ? "candidate image never became ready" : "synthetic cancelled preparation"));
+    expect(await failure).toBeInstanceOf(Error);
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(1);
+    expect(receiptMocks.waitForCloudflareContainerReleaseEntries).toHaveBeenCalledOnce();
+  });
+
+  it.each(["quota rejection", "pending distribution"])("keeps the Worker untouched during native %s", async (failure) => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+    }));
+    let reject!: (error: Error) => void;
+    const operation = failure === "quota rejection" ? releaseMocks.admitApplication : releaseMocks.assertApplicationReady;
+    operation.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const pending = syntheticDeployment().catch((error: unknown) => error);
+    await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce());
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
+    reject(new Error(failure));
+    expect(await pending).toEqual(new Error(failure));
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+  });
+
+  it.each(["immediate", "worker-only"] as const)("rolls dedicated smoke without member drain admission in %s mode", async (mode) => {
+    const smoke = { name: "hosted-worker-smoke", className: "DeploySmokeRunnerContainer", applicationId: "smoke-app", namespaceId: "smoke-namespace", specification: {} };
+    receiptMocks.readRenderedContainerIdentities.mockResolvedValue([{ applicationName: smoke.name, className: smoke.className }]);
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: mode === "worker-only", applications: [smoke],
+    }));
+    releaseMocks.assertDrained.mockRejectedValue(new Error("synthetic member drain endpoint unavailable"));
+    await syntheticDeployment(mode);
+    expect(releaseMocks.assertDrained).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).toHaveBeenCalledWith(smoke);
+    expect(releaseMocks.assertApplicationReady).toHaveBeenCalledOnce();
+    expect(releaseMocks.assertApplicationReady.mock.invocationCallOrder[0]).toBeLessThan(wranglerMocks.runWranglerLoggedCaptured.mock.invocationCallOrder[0]!);
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
+  });
+
+  it.each(["RunnerContainer", "NextRunnerContainer"])("still blocks reuse of %s when member drain evidence is unavailable", async (className) => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
+      applications: [{ name: renderedContainers[0]!.applicationName, className, applicationId: "member-app", namespaceId: "member-namespace", specification: {} }],
+    }));
+    releaseMocks.assertDrained.mockRejectedValue(new Error("synthetic member drain endpoint unavailable"));
+    await expect(syntheticDeployment()).rejects.toThrow("member drain endpoint unavailable");
+    expect(releaseMocks.assertDrained).toHaveBeenCalledWith("member-app");
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+  });
+
+  it("publishes an unchanged execution release once, with no container mutation", async () => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: true, applications: [],
+    }));
+    await syntheticDeployment();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0].slice(0, 2)).toEqual(["versions", "upload"]);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
+    expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledOnce();
+  });
+
+  it("forwards explicit retention and records only the effective application set", async () => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath, retainServingRunner }) => {
+      expect(retainServingRunner).toBe(true);
+      return { configPath: `${configPath}.retained`, promotionConfigPath: `${configPath}.retained`,
+        activeApplicationName: "serving", workerOnly: true, applications: [] };
+    });
+    await runDeployWorkerVersionCli([], {
+      deployRoot: "/tmp/synthetic-deploy", log: false,
+      env: { CF_BUNDLES_BUCKET: "synthetic-bundles", CF_WORKER_NAME: "hosted-worker", CLOUDFLARE_ACCOUNT_ID: "account-fixture", CLOUDFLARE_API_TOKEN: "token-fixture" },
+      runHostedWorkerDeployment: async ({ dependencies }) => {
+        await dependencies.deployDirect({ configPath: "/tmp/generated.jsonc", containerRolloutMode: "worker-only",
+          deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json",
+          versionTag: "synthetic", workerName: "hosted-worker" });
+        return createDeploymentResult();
+      },
+    });
+    expect(imageMocks.prepareHostedContainerDeployImage.mock.calls[0]![0]).not.toHaveProperty("release");
+    expect(receiptMocks.readRenderedContainerIdentities).toHaveBeenCalledWith("/tmp/generated.jsonc.retained");
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(fileMocks.writeFile).toHaveBeenCalledWith("/tmp/generated.jsonc", "{}", "utf8");
   });
 
   it("passes app-root deploy artifact paths to the deploy entrypoint", async () => {
@@ -136,6 +306,7 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
   it("builds a receipt around the exact direct deploy", async () => {
+    imageMocks.prepareHostedContainerDeployImage.mockResolvedValueOnce("/tmp/wrangler.image-prepared.jsonc");
     const env = {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CLOUDFLARE_ACCOUNT_ID: "account-fixture",
@@ -151,7 +322,7 @@ describe("runDeployWorkerVersionCli", () => {
       version: 6,
     }];
     const actions = [{
-      action: "modified",
+      action: "unchanged",
       applicationName: "hosted-worker-runnercontainer",
       className: "RunnerContainer",
     }];
@@ -160,7 +331,7 @@ describe("runDeployWorkerVersionCli", () => {
       readRollout,
     });
     receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValueOnce(before);
-    receiptMocks.parseWranglerContainerActions.mockReturnValue(actions);
+
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
@@ -185,20 +356,20 @@ describe("runDeployWorkerVersionCli", () => {
     );
 
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
-      "deploy",
+      "versions", "upload",
       "--config",
-      "/tmp/wrangler.generated.jsonc",
-      "--message",
-      "manual direct deploy",
+      "/tmp/wrangler.image-prepared.jsonc",
       "--name",
       "hosted-worker",
+      "--message",
+      "manual direct deploy",
       "--tag",
       "manual-version",
       "--secrets-file",
       "/tmp/worker-secrets.json",
     ]);
     expect(receiptMocks.readRenderedContainerIdentities).toHaveBeenCalledWith(
-      "/tmp/wrangler.generated.jsonc",
+      "/tmp/wrangler.image-prepared.jsonc",
     );
     expect(receiptMocks.createCloudflareContainerProvider).toHaveBeenCalledWith({
       accountId: "account-fixture",
@@ -212,10 +383,6 @@ describe("runDeployWorkerVersionCli", () => {
         "before",
         readRollout,
       );
-    expect(receiptMocks.parseWranglerContainerActions).toHaveBeenCalledWith(
-      "deploy\n",
-      renderedContainers,
-    );
     expect(receiptMocks.parseWranglerWorkerVersionId).toHaveBeenCalledWith("deploy\n");
     expect(receiptMocks.waitForCloudflareContainerReleaseEntries).toHaveBeenCalledWith({
       actions,
@@ -296,20 +463,20 @@ describe("runDeployWorkerVersionCli", () => {
       },
     );
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
-      "deploy",
+      "versions", "upload",
       "--config",
       "/tmp/wrangler.generated.jsonc",
-      "--message",
-      "manual direct deploy",
       "--name",
       "hosted-worker",
+      "--message",
+      "manual direct deploy",
       "--tag",
       "manual-version",
     ]);
-    expect(trace).toEqual(["r2", "r2", "deploy"]);
+    expect(trace).toEqual(["r2", "r2", "deploy", "versions", "deploy", "versions"]);
   });
 
-  it("passes the immediate container rollout flag only for explicit hotfix deploys", async () => {
+  it("prepares the inactive image immediately and promotes without a container rollout", async () => {
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
@@ -338,14 +505,13 @@ describe("runDeployWorkerVersionCli", () => {
     );
 
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith([
-      "deploy",
+      "versions", "upload",
       "--config",
       "/tmp/wrangler.generated.jsonc",
-      "--containers-rollout=immediate",
-      "--message",
-      "manual direct deploy",
       "--name",
       "hosted-worker",
+      "--message",
+      "manual direct deploy",
       "--tag",
       "manual-version",
     ]);
@@ -406,3 +572,14 @@ const releasedContainers = [
     version: 7,
   },
 ] as const;
+
+async function syntheticDeployment(containerRolloutMode: "immediate" | "worker-only" = "immediate") {
+  return runDeployWorkerVersionCli([], {
+    deployRoot: "/tmp/repo/apps/cloudflare", log: false,
+    env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture" },
+    runHostedWorkerDeployment: async ({ dependencies }) => {
+      await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode, deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
+      return createDeploymentResult();
+    },
+  });
+}

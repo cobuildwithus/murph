@@ -530,6 +530,65 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(payload)).not.toContain("payloadCiphertext");
   });
 
+  it.each([
+    { scenario: "empty conversation batch", item: null, consumedSeq: "0", eligible: false },
+    { scenario: "system-only work", item: { lane: "system" }, consumedSeq: "0", eligible: false },
+    { scenario: "consumed item replay", item: { consumedAt: FIXED_NOW }, consumedSeq: "0", eligible: false },
+    { scenario: "consumed watermark replay", item: {}, consumedSeq: "1", eligible: false },
+    { scenario: "missing payload", item: { payloadInlineCiphertext: null }, consumedSeq: "0", eligible: false },
+    { scenario: "fresh conversation work", item: {}, consumedSeq: "0", eligible: true },
+  ])("only loads sponsorship for usable conversation input: $scenario", async ({ item, consumedSeq, eligible }) => {
+    const runningBit = {
+      expiresAt: "2026-04-27T00:00:00.000Z",
+      publicAlias: null,
+      requestedBit: "Use a nautical greeting.",
+      schema: "murph.group-sponsorship-bit.v1",
+    };
+    const items = item === null ? [] : [{
+      consumedAt: null,
+      createdAt: FIXED_NOW,
+      dedupeKey: "conversation-sponsorship-1",
+      expiresAt: null,
+      id: "mailbox_sponsorship_1",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+      occurredAt: FIXED_NOW,
+      payloadBytes: 64,
+      payloadInlineCiphertext: "cipher_inline_1",
+      payloadRef: null,
+      payloadSchema: "murph.hosted-mailbox-item.v1",
+      updatedAt: FIXED_NOW,
+      userId: "member_routes_1",
+      ...item,
+    }];
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [{ lane: "conversation", consumedSeq }],
+      items,
+      maxSeqByLane: [{ lane: "conversation", maxSeq: "1" }],
+    });
+    mocks.readHostedActiveGroupRunningBit.mockResolvedValue(runningBit);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          { importedSeq: "0", lane: "conversation" },
+          { importedSeq: "0", lane: "system" },
+        ],
+        limitPerLane: 10,
+        requestId: "request_sponsorship_eligibility",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledTimes(eligible ? 1 : 0);
+    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(eligible ? 1 : 0);
+    expect(payload.groupRunningBit ?? null).toEqual(eligible ? runningBit : null);
+    expect(payload.items).toHaveLength(items.length);
+  });
+
   it("returns ordinary mailbox work when the optional sponsorship bit is unavailable", async () => {
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
@@ -1844,6 +1903,48 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["individual Edge", "launch_edge_monthly", null, false, "openai", true],
+    ["Family Edge", null, "edge", false, "openai", true],
+    ["individual Pulse", "launch_monthly", null, false, "openai", false],
+    ["Family Pulse", null, "pulse", false, "openai", false],
+    ["Edge on Venice", "launch_edge_monthly", null, false, "venice", false],
+    ["group", "launch_max_monthly", null, true, "openai", false],
+    ["individual Max", "launch_max_monthly", null, false, "openai", true],
+    ["Family Max", null, "max", false, "openai", true],
+    ["Max on Venice", "launch_max_monthly", null, false, "venice", false],
+  ] as const)("projects native Astra authority from canonical %s eligibility", async (
+    _name, plan, familyPlan, group, provider, astraAllowed,
+  ) => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    const { resolveHostedMemberAssistantModel } = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")
+    >("@/src/lib/hosted-onboarding/assistant-model-preference");
+    const configuration = resolveHostedMemberAssistantModel({
+      accountGroupMemberships: familyPlan ? [{
+        group: { billingStatus: "active", suspendedAt: null },
+        planCode: familyPlan,
+        status: "active",
+      }] : [],
+      assistantModelPreference: null,
+      assistantProviderPreference: provider,
+      assistantReasoningEffortPreference: null,
+      billingRef: plan ? { currentBillingPhase: "paid", currentBillingPlanCode: plan } : null,
+      billingStatus: familyPlan ? "not_started" : "active",
+      inferenceConnection: null,
+      suspendedAt: null,
+      threadContainer: group ? { memberId: "synthetic_group_member" } : null,
+    });
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce(configuration);
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+    ));
+    expect(response.status).toBe(200);
+    const workspace = parseHostedWorkspaceReadResponse(await response.json());
+    expect(workspace.hostedAssistantAstraAllowed).toBe(astraAllowed);
+    expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
   });
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {

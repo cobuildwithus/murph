@@ -1,6 +1,7 @@
 ---
 title: 'Foreground priority E2E arms an obsolete canonical checkpoint barrier'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2724'
 ---
 
 ## Expected Behavior

@@ -62,6 +62,14 @@
     "./node/ulid": {
       "types": "./dist/node/ulid.d.ts",
       "default": "./dist/node/ulid.js"
+    },
+    "./cli-timing": {
+      "types": "./dist/cli-timing.d.ts",
+      "default": "./dist/cli-timing.js"
+    },
+    "./node/cli-timing": {
+      "types": "./dist/node/cli-timing.d.ts",
+      "default": "./dist/node/cli-timing.js"
     }
   },
   "files": [

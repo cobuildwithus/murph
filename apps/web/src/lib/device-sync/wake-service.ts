@@ -123,7 +123,7 @@ import {
 
 const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
 const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v3";
-const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
+const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 500;
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
@@ -2336,7 +2336,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
             tx,
           });
           // Insert/no-op first so an exact replay at the cap remains a successful
-          // no-op. A net-new 17th payload rolls back, preserving the bounded queue.
+          // no-op. A net-new payload beyond the cap rolls back, preserving the queue.
           const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
             where: {
               connectionId: currentAuthority.connectionId,
@@ -3400,9 +3400,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
   const dataSourceProviderSlug = normalizeJunctionProviderSlug(
     input.dataSourceProviderSlug,
   );
-  const unknownJunctionDataSource = input.provider === "junction"
-    && dataSourceProviderSlug === null
-    && isHostedJunctionDataWebhookEvent(input.eventType);
+  const unknownJunctionDataSource = isHostedJunctionDataSourceUnknown(input);
   const observedGoogleHealthSource = normalizeJunctionProviderSlug(
     input.sourceObservation?.source.sourceProviderSlug,
   ) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
@@ -3564,6 +3562,35 @@ function buildHostedFitbitMigrationSuccessorEventId(input: {
     input.expectedConnectedAt,
     logicalFactId,
   ].join(":");
+}
+
+function isHostedJunctionDataSourceUnknown(
+  input: HostedDeviceSyncWebhookAdmissionInput,
+): boolean {
+  if (
+    input.provider !== "junction"
+    || normalizeJunctionProviderSlug(input.dataSourceProviderSlug) !== null
+    || !isHostedJunctionDataWebhookEvent(input.eventType)
+  ) {
+    return false;
+  }
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
+  // Historical completion has no delivered data to attribute. Its already
+  // prepared exact-source fetch still needs durable admission. Google Health
+  // must retain the migration fence: its executor skips imports before cutover.
+  const sourceScopedHistoryFetch = input.eventType.startsWith("historical.data.")
+    && sourceProviderSlug !== null
+    && sourceProviderSlug !== JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    && input.dirtyResources.length > 0
+    && input.dirtyResources.every((resource) =>
+      resource.jobKind === "resource"
+      && resource.resource !== null
+      && resource.resourceCategory !== null
+      && resource.windowStart !== null
+      && resource.windowEnd !== null
+      && canonicalizeJunctionProviderSlug(resource.sourceProviderSlug) === sourceProviderSlug
+      && resource.payload?.webhookDataJson === undefined);
+  return !sourceScopedHistoryFetch;
 }
 
 function isHostedJunctionDataWebhookEvent(eventType: string): boolean {

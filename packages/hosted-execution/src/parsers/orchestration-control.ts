@@ -253,6 +253,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
     "assistantExecutionBlocked",
+    "conversationWorkPending",
     "orchestrationAttemptId",
     "processingMode",
   ]);
@@ -275,11 +276,23 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
     );
   }
+  const conversationWorkPending = record.conversationWorkPending === undefined
+    ? undefined
+    : requireExactTrue(
+        record.conversationWorkPending,
+        "Hosted runtime ensure-processing request conversationWorkPending",
+      );
+  if (conversationWorkPending && processingMode != null && processingMode !== "default") {
+    throw new TypeError(
+      "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
+    );
+  }
 
   return {
     ...(assistantExecutionBlocked === undefined
       ? {}
       : { assistantExecutionBlocked }),
+    ...(conversationWorkPending === undefined ? {} : { conversationWorkPending }),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",

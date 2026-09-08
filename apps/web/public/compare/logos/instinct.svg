@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <clipPath id="icon-card">
+      <rect width="100" height="100" rx="27.5" ry="27.5"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#icon-card)">
+    <rect width="100" height="100" fill="#FFFFFF"/>
+    <g transform="translate(20.75 20.75) scale(1.4625)">
+      <path d="M18.5709 31.4316V8.10527C18.5709 5.60045 18.1519 3.8784 17 2H23.5458C22.3938 3.93067 21.9748 5.60059 21.9748 8.10542V31.4318C21.9748 33.9366 22.3938 35.6586 23.5458 37.5374H17C18.1519 35.6064 18.5709 33.9364 18.5709 31.4316Z" fill="#060A09"/>
+    </g>
+  </g>
+</svg>

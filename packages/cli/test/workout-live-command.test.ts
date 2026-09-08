@@ -349,6 +349,110 @@ test('ad-hoc workout start accepts canonical decimal planned loads', async () =>
   assert.equal(rejected.envelope.error.code, 'invalid_payload')
 })
 
+test('live workout starts reject misplaced compact exercise fields before writing', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-workout-compact-fields-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])).envelope).created, true)
+
+  const persisted: HostedCanonicalWritePersistenceInput[] = []
+  await withHostedCanonicalWritePort(
+    {
+      async persistCanonicalWrite(input) {
+        persisted.push(input)
+      },
+    },
+    async () => {
+      for (const [exercise, embeddedField] of [
+        ['name=Step-up,sets=4;mode=bodyweight', 'sets'],
+        ['name=Step-up reps=6;sets=2;mode=bodyweight', 'reps'],
+        ['name=Step-up, sets = 4;mode=bodyweight', 'sets'],
+        ['name=Step-up,\tsets\t=\t4;mode=bodyweight', 'sets'],
+        ['name=Step-up, tempo=controlled, sets=4;mode=bodyweight', 'sets'],
+        ['name=Step-up,name=Push-up;mode=bodyweight', 'name'],
+        ['name=Step-up,targetWeight=20;mode=bodyweight', 'targetWeight'],
+        ['name=Step-up,targetWeightUnit=kg;mode=bodyweight', 'targetWeightUnit'],
+        ['name=Step-up,sourceExerciseId=EX_STEP;mode=bodyweight', 'sourceExerciseId'],
+        ['name=Step-up,groupId=circuit-a;mode=bodyweight', 'groupId'],
+        ['name=Step-up,mode=bodyweight', 'mode'],
+        ['name=Row,unitOverride=kg;mode=weight_reps', 'unitOverride'],
+        ['name=Step-up,note=Controlled;mode=bodyweight', 'note'],
+        ['name=Step-up;sourceExerciseId=EX_STEP,sets=4;mode=bodyweight', 'sets'],
+        ['name=Step-up;groupId=circuit-a reps=6;mode=bodyweight', 'reps'],
+        ['name=Step-up;sets=4,reps=6;mode=bodyweight', 'reps'],
+        ['name=Step-up;mode=bodyweight,sets=4', 'sets'],
+      ] as const) {
+        const result = await run<WorkoutResult>(cli, [
+          'workout', 'start', 'Compact field validation',
+          '--exercise', 'name=Push-up;sets=2;mode=bodyweight',
+          '--exercise', exercise,
+          '--vault', vaultRoot,
+        ])
+        assert.equal(result.envelope.ok, false)
+        if (result.envelope.ok) {
+          throw new Error('Expected misplaced compact exercise fields to fail.')
+        }
+        assert.equal(result.envelope.error.code, 'invalid_option')
+        assert.match(result.envelope.error.message ?? '', /semicolon/iu)
+        assert.ok(result.envelope.error.message?.includes(`;${embeddedField}=`))
+        assert.equal(persisted.length, 0)
+      }
+    },
+  )
+  assert.equal(persisted.length, 0)
+})
+
+test('live workout compact fields preserve punctuation, notes, and default sets', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-workout-compact-literals-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])).envelope).created, true)
+
+  const started = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Compact exercise literals',
+    '--exercise', 'name=Step-up;sets=4;reps=6;mode=bodyweight;sourceExerciseId=EX_STEP;groupId=circuit-a',
+    '--exercise', 'name=Row, neutral grip;sets=3;mode=weight_reps;unitOverride=kg',
+    '--exercise', String.raw`name=Band\row (left/right);mode=bodyweight;note=Keep tempo=controlled, sets=optional`,
+    '--exercise', String.raw`name=Row, sets\=optional + press (left/right)!;mode=bodyweight`,
+    '--exercise', 'name=Step-up, tempo=controlled;mode=bodyweight',
+    '--exercise', 'name=Offsetsets=4;mode=bodyweight',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const shown = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', started.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  const exercises = shown.entity.data.workout.exercises
+  assert.deepEqual(exercises.map((exercise) => exercise.name), [
+    'Step-up',
+    'Row, neutral grip',
+    String.raw`Band\row (left/right)`,
+    String.raw`Row, sets\=optional + press (left/right)!`,
+    'Step-up, tempo=controlled',
+    'Offsetsets=4',
+  ])
+  assert.deepEqual(
+    exercises.map((exercise) => exercise.sets.length),
+    [4, 3, 1, 1, 1, 1],
+  )
+  assert.deepEqual(
+    exercises.map((exercise) => exercise.setPlanIsFinite),
+    [true, true, false, false, false, false],
+  )
+  assert.equal(exercises[0]?.memberRepsPerSet, 6)
+  assert.equal(exercises[0]?.sourceExerciseId, 'EX_STEP')
+  assert.equal(exercises[0]?.groupId, 'circuit-a')
+  assert.equal(exercises[1]?.unitOverride, 'kg')
+  assert.equal(exercises[2]?.note, 'Keep tempo=controlled, sets=optional')
+})
+
 test('ad-hoc workout exercises require explicit editor modes and weight units', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-editor-mode-',

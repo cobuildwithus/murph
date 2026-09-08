@@ -1,3 +1,4 @@
+import { assistantFollowUpHasNewInput } from '../follow-ups.js'
 import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
@@ -46,6 +47,12 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   })
   if (!current) {
     return createAssistantOutboxAutomationAuthorityStaleError()
+  }
+
+  if (current.record.followUpSourceIntentId && input.intent.attemptCount === 1
+    && await assistantFollowUpHasNewInput(input)) {
+    return new VaultCliError('ASSISTANT_FOLLOW_UP_CONTEXT_CHANGED',
+      'New input arrived before optional follow-up delivery; reconsider current context.')
   }
 
   if (isRecognizedMurphOnboardingFollowupAutomation(current.record)) {

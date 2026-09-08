@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "wearable-history-fetch-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Wearable history sync keeps moving",
+    "summary": "History requests for Fitbit and other wearable connections can keep moving while Fitbit is still active.",
+    "details": "Google Health history still waits for the Fitbit migration handoff. Murph preserves the requested dates without treating a completion notification as newly arrived health data. Source permissions and data checks still apply.",
+    "relevanceTags": ["device-sync"],
+    "sourcePullRequests": [2950]
+  }
+}

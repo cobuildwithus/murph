@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { deviceSyncError } from "../errors.ts";
+import { JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS } from "../junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch, stringifyJson } from "../shared.ts";
 import type { DeviceSyncAccountStatus, OAuthStateConsumeClaim } from "../types.ts";
 import {
@@ -53,7 +54,11 @@ export function markSyncSucceededInTransaction(
     return false;
   }
 
-  const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
+  const metadata = mergeStoredDeviceSyncMetadataPatch(
+    existing.metadata,
+    options.metadataPatch,
+    existing.provider === "junction" ? JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS : [],
+  );
   const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
     ? options.nextReconcileAt ?? null
     : existing.nextReconcileAt;
@@ -162,7 +167,11 @@ export function markSyncFailed(
     const metadataPatch = options.metadataPatch;
 
     if (metadataPatch && Object.keys(metadataPatch).length > 0) {
-      const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, metadataPatch);
+      const metadata = mergeStoredDeviceSyncMetadataPatch(
+        existing.metadata,
+        metadataPatch,
+        existing.provider === "junction" ? JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS : [],
+      );
       database.prepare(`
         update device_connection
         set status = ?,

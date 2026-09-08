@@ -1,6 +1,7 @@
 ---
 title: 'Skipped GitHub job names can invalidate cross-repository Temporal proof parsing'
 severity: 'major'
+issue: 'cobuildwithus/murph#2807'
 ---
 
 ## Expected Behavior

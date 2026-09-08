@@ -1,6 +1,7 @@
 ---
 title: 'test:diff is blocked by unrelated workspace-boundary failures'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2725'
 ---
 
 ## Expected Behavior

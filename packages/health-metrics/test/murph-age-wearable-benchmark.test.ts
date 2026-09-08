@@ -151,3 +151,26 @@ test("locks the NHANES activity wearable shadow benchmark card before local adap
     );
   }
 });
+
+test("reports frozen benchmark policy errors in order and requires literal booleans", () => {
+  const card = listMurphAgeWearableActivityBenchmarkCards()[0];
+  if (!card) throw new Error("Expected activity benchmark card.");
+  const validation = validateMurphAgeWearableActivityBenchmarkCard({
+    ...card,
+    denominatorPolicy: { ...card.denominatorPolicy, sameDenominatorRequired: 1, unexpected: true },
+    splitPolicy: { ...card.splitPolicy, participantIdsExportAllowed: 0, unexpected: true },
+    negativeControlPolicy: { ...card.negativeControlPolicy, earlyEventWashoutRequired: "true", unexpected: true },
+    selectionPolicy: { ...card.selectionPolicy, testSetMutationAuthorized: null, unexpected: true },
+  });
+  assert.equal(validation.status, "invalid");
+  assert.deepEqual(validation.warnings.map((warning) => warning.message), [
+    "Wearable activity benchmark card denominator policy contains unsupported field unexpected.",
+    "Wearable activity benchmark card denominator policy sameDenominatorRequired must be true.",
+    "Wearable activity benchmark card split policy contains unsupported field unexpected.",
+    "Wearable activity benchmark card split policy participantIdsExportAllowed must be false.",
+    "Wearable activity benchmark card negative control policy contains unsupported field unexpected.",
+    "Wearable activity benchmark card negative control policy earlyEventWashoutRequired must be true.",
+    "Wearable activity benchmark card selection policy contains unsupported field unexpected.",
+    "Wearable activity benchmark card selection policy testSetMutationAuthorized must be false.",
+  ]);
+});

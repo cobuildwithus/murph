@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +15,43 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("workspace source resolution", () => {
+  it("resolves the Web device-sync service through source when package dist is absent", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "murph-web-source-"));
+    const webDir = path.join(fixtureRoot, "apps/web");
+    const packageDir = path.join(fixtureRoot, "packages/device-syncd");
+    const servicePath = path.join(packageDir, "src/service.ts");
+
+    try {
+      fs.mkdirSync(webDir, { recursive: true });
+      fs.mkdirSync(path.dirname(servicePath), { recursive: true });
+      fs.mkdirSync(path.join(webDir, "node_modules/@murphai"), { recursive: true });
+      fs.symlinkSync(packageDir, path.join(webDir, "node_modules/@murphai/device-syncd"), "dir");
+      for (const relativePath of ["tsconfig.base.json", "packages/device-syncd/package.json", "packages/device-syncd/src/service.ts"]) {
+        fs.copyFileSync(path.join(repoRoot, relativePath), path.join(fixtureRoot, relativePath));
+      }
+      const config = JSON.parse(fs.readFileSync(path.join(repoRoot, "apps/web/tsconfig.json"), "utf8"));
+      config.include = ["probe.ts"];
+      config.exclude = [];
+      config.compilerOptions.incremental = false;
+      config.compilerOptions.types = [];
+      config.compilerOptions.plugins = [];
+      delete config.compilerOptions.tsBuildInfoFile;
+      fs.writeFileSync(path.join(webDir, "tsconfig.json"), JSON.stringify(config));
+      fs.writeFileSync(path.join(webDir, "probe.ts"), 'import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";\nvoid SqliteDeviceSyncStore;\n');
+
+      const output = execFileSync(process.execPath, [
+        path.join(repoRoot, "scripts/run-typescript.mjs"),
+        "web", "-p", path.join(webDir, "tsconfig.json"), "--listFilesOnly", "--pretty", "false",
+      ], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+      // Resolution proof only: sibling source dependencies are deliberately absent.
+      expect(output.split(/\r?\n/u)).toContain(servicePath);
+      expect(fs.existsSync(path.join(packageDir, "dist"))).toBe(false);
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps configured package source anchors on files that exist", () => {
     const entries = resolveHostedWebWorkspaceSourceEntries(path.join(repoRoot, "apps/web"));
 

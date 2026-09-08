@@ -8,12 +8,12 @@ import {
 } from "../hosted-crypto/secure-box";
 
 type ClinicalSecretPrismaClient = Parameters<typeof sealHostedUserSecureBoxString>[0]["prisma"];
-type ClinicalConnectionSecretField = "accessToken" | "patientId";
+type ClinicalConnectionSecretField = "accessToken" | "patientId" | "patientBinding";
 type ClinicalPageCursorIdentity = {
-  queryFingerprint?: string;
-  queryScopeId?: string;
-  retrievalProtocol?: "query-slices-v2";
-  sliceId?: string;
+  queryFingerprint: string;
+  queryScopeId: string;
+  retrievalProtocol: "query-slices-v2";
+  sliceId: string;
 };
 
 export async function sealClinicalConnectionFhirBaseUrl(input: {
@@ -73,17 +73,13 @@ export async function sealClinicalPageCursor(input: {
   const sealed = await sealHostedUserSecureBoxString({
     aad: {
       field: "pageCursor",
-      purpose: binding
-        ? `clinical-records-fhir-page:${binding}`
-        : `clinical-records-fhir-page:${input.resourceType}`,
+      purpose: `clinical-records-fhir-page:${binding}`,
       rowId: input.runId,
       sequence: input.generation,
       table: "clinical_record_retrieval_run",
     },
     lane: "clinical-records-page-cursor",
-    scope: binding
-      ? `clinical-records:${input.runId}:${binding}:pageCursor`
-      : `clinical-records:${input.runId}:${input.resourceType}:pageCursor`,
+    scope: `clinical-records:${input.runId}:${binding}:pageCursor`,
     userId: input.memberId,
     value: input.value,
   });
@@ -102,17 +98,13 @@ export async function openClinicalPageCursor(input: {
   const opened = await openHostedUserSecureBoxString({
     aad: {
       field: "pageCursor",
-      purpose: binding
-        ? `clinical-records-fhir-page:${binding}`
-        : `clinical-records-fhir-page:${input.resourceType}`,
+      purpose: `clinical-records-fhir-page:${binding}`,
       rowId: input.runId,
       sequence: input.generation,
       table: "clinical_record_retrieval_run",
     },
     lane: "clinical-records-page-cursor",
-    scope: binding
-      ? `clinical-records:${input.runId}:${binding}:pageCursor`
-      : `clinical-records:${input.runId}:${input.resourceType}:pageCursor`,
+    scope: `clinical-records:${input.runId}:${binding}:pageCursor`,
     userId: input.memberId,
     value: input.value,
   });
@@ -121,19 +113,12 @@ export async function openClinicalPageCursor(input: {
 }
 
 function clinicalPageCursorBinding(input: {
-  queryFingerprint?: string;
-  queryScopeId?: string;
+  queryFingerprint: string;
+  queryScopeId: string;
   resourceType: string;
-  retrievalProtocol?: "query-slices-v2";
-  sliceId?: string;
-}): string | null {
-  const fields = [
-    input.retrievalProtocol,
-    input.queryScopeId,
-    input.queryFingerprint,
-    input.sliceId,
-  ];
-  if (fields.every((field) => field === undefined)) return null;
+  retrievalProtocol: "query-slices-v2";
+  sliceId: string;
+}): string {
   if (
     input.retrievalProtocol !== "query-slices-v2"
     || typeof input.queryScopeId !== "string"
@@ -204,7 +189,7 @@ export async function sealClinicalConnectionSecret(input: {
   tokenVersion: number;
   value: string | null;
 }): Promise<string | null> {
-  const isPatientId = input.field === "patientId";
+  const isPatientId = input.field !== "accessToken";
   return sealHostedUserSecureBoxString({
     aad: {
       field: input.field,
@@ -229,7 +214,7 @@ export async function openClinicalConnectionSecret(input: {
   prisma?: ClinicalSecretPrismaClient;
   tokenVersion: number;
 }): Promise<string | null> {
-  const isPatientId = input.field === "patientId";
+  const isPatientId = input.field !== "accessToken";
   return openHostedUserSecureBoxString({
     aad: {
       field: input.field,

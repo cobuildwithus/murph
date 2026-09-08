@@ -8,7 +8,6 @@ import {
 
 const mocks = vi.hoisted(() => ({
   ensureRuntimeProcessing: vi.fn(),
-  prewarmRuntimeShell: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
   recordHostedIngressDirectEnsureTiming: vi.fn(async () => ({
@@ -41,9 +40,6 @@ vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "@/src/lib/hosted-onboarding/webhook-service-wake";
-import {
-  startHostedRuntimeShellPrewarmBestEffort,
-} from "@/src/lib/hosted-execution/direct-runtime-wake";
 
 const response = {
   ignored: false,
@@ -109,7 +105,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
-      prewarmRuntimeShell: mocks.prewarmRuntimeShell,
     });
   });
 
@@ -803,74 +798,4 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
-});
-
-describe("startHostedRuntimeShellPrewarmBestEffort", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.prewarmRuntimeShell.mockResolvedValue({ accepted: true });
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
-      prewarmRuntimeShell: mocks.prewarmRuntimeShell,
-    });
-  });
-
-  it("issues only the shell-prewarm command for the instant-start member", async () => {
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      orchestrationAttemptId:
-        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-      source: "linq-instant-start",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
-      orchestrationAttemptId:
-        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-instant-start",
-      userId: "member_123",
-    });
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-  });
-
-  it("issues only the shell-prewarm command for a typing-start hint", async () => {
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      source: "linq-typing-started",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(mocks.prewarmRuntimeShell).toHaveBeenCalledWith({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-typing-started",
-      userId: "member_123",
-    });
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-  });
-
-  it("settles when client setup or the best-effort request fails", async () => {
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.readHostedExecutionControlClientIfConfigured.mockImplementationOnce(() => {
-      throw new TypeError("Hosted execution baseUrl must be configured.");
-    });
-
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      source: "linq-instant-start",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    mocks.prewarmRuntimeShell.mockRejectedValueOnce(
-      new Error("cloudflare unavailable"),
-    );
-    await expect(startHostedRuntimeShellPrewarmBestEffort({
-      source: "linq-instant-start",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-
-    expect(consoleWarn).toHaveBeenCalledTimes(2);
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
-    consoleWarn.mockRestore();
-  });
 });

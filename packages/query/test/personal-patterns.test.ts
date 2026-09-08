@@ -1898,6 +1898,122 @@ test("Personal Patterns runtime and Browser Vault reuse the same projected metri
   }
 });
 
+test("Personal Patterns retains available pairs when a nearest match would strand a later case", () => {
+  const exposed = ["2026-02-09", "2026-03-02"];
+  const controls = ["2026-01-05", "2026-02-16"];
+  const entities = [
+    ...exposed.flatMap((date, index) => [
+      journalFactor(`exposure_${index}`, date, "outdoor-break", "happened"),
+      observation(`exposed_hrv_${index}`, addDays(date, 1), "hrv", 70, "ms"),
+    ]),
+    ...controls.flatMap((date, index) => [
+      journalFactor(`control_${index}`, date, "outdoor-break", "did-not-happen"),
+      observation(`control_hrv_${index}`, addDays(date, 1), "hrv", 50, "ms"),
+    ]),
+  ];
+  const options = { asOf: "2026-03-03", windowDays: 90 };
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({ entities, vaultRoot: "test://comparison-assignment" }),
+    options,
+  );
+  const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
+  assert.equal(cell?.exposedDays, 2);
+  assert.equal(cell?.grade, "D");
+  assert.deepEqual(cell?.exposedDates, exposed);
+  assert.deepEqual(cell?.comparisonDates, controls);
+  assert.deepEqual(buildPersonalPatternReport(
+    createVaultReadModel({ entities: [...entities].reverse(), vaultRoot: "test://comparison-assignment" }),
+    options,
+  ), report);
+});
+
+for (const scenario of [
+  { name: "one unusual case cannot inflate a typical modest effect to grade A", deltas: [27, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], grade: "B" },
+  { name: "a consistently larger effect still earns grade A", deltas: Array(12).fill(10), grade: "A" },
+  { name: "two extreme cases contradict the typical case", deltas: [-1, -1, 35, -1, -1, -1, -1, -1, 35, -1, -1, -1], grade: null },
+  { name: "tiny consistent changes depend on extreme cases for magnitude", deltas: [30, 0.1, 0.1, 0.1, 30, 0.1, 0.1, 0.1], grade: null },
+  { name: "a minority of large changes outweigh frequent contradictions", deltas: [15, 15, -2, -2, 15, 15, -2, -2], grade: null },
+  { name: "consistent evidence tolerates an occasional contradictory case", deltas: [10, 12, 8, -1, 9, 10, 8, 12], grade: "B" },
+  { name: "consistent decreases remain discoverable", deltas: [-10, -12, -8, 1, -9, -10, -8, -12], grade: "B" },
+]) {
+  test(`Personal Patterns grades repeated evidence when ${scenario.name}`, () => {
+    const entities = scenario.deltas.flatMap((delta, index) => {
+      const date = addDays("2026-01-05", index * 14);
+      return [
+        event(`exposure_${index}`, date, "activity_session", { activityType: "running" }),
+        observation(`exposed_hrv_${index}`, addDays(date, 1), "hrv", 50 + delta, "ms"),
+        observation(`baseline_hrv_${index}`, addDays(date, 8), "hrv", 50, "ms"),
+      ];
+    });
+    const report = buildPersonalPatternReport(
+      createVaultReadModel({ entities, vaultRoot: "test://repeated-evidence" }),
+      { asOf: "2026-06-30", windowDays: 200 },
+    );
+    const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
+    assert.equal(cell?.exposedDays, scenario.deltas.length);
+    assert.equal(cell?.grade, scenario.grade);
+    assert.equal(cell?.repeatedDirection, scenario.grade !== null);
+  });
+}
+
+test("Personal Patterns counts overlapping episode records as one independent case", () => {
+  const entities = [
+    journalFactor("episode_a_day_1", "2026-01-05", "travel", "happened", ["episode-a"]),
+    journalFactor("episode_a_day_2", "2026-01-06", "travel", "happened", ["episode-a"]),
+    journalFactor("episode_b_day_2", "2026-01-06", "travel", "happened", ["episode-b"]),
+    journalFactor("episode_b_day_3", "2026-01-07", "travel", "happened", ["episode-b"]),
+    journalFactor("separate_note", "2026-01-05", "travel", "happened"),
+    ...["2026-01-05", "2026-01-06", "2026-01-07"].flatMap((date, index) => [
+      observation(`exposed_${index}`, addDays(date, 1), "hrv", 70, "ms"),
+      observation(`comparison_${index}`, addDays(date, 8), "hrv", 50, "ms"),
+    ]),
+  ];
+  for (const history of [entities, [...entities].reverse()]) {
+    const report = buildPersonalPatternReport(
+      createVaultReadModel({ entities: history, vaultRoot: "test://overlapping-episodes" }),
+      { asOf: "2026-01-31", windowDays: 60 },
+    );
+    const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
+    assert.equal(report.factors[0]?.episodeCount, 1);
+    assert.equal(cell?.exposedDays, 1);
+    assert.equal(cell?.comparisonDays, 1);
+    assert.equal(cell?.exposedDates?.length, 3);
+    assert.equal(new Set(cell?.comparisonDates).size, 3);
+    assert.equal(cell?.grade, "E");
+  }
+});
+
+test("Personal Patterns never treats an exposed day outside the report as a baseline", () => {
+  const entities = [
+    event("outside_run", "2026-03-03", "activity_session", { activityType: "running" }),
+    event("inside_run", "2026-03-10", "activity_session", { activityType: "running" }),
+    observation("outside_outcome", "2026-03-04", "hrv", 50, "ms"),
+    observation("inside_outcome", "2026-03-11", "hrv", 70, "ms"),
+  ];
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({ entities, vaultRoot: "test://pattern-window" }),
+    { asOf: "2026-03-31", windowDays: 28 },
+  );
+  const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
+  assert.equal(cell?.stage, "insufficient");
+  assert.equal(cell?.comparisonDays, 0);
+});
+
+test("Personal Patterns does not use tomorrow as a same-day subjective baseline", () => {
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        journalFactor("factor", "2026-03-25", "outdoor-break", "happened"),
+        journalOutcome("outcome", "2026-03-25", "energy", "4"),
+        journalOutcome("future", "2026-04-01", "energy", "1"),
+      ],
+      vaultRoot: "test://subjective-window",
+    }),
+    { asOf: "2026-03-31", windowDays: 28 },
+  );
+  assert.equal(report.cells[0]?.stage, "insufficient");
+});
+
 function event(
   id: string,
   date: string,

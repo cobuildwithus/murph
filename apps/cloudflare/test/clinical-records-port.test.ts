@@ -86,7 +86,8 @@ describe("hosted clinical records runtime port", () => {
             patientIdHash: HASH,
             requestedScopes: ["patient/Observation.read"],
             retrievalJobId: "run_1",
-            retrievalScopes: [{
+            retrievalProtocol: "query-slices-v2",
+            retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole",
               coverage: "whole-family",
               queryFingerprint: HASH,
               resourceType: "Observation",
@@ -129,14 +130,14 @@ describe("hosted clinical records runtime port", () => {
       .resolves.toMatchObject({ ok: true });
     await expect(port.readRun({ generation: 1, runId: "run_1" }))
       .resolves.toMatchObject({ status: "ready" });
-    await expect(port.fetchPage({
+    await expect(port.fetchPage({ retrievalProtocol: "query-slices-v2", queryScopeId: "observation", sliceId: "whole", queryFingerprint: HASH,
       cursor: null,
       generation: 1,
       requestId: "request_1",
       resourceType: "Observation",
       runId: "run_1",
     })).resolves.toMatchObject({ nextCursor: null, status: "page" });
-    await expect(port.recordOutcome({
+    await expect(port.recordOutcome({ retrievalProtocol: "query-slices-v2", retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       counts: {
         createdCount: 0,
         executableDecisionCount: 0,
@@ -163,7 +164,7 @@ describe("hosted clinical records runtime port", () => {
         path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
       },
       {
-        body: {
+        body: { retrievalProtocol: "query-slices-v2", queryScopeId: "observation", sliceId: "whole", queryFingerprint: HASH,
           cursor: null,
           generation: 1,
           requestId: "request_1",
@@ -413,7 +414,7 @@ describe("hosted clinical records runtime port", () => {
       transport: { mode: "proxy" },
     });
 
-    const recording = port.recordOutcome({
+    const recording = port.recordOutcome({ retrievalProtocol: "query-slices-v2", retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       counts: {
         createdCount: 0,
         executableDecisionCount: 0,
@@ -464,7 +465,7 @@ describe("hosted clinical records runtime port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.fetchPage({
+    await expect(port.fetchPage({ retrievalProtocol: "query-slices-v2", queryScopeId: "observation", sliceId: "whole", queryFingerprint: HASH,
       cursor: null,
       generation: 1,
       requestId: "request_1",
@@ -501,7 +502,7 @@ describe("hosted clinical records runtime port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.fetchPage({
+    await expect(port.fetchPage({ retrievalProtocol: "query-slices-v2", queryScopeId: "observation", sliceId: "whole", queryFingerprint: HASH,
       cursor: null,
       generation: 1,
       requestId: "request_1",
@@ -635,7 +636,7 @@ describe("hosted clinical records runtime port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.fetchPage({
+    await expect(port.fetchPage({ retrievalProtocol: "query-slices-v2", queryScopeId: "observation", sliceId: "whole", queryFingerprint: HASH,
       cursor: null,
       generation: 1,
       requestId: "request_1",

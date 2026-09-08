@@ -2,6 +2,12 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+  acquireHostedLinqParticipantContactLockTx: vi.fn(),
+  assertHostedMemberLinqEmailHandleOwnerTx: vi.fn(),
+  bindHostedMemberLinqEmailHandleTx: vi.fn(),
+  lockHostedMemberRow: vi.fn(),
+  prepareHostedDomainRootForWeb: vi.fn(),
+  revalidatePreparedHostedDomainRootForWebTx: vi.fn(),
   assertHostedMemberNotSuspended: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
@@ -11,6 +17,22 @@ const mocks = vi.hoisted(() => ({
   readHostedThreadRouteByThreadIdentity: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedDomainRootForWeb: mocks.prepareHostedDomainRootForWeb,
+  revalidatePreparedHostedDomainRootForWebTx: mocks.revalidatePreparedHostedDomainRootForWebTx,
+}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  assertHostedMemberLinqEmailHandleOwnerTx: mocks.assertHostedMemberLinqEmailHandleOwnerTx,
+  bindHostedMemberLinqEmailHandleTx: mocks.bindHostedMemberLinqEmailHandleTx,
+}));
+vi.mock("@/src/lib/hosted-onboarding/linq-participant-contact", () => ({
+  acquireHostedLinqParticipantContactLockTx: mocks.acquireHostedLinqParticipantContactLockTx,
+}));
+vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/shared")>(),
+  lockHostedMemberRow: mocks.lockHostedMemberRow,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -72,6 +94,10 @@ beforeEach(async () => {
   mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
   mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
   mocks.acquireHostedLinqChatOwnershipLockTx.mockResolvedValue(undefined);
+  mocks.acquireHostedLinqParticipantContactLockTx.mockResolvedValue(undefined);
+  mocks.assertHostedMemberLinqEmailHandleOwnerTx.mockResolvedValue(undefined);
+  mocks.bindHostedMemberLinqEmailHandleTx.mockResolvedValue(undefined);
+  mocks.prepareHostedDomainRootForWeb.mockResolvedValue({ rootKeyId: "synthetic-root" });
   mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   mocks.getPrisma.mockReturnValue({
     $transaction: vi.fn(
@@ -114,6 +140,29 @@ test("records one exact temporary sender bridge without creating a group", async
     prisma: tx,
     recipientPhone: recovery.recipientPhone,
   });
+  expect(mocks.bindHostedMemberLinqEmailHandleTx).toHaveBeenCalledWith({
+    emailAddress: recovery.participantContact.value,
+    lookupKey: recovery.participantContact.lookupKey,
+    memberId: "member_existing",
+    prisma: tx,
+  });
+  expect(mocks.acquireHostedLinqParticipantContactLockTx.mock.invocationCallOrder[0])
+    .toBeLessThan(mocks.acquireHostedLinqChatOwnershipLockTx.mock.invocationCallOrder[0]!);
+  expect(mocks.bindHostedMemberLinqEmailHandleTx.mock.invocationCallOrder[0])
+    .toBeLessThan(mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0]!);
+});
+
+test("rejects a foreign durable handle before writing a recovery bridge", async () => {
+  const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+  mocks.assertHostedMemberLinqEmailHandleOwnerTx.mockRejectedValueOnce(hostedOnboardingError({
+    code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+    httpStatus: 409,
+    message: "Synthetic identity conflict.",
+  }));
+  const response = await route.POST(buildRequest());
+  expect(response.status).toBe(409);
+  expect(mocks.bindHostedMemberLinqEmailHandleTx).not.toHaveBeenCalled();
+  expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
 });
 
 test("does not mutate an already connected group", async () => {
@@ -162,7 +211,7 @@ test("refuses a Messages email already owned by another account", async () => {
 });
 
 test("refuses to overwrite another pending Messages setup", async () => {
-  mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
     pendingLinqChatId: "chat_other",
     pendingLinqParticipantContact: {
       kind: "email",
@@ -182,7 +231,7 @@ test("refuses to overwrite another pending Messages setup", async () => {
 });
 
 test("accepts an idempotent exact pending Messages setup", async () => {
-  mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
     pendingLinqChatId: recovery.chatId,
     pendingLinqParticipantContact: recovery.participantContact,
     pendingLinqRecipientPhone: recovery.recipientPhone,

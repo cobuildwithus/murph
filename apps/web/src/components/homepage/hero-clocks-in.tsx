@@ -1291,7 +1291,6 @@ export function HeroClocksIn({
               authenticated={authenticated}
               context="hero"
               leadingIcon={channelIcon}
-              preloadAuthPanel
             />
           </div>
         </div>

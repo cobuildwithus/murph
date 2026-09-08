@@ -11,6 +11,7 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboarding/member-channel-sync";
+import { acquireHostedLinqParticipantEmailLockTx } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
@@ -54,6 +55,7 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
   });
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {
+    await acquireHostedLinqParticipantEmailLockTx({ emailAddress: verifiedEmail.address, tx });
     await lockHostedMemberRow(tx, auth.member.id);
     const currentAuthorization = await readHostedMemberEmailAuthorization({
       memberId: auth.member.id,

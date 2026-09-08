@@ -54,6 +54,9 @@ describe('assistant generated delivery files', () => {
       'never move or copy existing, user-owned, canonical, or durable files there',
     )
     expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      'Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive.',
+    )
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
       'pass those exact included ids in retire_export_pack_ids',
     )
     expect(

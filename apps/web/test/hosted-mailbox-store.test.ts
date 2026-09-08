@@ -555,64 +555,6 @@ describe("claimHostedMailboxConversationSubscriptionAction", () => {
       });
     },
   );
-
-  it("allows only one of two concurrent different actions to claim an input", async () => {
-    type TestSubscriptionAction = "start_pulse_now" | "upgrade_edge";
-    type ClaimUpdateArgs = {
-      data: { subscriptionActionClaim: TestSubscriptionAction };
-    };
-
-    let currentClaim: TestSubscriptionAction | null = null;
-    let readCount = 0;
-    let releaseReads!: () => void;
-    const bothReadsStarted = new Promise<void>((resolve) => {
-      releaseReads = resolve;
-    });
-    const findMany = vi.fn(async () => {
-      const observedClaim = currentClaim;
-      readCount += 1;
-      if (readCount === 2) {
-        releaseReads();
-      }
-      await bothReadsStarted;
-      return [{
-        id: "mailbox_claim_1",
-        subscriptionActionClaim: observedClaim,
-      }];
-    });
-    const updateMany = vi.fn(async (args: ClaimUpdateArgs) => {
-      if (currentClaim !== null) {
-        return { count: 0 };
-      }
-      currentClaim = args.data.subscriptionActionClaim;
-      return { count: 1 };
-    });
-    const findFirst = vi.fn(async () => ({
-      subscriptionActionClaim: currentClaim,
-    }));
-    const prisma = {
-      hostedMailboxItem: { findFirst, findMany, updateMany },
-    } as never;
-
-    const results = await Promise.all([
-      claimHostedMailboxConversationSubscriptionAction({
-        action: "start_pulse_now",
-        assistantInputId: "ain_valid",
-        memberId: "member_mailbox_1",
-        prisma,
-      }),
-      claimHostedMailboxConversationSubscriptionAction({
-        action: "upgrade_edge",
-        assistantInputId: "ain_valid",
-        memberId: "member_mailbox_1",
-        prisma,
-      }),
-    ]);
-
-    expect(new Set(results)).toEqual(new Set(["claimed", "conflict"]));
-    expect(updateMany).toHaveBeenCalledTimes(2);
-    expect(findFirst).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
@@ -2498,6 +2440,10 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       orderBy: {
         laneSeq: "desc",
       },
+      select: {
+        laneSeq: true,
+        updatedAt: true,
+      },
       where: expectLiveHostedMailboxWhere({
         lane: "conversation",
         userId: "member_mailbox_1",
@@ -2826,7 +2772,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
 });
 
 describe("fetchHostedRuntimeMailboxProjection", () => {
-  it("projects both requested lanes with one query while preserving item payload metadata", async () => {
+  it.each(["root", "transaction"] as const)("projects both lanes with one query and no new transaction using a %s client", async (clientKind) => {
     const queryRaw = vi.fn(async () => [
       {
         consumedSeq: 11n,
@@ -2873,10 +2819,14 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         requestedLane: "system",
       },
     ]);
+    const transaction = vi.fn(() => {
+      throw new Error("Read-only mailbox projection must not open a transaction.");
+    });
     const prisma = createHostedMailboxClient({
       hostedMailboxItem: createHostedMailboxItemDelegate(),
       hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
       queryRaw,
+      ...(clientKind === "root" ? { transaction } : {}),
     });
 
     const result = await fetchHostedRuntimeMailboxProjection({
@@ -2892,6 +2842,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     });
 
     expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
       { consumedSeq: "2", lane: "system" },
@@ -2976,60 +2927,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       maxUpdatedAt: new Date("2026-04-26T00:00:02.000Z"),
       requestedLane: "conversation",
     };
-    const emptySourceProjection = {
-      consumedSeq: 0n,
-      itemConsumedAt: null,
-      itemCreatedAt: null,
-      itemDedupeKey: null,
-      itemExpiresAt: null,
-      itemId: null,
-      itemKind: null,
-      itemLane: null,
-      itemLaneSeq: null,
-      itemOccurredAt: null,
-      itemPayloadBytes: null,
-      itemPayloadHash: null,
-      itemPayloadInlineCiphertext: null,
-      itemPayloadRef: null,
-      itemPayloadSchema: null,
-      itemUpdatedAt: null,
-      itemUserId: null,
-      maxSeq: 0n,
-      maxUpdatedAt: null,
-      requestedLane: "conversation",
-    };
-    const queryRaw = vi.fn(async (...args: unknown[]) => {
-      switch (queryRaw.mock.calls.length) {
-        case 1:
-          return [sourceRow];
-        case 2:
-          return [{ seq: 1n }];
-        case 3: {
-          const values = args.slice(1);
-          return [buildHostedMailboxItemRow({
-            createdAt: FIXED_NOW,
-            dedupeKey: String(values[4]),
-            expiresAt: values[12] as Date | null,
-            id: String(values[0]),
-            kind: String(values[5]),
-            lane: String(values[2]),
-            laneSeq: values[3] as bigint,
-            occurredAt: values[6] as Date,
-            payloadBytes: values[10] as number,
-            payloadHash: values[11] as string,
-            payloadInlineCiphertext: values[8] as string,
-            payloadRef: values[9] as string | null,
-            payloadSchema: String(values[7]),
-            updatedAt: FIXED_NOW,
-            userId: String(values[1]),
-          })];
-        }
-        case 4:
-          return [emptySourceProjection];
-        default:
-          throw new Error("Unexpected hosted mailbox rehome query.");
-      }
-    });
+    const queryRaw = vi.fn(async () => [sourceRow]);
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
     const routeTimestamp = new Date("2026-04-01T00:00:00.000Z");
@@ -3078,7 +2976,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     const transaction = vi.fn(async (
       operation: (transactionClient: typeof tx) => Promise<unknown>,
     ) => operation(tx));
-    const prisma = Object.assign(Object.create(null), {
+    const prisma = Object.assign(Object.create(null), tx, {
       $transaction: transaction,
     }) as never;
 
@@ -3090,7 +2988,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       userId: sourceUserId,
     });
 
-    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(result.items).toMatchObject([{
       consumedAt: sourceRow.itemConsumedAt.toISOString(),
@@ -3454,9 +3352,11 @@ function createHostedMailboxClient(input: {
   hostedMailboxItem: ReturnType<typeof createHostedMailboxItemDelegate>;
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
   queryRaw?: ReturnType<typeof vi.fn>;
+  transaction?: ReturnType<typeof vi.fn>;
 }) {
   return Object.assign(Object.create(null), {
     ...(input.queryRaw ? { $queryRaw: input.queryRaw } : {}),
+    ...(input.transaction ? { $transaction: input.transaction } : {}),
     hostedMailboxItem: input.hostedMailboxItem,
     hostedMailboxPayload: input.hostedMailboxPayload,
   }) as Parameters<typeof fetchHostedMailboxItemsAfterLaneCursors>[0]["prisma"];

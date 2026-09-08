@@ -34,14 +34,6 @@ import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
-type HostedRuntimeMailboxAiUsageItem = {
-  consumedAt?: string | null;
-  lane: string;
-  laneSeq: string;
-  payloadInlineCiphertext?: string | null;
-  payloadRef?: string | null;
-};
-
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
@@ -60,18 +52,29 @@ export const POST = withJsonError(async (request: Request) => {
     now: fetchedAt,
     userId,
   });
-  const usageRunningLow = await requireHostedRuntimeMailboxAiUsageAccess({
+  const conversationWorkPresent = hostedMailboxItemsRequireAiUsageAccess({
     consumedSeqByLane: projection.consumedSeqByLane,
-    items: projection.items,
+    items: projection.items.map((item) => ({
+      consumedAt: item.consumedAt ?? null,
+      lane: item.lane,
+      laneSeq: item.laneSeq,
+      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+      payloadRef: item.payloadRef ?? null,
+    })),
     lanes: body.lanes,
-    maxSeqByLane: projection.maxSeqByLane,
-    prisma,
-    userId,
   });
-  // Sponsorship color is presentation for conversation imports only. A
-  // system-only consistency read cannot consume it, so keep that hot path to
-  // the mailbox projection it actually requested.
-  const groupRunningBit = body.lanes.some(({ lane }) => lane === "conversation")
+  const usageRunningLow = conversationWorkPresent
+    ? await requireHostedRuntimeMailboxAiUsageAccess({
+        consumedSeqByLane: projection.consumedSeqByLane,
+        lanes: body.lanes,
+        maxSeqByLane: projection.maxSeqByLane,
+        prisma,
+        userId,
+      })
+    : false;
+  // Sponsorship color is presentation for conversation imports only. An
+  // empty, consumed-replay, or system-only batch cannot consume it.
+  const groupRunningBit = conversationWorkPresent
     ? await readHostedActiveGroupRunningBit({
         now: fetchedAt,
         prisma,
@@ -92,7 +95,6 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
-  items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
   maxSeqByLane: Parameters<
     typeof readHostedMailboxConversationAiUsageHighWater
@@ -100,22 +102,6 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   prisma: PrismaClient;
   userId: string;
 }): Promise<boolean> {
-  // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
-  // watermarks are simpler than returning partial lane output around denied AI work.
-  if (!hostedMailboxItemsRequireAiUsageAccess({
-    consumedSeqByLane: input.consumedSeqByLane,
-    items: input.items.map((item) => ({
-      consumedAt: item.consumedAt ?? null,
-      lane: item.lane,
-      laneSeq: item.laneSeq,
-      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
-      payloadRef: item.payloadRef ?? null,
-    })),
-    lanes: input.lanes,
-  })) {
-    return false;
-  }
-
   const gate = await resolveHostedRuntimeAiUsageGate({
     mode: "read_first",
     userId: input.userId,

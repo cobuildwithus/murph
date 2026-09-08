@@ -8,6 +8,7 @@ import {
 import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
+import { HOSTED_ASSISTANT_ASTRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -118,13 +119,9 @@ export const GET = withJsonError(async (request: Request) => {
       userId,
     })
   ).status === "allowed";
-  const hostedAssistantSubagentModelOverridesAllowed =
-    customInferenceOverride === null
-    && assistantConfiguration?.solAvailable === true;
-
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
-    hostedAssistantSubagentModelOverridesAllowed,
+    ...projectHostedAssistantModelAuthority(assistantConfiguration, customInferenceOverride === null),
     ...(customInferenceOverride
       ? { hostedAssistantCustomInferenceOverride: customInferenceOverride }
       : assistantConfiguration?.hostedAssistantModelOverride
@@ -171,6 +168,18 @@ export const GET = withJsonError(async (request: Request) => {
       : null,
   }));
 });
+
+function projectHostedAssistantModelAuthority(
+  configuration: HostedMemberAssistantModelResolution | null,
+  managed: boolean,
+) {
+  return {
+    hostedAssistantAstraAllowed: managed
+      && configuration?.provider === "openai"
+      && configuration.availableModels.includes(HOSTED_ASSISTANT_ASTRA_MODEL),
+    hostedAssistantSubagentModelOverridesAllowed: managed && configuration?.solAvailable === true,
+  };
+}
 
 async function readHostedAssistantConfigurationFailingClosedForCustomInference(
   input: {

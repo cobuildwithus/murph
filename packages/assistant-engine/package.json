@@ -129,7 +129,7 @@
     "node": ">=24.14.1"
   },
   "devDependencies": {
-    "@openai/codex": "0.151.0",
+    "@openai/codex": "0.153.4",
     "zod": "^4.4.3"
   }
 }

@@ -20,7 +20,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
     return createElement("div", null, "Auth dialog");
   },
   preloadHostedAuthPanelIsland: vi.fn(),
-  useHostedAuthPanelIslandIdlePreload: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-runtime", () => ({

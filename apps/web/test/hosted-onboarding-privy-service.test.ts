@@ -14,6 +14,7 @@ import {
   getHostedDomainRootUnwrapCache,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   HostedDomainRootPreparationMismatchError,
@@ -2763,7 +2764,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(telegramRoutingUpsert).toHaveBeenCalledTimes(1);
   });
 
-  it("does not block phone auth when a linked email belongs to another member", async () => {
+  it.each(["unique-index", "linq-handle"])("does not block phone auth on a %s secondary email conflict", async (conflict) => {
     const secondaryEmailTransactionCachePresence: boolean[] = [];
     const secondaryEmailTransactionProviderDisabled: boolean[] = [];
     const phoneMember = makeMember({ id: "member_phone_secondary_email" });
@@ -2795,6 +2796,13 @@ describe("completeHostedPrivyVerification", () => {
           secondaryEmailTransactionProviderDisabled.push(
             areHostedDomainRootProviderCallsDisabled(),
           );
+          if (conflict === "linq-handle") {
+            throw hostedOnboardingError({
+              code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+              httpStatus: 409,
+              message: "Synthetic cross-owner email conflict.",
+            });
+          }
           throw new Prisma.PrismaClientKnownRequestError(
             "duplicate verified email",
             {

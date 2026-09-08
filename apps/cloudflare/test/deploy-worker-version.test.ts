@@ -339,7 +339,7 @@ describe("runHostedWorkerDeployment", () => {
     });
   });
 
-  it("supports explicit immediate container rollout for hotfix deploys", async () => {
+  it.each(["immediate", "worker-only"])("supports explicit %s deployment", async (mode) => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
       versions: [
@@ -360,7 +360,7 @@ describe("runHostedWorkerDeployment", () => {
       dependencies,
       env: {
         CF_WORKER_NAME: "hosted-worker",
-        HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
+        HOSTED_EXECUTION_CONTAINER_ROLLOUT: mode,
       },
       resultPath: "/tmp/deployment-result.json",
       runnerBundleDir: "/tmp/runner-bundle",
@@ -369,7 +369,7 @@ describe("runHostedWorkerDeployment", () => {
     });
 
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
-      containerRolloutMode: "immediate",
+      containerRolloutMode: mode,
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("direct deploy"),
       includeSecrets: true,
@@ -393,7 +393,7 @@ describe("runHostedWorkerDeployment", () => {
       runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
       workerName: "hosted-worker",
-    })).rejects.toThrow("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual' or 'immediate'.");
+    })).rejects.toThrow("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual', 'immediate', or 'worker-only'.");
 
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
     expect(dependencies.validateDeployEnvironment).not.toHaveBeenCalled();

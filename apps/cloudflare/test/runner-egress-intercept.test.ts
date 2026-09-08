@@ -9510,6 +9510,11 @@ describe("hostedRunnerIntercept", () => {
     },
     {
       method: "POST",
+      operation: "sendDocument",
+      query: "",
+    },
+    {
+      method: "POST",
       operation: "sendPhoto",
       query: "",
     },

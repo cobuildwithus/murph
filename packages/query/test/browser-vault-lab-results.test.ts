@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+  createBrowserVaultInteractiveQueryClient,
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
@@ -11,6 +12,7 @@ import {
   selectBrowserVaultExperimentResults,
   selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
+  splitBrowserVaultReplica,
 } from "../src/browser.ts";
 import {
   buildMetricProjection,
@@ -21,6 +23,45 @@ import {
 type CanonicalEntity = Parameters<
   typeof createVaultReadModel
 >[0]["entities"][number];
+
+test("combined shard clients preserve deep immutability and lab identity validation", async () => {
+  const vault = createVaultReadModel({
+    entities: [createLabTest("evt_albumin", "2026-06-01T08:00:00.000Z", [{
+      analyte: "Albumin",
+      biomarkerSlug: "albumin",
+      referenceRange: { high: 5, low: 3.5 },
+      unit: "g/dL",
+      value: 4.2,
+    }])],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const shards = await splitBrowserVaultReplica(await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "8".repeat(64),
+    vault,
+  }));
+  // A shallow-frozen input must not prevent freezing its nested lab fields.
+  Object.freeze(shards.labs.labResultRows);
+  const client = createBrowserVaultInteractiveQueryClient(shards.core, shards.metrics, shards.labs);
+  const row = client.labResults.list()[0];
+  assert.ok(row?.referenceRange);
+  assert.equal(Object.isFrozen(client.replica), true);
+  const entity = client.replica.entities[0];
+  assert.ok(entity);
+  assert.equal(Object.isFrozen(entity.attributes), true);
+  assert.equal(Object.isFrozen(client.replica.labResultRows), true);
+  assert.equal(Object.isFrozen(row), true);
+  assert.equal(Object.isFrozen(row.referenceRange), true);
+  const referenceRange = row.referenceRange;
+  assert.throws(() => { referenceRange.high = 99; }, TypeError);
+  assert.equal(client.labResults.list()[0]?.referenceRange?.high, 5);
+  assert.throws(() => createBrowserVaultInteractiveQueryClient(shards.core, shards.metrics, {
+    ...shards.labs,
+    identity: { ...shards.labs.identity, sourceBundleHash: "9".repeat(64) },
+  }), /labs shard identity must match the core shard identity/u);
+});
 
 test("browser vault projects all live lab history without widening the wearable lookback", async () => {
   const vault = createVaultReadModel({

@@ -53,6 +53,7 @@ export interface HostedPrivySignInState {
 
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
+    availableModels?: readonly HostedAssistantProductModel[];
     configurationAvailable: boolean;
     dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
@@ -242,6 +243,7 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
   return {
     account: {
       assistant: {
+        availableModels: assistantModel.availableModels,
         configurationAvailable: assistantModel.configurationAvailable,
         dormantSolPreference: assistantModel.dormantSolPreference,
         model: assistantModel.model,

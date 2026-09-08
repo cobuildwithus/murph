@@ -23,6 +23,9 @@ import {
   createCloudflareArtifactStore,
 } from "./runtime-platform/artifact-store.ts";
 import {
+  createCloudflareMediaStore,
+} from "./runtime-platform/media-store.ts";
+import {
   createHostedWebRuntimeLogPort,
 } from "./runtime-platform/log-port.ts";
 import {
@@ -90,6 +93,11 @@ export async function prepareHostedContainerWorkspaceRestore(input: {
   );
   const platform: HostedWorkspaceRestorePreparationPlatform = {
     artifactStore: createCloudflareArtifactStore({
+      fetchImpl: trustedInternalFetch,
+      timeoutMs,
+      workspaceCheckpointBridge,
+    }),
+    mediaStore: createCloudflareMediaStore({
       fetchImpl: trustedInternalFetch,
       timeoutMs,
       workspaceCheckpointBridge,

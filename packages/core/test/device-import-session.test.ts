@@ -9,6 +9,7 @@ import {
   createDeviceBatchImportSession,
   importDeviceBatch,
   initializeVault,
+  readEvent,
   type DeviceBatchImportTiming,
 } from "../src/index.ts";
 
@@ -168,6 +169,57 @@ test("does not seed an empty event identity cache from a sample-only import", as
     assert.equal(replayTiming?.eventIdentityIndexCacheHit, false);
     assert.equal(replay.events[0]?.id, persisted.events[0]?.id);
     assert.equal(replay.events[0]?.lifecycle?.revision, 2);
+  });
+});
+
+test("keeps the cached baseline isolated from reconciliation and discards it after rejection", async () => {
+  await withTempVault(async (vaultRoot) => {
+    const originalAt = "2026-01-01T00:00:00.000Z";
+    const original = await importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: originalAt,
+      events: [buildObservation("existing", originalAt, 1)],
+    });
+    const session = createDeviceBatchImportSession();
+    const timings: DeviceBatchImportTiming[] = [];
+    const options = { session, onTiming: (timing: DeviceBatchImportTiming) => timings.push(timing) };
+    const secondAt = "2026-01-02T00:00:00.000Z";
+    await importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: secondAt,
+      events: [buildObservation("disjoint", secondAt, 2)],
+    }, options);
+    const correctionAt = "2026-01-03T00:00:00.000Z";
+    const correction = await importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: correctionAt,
+      events: [buildObservation("existing", correctionAt, 3)],
+    }, options);
+    const fourthAt = "2026-01-04T00:00:00.000Z";
+    const disjoint = await importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: fourthAt,
+      events: [buildObservation("another-disjoint", fourthAt, 4)],
+    }, options);
+    assert.deepEqual(timings.map((timing) => timing.eventIdentityIndexCacheHit), [false, true, true]);
+    assert.equal(correction.events[0]?.id, original.events[0]?.id);
+    assert.equal(correction.events[0]?.lifecycle?.revision, 2);
+    assert.equal(disjoint.events[0]?.lifecycle?.revision ?? 1, 1);
+
+    await assert.rejects(importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: fourthAt,
+      events: [{ ...buildObservation("invalid", fourthAt, 5), timeZone: "Invalid/Zone" }],
+    }, options));
+    const recovered = await importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: correctionAt,
+      events: [buildObservation("existing", correctionAt, 3)],
+    }, options);
+    assert.equal(timings.at(-1)?.eventIdentityIndexCacheHit, false);
+    assert.equal(recovered.applied, false);
+    assert.equal(recovered.events[0]?.id, correction.events[0]?.id);
+    assert.equal(recovered.events[0]?.lifecycle?.revision, 2);
+    const eventId = original.events[0]?.id;
+    assert.ok(eventId);
+    const persisted = await readEvent({ vaultRoot, eventId });
+    assert.ok(persisted.event.kind === "observation");
+    assert.equal(persisted.event.value, 3);
+    assert.equal(persisted.event.lifecycle?.revision, 2);
   });
 });
 

@@ -14,6 +14,7 @@ export type HostedStorageScope =
   | "email-raw"
   | "environment-voice"
   | "meal-photo"
+  | "media"
   | "private-media"
   | "runner-secrets";
 
@@ -295,6 +296,7 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "email-raw",
   "environment-voice",
   "meal-photo",
+  "media",
   "private-media",
   "runner-secrets",
 ]);

@@ -268,10 +268,22 @@ export function createComposioConnectedAppsClient(input: {
           provider.connectedAccounts.list(params)
         );
         const payloadRecord = asRecord(payload);
-        const items = Array.isArray(payloadRecord?.items)
-          ? payload.items
-          : [];
-        accounts.push(...items.flatMap(parseConnectedAccount));
+        if (
+          !Array.isArray(payloadRecord?.items)
+          || (payloadRecord.next_cursor != null
+            && typeof payloadRecord.next_cursor !== "string")
+        ) {
+          throw new ComposioConnectedAppsRequestError(
+            "Composio returned an invalid account-list response.",
+          );
+        }
+        const parsedAccounts = payload.items.flatMap(parseConnectedAccount);
+        if (parsedAccounts.length !== payload.items.length) {
+          throw new ComposioConnectedAppsRequestError(
+            "Composio returned an invalid account-list response.",
+          );
+        }
+        accounts.push(...parsedAccounts);
         cursor = normalizeNonEmptyString(payloadRecord?.next_cursor);
       } while (cursor);
 

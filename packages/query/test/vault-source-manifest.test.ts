@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 
+import { brotliCompressSync } from "node:zlib";
+
 import { afterEach, test } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, VAULT_LAYOUT } from "@murphai/contracts";
@@ -272,4 +274,18 @@ test("isCanonicalQuerySourcePath matches the shared source families", () => {
   );
   assert.equal(isCanonicalQuerySourcePath("../vault.json"), false);
   assert.equal(isCanonicalQuerySourcePath("experiments\\trial.md"), false);
+});
+
+
+test("Brotli event archives enter the source manifest and canonical query reads", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  const relativePath = "ledger/events/2026/2026-04.jsonl.br";
+  await mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true });
+  await writeFile(path.join(vaultRoot, relativePath), brotliCompressSync(
+    '{"id":"evt_brotli_synthetic","kind":"note","title":"Archive discovery","occurredAt":"2026-04-01T00:00:00.000Z"}\n',
+  ));
+  assert.equal(isCanonicalQuerySourcePath(relativePath), true);
+  assert.deepEqual((await listCanonicalSourceManifest(vaultRoot)).map((entry) => entry.relativePath), [relativePath]);
+  const snapshot = await readVaultSourceStrict(vaultRoot);
+  assert.ok(snapshot.entities.some((entity) => entity.entityId === "evt_brotli_synthetic"));
 });

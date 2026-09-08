@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "health-source-reconnect-progress",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Health source reconnects keep their progress",
+    "summary": "Reconnecting a health source can now work through a large backlog of older queued updates without starting over on every retry.",
+    "details": "A reconnect may still need another attempt while the backlog is processed. Your current connection stays unchanged until that step finishes, and saved updates that can be imported without the old credentials are retained.",
+    "relevanceTags": ["device-sync"],
+    "sourcePullRequests": [2908]
+  }
+}

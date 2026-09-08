@@ -57,6 +57,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   return jsonOk({
+    availableModels: result.availableModels,
     dormantSolPreference: result.dormantSolPreference,
     model: result.model,
     ok: true,

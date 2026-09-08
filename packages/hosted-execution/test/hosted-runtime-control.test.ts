@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   ASSISTANT_RUNTIME_ISSUE_SCHEMA,
@@ -24,6 +27,9 @@ import {
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
+  parseHostedRuntimeAssistantConfigurationControlRequest as parseConfigurationControlRequest,
+  parseHostedRuntimeAssistantConfigurationToolRequest as parseConfigurationToolRequest,
+  parseHostedRuntimeAssistantConfigurationToolResponse as parseConfigurationToolResponse,
   parseHostedAssistantReasoningEffortOverride,
 } from "../src/assistant-model.ts";
 import {
@@ -38,6 +44,7 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -100,6 +107,12 @@ import {
   parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceState,
 } from "../src/parsers.ts";
+
+it("preserves configuration parser identity through the legacy export", () => {
+  expect(parseHostedRuntimeAssistantConfigurationControlRequest).toBe(parseConfigurationControlRequest);
+  expect(parseHostedRuntimeAssistantConfigurationToolRequest).toBe(parseConfigurationToolRequest);
+  expect(parseHostedRuntimeAssistantConfigurationToolResponse).toBe(parseConfigurationToolResponse);
+});
 
 describe("hosted runtime control contracts", () => {
   it("parses fail-closed health-data admission and rejects revoked processing", () => {
@@ -394,10 +407,12 @@ describe("hosted runtime control contracts", () => {
       HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_TERRA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
+      "gpt-6-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
       HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
+      "gpt-6-astra",
     ]);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);
@@ -2343,6 +2358,9 @@ describe("hosted runtime control contracts", () => {
       extraLeaf: 1,
       freshStartRequestedAtEpochMs: -1,
       replacedStaleFence: "true",
+      runnerTargetReconcileElapsedMs: 12,
+      standbyClaimElapsedMs: 25,
+      runnerTargetBindElapsedMs: 50,
       standbyAllocationElapsedMs: 87,
       standbyAllocationOutcome: "fallback",
       standbyAllocationReason: "claim_no_ready_slot",
@@ -2370,6 +2388,9 @@ describe("hosted runtime control contracts", () => {
       directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      runnerTargetReconcileElapsedMs: 12,
+      standbyClaimElapsedMs: 25,
+      runnerTargetBindElapsedMs: 50,
       standbyAllocationElapsedMs: 87,
       standbyAllocationOutcome: "fallback",
       standbyAllocationReason: "claim_no_ready_slot",
@@ -2471,6 +2492,16 @@ describe("hosted runtime control contracts", () => {
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
+    expect(() => parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantAstraAllowed: "true",
+      workspace: null,
+    })).toThrow(/hostedAssistantAstraAllowed/u);
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantAstraAllowed: true,
+      workspace: null,
+    }).hostedAssistantAstraAllowed).toBe(true);
     expect(() => parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantSubagentModelOverridesAllowed: "true",
@@ -2866,6 +2897,32 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeRedactedJson({
       source: "retrying hosted-user-runtime:opaque-test",
     }, "Hosted runtime redacted JSON")).toThrow(/direct identifier/u);
+  });
+
+  it("bounds device-sync continuation owners to the runtime connection authority", () => {
+    expect(HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT).toBe(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+    );
+    const continuationSeqs = Array.from(
+      { length: HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT },
+      (_, index) => String(index + 1),
+    );
+    expect(parseHostedRuntimeRedactedJson({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: continuationSeqs,
+    }, "Hosted runtime redacted JSON")).toEqual({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: continuationSeqs,
+    });
+    expect(() => parseHostedRuntimeRedactedJson({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: [
+        ...continuationSeqs,
+        String(HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT + 1),
+      ],
+    }, "Hosted runtime redacted JSON")).toThrow(
+      new RegExp(
+        `at most ${HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT} redacted values`,
+        "u",
+      ),
+    );
   });
 
   it("accepts retired device-sync environment logs from warm runners", () => {

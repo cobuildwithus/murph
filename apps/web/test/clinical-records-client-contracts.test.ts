@@ -81,7 +81,7 @@ describe("Clinical Records client contracts", () => {
         latestRun: null,
         providerDirectoryEntryId: "epic-example",
         sourceSystem: "epic-fhir",
-        status: "disconnected",
+        status: "unsupported",
       }],
       ok: true,
     })).toThrow(/client contract/u);

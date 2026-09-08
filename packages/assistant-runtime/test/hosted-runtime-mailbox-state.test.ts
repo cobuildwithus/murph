@@ -6,6 +6,9 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionDeviceSyncWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -328,158 +331,240 @@ describe("hosted runtime system mailbox state", () => {
         ],
       },
     })).toEqual({
+      deviceSyncContinuationSeqs: [],
       firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: "4",
       handledThroughSeq: "3",
     });
   });
 
-  it("does not let a handled device item retained as a local retry pin the canonical prefix", () => {
+  it.each([
+    { blocker: "9", handled: "8", owner: "4", owners: ["4", "6"] },
+    { blocker: "4", handled: "3", owner: "9", owners: ["6", "9"] },
+  ])("keeps owner $owner stable across status transitions beside blocker $blocker", ({ blocker, handled, owner, owners }) => {
     const retryAt = "2026-04-28T00:00:00.000Z";
-    const base = buildPendingDeviceSyncMailboxItem({
+    const retainedDeviceRetry = buildRetainedDeviceSyncMailboxItem({
       itemId: "retained_device_retry",
-      mailboxLaneSeq: "4",
+      mailboxLaneSeq: owner,
+      retryAt,
     });
-    const retainedDeviceRetry: HostedSystemMailboxPendingItem = {
-      ...base,
-      attemptCount: 1,
-      lastAttemptAt: "2026-04-27T00:00:00.000Z",
-      nextAttemptAt: retryAt,
+    const pendingBlocker = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_blocker",
+        mailboxLaneSeq: blocker,
+      }),
+      nextAttemptAt: "2026-04-29T00:00:00.000Z",
       wake: buildHostedExecutionDeviceSyncWake({
-        connectionId: "dsc_retained_retry",
-        eventId: "device-sync.wake:retained_device_retry",
+        connectionId: "dsc_pending_blocker",
+        eventId: "device-sync.wake:pending_blocker",
         expectedConnectedAt: "2026-04-01T00:00:00.000Z",
-        hint: {
-          jobs: [{
-            availableAt: retryAt,
-            dedupeKey: "retained-weight-retry",
-            kind: "resource",
-            maxAttempts: 1,
-            payload: {},
-          }],
-        },
         occurredAt: "2026-04-27T00:00:00.000Z",
         provider: "junction",
         reason: "reconcile_due",
         userId: "member_123",
       }),
     };
-    const pendingSuccessor = buildPendingSystemMailboxItem({
-      itemId: "pending_successor",
-      mailboxLaneSeq: "9",
+    const secondRetainedDeviceRetry = buildRetainedDeviceSyncMailboxItem({
+      itemId: "second_retained_device_retry",
+      mailboxLaneSeq: "6",
+      retryAt,
     });
 
     expect(resolveHostedSystemMailboxProgress({
       importedSeq: "9",
       now: "2026-04-27T00:00:00.000Z",
-      state: { pending: [retainedDeviceRetry, pendingSuccessor] },
+      state: {
+        pending: [pendingBlocker, secondRetainedDeviceRetry, retainedDeviceRetry],
+      },
     })).toEqual({
-      firstPendingClassifierFailures: ["wake_not_device_sync"],
-      firstPendingSeq: "9",
-      handledThroughSeq: "8",
+      deviceSyncContinuationSeqs: owners,
+      firstPendingClassifierFailures: ["continuation_owner_missing"],
+      firstPendingSeq: blocker,
+      handledThroughSeq: handled,
+    });
+    for (const item of [
+      retainedDeviceRetry,
+      {
+        ...retainedDeviceRetry,
+        attemptCount: 2,
+        nextAttemptAt: null,
+        status: "sending" as const,
+      },
+      {
+        ...retainedDeviceRetry,
+        attemptCount: 2,
+        nextAttemptAt: null,
+        postCheckpointRecord: {
+          connectionId: "dsc_retained_device_retry",
+          kind: "device-sync.dirty-processed" as const,
+          processedRevision: "2",
+        },
+        status: "recording" as const,
+      },
+    ]) {
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "9",
+        now: retryAt,
+        state: { pending: [pendingBlocker, item] },
+      })).toEqual({
+        deviceSyncContinuationSeqs: [owner],
+        firstPendingClassifierFailures: ["continuation_owner_missing"],
+        firstPendingSeq: blocker,
+        handledThroughSeq: handled,
+      });
+    }
+  });
+
+  it("promotes the exact legacy retained-pending shape to durable ownership", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    try {
+      const {
+        deviceSyncContinuationOwner: _legacyOwner,
+        ...legacyRetained
+      } = buildRetainedDeviceSyncMailboxItem({
+        itemId: "legacy_retained_device_retry",
+        mailboxLaneSeq: "4",
+        retryAt: "2026-04-28T00:00:00.000Z",
+      });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [legacyRetained],
+      }));
+
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      expect(state.pending[0]?.deviceSyncContinuationOwner).toBe(true);
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "4",
+        state,
+      })).toEqual({
+        deviceSyncContinuationSeqs: ["4"],
+        firstPendingClassifierFailures: null,
+        firstPendingSeq: null,
+        handledThroughSeq: "4",
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          ...legacyRetained,
+          nextAttemptAt: "2026-04-28T00:01:00.000Z",
+        }],
+      }));
+      const mismatchedLegacyState = await readHostedSystemMailboxState(vaultRoot);
+      expect(mismatchedLegacyState.pending[0]?.deviceSyncContinuationOwner).toBeUndefined();
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "4",
+        state: mismatchedLegacyState,
+      })).toEqual({
+        deviceSyncContinuationSeqs: [],
+        firstPendingClassifierFailures: ["continuation_owner_missing"],
+        firstPendingSeq: "4",
+        handledThroughSeq: "3",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("fails closed when continuation ownership is ambiguous or exceeds runtime authority", () => {
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const boundedRetained = Array.from({
+      length: HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
+    }, (_, index) =>
+      buildRetainedDeviceSyncMailboxItem({
+        itemId: `bounded_retained_${index + 1}`,
+        mailboxLaneSeq: String(index + 1),
+        retryAt,
+      })
+    );
+    const importedSeq = String(boundedRetained.length);
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq,
+      now: retryAt,
+      state: { pending: [...boundedRetained].reverse() },
+    })).toEqual({
+      deviceSyncContinuationSeqs: boundedRetained.map((item) => item.mailboxLaneSeq!),
+      firstPendingClassifierFailures: null,
+      firstPendingSeq: null,
+      handledThroughSeq: importedSeq,
+    });
+
+    const overflow = buildRetainedDeviceSyncMailboxItem({
+      itemId: "bounded_retained_overflow",
+      mailboxLaneSeq: String(boundedRetained.length + 1),
+      retryAt,
     });
     expect(resolveHostedSystemMailboxProgress({
-      importedSeq: "9",
+      importedSeq: overflow.mailboxLaneSeq!,
       now: retryAt,
-      state: { pending: [retainedDeviceRetry] },
+      state: { pending: [...boundedRetained, overflow] },
     })).toEqual({
+      deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_projection_invalid"],
+      firstPendingSeq: "1",
+      handledThroughSeq: "0",
+    });
+
+    const duplicateConnection = buildRetainedDeviceSyncMailboxItem({
+      connectionId: "dsc_bounded_retained_1",
+      itemId: "duplicate_connection_owner",
+      mailboxLaneSeq: String(boundedRetained.length + 2),
+      retryAt,
+    });
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: duplicateConnection.mailboxLaneSeq!,
+      now: retryAt,
+      state: { pending: [boundedRetained[0]!, duplicateConnection] },
+    })).toEqual({
+      deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_projection_invalid"],
+      firstPendingSeq: "1",
+      handledThroughSeq: "0",
+    });
+
+    const notImportedOwner = buildRetainedDeviceSyncMailboxItem({
+      itemId: "not_imported_owner",
+      mailboxLaneSeq: "2",
+      retryAt,
+    });
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "1",
+      now: retryAt,
+      state: { pending: [notImportedOwner] },
+    })).toEqual({
+      deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_projection_invalid"],
+      firstPendingSeq: "2",
+      handledThroughSeq: "1",
+    });
+  });
+
+  it("derives first-pending diagnostics from ownership, not retry hints", () => {
+    const retained = buildRetainedDeviceSyncMailboxItem({
+      itemId: "retained_device_retry",
+      mailboxLaneSeq: "4",
+      retryAt: "2026-04-28T00:00:00.000Z",
+    });
+    // The wake's job schedule no longer matches, but the explicit owner remains.
+    const mismatchedRetry = {
+      ...retained,
+      nextAttemptAt: "2026-04-28T00:01:00.000Z",
+    };
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      state: { pending: [mismatchedRetry] },
+    })).toEqual({
+      deviceSyncContinuationSeqs: ["4"],
       firstPendingClassifierFailures: null,
       firstPendingSeq: null,
       handledThroughSeq: "9",
     });
 
-    const mismatchedRetry = {
-      ...retainedDeviceRetry,
-      wake: buildHostedExecutionDeviceSyncWake({
-        connectionId: "dsc_retained_retry",
-        eventId: "device-sync.wake:retained_device_retry",
-        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
-        hint: {
-          jobs: [{
-            availableAt: "2026-04-28T00:01:00.000Z",
-            dedupeKey: "retained-weight-retry",
-            kind: "resource",
-            maxAttempts: 1,
-            payload: {},
-          }],
-        },
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        provider: "junction",
-        reason: "reconcile_due",
-        userId: "member_123",
-      }),
-    };
+    const { deviceSyncContinuationOwner: _owner, ...unownedRetry } = mismatchedRetry;
     expect(resolveHostedSystemMailboxProgress({
       importedSeq: "9",
-      now: retryAt,
-      state: { pending: [mismatchedRetry] },
+      state: { pending: [unownedRetry] },
     })).toEqual({
-      firstPendingClassifierFailures: ["job_schedule_match_missing"],
-      firstPendingSeq: "4",
-      handledThroughSeq: "3",
-    });
-  });
-
-  it("reports every bounded retained-device-retry classifier failure", () => {
-    const base = buildPendingDeviceSyncMailboxItem({
-      itemId: "malformed_device_retry",
-      mailboxLaneSeq: "4",
-    });
-    const retryAt = "2026-04-28T00:00:00.000Z";
-
-    expect(resolveHostedSystemMailboxProgress({
-      importedSeq: "9",
-      now: retryAt,
-      state: {
-        pending: [{
-          ...base,
-          nextAttemptAt: retryAt,
-        }],
-      },
-    })).toEqual({
-      firstPendingClassifierFailures: [
-        "connection_missing",
-        "job_hints_missing",
-      ],
-      firstPendingSeq: "4",
-      handledThroughSeq: "3",
-    });
-
-    expect(resolveHostedSystemMailboxProgress({
-      importedSeq: "9",
-      now: retryAt,
-      state: {
-        pending: [{
-          ...base,
-          postCheckpointRecord: { kind: "vault-share.projection" },
-          status: "recording",
-          wake: buildHostedExecutionDeviceSyncWake({
-            connectionId: "dsc_malformed_retry",
-            eventId: "device-sync.wake:malformed_device_retry",
-            expectedConnectedAt: "2026-04-01T00:00:00.000Z",
-            hint: {
-              jobs: [{
-                availableAt: retryAt,
-                dedupeKey: "malformed-weight-retry",
-                kind: "resource",
-                maxAttempts: 1,
-                payload: {},
-              }],
-            },
-            occurredAt: "2026-04-27T00:00:00.000Z",
-            provider: "junction",
-            reason: "reconcile_due",
-            userId: "member_123",
-          }),
-        }],
-      },
-    })).toEqual({
-      firstPendingClassifierFailures: [
-        "status_not_pending",
-        "post_checkpoint_record_present",
-        "next_attempt_missing",
-        "job_schedule_match_missing",
-      ],
+      deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_owner_missing"],
       firstPendingSeq: "4",
       handledThroughSeq: "3",
     });
@@ -504,6 +589,7 @@ describe("hosted runtime system mailbox state", () => {
         })],
       },
     })).toEqual({
+      deviceSyncContinuationSeqs: [],
       firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: null,
       handledThroughSeq: "0",
@@ -1665,6 +1751,40 @@ function buildPendingDeviceSyncMailboxItem(input: {
       reason: "reconcile_due",
       userId: "member_123",
     },
+  };
+}
+
+function buildRetainedDeviceSyncMailboxItem(input: {
+  connectionId?: string;
+  itemId: string;
+  mailboxLaneSeq: string;
+  retryAt: string;
+}): HostedSystemMailboxPendingItem {
+  const pending = buildPendingDeviceSyncMailboxItem(input);
+  return {
+    ...pending,
+    attemptCount: 1,
+    deviceSyncContinuationOwner: true,
+    lastAttemptAt: "2026-04-27T00:00:00.000Z",
+    nextAttemptAt: input.retryAt,
+    wake: buildHostedExecutionDeviceSyncWake({
+      connectionId: input.connectionId ?? `dsc_${input.itemId}`,
+      eventId: `device-sync.wake:${input.itemId}`,
+      expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+      hint: {
+        jobs: [{
+          availableAt: input.retryAt,
+          dedupeKey: `retained-job:${input.itemId}`,
+          kind: "resource",
+          maxAttempts: 1,
+          payload: {},
+        }],
+      },
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      provider: "junction",
+      reason: "reconcile_due",
+      userId: "member_123",
+    }),
   };
 }
 

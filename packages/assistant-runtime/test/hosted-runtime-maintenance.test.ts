@@ -10,6 +10,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 import {
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
@@ -4092,7 +4093,44 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("emits exactly one sanitized job-failed event for a failed device-sync attempt", async () => {
+  it.each<{
+    code: string;
+    expectedReason?: string;
+    exhausted?: boolean;
+    label: string;
+    reason?: unknown;
+  }>([
+    { label: "ordinary failure", code: "SYNC_JOB_FAILED" },
+    ...[
+      { label: "valid queued reason", reason: "sample_count_mismatch", expectedReason: "sample_count_mismatch" },
+      { label: "valid exhausted reason", reason: "summary_identity_incomplete", expectedReason: "summary_identity_incomplete", exhausted: true },
+      { label: "missing reason" },
+      { label: "unknown token", reason: "unknown_binding_reason" },
+      { label: "freeform reason", reason: "synthetic-private-ecg detail" },
+      { label: "padded reason", reason: " sample_count_mismatch " },
+      { label: "null reason", reason: null },
+      { label: "numeric reason", reason: 123 },
+      { label: "array reason", reason: ["sample_count_mismatch"] },
+      { label: "object reason", reason: { reason: "sample_count_mismatch" } },
+    ].map((entry) => ({ ...entry, code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE" })),
+    { label: "reason on another failure", code: "SYNC_JOB_FAILED", reason: "sample_count_mismatch" },
+  ])("emits exactly one sanitized job-failed event: $label", async ({ code, expectedReason, exhausted = false, reason }) => {
+    const ecgFailure = code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE";
+    const provider = ecgFailure ? "junction" : "whoop";
+    const sensitiveEcgDetails = {
+      junctionEcgActualRecordingCount: 987_001,
+      junctionEcgActualSampleCount: 987_002,
+      junctionEcgExpectedRecordingCount: 987_003,
+      junctionEcgExpectedSampleCount: 987_004,
+      junctionEcgMaxRecordingCount: 987_005,
+      junctionEcgMaxSampleCount: 987_006,
+      recordingId: "synthetic-private-ecg-recording",
+      sampleId: "synthetic-private-ecg-sample",
+      rawError: "synthetic-private-ecg-error",
+      url: "https://example.test/synthetic-private-ecg",
+      path: "/tmp/synthetic-private-ecg",
+      payload: { voltage: "synthetic-private-ecg-payload" },
+    };
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 1);
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -4107,9 +4145,11 @@ describe("runHostedDeviceSyncPass", () => {
         {
           accountId: "local_account_sensitive",
           accountStatus: null,
-          attempts: 1,
-          code: "SYNC_JOB_FAILED",
+          attempts: exhausted ? 5 : 1,
+          code,
           details: {
+            ...sensitiveEcgDetails,
+            ...(reason === undefined ? {} : { junctionEcgBindingReason: reason }),
             failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
             failureErrorCause: "Connect Timeout Error",
             failureErrorName: "TypeError",
@@ -4144,24 +4184,24 @@ describe("runHostedDeviceSyncPass", () => {
             providerOAuthResponseErrorFieldPresent: true,
             providerOAuthResponseShapeKind: "json_object",
           },
-          jobDisposition: "queued",
+          jobDisposition: exhausted ? "dead" : "queued",
           jobKind: "reconcile",
           maxAttempts: 5,
-          remainingAttempts: 4,
+          remainingAttempts: exhausted ? 0 : 4,
           retryable: true,
         },
       ]),
       listAccounts: vi.fn(() => [
         {
           id: "local_account_sensitive",
-          lastErrorCode: "SYNC_JOB_FAILED",
+          lastErrorCode: code,
           lastErrorMessage:
             "Importer failed reading file://<fixture-path> for owner@example.test with access_token=<fixture-secret>.",
           lastSyncCompletedAt: null,
           lastSyncErrorAt: "2026-04-08T00:00:03.000Z",
           lastSyncStartedAt: "2026-04-08T00:00:01.000Z",
           nextReconcileAt: "2026-04-08T02:00:00.000Z",
-          provider: "whoop",
+          provider,
           setupPhase: null,
           status: "active",
         },
@@ -4213,7 +4253,7 @@ describe("runHostedDeviceSyncPass", () => {
         runtimeLogPlatform: {
           logPort: {
             async write(request) {
-              logRequests.push(request);
+              logRequests.push(parseHostedRuntimeLogRequest(request));
               return {
                 loggedCount: request.entries.length,
               };
@@ -4236,18 +4276,18 @@ describe("runHostedDeviceSyncPass", () => {
     const entry = jobFailureEntries[0];
     assert.ok(entry);
     assert.equal(entry.component, "device-sync");
-    assert.equal(entry.errorCode, "SYNC_JOB_FAILED");
+    assert.equal(entry.errorCode, code);
     assert.equal(entry.eventCode, "device-sync.job_failed");
     assert.equal(entry.level, "warn");
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
-      failureCode: "SYNC_JOB_FAILED",
-      failureDisposition: "queued",
+      failureCode: code,
+      failureDisposition: exhausted ? "dead" : "queued",
       failureEventOrigin: "worker_attempt",
-      failureJobAttempts: 1,
+      failureJobAttempts: exhausted ? 5 : 1,
       failureJobKind: "reconcile",
       failureJobMaxAttempts: 5,
-      failureJobRemainingAttempts: 4,
+      failureJobRemainingAttempts: exhausted ? 0 : 4,
       failureSummary:
         "Importer failed reading <redacted-path> for <redacted-email> with",
       failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
@@ -4262,6 +4302,7 @@ describe("runHostedDeviceSyncPass", () => {
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
       failureRetryable: true,
+      ...(expectedReason ? { junctionEcgBindingReason: expectedReason } : {}),
       hadPriorFailure: false,
       hadPriorSuccess: false,
       hostedConnectionKnown: true,
@@ -4289,7 +4330,7 @@ describe("runHostedDeviceSyncPass", () => {
       providerOAuthResponseErrorDescriptionFieldPresent: true,
       providerOAuthResponseErrorFieldPresent: true,
       providerOAuthResponseShapeKind: "json_object",
-      provider: "whoop",
+      provider,
       setupPhase: null,
       status: "active",
       syncCompletedAt: null,
@@ -4298,7 +4339,17 @@ describe("runHostedDeviceSyncPass", () => {
       wakeKind: "device-sync.wake",
       wakeReason: "webhook_hint",
     });
+    assert.ok(entry.redactedJson);
+    // Exercise the shared 32-key sanitizer with the fully populated diagnostic.
+    expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(32);
+    const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(entry.redactedJson);
+    expect(sharedDetails?.junctionEcgBindingReason).toBe(expectedReason);
+    for (const field of Object.keys(sensitiveEcgDetails)) {
+      expect(entry.redactedJson).not.toHaveProperty(field);
+      expect(sharedDetails).not.toHaveProperty(field);
+    }
     const serialized = JSON.stringify(logRequests);
+    expect(serialized).not.toContain("synthetic-private-ecg");
     expect(serialized).not.toContain("local_account_sensitive");
     expect(serialized).not.toContain("hosted_connection_sensitive");
     expect(serialized).not.toContain("file://");

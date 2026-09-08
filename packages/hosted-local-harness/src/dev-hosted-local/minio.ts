@@ -17,7 +17,9 @@ import {
 } from "./environment.ts";
 import {
   spawnChildProcess,
+  terminateChildProcess,
   terminateChildProcessAndWait,
+  throwIfAbortSignalAborted,
   waitForHealthyHttpEndpoint,
 } from "./runtime.ts";
 import type {
@@ -128,10 +130,12 @@ export interface HostedLocalMinioServer {
 }
 
 export async function maybeStartHostedLocalMinio(input: {
+  abortSignal?: AbortSignal;
   buildId: string;
   containerHost: string;
   env: NodeJS.ProcessEnv;
   pipeOutput?: boolean;
+  onProcessStarted?: (process: BufferedNamedChildProcess) => void;
   /** Test seam: probe whether an image can be pulled. Defaults to real docker. */
   pullImage?: (image: string) => Promise<boolean>;
   stderrTarget?: NodeJS.WritableStream;
@@ -167,12 +171,14 @@ export async function maybeStartHostedLocalMinio(input: {
   });
   const credentials = resolveHostedLocalMinioCredentials(input.env);
 
+  const processes: BufferedNamedChildProcess[] = [];
   const startContainer = async (
     image: string = resolveHostedLocalMinioImage(input.env),
   ): Promise<BufferedNamedChildProcess> => {
     await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
       buildId: buildIdLabelValue,
     });
+    throwIfAbortSignalAborted(input.abortSignal);
     const childProcess = spawnChildProcess("minio", "docker", [
       "run",
       "--rm",
@@ -214,20 +220,31 @@ export async function maybeStartHostedLocalMinio(input: {
       stdoutTarget: input.stdoutTarget,
     });
 
+    processes.push(childProcess);
+    input.onProcessStarted?.(childProcess);
+    const onAbort = (): void => {
+      terminateChildProcess(childProcess.child, input.abortSignal?.reason === "SIGKILL" ? "SIGKILL" : "SIGTERM");
+    };
+    input.abortSignal?.addEventListener("abort", onAbort, { once: true });
     try {
+      throwIfAbortSignalAborted(input.abortSignal);
       await waitForHealthyHttpEndpoint({
         host: controlHost,
         label: "minio",
+        signal: input.abortSignal,
         path: HOSTED_LOCAL_MINIO_HEALTH_PATH,
         port,
         protocol: "http",
       });
+      throwIfAbortSignalAborted(input.abortSignal);
     } catch (error) {
       await terminateChildProcessAndWait(childProcess.child, { signal: "SIGTERM" }).catch(() => {});
       await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
         buildId: buildIdLabelValue,
       }).catch(() => {});
       throw error;
+    } finally {
+      input.abortSignal?.removeEventListener("abort", onAbort);
     }
 
     return childProcess;
@@ -236,7 +253,6 @@ export async function maybeStartHostedLocalMinio(input: {
   let childProcess = await startContainer(
     await resolveHostedLocalMinioRunnableImage(input.env, input.pullImage),
   );
-  const processes: BufferedNamedChildProcess[] = [childProcess];
   let restartPromise: Promise<BufferedNamedChildProcess | null> | null = null;
 
   const bridgeMarkerEnv: Record<string, string> = {};
@@ -260,6 +276,7 @@ export async function maybeStartHostedLocalMinio(input: {
       ...localMarkerEnv,
     },
     ensureReady: async (): Promise<BufferedNamedChildProcess | null> => {
+      throwIfAbortSignalAborted(input.abortSignal);
       if (await isHostedLocalMinioReady({
         host: controlHost,
         port,
@@ -269,7 +286,6 @@ export async function maybeStartHostedLocalMinio(input: {
       if (restartPromise === null) {
         restartPromise = (async () => {
           childProcess = await startContainer();
-          processes.push(childProcess);
           return childProcess;
         })().finally(() => {
           restartPromise = null;

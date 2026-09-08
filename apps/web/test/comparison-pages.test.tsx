@@ -59,32 +59,96 @@ const NEW_MESSAGING_HEALTH_GUIDES = [
   "tempo",
 ] as const;
 
+const EXPANSION_GUIDES_2026_09_04 = [
+  "abbott-lingo",
+  "agelessrx",
+  "amazfit-helio-ring",
+  "amazon-one-medical",
+  "askmd",
+  "august",
+  "bevel",
+  "caresupport",
+  "chatgpt-health",
+  "claude",
+  "copilot-health",
+  "counsel-health",
+  "death-clock",
+  "dexcom-stelo",
+  "doctronic",
+  "docus",
+  "dont-die",
+  "duckbill",
+  "eugene",
+  "flo",
+  "freestyle-libre",
+  "healthspan",
+  "hilo",
+  "immortals",
+  "instinct",
+  "kardiamobile",
+  "kicker",
+  "kim",
+  "lark",
+  "lucas",
+  "marek-health",
+  "natural-cycles",
+  "omron-connect",
+  "orchid",
+  "overlord",
+  "picnichealth",
+  "poke",
+  "renpho",
+  "sidekicks",
+  "simple",
+  "sleep-number",
+  "suunto",
+  "talkspace-tee",
+  "tomo",
+  "vidaya",
+  "viome",
+  "vora",
+  "wahoo",
+  "webmd",
+  "zero-longevity",
+] as const;
+
 // Guides whose data Murph can read through a connection it actually offers
 // (direct integrations plus Apple Health relays for iPhone-paired devices).
 const CONNECTED_GUIDES = new Set([
+  "abbott-lingo",
+  "amazfit-helio-ring",
   "amazfit-helio-strap",
   "apple-health-fitness",
   "autosleep",
   "circular",
   "coros",
   "cronometer",
+  "dexcom-stelo",
   "eight-sleep",
+  "freestyle-libre",
   "garmin-connect",
   "google-health",
+  "hilo",
   "hume-health",
   "january-ai",
+  "kardiamobile",
   "levels",
   "macrofactor",
   "nutrisense",
+  "omron-connect",
   "oura-ring",
   "pillow",
   "polar-loop",
+  "renpho",
   "ringconn",
   "signos",
   "sleep-cycle",
+  "sleep-number",
   "sleepwatch",
   "strava",
+  "suunto",
   "ultrahuman-ring-pro",
+  "wahoo",
   "welltory",
   "whoop",
   "withings",
@@ -192,7 +256,7 @@ describe("comparison catalog", () => {
   });
 
   it("publishes a substantial, unique, source-backed catalog", () => {
-    expect(COMPARISONS.length).toBeGreaterThanOrEqual(112);
+    expect(COMPARISONS.length).toBeGreaterThanOrEqual(162);
 
     assert.deepEqual(
       Object.keys(MURPH_COMPARISON_EVIDENCE).sort(),
@@ -391,6 +455,17 @@ describe("comparison catalog", () => {
     for (const slug of NEW_MESSAGING_HEALTH_GUIDES) {
       expect(comparisonBySlug(slug).lastVerified).toBe("2026-09-03");
     }
+  });
+
+  it("publishes the fifty expansion guides across every category", () => {
+    const categories = new Set<string>();
+    for (const slug of EXPANSION_GUIDES_2026_09_04) {
+      const comparison = comparisonBySlug(slug);
+      expect(comparison.lastVerified).toBe("2026-09-04");
+      categories.add(comparison.category);
+    }
+    expect(EXPANSION_GUIDES_2026_09_04).toHaveLength(50);
+    expect(categories.size).toBeGreaterThanOrEqual(5);
   });
 
   it("keeps every guide's ten rows to ten distinct decisions", () => {

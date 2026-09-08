@@ -18,7 +18,6 @@ vi.mock("@/app/auth-controls", () => ({
     authLabel: string;
     context: "nav" | "hero" | "footer";
     leadingIcon?: ReactNode;
-    preloadAuthPanel?: boolean;
   }) {
     return createElement(
       "div",
@@ -26,7 +25,6 @@ vi.mock("@/app/auth-controls", () => ({
         "data-authenticated": String(props.authenticated),
         "data-context": props.context,
         "data-label": props.authLabel,
-        "data-preload": String(props.preloadAuthPanel ?? false),
       },
       props.leadingIcon,
       "Landing auth actions",

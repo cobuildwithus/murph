@@ -13,6 +13,10 @@ rendered implementation quality, responsive behavior, accessibility, and
 design-system execution; do not duplicate subjective product-taste findings or
 decide the copy, state selection, action count, or whether an element exists.
 
+When used as the parent's checklist, the review-only restrictions apply to this
+inspection step, not to the surrounding authorized implementation. This file
+does not add a separate completion gate.
+
 Outcome:
 Determine whether the declared product experience renders faithfully, visually coherently, responsively, accessibly, and with a maintainable frontend implementation.
 

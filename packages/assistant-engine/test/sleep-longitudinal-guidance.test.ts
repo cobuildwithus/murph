@@ -7,6 +7,7 @@ import {
   ASSISTANT_SKILLS,
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 
 async function readSkill(slug: string): Promise<string> {
   return readFile(
@@ -429,24 +430,25 @@ describe('experiment start and support mechanics', () => {
   })
 
   it('uses typed session fields and lifecycle-owned finite support only with consent', async () => {
-    const skill = await readSkill('experiment-onboarding')
+    const skill = await readWorkflowSkillPolicy('experiment-onboarding')
     const support = readSection(skill, 'Planned-session support reminders')
     const active = readSection(skill, 'Active experiment support')
+    const mechanics = readSection(skill, 'Experiment automation mechanics')
 
     expect(active).toContain('use the stable id from `protocol.sessionFieldIds`')
     expect(active).toContain('repeat `--field <id>=<value>` for each value')
     expect(active).toContain('Never bury declared session fields in notes or confounders')
-    expect(active).toContain('supportSeriesId: "experiment:<experimentId>"')
-    expect(active).toContain(
+    expect(mechanics).toContain('supportSeriesId: "experiment:<experimentId>"')
+    expect(mechanics).toContain(
       'Never pass a raw `system:support-series:*` tag',
     )
-    expect(active).toContain(
+    expect(mechanics).toContain(
       'never assign the engine-managed `experiment-lifecycle:<experimentId>` series id',
     )
-    expect(active).toContain(
+    expect(mechanics).toContain(
       'Use `tags` only for ordinary descriptive tags.',
     )
-    expect(active).toContain(
+    expect(mechanics).toContain(
       '`murph.automation` action `reconcile`',
     )
     expect(support).toContain('Agreement to the experiment is not agreement to reminders or check-ins.')

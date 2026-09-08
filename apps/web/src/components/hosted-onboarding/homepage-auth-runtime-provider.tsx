@@ -3,7 +3,6 @@
 import {
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -21,14 +20,6 @@ import {
   type HomepageAuthRuntimeComponent,
 } from "./homepage-auth-runtime-loader";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
-
-type WindowWithIdleCallback = typeof window & {
-  cancelIdleCallback?: (handle: number) => void;
-  requestIdleCallback?: (
-    callback: () => void,
-    options?: { timeout?: number },
-  ) => number;
-};
 
 export function HomepageAuthRuntimeProvider({
   authenticated,
@@ -94,32 +85,6 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
     prepareAuth();
     setSessionRuntime(() => runtimeAtOpen);
     setOpen(true);
-  }, [prepareAuth]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const prepare = () => {
-      if (!cancelled) {
-        prepareAuth();
-      }
-    };
-    const idleWindow = window as WindowWithIdleCallback;
-
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(prepare, { timeout: 2500 });
-
-      return () => {
-        cancelled = true;
-        idleWindow.cancelIdleCallback?.(handle);
-      };
-    }
-
-    const handle = window.setTimeout(prepare, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
   }, [prepareAuth]);
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {

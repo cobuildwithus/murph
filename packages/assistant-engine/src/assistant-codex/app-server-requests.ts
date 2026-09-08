@@ -51,6 +51,7 @@ export function buildCodexThreadStartParams(
   input: CodexAppServerPreparedThreadInput,
 ): Record<string, unknown> {
   return {
+    experimentalRawEvents: true,
     ...buildCodexThreadContextParams({
       includeInstructions: true,
       includeServiceName: true,

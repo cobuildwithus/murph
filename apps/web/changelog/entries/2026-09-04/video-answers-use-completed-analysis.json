@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "video-answers-use-completed-analysis",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable answers about your videos",
+    "summary": "Murph is less likely to report that video analysis failed after it successfully found an answer.",
+    "details": "This applies to video questions in private and group conversations. If analysis returns no usable observation, Murph still says so.",
+    "relevanceTags": ["conversation"],
+    "sourcePullRequests": [2835]
+  }
+}

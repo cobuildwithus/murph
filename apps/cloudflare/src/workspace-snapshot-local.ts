@@ -201,6 +201,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       "-C",
       durableRoot,
       "--format=pax",
+      "--numeric-owner",
       "--no-recursion",
       "--null",
       "-T",
@@ -517,12 +518,6 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
 
     const extractStartedAt = Date.now();
     const archiveExtractStartedAt = Date.now();
-    const zstd = spawn("zstd", [
-      "-d",
-      "--stdout",
-    ], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
     const tar = spawn("tar", [
       "-C",
       restoreRoot,
@@ -536,14 +531,21 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
     ], {
       stdio: ["pipe", "ignore", "pipe"],
     });
-    const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
     const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+    // Share the pipe with zstd directly. Relaying the expanded tar through Node
+    // adds stream scheduling and copies proportional to the unpacked workspace.
+    const zstd = spawn("zstd", [
+      "-d",
+      "--stdout",
+    ], {
+      stdio: ["pipe", tar.stdin, "pipe"],
+    });
+    const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
+    // The child owns its duplicated descriptor. Close the parent's copy so tar
+    // receives EOF when zstd closes stdout, including on decoder failure.
+    tar.stdin?.destroy();
     let zstdInputPipe: Promise<void> | null = null;
-    let archivePipe: Promise<void> | null = null;
     try {
-      if (!zstd.stdout || !tar.stdin) {
-        throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
-      }
       if (!zstd.stdin) {
         throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
       }
@@ -551,13 +553,8 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
         pipeline(Readable.from([plaintextArchive]), zstd.stdin),
         [zstdExit, tarExit],
       );
-      archivePipe = waitForHostedWorkspaceSnapshotProcessPipe(
-        pipeline(zstd.stdout, tar.stdin),
-        [zstdExit, tarExit],
-      );
       await Promise.all([
         zstdInputPipe,
-        archivePipe,
         zstdExit,
         tarExit,
       ]);
@@ -568,7 +565,7 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
         zstdExit,
         tarExit,
       ]);
-      await Promise.allSettled([zstdInputPipe, archivePipe].filter((promise) => promise !== null));
+      await zstdInputPipe?.catch(() => {});
       if (
         processFailure
         && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
@@ -620,48 +617,46 @@ async function decryptHostedWorkspaceSnapshotEncryptedStream(input: {
   };
 }): Promise<void> {
   let encryptedByteCount = 0;
-  let encryptedTail = Buffer.alloc(0);
+  const ciphertextByteSize = input.expectedEncryptedByteSize - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES;
+  const authTag = Buffer.alloc(HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES);
+  let authTagByteCount = 0;
   try {
     for await (const rawChunk of input.encryptedStream) {
       const chunk = Buffer.isBuffer(rawChunk)
         ? rawChunk
-        : Buffer.from(rawChunk);
+        : Buffer.from(rawChunk.buffer, rawChunk.byteOffset, rawChunk.byteLength);
       if (chunk.byteLength === 0) {
         continue;
       }
+      const ciphertextBytes = Math.min(chunk.byteLength, Math.max(0, ciphertextByteSize - encryptedByteCount));
       encryptedByteCount += chunk.byteLength;
       if (encryptedByteCount > input.expectedEncryptedByteSize) {
         throw new Error("Hosted workspace snapshot encrypted stream exceeded its ref byte count.");
       }
       input.encryptedObjectHash.update(chunk);
 
-      const encrypted = encryptedTail.byteLength > 0
-        ? Buffer.concat([encryptedTail, chunk])
-        : chunk;
-      if (encrypted.byteLength <= HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
-        encryptedTail = Buffer.from(encrypted);
-        continue;
+      // The ref fixes the ciphertext/tag boundary independently of stream
+      // chunks. Consume ciphertext synchronously without copying or retaining
+      // the caller's buffer; authentication still completes before extraction.
+      if (ciphertextBytes > 0) {
+        input.plaintextArchiveCollector.append(
+          input.decipher.update(chunk.subarray(0, ciphertextBytes)),
+        );
       }
-
-      const ciphertextEnd =
-        encrypted.byteLength - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES;
-      encryptedTail = Buffer.from(encrypted.subarray(ciphertextEnd));
-      input.plaintextArchiveCollector.append(
-        input.decipher.update(encrypted.subarray(0, ciphertextEnd)),
-      );
+      authTagByteCount += chunk.copy(authTag, authTagByteCount, ciphertextBytes);
     }
 
     if (encryptedByteCount !== input.expectedEncryptedByteSize) {
       throw new Error("Hosted workspace snapshot encrypted stream byte count does not match its ref.");
     }
-    if (encryptedTail.byteLength !== HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
+    if (authTagByteCount !== HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES) {
       throw new Error("Hosted workspace snapshot auth tag is incomplete.");
     }
 
-    input.decipher.setAuthTag(encryptedTail);
+    input.decipher.setAuthTag(authTag);
     input.plaintextArchiveCollector.append(input.decipher.final());
   } finally {
-    encryptedTail.fill(0);
+    authTag.fill(0);
   }
 }
 

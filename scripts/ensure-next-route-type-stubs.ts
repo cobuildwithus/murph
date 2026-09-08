@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -72,7 +72,7 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
   );
 
   await ensureNextRouteTypesRuntimeStub(stubPath);
-  await removeStaleNextValidatorStub(stubPath);
+  await removeStaleNextRouteChecks(stubPath);
 
   return stubPath;
 }
@@ -161,7 +161,7 @@ async function ensureNextRouteTypesRuntimeStub(routeTypesStubPath: string): Prom
   }
 }
 
-async function removeStaleNextValidatorStub(routeTypesStubPath: string): Promise<void> {
+async function removeStaleNextRouteChecks(routeTypesStubPath: string): Promise<void> {
   if (!routeTypesStubPath.endsWith("/routes.d.ts")) {
     return;
   }
@@ -178,8 +178,62 @@ async function removeStaleNextValidatorStub(routeTypesStubPath: string): Promise
   await Promise.all(
     [...candidateValidatorPaths].map(async (validatorPath) => {
       await rm(validatorPath, { force: true });
+      if (workspaceRoot) {
+        await removeOrphanNextRouteGuards(path.dirname(validatorPath), workspaceRoot);
+      }
     }),
   );
+}
+
+async function removeOrphanNextRouteGuards(typesDirectory: string, workspaceRoot: string): Promise<void> {
+  const appTypesDirectory = path.join(typesDirectory, "app");
+  if (!(await isPlainGeneratedDirectory(workspaceRoot, appTypesDirectory))) return;
+
+  const entries = await readdir(appTypesDirectory, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^(?:page|layout|route)\.ts$/u.test(entry.name)) continue;
+    const guardPath = path.join(entry.parentPath, entry.name);
+    const contents = await readFile(guardPath, "utf8");
+    // Next's Webpack guards import the source through its emitted .js path.
+    const sourceImport = contents.match(/^import \* as entry from ['"](\.\.?\/[^'"\r\n]+)\.js['"]/mu)?.[1];
+    if (!sourceImport) continue;
+    const sourceStem = path.resolve(path.dirname(guardPath), sourceImport);
+    if (path.basename(sourceStem) !== entry.name.replace(/\.ts$/u, "")) continue;
+    const isAppSource = ["app", "src/app"].some((appDirectory) =>
+      sourceStem.startsWith(path.join(workspaceRoot, appDirectory) + path.sep)
+    );
+    if (!isAppSource || await hasNextRouteSource(sourceStem)) continue;
+    await rm(guardPath, { force: true });
+  }
+}
+
+async function isPlainGeneratedDirectory(workspaceRoot: string, directory: string): Promise<boolean> {
+  let current = workspaceRoot;
+  for (const segment of path.relative(workspaceRoot, directory).split(path.sep)) {
+    current = path.join(current, segment);
+    try {
+      const info = await lstat(current);
+      if (!info.isDirectory() || info.isSymbolicLink()) return false;
+    } catch (error) {
+      if (isNodeErrorWithCode(error, "ENOENT")) return false;
+      throw error;
+    }
+  }
+  return true;
+}
+
+async function hasNextRouteSource(sourceStem: string): Promise<boolean> {
+  for (const extension of ["ts", "tsx", "js", "jsx", "mjs", "cjs"]) {
+    try {
+      await access(`${sourceStem}.${extension}`);
+      return true;
+    } catch (error) {
+      if (!isNodeErrorWithCode(error, "ENOENT") && !isNodeErrorWithCode(error, "ENOTDIR")) {
+        throw error;
+      }
+    }
+  }
+  return false;
 }
 
 function extractWorkspaceRootFromRouteTypesPath(routeTypesStubPath: string): string | null {

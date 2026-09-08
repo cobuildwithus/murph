@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   isMobile: false,
   loginWithCode: vi.fn(),
-  loginWithTelegram: vi.fn(),
+  initOAuth: vi.fn(),
   privyReady: false,
   sendCode: vi.fn(),
   user: null as { linkedAccounts?: unknown } | null,
@@ -31,9 +31,10 @@ vi.mock("@privy-io/react-auth", () => ({
       sendCode: mocks.sendCode,
     };
   },
-  useLoginWithTelegram() {
+  useLoginWithOAuth() {
     return {
-      login: mocks.loginWithTelegram,
+      initOAuth: mocks.initOAuth,
+      loading: false,
       state: { status: "initial" },
     };
   },
@@ -77,7 +78,7 @@ beforeEach(() => {
     redirectUrl: "/home",
   });
   mocks.loginWithCode.mockResolvedValue(undefined);
-  mocks.loginWithTelegram.mockResolvedValue(undefined);
+  mocks.initOAuth.mockResolvedValue(undefined);
   mocks.sendCode.mockResolvedValue(undefined);
 });
 
@@ -86,7 +87,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("HostedAuthPanel releases the real phone controls at Telegram's trusted-click handoff", async () => {
+test("HostedAuthPanel enables Telegram when Privy becomes ready", async () => {
   const renderPanel = () => createElement(HostedAuthPanelHarness);
   const rendered = await renderClientComponent(renderPanel(), {
     matchMedia: createDesktopMatchMedia(),
@@ -100,35 +101,22 @@ test("HostedAuthPanel releases the real phone controls at Telegram's trusted-cli
 
     expect(phoneInput.disabled).toBe(false);
     expect(countryTrigger.disabled).toBe(false);
-    expect(telegramButton.disabled).toBe(false);
-
-    await act(async () => {
-      telegramButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-
-    expect(readButton(rendered.container, "Connecting...").disabled).toBe(true);
-    expect(phoneInput.disabled).toBe(true);
-    expect(countryTrigger.disabled).toBe(true);
-    expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+    expect(telegramButton.disabled).toBe(true);
+    expect(phoneInput.disabled).toBe(false);
+    expect(countryTrigger.disabled).toBe(false);
+    expect(mocks.initOAuth).not.toHaveBeenCalled();
 
     mocks.privyReady = true;
-    installTelegramLoginWidget(rendered.window);
     await rendered.rerender(renderPanel());
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    const continueButton = readButton(rendered.container, "Continue");
-    expect(continueButton.disabled).toBe(false);
-    expect(continueButton.textContent).toContain("Continue with Telegram");
-    expect(rendered.container.textContent).toContain(
-      "Telegram is ready. Continue to open sign in.",
-    );
+    const telegramReadyButton = readButton(rendered.container, "Telegram");
+    expect(telegramReadyButton.disabled).toBe(false);
     expect(phoneInput.disabled).toBe(false);
     expect(countryTrigger.disabled).toBe(false);
-    expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+    expect(mocks.initOAuth).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();
   }
@@ -166,7 +154,7 @@ test("HostedAuthPanel keeps real phone controls enabled for their own queued sen
   }
 });
 
-test("HostedAuthPanel disables the real mobile country trigger while Telegram waits", async () => {
+test("HostedAuthPanel keeps the mobile country trigger available while Telegram initializes", async () => {
   mocks.isMobile = true;
   const rendered = await renderClientComponent(
     createElement(HostedAuthPanelHarness),
@@ -177,15 +165,8 @@ test("HostedAuthPanel disables the real mobile country trigger while Telegram wa
     const countryTrigger = readCountryTrigger(rendered.container);
     const telegramButton = readButton(rendered.container, "Telegram");
     expect(countryTrigger.disabled).toBe(false);
-
-    await act(async () => {
-      telegramButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-
-    expect(readButton(rendered.container, "Connecting...").disabled).toBe(true);
-    expect(countryTrigger.disabled).toBe(true);
+    expect(telegramButton.disabled).toBe(true);
+    expect(countryTrigger.disabled).toBe(false);
   } finally {
     await rendered.cleanup();
   }
@@ -238,7 +219,7 @@ test("HostedAuthPanel gates method actions until an authenticated session snapsh
     ).toBe(false);
     expect(mocks.sendCode).not.toHaveBeenCalled();
     expect(mocks.loginWithCode).not.toHaveBeenCalled();
-    expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+    expect(mocks.initOAuth).not.toHaveBeenCalled();
     expect(mocks.completeHostedPrivyAuth).not.toHaveBeenCalled();
 
     mocks.user = {};
@@ -429,13 +410,6 @@ function readButton(container: HTMLElement, label: string): HTMLButtonElement {
   return button;
 }
 
-function installTelegramLoginWidget(targetWindow: Window & typeof globalThis) {
-  Reflect.set(targetWindow, "Telegram", {
-    Login: {
-      auth: vi.fn(),
-    },
-  });
-}
 
 function createDesktopMatchMedia(): typeof window.matchMedia {
   return vi.fn((query: string) => ({

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 const HOSTED_STORAGE_NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9_-]{3,63}$/u;
+const HOSTED_MEDIA_ID_PATTERN = /^[a-f0-9]{64}$/u;
 const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const HOSTED_STORAGE_NAMESPACE_SALT = "murph.hosted.storage-namespace.v1";
@@ -72,6 +73,29 @@ export async function hostedArtifactUserPrefix(input: {
   userId: string;
 }): Promise<string> {
   return `users/${resolveHostedStorageNamespaceId(input)}/artifacts/`;
+}
+
+export async function hostedMediaObjectKey(input: {
+  mediaId: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const mediaId = requireHostedMediaId(input.mediaId);
+  const mediaSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "media-path",
+    value: `media:${userSegment}:${mediaId}`,
+  });
+
+  return `users/${userSegment}/media/${mediaSegment}.media.enc`;
+}
+
+export async function hostedMediaUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `users/${resolveHostedStorageNamespaceId(input)}/media/`;
 }
 
 export async function hostedRunnerSecretsObjectKey(input: {
@@ -280,6 +304,14 @@ function requireHostedEnvironmentVoiceKey(value: string): string {
     throw new TypeError("Hosted environment voice key is invalid.");
   }
   return value;
+}
+
+function requireHostedMediaId(value: string): string {
+  const normalized = requireStoragePathString(value, "Hosted media id");
+  if (!HOSTED_MEDIA_ID_PATTERN.test(normalized)) {
+    throw new TypeError("Hosted media id is invalid.");
+  }
+  return normalized;
 }
 
 function requireHostedPrivateMediaSha256(value: string): string {

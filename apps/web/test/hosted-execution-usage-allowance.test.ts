@@ -415,6 +415,64 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices OpenAI priority token usage at 200% for allowance accounting", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      tokenPricingBasis: "openai-priority",
+    })).toMatchObject({
+      costUsdMicros: 1_518n,
+      counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "759",
+        tokenPricingAdjustment: {
+          denominator: "1",
+          numerator: "2",
+        },
+        tokenPricingBasis: "openai-priority",
+      },
+      pricingVersion:
+        "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority",
+    });
+  });
+
+  it.each([
+    [272_000, "standard", 4_220_000n],
+    [272_001, "standard", 7_365_020n],
+    [272_000, "openai-flex", 2_110_000n],
+    [272_001, "openai-flex", 3_682_510n],
+  ] as const)("prices Astra at %i input tokens with %s accounting", (inputTokens, tokenPricingBasis, expected) => {
+    const result = priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-6-astra",
+      servedModel: "openai/gpt-6-astra-2026-09-04",
+      inputTokens,
+      cachedInputTokens: 100_000,
+      cacheWriteTokens: 100_000,
+      outputTokens: 43_000,
+      tokenPricingBasis,
+    });
+    expect(result.costUsdMicros).toBe(expected);
+    expect(result.pricingVersion).toBe(`openai-api-pricing-2026-09-04-gpt-6-astra-${tokenPricingBasis}`);
+    expect(result.pricingSnapshot).toMatchObject({ model: "gpt-6-astra", modelSource: "served", pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra" });
+  });
+
+  it.each(["thread.tokenUsage.total.delta", "subagent.turn.tokenUsage.total.delta"])("does not mistake cumulative Astra input for a long request: %s", (usageExtractionSourcePath) => {
+    const result = priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-6-astra",
+      servedModel: "gpt-6-astra",
+      inputTokens: 400_000,
+      cachedInputTokens: 0,
+      outputTokens: 10_000,
+      usageExtractionSourcePath,
+    });
+    expect(result.costUsdMicros).toBe(4_500_000n);
+  });
+
+  it("does not invent Venice pricing for Astra", () => {
+    expect(() => priceHostedAiUsageForAllowance({ ...BASE_USAGE_RECORD, requestedModel: "gpt-6-astra", servedModel: "gpt-6-astra", providerName: "venice" })).toThrow("pricing is missing for the provider model");
+  });
+
   it("prices GPT-5.6 model slugs with official standard and flex accounting", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -465,6 +523,27 @@ describe("hosted AI usage allowance pricing", () => {
         tokenPricingBasis: "openai-flex",
       },
       pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "hosted-openai",
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-luna",
+      tokenPricingBasis: "openai-priority",
+    })).toMatchObject({
+      costUsdMicros: 154n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-luna",
+        tokenPricingAdjustment: {
+          denominator: "1",
+          numerator: "2",
+        },
+        tokenPricingBasis: "openai-priority",
+      },
+      pricingVersion:
+        "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority",
     });
   });
 
@@ -843,17 +922,30 @@ describe("hosted AI usage allowance pricing", () => {
       ...BASE_USAGE_RECORD,
       providerName: "venice",
       tokenPricingBasis: "openai-flex",
-    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+    })).toThrow(
+      "OpenAI token pricing adjustments require OpenAI provider evidence",
+    );
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       providerName: "anthropic",
       tokenPricingBasis: "openai-flex",
-    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+    })).toThrow(
+      "OpenAI token pricing adjustments require OpenAI provider evidence",
+    );
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       providerName: "openai-local-test",
       tokenPricingBasis: "openai-flex",
-    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+    })).toThrow(
+      "OpenAI token pricing adjustments require OpenAI provider evidence",
+    );
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "venice",
+      tokenPricingBasis: "openai-priority",
+    })).toThrow(
+      "OpenAI token pricing adjustments require OpenAI provider evidence",
+    );
   });
 
   it("records member-provided credential usage without counting it against allowance", () => {
@@ -872,7 +964,9 @@ describe("hosted AI usage allowance pricing", () => {
       credentialSource: "member",
       providerName: "venice",
       tokenPricingBasis: "openai-flex",
-    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+    })).toThrow(
+      "OpenAI token pricing adjustments require OpenAI provider evidence",
+    );
 
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,

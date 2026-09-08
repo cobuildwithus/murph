@@ -49,14 +49,16 @@ export function isHostedLinqInstantStartCandidate(input: {
   participantContact: HostedLinqParticipantContact;
   phonePrefixes: readonly string[];
 }): boolean {
-  return input.participantContact.kind === "phone"
-    && input.event.data.chat?.is_group === false
+  return input.event.data.chat?.is_group === false
     && !input.event.data.is_from_me
     && isHostedLinqIMessageService(input.event.data.service)
-    && resolveHostedLinqInstantStartPhonePrefix({
-        phoneNumber: input.participantContact.value,
-        prefixes: input.phonePrefixes,
-      }) !== null;
+    && (
+      input.participantContact.kind === "email"
+      || resolveHostedLinqInstantStartPhonePrefix({
+          phoneNumber: input.participantContact.value,
+          prefixes: input.phonePrefixes,
+        }) !== null
+    );
 }
 
 export function isHostedLinqInstantStartEligible(input: {

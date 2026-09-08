@@ -746,50 +746,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         },
       },
     });
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
-      data: {
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-        pendingLinqParticipantContactEncrypted: null,
-        pendingLinqParticipantContactKind: null,
-        pendingLinqParticipantContactLookupKey: null,
-        pendingLinqParticipantContactObservedAt: null,
-        pendingLinqRecipientPhoneEncrypted: null,
-        pendingLinqRecipientPhoneLookupKey: null,
-      },
-      where: {
-        NOT: {
-          memberId: "member_123",
-        },
-        linqChatLookupKey: null,
-        pendingLinqChatLookupKey: {
-          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
-        },
-      },
-    });
-    expect(updateMany).toHaveBeenNthCalledWith(2, {
-      data: {
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-        pendingLinqParticipantContactEncrypted: null,
-        pendingLinqParticipantContactKind: null,
-        pendingLinqParticipantContactLookupKey: null,
-        pendingLinqParticipantContactObservedAt: null,
-        pendingLinqRecipientPhoneEncrypted: null,
-        pendingLinqRecipientPhoneLookupKey: null,
-      },
-      where: {
-        NOT: {
-          memberId: "member_123",
-        },
-        linqChatLookupKey: {
-          not: null,
-        },
-        pendingLinqChatLookupKey: {
-          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
-        },
-      },
-    });
+    expect(updateMany).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith({

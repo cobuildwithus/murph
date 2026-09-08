@@ -6,8 +6,8 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
 import {
-  isPushPrimarySourceRecoveryNoticeEligible,
-  readPushPrimarySourceRecoveryNoticePolicy,
+  isSourceRecoveryNoticeEligible,
+  readSourceRecoveryNoticePolicy,
 } from "@murphai/device-syncd/source-staleness";
 
 import {
@@ -74,7 +74,16 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
   if (!Number.isFinite(now.getTime())) {
     return;
   }
+  const policy = readSourceRecoveryNoticePolicy(input.candidate.sourceProviderSlug);
+  if (!policy) {
+    return;
+  }
   const notificationKey = buildHostedSourceDeliveryStallNoticeKey(input.candidate);
+  const messageKey = input.candidate.sourceProviderSlug === "apple_health_kit"
+    ? "linq.apple_health_delivery_stalled"
+    : input.candidate.sourceProviderSlug === "whoop_v2"
+    ? "linq.device_connection_check"
+    : "linq.device_delivery_stalled";
   const dedupeKey = `assistant.notification.requested:${notificationKey}`;
   const existing = await readHostedMailboxItemByDedupeKey({
     dedupeKey,
@@ -86,10 +95,20 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
   }
   const appended = await runWithPreparedHostedMailboxItemAppendCrypto({
     append: (prepared) => prisma.$transaction(async (tx) => {
+      // Serialize first materialization and retries on the existing episode
+      // owner before checking whether another attempt already queued it.
+      await tx.$queryRaw`
+        SELECT id
+        FROM device_connection_source
+        WHERE connection_id = ${input.candidate.connectionId}
+          AND source_instance_key = ${input.candidate.sourceInstanceKey}
+        FOR UPDATE
+      `;
       const source = await tx.deviceConnectionSource.findUnique({
         select: {
           connection: { select: { status: true, userId: true } },
           lastDataAt: true,
+          lastErrorCode: true,
           lifecycleEpoch: true,
           sourceProviderSlug: true,
           status: true,
@@ -116,8 +135,9 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         || source.lastDataAt?.toISOString() !== input.candidate.lastDataAt
         || source.sourceProviderSlug !== input.candidate.sourceProviderSlug
         || !outreachPolicy?.enabled
-        || !isPushPrimarySourceRecoveryNoticeEligible({
+        || !isSourceRecoveryNoticeEligible({
           lastDataAt: source.lastDataAt?.toISOString() ?? null,
+          lastErrorCode: source.lastErrorCode,
           now: input.now,
           silentHours: outreachPolicy.silentHours,
           sourceProviderSlug: source.sourceProviderSlug,
@@ -146,9 +166,15 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
       ) {
         return null;
       }
-      const policy = readPushPrimarySourceRecoveryNoticePolicy(source.sourceProviderSlug);
-      if (!policy) {
-        return null;
+      const alreadyQueued = await readHostedMailboxItemByDedupeKey({
+        dedupeKey,
+        prisma: tx,
+        userId: input.userId,
+      });
+      if (alreadyQueued) {
+        // The stored payload is immutable: rebuilding it with this attempt's
+        // timestamp, copy, or route would produce a false dedupe conflict.
+        return { item: alreadyQueued };
       }
       const checkIn = renderUserFacingMessage({
         context: {
@@ -156,7 +182,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
           deviceDisplayName: policy.deviceDisplayName,
           providerDisplayName: policy.providerDisplayName,
         },
-        key: "linq.device_delivery_stalled",
+        key: messageKey,
         seed: notificationKey,
       }).text;
       const text = `${checkIn} If this gap is expected, tell me to wait 5–30 days or stop these check-ins.`;
@@ -196,6 +222,9 @@ async function signalHostedSourceDeliveryStallNoticeBestEffort(input: {
   item: HostedMailboxItemRecord;
   prisma: PrismaClient;
 }): Promise<void> {
+  if (input.item.kind !== "assistant.notification.requested") {
+    throw new Error("Source recovery notification identity belongs to another mailbox kind.");
+  }
   if (input.item.consumedAt !== null) {
     return;
   }

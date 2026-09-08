@@ -8442,6 +8442,21 @@ test("importDeviceBatch retains member edits while advancing provider siblings a
   assert.ok(update.applied);
   const shardPath = first.eventShardPaths[0] as string;
   const keptRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  assert.deepEqual(
+    keptRows.filter((event) => event.id === edited.id).map((event) => ({
+      source: event.source,
+      revision: event.lifecycle?.revision ?? 1,
+      value: eventObservationValue(event),
+    })),
+    [
+      { source: "device", revision: 1, value: 1 },
+      { source: "manual", revision: 2, value: 7 },
+      { source: "device", revision: 3, value: 2 },
+      { source: "manual", revision: 4, value: 7 },
+    ],
+  );
+  const audits = await readJsonlRecords({ vaultRoot, relativePath: update.auditPath }) as AuditRecord[];
+  assert.match(audits.at(-1)?.summary ?? "", /2 event\(s\) updated in place by externalRef/);
   const keptLive = collapseEventSpines(keptRows);
   const keptEdited = keptLive.find((event) => event.id === edited.id);
   const keptSibling = keptLive.find((event) =>
@@ -8734,6 +8749,21 @@ test("importDeviceBatch retains omitted member edits above provider tombstones",
       readJsonlRecords({ vaultRoot, relativePath })
     ))
   ).flat() as EventRecord[];
+  assert.deepEqual(
+    rows.filter((event) => event.id === edited.id).map((event) => ({
+      source: event.source,
+      revision: event.lifecycle?.revision ?? 1,
+      deleted: isDeletedEventLifecycle(event.lifecycle),
+    })),
+    [
+      { source: "device", revision: 1, deleted: false },
+      { source: "manual", revision: 2, deleted: false },
+      { source: "device", revision: 3, deleted: true },
+      { source: "manual", revision: 4, deleted: false },
+    ],
+  );
+  const audits = await readJsonlRecords({ vaultRoot, relativePath: update.auditPath }) as AuditRecord[];
+  assert.match(audits.at(-1)?.summary ?? "", /1 omitted authoritative event\(s\) retracted/);
   const keptEdited = collapseEventSpines(rows).find((event) => event.id === edited.id);
   assert.equal(keptEdited?.note, "member context");
   assert.equal(keptEdited?.source, "manual");
@@ -9639,6 +9669,20 @@ test("importDeviceBatch replays a transitive in-batch legacy-ref migration and r
       ],
     }],
   );
+
+  const revisions = await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.eventShardPaths[0] as string,
+  }) as EventRecord[];
+  assert.deepEqual(revisions.map((event) => ({
+    revision: event.lifecycle?.revision ?? 1,
+    resourceId: event.externalRef?.resourceId,
+    value: eventObservationValue(event),
+  })), [
+    { revision: 1, resourceId: externalRefA.resourceId, value: 90 },
+    { revision: 2, resourceId: externalRefB.resourceId, value: 92 },
+    { revision: 3, resourceId: externalRefC.resourceId, value: 94 },
+  ]);
 
   const watchedPaths = [
     first.eventShardPaths[0] as string,

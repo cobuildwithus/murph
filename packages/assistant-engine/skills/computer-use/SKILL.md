@@ -500,8 +500,12 @@ reliable supply-duration evidence. Examples include a 30-day supplement supply,
 
 Create it under the developer prompt's shared automation action rules with:
 
-- `schedule: { "kind": "at", "at": "<ISO timestamp near expected depletion>" }`
-- `slug`: a stable value that identifies the item and date
+- `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`,
+  and the explicit local `schedule.localAt.date` near expected depletion; follow
+  the automation tool's local-time and DST recovery contract, never raw `schedule.at`
+- Omit `slug`; the host generates the automation identity. Reuse an existing
+  equivalent reminder identified by conversation or tool evidence instead of
+  inventing a recipe key
 - `continuityPolicy: "preserve"`
 - `instructions`: ask whether the user wants Murph to reorder or adjust the
   item

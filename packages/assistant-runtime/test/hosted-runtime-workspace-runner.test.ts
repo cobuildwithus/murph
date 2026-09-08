@@ -50,6 +50,10 @@ import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
+  sanitizeHostedExecutionStructuredLogDetails,
+} from "@murphai/hosted-execution";
+import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -86,6 +90,10 @@ import {
 import {
   createHostedConversationMailboxImportItem,
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
+import {
+  checkpointHostedRuntimeBridgeWebWorkspace,
+  HostedRuntimeBridgeCheckpointLeaseError,
+} from "../src/hosted-runtime/checkpoint-bridge.ts";
 import {
   createEmptyHostedMailboxImportState,
   readHostedMailboxImportState,
@@ -164,6 +172,237 @@ async function runHostedWorkspaceUntilIdleOrBudget(
     await drainHostedRuntimeLogWritesBestEffort();
   }
 }
+
+describe("foreground checkpoint lease diagnostics", () => {
+  const requestVersion = "930000000000000001";
+  const responseVersion = "930000000000000002";
+  const differentVersion = "930000000000000003";
+  const privateValues = {
+    attemptId: "attempt_synthetic_private_lease",
+    leaseGeneration: "940000000000000001",
+    providerEgressToken: "synthetic-private-egress-token",
+    providerPayload: "synthetic-private-provider-payload",
+    userContent: "synthetic-private-content-without-a-redaction-pattern",
+    path: "/home/synthetic-private/lease.txt",
+    email: "synthetic-private@example.invalid",
+  };
+
+  function createBridgeCheckpoint(checkpointed: boolean, liveVersion: string) {
+    let workspaceVersion = requestVersion;
+    const readCurrentLease = vi.fn(async () => ({
+      attemptId: privateValues.attemptId,
+      leaseGeneration: privateValues.leaseGeneration,
+      providerEgressToken: privateValues.providerEgressToken,
+      userId: TEST_USER_ID,
+      workspaceVersion,
+    }));
+    const checkpointWorkspace = vi.fn(async () => {
+      workspaceVersion = liveVersion;
+      return {
+        checkpointed,
+        workspace: createWorkspaceState({
+          redactedStatus: { status: privateValues.userContent },
+          version: responseVersion,
+        }),
+      };
+    });
+    return {
+      checkpoint: (request: HostedWorkspaceCheckpointRequest) =>
+        checkpointHostedRuntimeBridgeWebWorkspace({
+          checkpointWorkspace, readCurrentLease, request, userId: TEST_USER_ID,
+        }),
+      checkpointWorkspace,
+      readCurrentLease,
+    };
+  }
+
+  for (const checkpointed of [true, false]) {
+    for (const matchesResponse of [true, false]) {
+      test(`logs only the typed pair for checkpointed=${checkpointed}, matchesResponse=${matchesResponse}`, async () => {
+        const bridge = createBridgeCheckpoint(
+          checkpointed, matchesResponse ? responseVersion : differentVersion,
+        );
+        const { logRequests, warnings } = await runForegroundCheckpointDiagnosticTest({
+          attemptId: privateValues.attemptId,
+          leaseGeneration: privateValues.leaseGeneration,
+          requestVersion,
+          async checkpoint(request) {
+            try {
+              return await bridge.checkpoint(request);
+            } catch (error) {
+              assert.ok(error instanceof HostedRuntimeBridgeCheckpointLeaseError);
+              assert.equal(error.code, "stale_workspace_version");
+              assert.equal(error.stage, "after_web_checkpoint");
+              assert.ok(error.postWebCheckpoint);
+              // Extra own/nested properties must not become a log-field escape hatch.
+              Object.assign(error.postWebCheckpoint, privateValues, {
+                expectedWorkspaceVersion: requestVersion,
+                returnedWorkspaceVersion: responseVersion,
+                currentWorkspaceVersion: differentVersion,
+              });
+              Object.assign(error, privateValues, {
+                context: { checkpointLeaseMatchesResponse: privateValues.userContent },
+                details: { checkpointResponseCheckpointed: privateValues.providerPayload },
+              });
+              const generic = buildHostedExecutionSafeErrorDiagnostics(error);
+              expect(generic).not.toHaveProperty("checkpointLeaseMatchesResponse");
+              expect(generic).not.toHaveProperty("checkpointResponseCheckpointed");
+              throw error;
+            }
+          },
+        });
+        const entries = logRequests.flatMap((request) => request.entries);
+        const failures = entries.filter((entry) =>
+          entry.errorCode === "foreground_mailbox_import_failed"
+        );
+        expect(failures).toHaveLength(1);
+        const failure = failures[0]!;
+        expect(failure).toMatchObject({
+          component: "mailbox",
+          eventCode: "runner.error",
+          level: "warn",
+          phase: "active_turn_input",
+        });
+        expect(failure.redactedJson).toEqual({
+          failureCodeDetails: ["stale_workspace_version"],
+          failureNames: [],
+          failureSummaries: [
+            "Hosted runtime bridge checkpoint lease validation failed after_web_checkpoint.",
+          ],
+          nestedErrorCode: "checkpoint_error",
+          checkpointResponseCheckpointed: checkpointed,
+          checkpointLeaseMatchesResponse: matchesResponse,
+        });
+        expect(parseHostedRuntimeLogRequest({ entries: [failure] }).entries[0]?.redactedJson)
+          .toEqual(failure.redactedJson);
+        const sanitized = sanitizeHostedExecutionStructuredLogDetails(failure.redactedJson);
+        // The existing structured sanitizer omits empty arrays, but retains both booleans.
+        expect(sanitized).toEqual({
+          failureCodeDetails: ["stale_workspace_version"],
+          failureSummaries: [
+            "Hosted runtime bridge checkpoint lease validation failed after_web_checkpoint.",
+          ],
+          nestedErrorCode: "checkpoint_error",
+          checkpointResponseCheckpointed: checkpointed,
+          checkpointLeaseMatchesResponse: matchesResponse,
+        });
+        expect(parseHostedRuntimeLogRequest({ entries: [{ ...failure, redactedJson: sanitized }] })
+          .entries[0]?.redactedJson).toEqual(sanitized);
+        for (const entry of entries.filter((entry) => entry !== failure)) {
+          expect(entry.redactedJson ?? {}).not.toHaveProperty("checkpointResponseCheckpointed");
+          expect(entry.redactedJson ?? {}).not.toHaveProperty("checkpointLeaseMatchesResponse");
+        }
+        for (const sensitive of [
+          ...Object.values(privateValues), TEST_USER_ID,
+          requestVersion, responseVersion, differentVersion,
+        ]) {
+          expect(JSON.stringify({ logRequests, warnings })).not.toContain(sensitive);
+        }
+        expect(bridge.readCurrentLease).toHaveBeenCalledTimes(2);
+        expect(bridge.checkpointWorkspace).toHaveBeenCalledOnce();
+      });
+    }
+
+    test(`does not enrich an unchanged-lease checkpointed=${checkpointed} response`, async () => {
+      const bridge = createBridgeCheckpoint(checkpointed, requestVersion);
+      const { logRequests } = await runForegroundCheckpointDiagnosticTest({
+        attemptId: privateValues.attemptId,
+        checkpoint: bridge.checkpoint,
+        expectFailure: !checkpointed,
+        leaseGeneration: privateValues.leaseGeneration,
+        requestVersion,
+      });
+      for (const request of logRequests) {
+        for (const entry of request.entries) {
+          expect(entry.redactedJson ?? {}).not.toHaveProperty("checkpointResponseCheckpointed");
+          expect(entry.redactedJson ?? {}).not.toHaveProperty("checkpointLeaseMatchesResponse");
+        }
+      }
+      expect(bridge.readCurrentLease).toHaveBeenCalledTimes(2);
+      expect(bridge.checkpointWorkspace).toHaveBeenCalledOnce();
+    });
+  }
+
+  test("projects the checked primitive values without rereading supplied metadata", async () => {
+    const responseCheckpointed = vi.fn()
+      .mockReturnValueOnce(false).mockReturnValue(privateValues.userContent);
+    const leaseMatchesResponse = vi.fn()
+      .mockReturnValueOnce(true).mockReturnValue(privateValues.providerPayload);
+    const metadata = Object.defineProperties({}, {
+      responseCheckpointed: { get: responseCheckpointed },
+      leaseMatchesResponse: { get: leaseMatchesResponse },
+    });
+    const error = Object.assign(new HostedRuntimeBridgeCheckpointLeaseError(
+      "stale_workspace_version", "after_web_checkpoint",
+    ), { postWebCheckpoint: metadata });
+    const { logRequests, warnings } = await runForegroundCheckpointDiagnosticTest({
+      attemptId: privateValues.attemptId,
+      checkpoint: async () => { throw error; },
+      leaseGeneration: privateValues.leaseGeneration,
+      requestVersion,
+    });
+    const failure = logRequests.flatMap((request) => request.entries)
+      .find((entry) => entry.errorCode === "foreground_mailbox_import_failed");
+    expect(failure?.redactedJson).toMatchObject({
+      checkpointResponseCheckpointed: false,
+      checkpointLeaseMatchesResponse: true,
+    });
+    expect(responseCheckpointed).toHaveBeenCalledOnce();
+    expect(leaseMatchesResponse).toHaveBeenCalledOnce();
+    for (const sensitive of Object.values(privateValues)) {
+      expect(JSON.stringify({ logRequests, warnings })).not.toContain(sensitive);
+    }
+  });
+
+  const metadata = { responseCheckpointed: true, leaseMatchesResponse: true };
+  test.each([
+    ["untyped lookalike", (): Error => Object.assign(new Error("Synthetic callback failure."), {
+      name: "HostedRuntimeBridgeCheckpointLeaseError",
+      code: "stale_workspace_version",
+      stage: "after_web_checkpoint",
+      postWebCheckpoint: metadata,
+    })],
+    ["other stage", () => new HostedRuntimeBridgeCheckpointLeaseError(
+      "stale_workspace_version", "before_web_checkpoint", metadata,
+    )],
+    ["other code", () => new HostedRuntimeBridgeCheckpointLeaseError(
+      "stale_attempt", "after_web_checkpoint", metadata,
+    )],
+    ["missing metadata", () => new HostedRuntimeBridgeCheckpointLeaseError(
+      "stale_workspace_version", "after_web_checkpoint",
+    )],
+    ["non-boolean accepted flag", () => Object.assign(
+      new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", "after_web_checkpoint"),
+      { postWebCheckpoint: { ...metadata, responseCheckpointed: privateValues.userContent } },
+    )],
+    ["non-boolean match flag", () => Object.assign(
+      new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", "after_web_checkpoint"),
+      { postWebCheckpoint: { ...metadata, leaseMatchesResponse: privateValues.providerPayload } },
+    )],
+    ["arbitrary cause wrapper", () => new Error("Synthetic callback wrapper.", {
+      cause: new HostedRuntimeBridgeCheckpointLeaseError(
+        "stale_workspace_version", "after_web_checkpoint", metadata,
+      ),
+    })],
+    ["non-error throw", (): string => "Synthetic callback failure."],
+  ] as const)("does not project metadata from %s", async (_label, createError) => {
+    const { logRequests, warnings } = await runForegroundCheckpointDiagnosticTest({
+      attemptId: privateValues.attemptId,
+      checkpoint: async () => { throw createError(); },
+      leaseGeneration: privateValues.leaseGeneration,
+      requestVersion,
+    });
+    const failure = logRequests.flatMap((request) => request.entries)
+      .find((entry) => entry.errorCode === "foreground_mailbox_import_failed");
+    assert.ok(failure);
+    expect(failure.redactedJson).not.toHaveProperty("checkpointResponseCheckpointed");
+    expect(failure.redactedJson).not.toHaveProperty("checkpointLeaseMatchesResponse");
+    expect(() => parseHostedRuntimeLogRequest({ entries: [failure] })).not.toThrow();
+    for (const sensitive of Object.values(privateValues)) {
+      expect(JSON.stringify({ logRequests, warnings })).not.toContain(sensitive);
+    }
+  });
+});
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
@@ -10255,6 +10494,91 @@ async function runConversationHandledThroughScenario(input: {
       now: () => TEST_NOW,
     });
   } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+}
+
+async function runForegroundCheckpointDiagnosticTest(input: {
+  attemptId: string;
+  checkpoint: HostedRuntimeWorkspacePort["checkpoint"];
+  expectFailure?: boolean;
+  leaseGeneration: string;
+  requestVersion: string;
+}) {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-foreground-lease-"));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const logRequests: HostedRuntimeLogRequest[] = [];
+  const items: HostedMailboxItem[] = [];
+  const artifactPutCalls: string[] = [];
+  const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+  const platform = createPlatform({
+    artifactPutCalls,
+    logRequests,
+    mailboxPort: createMailboxPort({ items }).mailboxPort,
+    workspacePort: { checkpoint: input.checkpoint },
+  });
+  const checkpointRuntimeRedactedStatus = vi.fn(async (
+    checkpoint: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
+  ) => await platform.workspacePort.checkpoint({
+    attemptId: input.attemptId,
+    expectedWorkspaceVersion: input.requestVersion,
+    leaseGeneration: input.leaseGeneration,
+    nextWakeAt: checkpoint.nextWakeAt ?? null,
+    nextWakeReason: checkpoint.nextWakeReason ?? null,
+    reason: checkpoint.reason,
+    redactedStatus: checkpoint.redactedStatus,
+    snapshotRef: null,
+  }));
+  try {
+    await runHostedWorkspaceUntilIdleOrBudget({
+      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        attemptId: input.attemptId,
+        expectedWorkspaceVersion: input.requestVersion,
+        leaseGeneration: input.leaseGeneration,
+        snapshotRef: null,
+      }),
+      checkpointRuntimeRedactedStatus,
+      expectedUserId: TEST_USER_ID,
+      importItem: async () => ({ status: "imported" }),
+      limitPerLane: 10,
+      now: () => TEST_NOW,
+      platform,
+      requestId: "request_synthetic_foreground_lease",
+      runtimeWakeSignal,
+      async runAssistantPhase() {
+        items.push(createMailboxItem());
+        runtimeWakeSignal.notify();
+        await vi.waitFor(() => {
+          if (input.expectFailure !== false) {
+            expect(logRequests.flatMap((request) => request.entries).filter((entry) =>
+              entry.errorCode === "foreground_mailbox_import_failed"
+            )).toHaveLength(1);
+          } else {
+            expect(checkpointRuntimeRedactedStatus).toHaveResolvedTimes(1);
+          }
+        });
+        return { progressed: false };
+      },
+      vaultRoot,
+      workspace: createWorkspaceState({
+        // Existing receipt authority makes the late import checkpoint its progress.
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: 1,
+          hostedCanonicalWriteReceiptLogSha256: "a".repeat(64),
+        },
+        version: input.requestVersion,
+      }),
+    });
+    expect(checkpointRuntimeRedactedStatus).toHaveBeenCalledOnce();
+    expect(artifactPutCalls).toEqual([]);
+    if (input.expectFailure === false) {
+      expect(logRequests.flatMap((request) => request.entries).filter((entry) =>
+        entry.errorCode === "foreground_mailbox_import_failed"
+      )).toHaveLength(0);
+    }
+    return { logRequests, warnings: warn.mock.calls };
+  } finally {
+    warn.mockRestore();
     await rm(vaultRoot, { force: true, recursive: true });
   }
 }

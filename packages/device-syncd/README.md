@@ -465,3 +465,18 @@ Strava settings:
 # from the repo root
 node packages/device-syncd/dist/bin.js
 ```
+
+### Provider execution scope
+
+Each bounded worker drain creates an optional provider pass executor once, then
+releases it when the drain returns. Standalone worker calls get separate scopes.
+Junction reuses successful inventory and source projection across ordinary
+resource jobs and bounded summary-reconciliation continuations in that scope,
+keyed by account identity, connection generation, and source lifecycle. Bounded
+reconciliation inventory and ordinary resource inventory have separate keys so
+reuse cannot bypass collection limits. Historical attempts, calendar repair,
+unbounded full jobs, timeseries continuations, other job kinds, or any failed job
+discard that reuse. Historical attempts and calendar repair load their own
+inventory. Every canonical import retains its live connection-source admission
+check. The scope contains provider inventory only, never cached authorization
+or durable state.

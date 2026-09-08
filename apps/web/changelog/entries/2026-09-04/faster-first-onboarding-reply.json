@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "faster-first-onboarding-reply",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A quicker start with Murph",
+    "summary": "Murph keeps the opening questions moving while saving the name and personal details you share in the background.",
+    "details": "You can skip a question or ask for help at any point.",
+    "relevanceTags": [
+      "assistant",
+      "messaging",
+      "onboarding",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      2802
+    ]
+  }
+}

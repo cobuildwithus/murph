@@ -4281,6 +4281,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     };
 
     vi.mocked(executeCodexAppServerTurn).mockResolvedValueOnce({
+      followUpRequest: null,
       acceptedNoReplyDeliveryContextOrdinals: [],
       additionalUsages: [],
       finalAction: null,

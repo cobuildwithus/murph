@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
 
 import type {
   AllergyIntolerance,
@@ -17,10 +16,11 @@ import type {
 } from "@medplum/fhirtypes";
 import {
   CLINICAL_IMPORT_PLAN_MAX_DECISIONS,
-  CLINICAL_RAW_MANIFEST_MAX_BYTES,
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
-  clinicalFacetSlug,
+  fhirResourceTypeToSlug,
+  clinicalFhirPageHasIncompleteSearchOutcome,
+  clinicalFhirScopeAllowsOperation,
   clinicalFhirManifestPathSchema,
   clinicalImportRetractDecisionSchema,
   clinicalImportPlanSchema,
@@ -48,12 +48,6 @@ import {
   type BloodTestResultRecord,
   type EventImportDecision,
 } from "@murphai/contracts";
-import { resolveVaultPathOnDisk } from "@murphai/core";
-
-export interface BuildClinicalImportPlanInput {
-  vaultRoot: string;
-  manifestPath: string;
-}
 
 export interface ClinicalImportSnapshotPage {
   content: string;
@@ -190,40 +184,6 @@ const REVIEW_HOLD_RESOURCE_TYPES = new Set([
   "Observation",
 ]);
 
-export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
-  const manifestPath = clinicalFhirManifestPathSchema.parse(input.manifestPath);
-  const manifest = clinicalRawManifestSchema.parse(
-    JSON.parse(await readVaultRelativeText(input.vaultRoot, manifestPath, {
-      maxBytes: CLINICAL_RAW_MANIFEST_MAX_BYTES,
-    })),
-  );
-  assertClinicalRawManifestPathIdentity({ manifest, manifestPath });
-  await assertRawResourceFileByteBounds({
-    manifest,
-    manifestPath,
-    vaultRoot: input.vaultRoot,
-  });
-  const pages: ClinicalImportSnapshotPage[] = [];
-  for (const resourceFile of manifest.resourceFiles) {
-    const rawRef = rawRefForClinicalManifestFile({
-      manifestPath,
-      resourceFile,
-    });
-    pages.push({
-      content: await readVaultRelativeText(input.vaultRoot, rawRef, {
-        maxBytes: CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
-      }),
-      relativePath: resourceFile.relativePath,
-    });
-  }
-
-  return buildClinicalImportPlanFromSnapshot({
-    manifest,
-    manifestPath,
-    pages,
-  });
-}
-
 export function buildClinicalImportPlanFromSnapshot(
   input: BuildClinicalImportPlanFromSnapshotInput,
 ): ClinicalImportPlan {
@@ -250,28 +210,54 @@ export function buildClinicalImportPlanFromSnapshot(
   }
   assertResolvedFhirPagination({ manifest, resourcePages });
   const resourceContexts = resourcePages.flatMap((page) =>
-    page.resources.map((resource): FhirResourceContext => ({
-      manifest,
-      rawRef: page.rawRef,
-      resource,
-    }))
+    page.resources.map(
+      (resource): FhirResourceContext => ({
+        manifest,
+        rawRef: page.rawRef,
+        resource,
+      }),
+    ),
   );
 
+  // An undated representation cannot order this identity against any sibling
+  // revision. Keep its evidence and leave the last validated canonical fact alone.
+  const unorderable = new Set(
+    resourceContexts
+      .filter(
+        ({ resource }) =>
+          REVIEW_HOLD_RESOURCE_TYPES.has(resource.resourceType) &&
+          readResourceId(resource) &&
+          !readResourceUpdatedAt(resource),
+      )
+      .map(({ resource }) => `${resource.resourceType}/${readResourceId(resource)}`),
+  );
   for (const context of resourceContexts) {
     if (decisions.length >= CLINICAL_IMPORT_PLAN_MAX_DECISIONS) {
-      throw new Error(`Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`);
+      throw new Error(
+        `Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`,
+      );
     }
-    decisions.push(mapFhirResource(context));
+    decisions.push(
+      unorderable.has(`${context.resource.resourceType}/${readResourceId(context.resource)}`)
+        ? reviewOnly(context, "FHIR resource lastUpdated is missing", "incomplete")
+        : mapFhirResource(context),
+    );
   }
 
-  const allergySnapshotDecision = buildAllergySnapshotDecision({
-    manifest,
-    manifestPath,
-    resourceContexts,
-  });
+  const allergySnapshotDecision = [...pageContents.values()].some(
+    clinicalFhirPageHasIncompleteSearchOutcome,
+  )
+    ? null
+    : buildAllergySnapshotDecision({
+        manifest,
+        manifestPath,
+        resourceContexts,
+      });
   if (allergySnapshotDecision) {
     if (decisions.length >= CLINICAL_IMPORT_PLAN_MAX_DECISIONS) {
-      throw new Error(`Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`);
+      throw new Error(
+        `Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`,
+      );
     }
     decisions.push(allergySnapshotDecision);
   }
@@ -300,7 +286,9 @@ function indexClinicalImportSnapshotPages(input: {
   const pageContents = new Map<string, string>();
   for (const page of input.pages) {
     if (pageContents.has(page.relativePath)) {
-      throw new Error(`Clinical FHIR snapshot has duplicate page content for ${page.relativePath}.`);
+      throw new Error(
+        `Clinical FHIR snapshot has duplicate page content for ${page.relativePath}.`,
+      );
     }
     pageContents.set(page.relativePath, page.content);
   }
@@ -319,8 +307,8 @@ function assertClinicalRawManifestPathIdentity(input: {
 }): void {
   const manifestPathParts = input.manifestPath.split("/");
   if (
-    manifestPathParts[3] !== input.manifest.connectionId
-    || manifestPathParts[4] !== input.manifest.retrievalJobId
+    manifestPathParts[3] !== input.manifest.connectionId ||
+    manifestPathParts[4] !== input.manifest.retrievalJobId
   ) {
     throw new Error("Clinical FHIR raw manifest path does not match manifest identity.");
   }
@@ -343,12 +331,16 @@ function assertClinicalImportSnapshotPageByteBounds(input: {
     }
     const byteSize = Buffer.byteLength(content, "utf8");
     if (byteSize > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
-      throw new Error(`Clinical FHIR raw resource file exceeds ${CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES} bytes for ${rawRef}.`);
+      throw new Error(
+        `Clinical FHIR raw resource file exceeds ${CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES} bytes for ${rawRef}.`,
+      );
     }
 
     totalBytes += byteSize;
     if (totalBytes > CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES) {
-      throw new Error(`Clinical FHIR raw resource files exceed ${CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES} total bytes.`);
+      throw new Error(
+        `Clinical FHIR raw resource files exceed ${CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES} total bytes.`,
+      );
     }
   }
 }
@@ -361,24 +353,15 @@ export function clinicalPlanToEventImportDecisions(
     if (decision.action !== "review") {
       return [eventImportDecisionSchema.parse(decision)];
     }
-    if (!REVIEW_HOLD_RESOURCE_TYPES.has(decision.resourceType)) {
-      return [];
-    }
-    if (!decision.externalRef) {
-      if (decision.resourceId) {
-        throw new Error(
-          `Clinical review for ${decision.resourceType}/${decision.resourceId} has no comparable source revision.`,
-        );
-      }
-      return [];
-    }
-
-    return [eventImportRetractionDecisionSchema.parse({
-      action: "retract",
-      externalRef: decision.externalRef,
-      reason: decision.reason,
-      evidence: decision.evidence,
-    })];
+    if (decision.disposition !== "hold") return [];
+    return [
+      eventImportRetractionDecisionSchema.parse({
+        action: "retract",
+        externalRef: decision.externalRef,
+        reason: decision.reason,
+        evidence: decision.evidence,
+      }),
+    ];
   });
 }
 
@@ -471,56 +454,17 @@ function allergySnapshotEvidence(input: {
 function hasCompleteAllergyEvidence(manifest: ClinicalRawManifest): boolean {
   return [...ALLERGY_CONFLICT_RESOURCE_TYPES].every((resourceType) =>
     isCompleteWholeFamilyClinicalFhirRetrieval(manifest, resourceType)
-    && hasGrantedFhirReadScope(manifest, resourceType)
+    && hasGrantedFhirSearchScope(manifest, resourceType)
     && manifest.errors?.some((error) =>
       !("resourceType" in error) || error.resourceType === resourceType
     ) !== true
   );
 }
 
-function hasGrantedFhirReadScope(manifest: ClinicalRawManifest, resourceType: string): boolean {
-  for (const scopeGroup of manifest.grantedScopes) {
-    for (const scope of scopeGroup.split(/\s+/u)) {
-      const match = /^(?:patient|system|user)\/([^\s.]+)\.([a-z]+)$/u.exec(scope);
-      const scopedResourceType = match?.[1];
-      const permissions = match?.[2];
-      if (
-        (scopedResourceType === "*" || scopedResourceType === resourceType)
-        && (
-          permissions === "read"
-          || (/^c?r?u?d?s?$/u.test(permissions ?? "") && permissions?.includes("r") === true)
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-async function assertRawResourceFileByteBounds(input: {
-  manifest: ClinicalRawManifest;
-  manifestPath: string;
-  vaultRoot: string;
-}): Promise<void> {
-  let totalBytes = 0;
-
-  for (const resourceFile of input.manifest.resourceFiles) {
-    const rawRef = rawRefForClinicalManifestFile({
-      manifestPath: input.manifestPath,
-      resourceFile,
-    });
-    const byteSize = await readVaultRelativeFileSize(input.vaultRoot, rawRef);
-    if (byteSize > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
-      throw new Error(`Clinical FHIR raw resource file exceeds ${CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES} bytes for ${rawRef}.`);
-    }
-
-    totalBytes += byteSize;
-    if (totalBytes > CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES) {
-      throw new Error(`Clinical FHIR raw resource files exceed ${CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES} total bytes.`);
-    }
-  }
+function hasGrantedFhirSearchScope(manifest: ClinicalRawManifest, resourceType: string): boolean {
+  return manifest.grantedScopes.flatMap((group) => group.split(/\s+/u)).some((scope) =>
+    clinicalFhirScopeAllowsOperation(scope, resourceType, "search")
+  );
 }
 
 function parseClinicalResourcePage(input: {
@@ -682,7 +626,7 @@ function readFhirNextPageUrlHash(input: {
   }
 
   const declaredNextPageUrlHash = input.resourceFile.nextPageUrlHash;
-  if (rawNextPageUrlHash !== declaredNextPageUrlHash) {
+  if (declaredNextPageUrlHash !== undefined && rawNextPageUrlHash !== declaredNextPageUrlHash) {
     throw new Error(`Clinical FHIR raw Bundle next link does not match its manifest hash for ${input.rawRef}.`);
   }
   return rawNextPageUrlHash;
@@ -778,28 +722,6 @@ function isWholeFamilyRetrieval(
   );
 }
 
-async function readVaultRelativeText(
-  vaultRoot: string,
-  relativePath: string,
-  options?: { maxBytes?: number },
-): Promise<string> {
-  const { absolutePath } = await resolveVaultPathOnDisk(vaultRoot, relativePath);
-  if (options?.maxBytes !== undefined) {
-    const byteSize = (await stat(absolutePath)).size;
-    if (byteSize > options.maxBytes) {
-      throw new Error(`Clinical FHIR raw file exceeds ${options.maxBytes} bytes for ${relativePath}.`);
-    }
-  }
-
-  return readFile(absolutePath, "utf8");
-}
-
-async function readVaultRelativeFileSize(vaultRoot: string, relativePath: string): Promise<number> {
-  const { absolutePath } = await resolveVaultPathOnDisk(vaultRoot, relativePath);
-  const fileStat = await stat(absolutePath);
-  return fileStat.size;
-}
-
 function assertRawResourceFileHash(input: {
   rawRef: string;
   resourceFile: ClinicalRawManifestResourceFile;
@@ -826,6 +748,10 @@ function sha256Hex(value: string): string {
 }
 
 function mapFhirResource(context: FhirResourceContext): MappedFhirResource {
+  if (readFhirArray(context.resource.meta?.tag).some((tag) => isRecord(tag) && tag.code === "SUBSETTED"
+    && tag.system === "http://terminology.hl7.org/CodeSystem/v3-ObservationValue")) {
+    return reviewOnly(context, "FHIR resource is a subset of the complete record", "incomplete");
+  }
   if (hasMalformedFhirContained(context.resource)) {
     return reviewOnly(context, "FHIR contained resources are invalid");
   }
@@ -833,10 +759,7 @@ function mapFhirResource(context: FhirResourceContext): MappedFhirResource {
     return reviewOnly(context, "FHIR modifier semantics are not importable");
   }
   if (
-    (isObservation(context.resource)
-      || isDiagnosticReport(context.resource)
-      || isDocumentReference(context.resource)
-      || isAllergyIntolerance(context.resource))
+    isAllergyIntolerance(context.resource)
     && !readResourceUpdatedAt(context.resource)
   ) {
     return reviewOnly(context, "FHIR resource lastUpdated is missing");
@@ -889,13 +812,14 @@ function resourceContext<TResource extends Resource>(
   };
 }
 
-function reviewOnly(context: FhirResourceContext, reason: string): MappedFhirResource {
+function reviewOnly(context: FhirResourceContext, reason: string, disposition?: "incomplete"): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   const externalRef = resourceId && readResourceUpdatedAt(context.resource)
     ? externalRefForResource(context, context.resource.resourceType, resourceId)
     : undefined;
   return clinicalImportReviewDecisionSchema.parse({
     action: "review",
+    disposition: disposition ?? (externalRef && REVIEW_HOLD_RESOURCE_TYPES.has(context.resource.resourceType) ? "hold" : "raw-only"),
     resourceType: context.resource.resourceType,
     resourceId,
     ...(externalRef ? { externalRef } : {}),
@@ -1494,7 +1418,7 @@ function hasCompatibleReferenceRangeUnit(
 }
 
 function clinicalSlugFields(value: string): Pick<BloodTestResultRecord, "biomarkerSlug" | "slug"> {
-  const slug = clinicalFacetSlug(value);
+  const slug = fhirResourceTypeToSlug(value);
   if (!slug) {
     return {};
   }

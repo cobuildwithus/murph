@@ -142,17 +142,18 @@ import {
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
 import {
   createAnalyzeVideoTurnState,
-  snapshotAnalyzeVideoAttachmentAuthorities,
-  type AnalyzeVideoAttachmentAuthority,
+  readAnalyzeVideoConversationEvents,
+  snapshotConversationAttachmentAuthorities,
+  type ConversationAttachmentAuthority,
 } from '../assistant-codex/analyze-video-tool.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
+  supportsAssistantVaultFileDelivery,
   resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
 import {
-  assertAssistantAcceptedTurnInputAssistantInputEventsExist,
-  assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
+  readAssistantAcceptedTurnInputEvents,
   type AssistantAcceptedTurnInputJournal,
   type AssistantAcceptedTurnInputItemInput,
   type AssistantAcceptedTurnInputTranscriptRef,
@@ -165,7 +166,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
-import { readAssistantInputEvent } from './input-store.js'
+import { readAssistantInputEvent, type AssistantInputEventRecord } from './input-store.js'
 import {
   resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
@@ -260,6 +261,11 @@ function rebaseAssistantProviderResultDeliveryContexts(input: {
   if (input.baseOrdinal === 0) {
     return input.providerResult
   }
+  // A negative request-relative ordinal must not become valid after rebasing.
+  const rebaseReplyOrdinal = (ordinal: number): number =>
+    Number.isInteger(ordinal) && ordinal >= 0
+      ? ordinal + input.baseOrdinal
+      : -1
   return {
     ...input.providerResult,
     acceptedNoReplyDeliveryContextOrdinals:
@@ -270,7 +276,7 @@ function rebaseAssistantProviderResultDeliveryContexts(input: {
       input.providerResult.precedingResponseSegments?.map((segment) => ({
         ...segment,
         deliveryContextOrdinal:
-          segment.deliveryContextOrdinal + input.baseOrdinal,
+          rebaseReplyOrdinal(segment.deliveryContextOrdinal),
       })),
     reactions: input.providerResult.reactions?.map((reaction) => ({
       ...reaction,
@@ -278,7 +284,7 @@ function rebaseAssistantProviderResultDeliveryContexts(input: {
         reaction.deliveryContextOrdinal + input.baseOrdinal,
     })),
     responseDeliveryContextOrdinal:
-      input.providerResult.responseDeliveryContextOrdinal + input.baseOrdinal,
+      rebaseReplyOrdinal(input.providerResult.responseDeliveryContextOrdinal),
   }
 }
 
@@ -601,7 +607,7 @@ export async function sendAssistantMessageLocal(
       input.providerStartCriticalPath,
       'assistantServiceStartedAtMonotonicMs',
     )
-  await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+  await readAssistantAcceptedTurnInputEvents({
     inputs: input.acceptedTurnInput?.initialInputs ?? [],
     vault: input.vault,
   })
@@ -744,25 +750,21 @@ export async function sendAssistantMessageLocal(
         const runtimeState = createAssistantRuntimeStateService(input.vault)
         const analyzeVideoAttachmentAuthorities = new Map<
           string,
-          AnalyzeVideoAttachmentAuthority
+          ConversationAttachmentAuthority
         >()
         const analyzeVideoTurnState = createAnalyzeVideoTurnState()
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
-        const snapshotAnalyzeVideoAuthorities = async (
-          acceptedInputIds: readonly string[],
-        ): Promise<void> => {
-          const newInputIds = acceptedInputIds.filter((acceptedInputId) => {
-            if (snapshottedAnalyzeVideoInputIds.has(acceptedInputId)) {
+        const snapshotAnalyzeVideoAuthorities = (
+          events: readonly AssistantInputEventRecord[],
+        ): void => {
+          const newEvents = events.filter((event) => {
+            if (snapshottedAnalyzeVideoInputIds.has(event.inputId)) {
               return false
             }
-            snapshottedAnalyzeVideoInputIds.add(acceptedInputId)
+            snapshottedAnalyzeVideoInputIds.add(event.inputId)
             return true
           })
-          if (newInputIds.length === 0) return
-          const authorities = await snapshotAnalyzeVideoAttachmentAuthorities({
-            acceptedInputIds: newInputIds,
-            vaultRoot: input.vault,
-          })
+          const authorities = snapshotConversationAttachmentAuthorities(newEvents)
           for (const authority of authorities) {
             const key = JSON.stringify([
               authority.messageRef,
@@ -779,13 +781,11 @@ export async function sendAssistantMessageLocal(
         >()
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
-            await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+            const events = await readAssistantAcceptedTurnInputEvents({
               inputs: acceptedInputs,
               vault: input.vault,
             })
-            await snapshotAnalyzeVideoAuthorities(
-              acceptedInputs.map((acceptedInput) => acceptedInput.id),
-            )
+            snapshotAnalyzeVideoAuthorities(events)
           },
           admissionHook: input.activeTurnInput,
           beforeProviderSteer: input.beforeProviderAcceptedInputs
@@ -796,13 +796,11 @@ export async function sendAssistantMessageLocal(
                     sessionId: resolved.session.sessionId,
                     turnId: receipt.turnId,
                   })
-                await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-                  journal: acceptedInputJournal,
+                const events = await readAssistantAcceptedTurnInputEvents({
+                  inputs: acceptedInputJournal.inputs,
                   vault: input.vault,
                 })
-                await snapshotAnalyzeVideoAuthorities(
-                  acceptedInputJournal.inputIds,
-                )
+                snapshotAnalyzeVideoAuthorities(events)
                 const releaseProviderAcceptedInputs =
                   await input.beforeProviderAcceptedInputs?.({
                     ...event,
@@ -843,12 +841,16 @@ export async function sendAssistantMessageLocal(
             sessionId: resolved.session.sessionId,
             turnId: receipt.turnId,
           })
-        await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-          journal: initialAcceptedInputJournal,
+        const initialAcceptedEvents = await readAssistantAcceptedTurnInputEvents({
+          inputs: initialAcceptedInputJournal.inputs,
           vault: input.vault,
         })
-        await snapshotAnalyzeVideoAuthorities(
-          initialAcceptedInputJournal.inputIds,
+        snapshotAnalyzeVideoAuthorities(await readAnalyzeVideoConversationEvents({
+          acceptedEvents: initialAcceptedEvents,
+          vaultRoot: input.vault,
+        }))
+        const initialVideoAuthorityInputIds = new Set(
+          [...analyzeVideoAttachmentAuthorities.values()].map((authority) => authority.messageRef),
         )
         const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt
@@ -892,9 +894,6 @@ export async function sendAssistantMessageLocal(
               deliver: async (progressInput) => {
                 const deliveryContextOrdinal =
                   progressInput.deliveryContextOrdinal ?? 0
-                const absoluteDeliveryContextOrdinal =
-                  providerRequestDeliveryContextBaseOrdinal +
-                  deliveryContextOrdinal
                 const { targetInputId, ...untargetedProgressInput } = progressInput
                 if (targetInputId) {
                   await beforeHostedToolExecution(deliveryContextOrdinal)
@@ -905,8 +904,9 @@ export async function sendAssistantMessageLocal(
                       input:
                         await applyAssistantAcceptedMessageTargetToDeliveryInput({
                           acceptedInputIds:
-                            resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
-                              absoluteDeliveryContextOrdinal,
+                            resolveNativeReplyAcceptedInputIds(
+                              deliveryContextOrdinal,
+                              providerRequestDeliveryContextBaseOrdinal,
                             ),
                           action: 'native-reply',
                           input: progressInput.input,
@@ -1002,12 +1002,12 @@ export async function sendAssistantMessageLocal(
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
           && actionApprovalPort != null
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
           && vaultFileSendTargetFingerprint !== null
         const pendingVaultFilesAvailable =
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
@@ -1018,9 +1018,18 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getAnalyzeVideoAttachmentAuthorities: () => [
-                ...analyzeVideoAttachmentAuthorities.values(),
-              ],
+              getConversationAttachmentAuthorities: () => {
+                const acceptedInputIds = new Set(resolveAssistantUserActionAcceptedInputIds({
+                  acceptedInputItems: acceptedInputItemsForProviderRequest,
+                  turnTrigger: currentInput.turnTrigger ?? null,
+                }))
+                // Retained history is frozen at turn start. Newly steered clips
+                // still require the current provider request's accepted boundary.
+                return [...analyzeVideoAttachmentAuthorities.values()].filter((authority) =>
+                  initialVideoAuthorityInputIds.has(authority.messageRef)
+                  || acceptedInputIds.has(authority.messageRef)
+                )
+              },
               getConversationScope: () =>
                 resolveAssistantConversationScope(
                   sharedPlan.conversationPolicy.audience,
@@ -1089,10 +1098,10 @@ export async function sendAssistantMessageLocal(
                         session: currentSession,
                         sharedPlan,
                       })
-                      if (deliveryFields.channel?.trim().toLowerCase() !== 'linq') {
+                      if (!supportsAssistantVaultFileDelivery(deliveryFields)) {
                         throw new VaultCliError(
                           'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
-                          'Vault files can only be sent to the current iMessage conversation.',
+                          'Vault files cannot be sent to this conversation.',
                         )
                       }
                       if (!resolveAssistantVaultFileSendTargetFingerprint(deliveryFields)) {
@@ -1276,8 +1285,8 @@ export async function sendAssistantMessageLocal(
           preProviderSteerAcceptedInputJournals.delete(
             preProviderSteerJournalKey,
           )
-          await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-            journal: acceptedInputJournal,
+          await readAssistantAcceptedTurnInputEvents({
+            inputs: acceptedInputJournal.inputs,
             vault: currentInput.vault,
           })
           if (holdGroupReplyDraft) {
@@ -1369,6 +1378,24 @@ export async function sendAssistantMessageLocal(
             ),
           ]
         }
+        // Native authority must not use the shared helper's out-of-range
+        // accounting fallback, or rebase an invalid request-relative ordinal.
+        function resolveNativeReplyAcceptedInputIds(
+          deliveryContextOrdinal: number,
+          baseOrdinal = 0,
+        ): readonly string[] {
+          const absoluteOrdinal = baseOrdinal + deliveryContextOrdinal
+          if (
+            !Number.isInteger(deliveryContextOrdinal) ||
+            deliveryContextOrdinal < 0 ||
+            absoluteOrdinal >= acceptedInputIdsByDeliveryContextOrdinal.length
+          ) {
+            return []
+          }
+          return resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+            absoluteOrdinal,
+          )
+        }
         function resolveNoReplyAcceptedInputIds(
           deliveryContextOrdinal: number,
           precedingReplyDeliveryContextOrdinal: number | null,
@@ -1406,13 +1433,18 @@ export async function sendAssistantMessageLocal(
               providerRequestDeliveryContextBaseOrdinal +
               authorizationInput.deliveryContextOrdinal
             const acceptedInputIds =
-              authorizationInput.action === 'participant-effect'
-                ? resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
-                    deliveryContextOrdinal,
+              authorizationInput.action === 'native-reply'
+                ? resolveNativeReplyAcceptedInputIds(
+                    authorizationInput.deliveryContextOrdinal,
+                    providerRequestDeliveryContextBaseOrdinal,
                   )
-                : acceptedInputIdsByDeliveryContextOrdinal[
-                    deliveryContextOrdinal
-                  ]
+                : authorizationInput.action === 'participant-effect'
+                  ? resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                      deliveryContextOrdinal,
+                    )
+                  : acceptedInputIdsByDeliveryContextOrdinal[
+                      deliveryContextOrdinal
+                    ]
             const deliveryContext =
               replyDeliveryContexts[deliveryContextOrdinal]
             if (!acceptedInputIds || !deliveryContext) {
@@ -1459,9 +1491,9 @@ export async function sendAssistantMessageLocal(
               throw error
             }
           }
-        // Cumulative through the ordinal: the no-reply hook and participant
-        // effects may reference any input already admitted into the provider
-        // turn. Native replies and reactions remain exact to one ordinal.
+        // Cumulative through the ordinal: the no-reply hook, participant
+        // effects and native replies may reference any input already admitted
+        // through their ordinal. Reactions remain exact to one ordinal.
         const admissionMs = elapsedSince(admissionStartedAt)
         const providerStartAtPreProviderSetupDone =
           stampAssistantProviderStartCriticalPath(
@@ -1764,36 +1796,40 @@ export async function sendAssistantMessageLocal(
             sinceProviderResultMs: 0,
             stage: 'provider-result-returned',
           })
+          if (providerOutcome.kind !== 'failed_terminal') {
+            onFirstAssistantResponseCompleted()
+          }
+          const completedContinuation = providerOutcome.kind === 'failed_terminal'
+            ? providerOutcome.codexContinuation
+            : providerOutcome.providerTurn.codexContinuation
+          if (!providerRequestJournal) {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.recordProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              })
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
+          } else {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              }) ?? providerRequestJournal
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
+          }
+          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           if (providerOutcome.kind === 'failed_terminal') {
-            if (!providerRequestJournal) {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                  continuation: providerOutcome.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                })
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-              providerRequestAcceptedInputItems =
-                providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-              acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-              acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-            } else {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                  continuation: providerOutcome.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                }) ?? providerRequestJournal
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-              providerRequestAcceptedInputItems =
-                providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-              acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-              acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-            }
             const failedProviderResult = {
               attemptCount: providerOutcome.attemptCount,
               provider: providerOutcome.route.provider,
@@ -2041,37 +2077,7 @@ export async function sendAssistantMessageLocal(
             throw providerOutcome.error
           }
 
-          onFirstAssistantResponseCompleted()
           const currentProviderResult = providerOutcome.providerTurn
-          if (!providerRequestJournal) {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: currentProviderResult.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              })
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          } else {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: currentProviderResult.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              }) ?? providerRequestJournal
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          }
           await drainLiveSteeredActiveTurnInputs({
             continuation: currentProviderResult.codexContinuation,
             sessionId: currentProviderResult.session.sessionId,
@@ -2286,6 +2292,7 @@ export async function sendAssistantMessageLocal(
               continue
             }
             precedingResponseSegments.push({
+              followUpRequest: segment.followUpRequest,
               ...(segment.contextReferences === undefined
                 ? {}
                 : {
@@ -2413,9 +2420,7 @@ export async function sendAssistantMessageLocal(
               }
               return await applyAssistantAcceptedMessageTargetToDeliveryInput({
                 acceptedInputIds:
-                  acceptedInputIdsByDeliveryContextOrdinal[
-                    deliveryContextOrdinal
-                  ] ?? [],
+                  resolveNativeReplyAcceptedInputIds(deliveryContextOrdinal),
                 action: 'native-reply',
                 input: segmentInput.input,
                 session: segmentInput.session,
@@ -2505,9 +2510,9 @@ export async function sendAssistantMessageLocal(
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
                 acceptedInputIds:
-                  acceptedInputIdsByDeliveryContextOrdinal[
-                    providerResult.responseDeliveryContextOrdinal
-                  ] ?? [],
+                  resolveNativeReplyAcceptedInputIds(
+                    providerResult.responseDeliveryContextOrdinal,
+                  ),
                 action: 'native-reply',
                 input: finalReplyInput,
                 session: deliverySession,
@@ -2539,6 +2544,7 @@ export async function sendAssistantMessageLocal(
                 }
               : await dispatchAssistantReply({
                   input: finalDeliveryInput,
+                  followUpRequest: providerResult.followUpRequest,
                   card: providerResult.responseCard ?? null,
                   media: providerResult.responseMedia ?? [],
                   response: rawFinalResponseText ?? '',

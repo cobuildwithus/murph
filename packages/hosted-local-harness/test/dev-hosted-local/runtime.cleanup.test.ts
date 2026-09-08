@@ -517,6 +517,7 @@ describe("cleanupHostedRunnerContainers", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "murph-runner-state-test-"));
     const persistDir = path.join(root, "state");
     const runnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-RunnerContainer");
+    const nextStateDir = path.join(persistDir, "v3", "do", "murph-hosted-NextRunnerContainer");
     const smokeStateDir = path.join(persistDir, "v3", "do", "murph-hosted-DeploySmokeRunnerContainer");
     const standbyStateDir = path.join(persistDir, "v3", "do", "murph-hosted-StandbyRunnerContainer");
     const userRunnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-UserRunnerDurableObject");
@@ -524,6 +525,7 @@ describe("cleanupHostedRunnerContainers", () => {
 
     try {
       await mkdir(runnerStateDir, { recursive: true });
+      await mkdir(nextStateDir, { recursive: true });
       await mkdir(smokeStateDir, { recursive: true });
       await mkdir(standbyStateDir, { recursive: true });
       await mkdir(userRunnerStateDir, { recursive: true });
@@ -534,6 +536,7 @@ describe("cleanupHostedRunnerContainers", () => {
       });
 
       await expect(access(runnerStateDir)).rejects.toThrow();
+      await expect(access(nextStateDir)).rejects.toThrow();
       await expect(access(smokeStateDir)).rejects.toThrow();
       await expect(access(standbyStateDir)).rejects.toThrow();
       await expect(access(userRunnerStateDir)).rejects.toThrow();

@@ -39,6 +39,7 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 import {
   readHostedStandbyMode,
+  readHostedStandbyTarget,
 } from "../src/standby-runner-contract.ts";
 import type {
   HostedStandbyMode,
@@ -392,6 +393,27 @@ async function assertRunnerContainerSmoke(input: {
   throw new Error("runner container smoke exhausted its attempts without a verdict.");
 }
 
+type SmokeStandbyInventory = {
+  ready?: unknown;
+  readyCount?: unknown;
+  provisioningCount?: unknown;
+  target?: unknown;
+  releaseMatches?: unknown;
+};
+
+function assertSmokeStandbyInventory(
+  inventory: SmokeStandbyInventory | null | undefined,
+  source: Record<string, string | undefined>,
+): void {
+  const mode = resolveSmokeExpectedStandbyMode(source);
+  if (mode === null || mode === "off") return;
+  const target = readHostedStandbyTarget(source);
+  if (!inventory || inventory.ready !== true || inventory.releaseMatches !== true
+    || inventory.target !== target || inventory.readyCount !== target || inventory.provisioningCount !== 0) {
+    throw new RunnerContainerSmokeRetryableError("Deploy standby inventory proof is missing or does not match the configured target.");
+  }
+}
+
 async function readRunnerContainerSmoke(input: {
   attempt: number;
   expectDirectR2PresignedPut: boolean;
@@ -442,6 +464,7 @@ async function readRunnerContainerSmoke(input: {
 
   const responsePayload = await response.json() as {
     ok?: unknown;
+    standbyInventory?: SmokeStandbyInventory | null;
     runnerContainer?: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
@@ -470,6 +493,9 @@ async function readRunnerContainerSmoke(input: {
   assertSmokeRunnerBundleManifest(runnerBundle, input.expectedManifest, {
     retryable: input.retryableManifestMismatch,
   });
+  if (input.expectLiveModelTurnModel === null) {
+    assertSmokeStandbyInventory(responsePayload.standbyInventory, input.source);
+  }
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);

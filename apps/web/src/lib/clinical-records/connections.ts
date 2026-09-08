@@ -1,10 +1,15 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
+
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
-import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
+import { requireHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { getPrisma } from "../prisma";
 import {
   CLINICAL_RECORD_CONNECTION_STATUSES,
+  CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE,
   CLINICAL_RECORD_RUN_STATUSES,
   type ClinicalRecordConnectionContract,
 } from "./client-contracts";
@@ -13,7 +18,7 @@ import { clinicalRecordsError } from "./errors";
 export async function listClinicalRecordConnections(
   request: Request,
 ): Promise<ClinicalRecordConnectionContract[]> {
-  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const auth = await requireHostedAppSessionFromRequest(request);
   return listClinicalRecordConnectionsForMember(auth.member.id);
 }
 
@@ -29,12 +34,14 @@ export async function listClinicalRecordConnectionsForMember(
       lastErrorCode: true,
       lastSyncCompletedAt: true,
       providerDirectoryEntryId: true,
+      retrievalGeneration: true,
       retrievalRuns: {
         orderBy: [{ generation: "desc" }],
         select: {
           completedAt: true,
           id: true,
           importedCount: true,
+          outcomeCountsJson: true,
           reviewCount: true,
           status: true,
         },
@@ -44,27 +51,36 @@ export async function listClinicalRecordConnectionsForMember(
       status: true,
     },
     take: 100,
-    where: { memberId, status: { not: "disconnected" } },
+    where: { memberId },
   });
   return connections.map((connection) => {
     const latestRun = connection.retrievalRuns[0] ?? null;
     return {
+      canImport: Boolean(
+        latestRun?.completedAt &&
+          (latestRun.status !== "needs_reauth" || latestRun.outcomeCountsJson !== null) &&
+          connection.retrievalGeneration < CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE,
+      ),
+      importsRemaining: Math.max(
+        0,
+        CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE - connection.retrievalGeneration,
+      ),
       connectedAt: connection.connectedAt.toISOString(),
       connectionId: connection.id,
       displayName: connection.displayName,
       lastErrorCode: sanitizeErrorCode(connection.lastErrorCode),
       lastSyncCompletedAt: connection.lastSyncCompletedAt?.toISOString() ?? null,
-      latestRun: latestRun ? {
-        completedAt: latestRun.completedAt?.toISOString() ?? null,
-        importedCount: latestRun.importedCount,
-        reviewCount: latestRun.reviewCount,
-        runId: latestRun.id,
-        status: requireKnownStatus(
-          latestRun.status,
-          CLINICAL_RECORD_RUN_STATUSES,
-          "run",
-        ),
-      } : null,
+      latestRun: latestRun
+        ? {
+            completedAt: latestRun.completedAt?.toISOString() ?? null,
+            importedCount: latestRun.importedCount,
+            labResultCount: outcomeCount(latestRun.outcomeCountsJson, "labResultCount"),
+            skippedExistingCount: outcomeCount(latestRun.outcomeCountsJson, "skippedExistingCount"),
+            reviewCount: latestRun.reviewCount,
+            runId: latestRun.id,
+            status: requireKnownStatus(latestRun.status, CLINICAL_RECORD_RUN_STATUSES, "run"),
+          }
+        : null,
       providerDirectoryEntryId: connection.providerDirectoryEntryId,
       sourceSystem: requireEpicSourceSystem(connection.sourceSystem),
       status: requireKnownStatus(
@@ -82,9 +98,10 @@ export async function disconnectClinicalRecordConnection(input: {
   request: Request;
 }): Promise<{ connectionId: string; status: "disconnected" }> {
   assertHostedOnboardingMutationOrigin(input.request);
-  const auth = await requireActiveHostedAppSessionFromRequest(input.request);
+  const auth = await requireHostedAppSessionFromRequest(input.request);
   const now = input.now ?? new Date();
   return getPrisma().$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, auth.member.id);
     const connection = await tx.clinicalRecordConnection.findFirst({
       select: { providerDirectoryEntryId: true },
       where: { id: input.connectionId, memberId: auth.member.id },
@@ -96,7 +113,6 @@ export async function disconnectClinicalRecordConnection(input: {
         accessTokenExpiresAt: null,
         disconnectedAt: now,
         patientIdEncrypted: null,
-        refreshTokenEncrypted: null,
         status: "disconnected",
       },
       where: { id: input.connectionId, memberId: auth.member.id },
@@ -114,10 +130,12 @@ export async function disconnectClinicalRecordConnection(input: {
     await tx.clinicalRecordRetrievalRun.updateMany({
       data: { completedAt: now, status: "canceled" },
       where: {
-        completedAt: null,
         connectionId: input.connectionId,
         memberId: auth.member.id,
-        status: { in: ["queued", "retrieving", "importing"] },
+        OR: [
+          { completedAt: null, status: { in: ["queued", "retrieving", "importing"] } },
+          { status: "needs_reauth", outcomeCountsJson: { equals: Prisma.DbNull } },
+        ],
       },
     });
     return { connectionId: input.connectionId, status: "disconnected" as const };
@@ -153,4 +171,10 @@ function connectionNotFoundError() {
     httpStatus: 404,
     message: "The Clinical Records connection was not found.",
   });
+}
+
+function outcomeCount(value: unknown, key: string): number {
+  if (!value || typeof value !== "object") return 0;
+  const count: unknown = Reflect.get(value, key);
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }

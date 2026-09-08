@@ -66,10 +66,13 @@ describe('assistant goal setup skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      "Route by the user's visible outcome and read the primary owner.",
+      "Read the primary owner for the user's visible outcome.",
     )
     expect(prompt).toContain(
-      'Setup: murph-onboarding, goal-setup, hosted-low-usage',
+      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge',
+    )
+    expect(prompt).toContain(
+      'facts -> domain.',
     )
   })
 

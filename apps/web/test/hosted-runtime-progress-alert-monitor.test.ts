@@ -164,6 +164,40 @@ describe("hosted runtime progress health", () => {
     });
   });
 
+  it.each([
+    { importedSeq: 2n, full: 0, unknown: 1, unhandled: 0 },
+    { importedSeq: 1n, full: 1, unknown: 0, unhandled: 1 },
+  ])("bounds system import coverage at durable high water ($importedSeq)", ({
+    importedSeq,
+    full,
+    unknown,
+    unhandled,
+  }) => {
+    const health = summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: ["runtime_a"],
+      now,
+      rows: [progressRow({
+        durableHighWaterSeq: 1n,
+        effectiveConsumedSeq: 0n,
+        headKind: "device-sync.wake",
+        headLaneSeq: 1n,
+        lane: "system",
+        pendingCount: 1n,
+        progressOriginAt: "2026-08-10T15:30:00.000Z",
+        runtimeKey: "runtime_a",
+        workspaceSystemImportedSeq: importedSeq,
+      })],
+    });
+
+    expect(health.systemDiagnostics).toMatchObject({
+      fullyImportedLaneCount: full,
+      importedUnhandledItemCount: unhandled,
+      partiallyImportedLaneCount: 0,
+      unimportedHeadLaneCount: 0,
+      unknownImportLaneCount: unknown,
+    });
+  });
+
   it("excludes inactive and intentionally usage-blocked work", () => {
     const health = summarizeHostedRuntimeProgressRows({
       activeRuntimeKeys: ["runtime_active"],
@@ -329,16 +363,6 @@ describe("hosted runtime progress alert monitor", () => {
     expect(sql).toContain("delivery.accepted_at");
     expect(sql).toContain(
       "workspace.next_wake_at AS workspace_next_wake_at",
-    );
-    expect(sql).toContain(
-      "progress_evidence.head_kind = 'device-sync.wake'",
-    );
-    expect(sql).toContain("hostedMailboxSystemImportedSeq");
-    expect(sql).toContain(
-      "progress_evidence.workspace_system_imported_seq",
-    );
-    expect(sql).toContain(
-      "progress_evidence.first_unimported_system_created_at",
     );
     expect(sql).toContain("pending_head.kind AS head_kind");
     expect(sql).toContain(

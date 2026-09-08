@@ -46,12 +46,18 @@ import {
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
+  ensureHostedMemberForPendingLinqParticipantContactTx,
   ensureHostedMemberForPrivyIdentityResolutionTx,
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   readHostedMemberIdByReplyAliasLookupKey,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import {
+  acquireHostedLinqParticipantEmailLockTx,
+  createHostedLinqParticipantContact,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import { removeHostedMemberLinkedAccountProjectionTx } from "@/src/lib/hosted-onboarding/linked-account-removal";
 import {
   suspendHostedMemberForBillingReversalTx,
   writeHostedMemberStripeBillingTx,
@@ -2135,6 +2141,119 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: memberId },
         });
         await disconnectClients([observer, reversalClient, restoreClient]);
+      }
+    });
+  },
+);
+
+describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted Linq email-handle identity PostgreSQL concurrency",
+  () => {
+    it("serializes a new inbound behind unlink without restoring the revoked member", async () => {
+      const first = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const second = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contact = createHostedLinqParticipantContact({
+        kind: "email", value: `unlink-${randomUUID()}@example.test`,
+      });
+      if (!contact) throw new Error("Expected synthetic email contact.");
+      const memberIds: string[] = [];
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value, encrypt: ({ value }) => value,
+      });
+      try {
+        const original = await first.$transaction((tx) => ensureHostedMemberForPendingLinqParticipantContactTx({
+          contact, observedAt: new Date(), prisma: tx,
+        }), { timeout: transactionTimeoutMs });
+        memberIds.push(original.member.id);
+        const locked = createDeferred<void>();
+        const inboundStarted = createDeferred<void>();
+        const [removed, incoming] = await Promise.all([
+          first.$transaction(async (tx) => {
+            await acquireHostedLinqParticipantEmailLockTx({ emailAddress: contact.value, tx });
+            locked.resolve();
+            await inboundStarted.promise;
+            return removeHostedMemberLinkedAccountProjectionTx({
+              expectedIdentity: contact.value, memberId: original.member.id, method: "email", prisma: tx,
+            });
+          }, { timeout: transactionTimeoutMs }),
+          (async () => {
+            await locked.promise;
+            return second.$transaction((tx) => {
+              inboundStarted.resolve();
+              return ensureHostedMemberForPendingLinqParticipantContactTx({
+                contact, observedAt: new Date(), prisma: tx,
+              });
+            }, { timeout: transactionTimeoutMs });
+          })(),
+        ]);
+        memberIds.push(incoming.member.id);
+        expect(removed).toBe(true);
+        expect(incoming.created).toBe(true);
+        expect(incoming.member.id).not.toBe(original.member.id);
+        await expect(first.hostedMemberIdentity.findUnique({ where: { memberId: original.member.id } }))
+          .resolves.toMatchObject({ linqEmailHandleLookupKey: null, linqEmailHandleEncrypted: null });
+        await expect(first.hostedMemberIdentity.count({ where: { linqEmailHandleLookupKey: contact.lookupKey } }))
+          .resolves.toBe(1);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await first.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+        await disconnectClients([first, second]);
+      }
+    });
+
+    it("selects one member and one instant-start creation winner", async () => {
+      const first = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const second = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contact = createHostedLinqParticipantContact({
+        kind: "email",
+        value: `instant-${randomUUID()}@example.com`,
+      });
+      if (!contact) {
+        throw new Error("Expected a valid Linq email contact.");
+      }
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+
+      try {
+        const [firstResolution, secondResolution] = await Promise.all([
+          first.$transaction((tx) =>
+            ensureHostedMemberForPendingLinqParticipantContactTx({
+              contact,
+              observedAt: new Date("2026-09-04T20:46:00.000Z"),
+              prisma: tx,
+            }), { timeout: transactionTimeoutMs }),
+          second.$transaction((tx) =>
+            ensureHostedMemberForPendingLinqParticipantContactTx({
+              contact,
+              observedAt: new Date("2026-09-04T20:46:00.000Z"),
+              prisma: tx,
+            }), { timeout: transactionTimeoutMs }),
+        ]);
+
+        expect(firstResolution.member.id).toBe(secondResolution.member.id);
+        expect([
+          firstResolution.created,
+          secondResolution.created,
+        ].sort()).toEqual([false, true]);
+        await expect(observer.hostedMemberIdentity.count({
+          where: { linqEmailHandleLookupKey: contact.lookupKey },
+        })).resolves.toBe(1);
+        await expect(observer.hostedMemberRouting.count({
+          where: { pendingLinqParticipantContactLookupKey: contact.lookupKey },
+        })).resolves.toBe(1);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedMember.deleteMany({
+          where: {
+            identity: {
+              linqEmailHandleLookupKey: contact.lookupKey,
+            },
+          },
+        });
+        await disconnectClients([first, second, observer]);
       }
     });
   },

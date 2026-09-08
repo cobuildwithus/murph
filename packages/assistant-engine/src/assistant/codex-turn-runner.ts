@@ -521,9 +521,9 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
-    const readOnlyAutomationTurn =
-      executionPlan.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
+    const readOnlyAutomationTurn = isReadOnlyScheduledTurn(
+      executionPlan.input, attemptPlan.routePlan.followUpInvocation,
+    )
     const hostedRuntimeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
@@ -642,6 +642,7 @@ async function executeAssistantCodexAttempt(input: {
                 ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY,
             }
           : {}),
+        followUpAttachmentAllowed: attemptPlan.routePlan.followUpAttachmentAllowed,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         memberMemoryMaintenanceAuthorized: memberMemoryMaintenanceTurn,
@@ -1087,4 +1088,10 @@ function hasAssistantRichUserMessageContent(
   userMessageContent: readonly AssistantUserMessageContentPart[],
 ): boolean {
   return userMessageContent.some((part) => part.type !== 'text')
+}
+
+function isReadOnlyScheduledTurn(input: {
+  scheduledInvocationAuthority?: { automationId: string } | null
+}, followUpInvocation?: boolean): boolean {
+  return followUpInvocation === true || input.scheduledInvocationAuthority?.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
 }

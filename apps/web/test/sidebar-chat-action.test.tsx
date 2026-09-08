@@ -283,6 +283,7 @@ test("SidebarChatWithMurphAction discloses Telegram new-tab behavior", async () 
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
   assert.match(markup, /href="https:\/\/t\.me\/withmurph_bot"/);
+  assert.match(markup, />Chat with Murph<\/a>/);
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
   assert.match(markup, /aria-label="Chat with Murph in Telegram \(opens in a new tab\)"/);

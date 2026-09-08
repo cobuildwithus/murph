@@ -1,7 +1,7 @@
 import "server-only";
 
 import {
-  readPushPrimarySourceRecoveryNoticePolicy,
+  readSourceRecoveryNoticePolicy,
 } from "@murphai/device-syncd/source-staleness";
 import {
   isHostedEmailConversationMessageWake,
@@ -27,7 +27,7 @@ export async function configureHostedSourceNoDataOutreach(input: {
   request: HostedExecutionDeviceSyncNoDataOutreachRequest;
 }): Promise<HostedExecutionDeviceSyncNoDataOutreachResponse> {
   const sourceProviderSlug = input.request.sourceProviderSlug.trim().toLowerCase();
-  if (!readPushPrimarySourceRecoveryNoticePolicy(sourceProviderSlug)) {
+  if (!readSourceRecoveryNoticePolicy(sourceProviderSlug)) {
     throw new TypeError("No-data outreach is unavailable for this source provider.");
   }
   const prisma = getPrisma();

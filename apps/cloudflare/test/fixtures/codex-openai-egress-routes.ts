@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "78c290807ce710180111df227df3b7a4fe845452",
+  upstreamCommit: "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "e8397c0f448c6975be857ebf3d77be00537d3c9d",
-  upstreamTag: "rust-v0.151.0",
-  version: "0.151.0",
+  upstreamSourceTree: "f89292b9cf6a6f0c316c7d88a47f111a20dc0015",
+  upstreamTag: "rust-v0.153.4",
+  version: "0.153.4",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -220,6 +220,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "Codex Apps file upload requires ChatGPT auth and the ChatGPT backend base URL.",
     },
     {
+      candidate: "/v1/liveazurefd.generateapi.path",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact Linux printable token joins the reviewed /v1/live route to adjacent Azure-provider and request-metadata labels; it is not a separate HTTP route.",
+    },
+    {
       candidate: "/v1/liveend_turn",
       disposition: "binary_false_positive",
       owner: "codex",
@@ -236,6 +242,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       disposition: "configurable_telemetry_origin",
       owner: "codex-otel",
       reason: "OTLP export uses an operator-configured telemetry endpoint.",
+    },
+    {
+      candidate: "/v1/rateiconcwdsrowscolssteplinelastargvenumusedexecsyncdesc",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "This exact Linux printable token joins unrelated serialized field labels; the pinned provider source has no such HTTP route.",
     },
     {
       candidate: "/v1/resp",

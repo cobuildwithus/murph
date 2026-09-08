@@ -4541,6 +4541,33 @@ function resolveDeviceEventIdentity(
   return { associationSafe, latest, matchedEntries, refKey };
 }
 
+function findHistoricalDeviceEventContentOwners(
+  entry: PreparedDeviceEventEntry,
+  index: EventExternalRefIndex,
+): Map<string, Set<number>> {
+  let incomingContentFingerprint: string | undefined;
+  const owners = new Map<string, Set<number>>();
+  for (const externalRef of [entry.record.externalRef, ...entry.legacyExternalRefs]) {
+    if (!externalRef) {
+      continue;
+    }
+    const ownersByFingerprint =
+      index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(eventExternalRefKey(externalRef));
+    if (!ownersByFingerprint) {
+      continue;
+    }
+    incomingContentFingerprint ??= deviceEventContentFingerprint(entry.record);
+    for (const [ownerId, revisions] of ownersByFingerprint.get(incomingContentFingerprint) ?? []) {
+      const ownerRevisions = owners.get(ownerId) ?? new Set<number>();
+      for (const revision of revisions) {
+        ownerRevisions.add(revision);
+      }
+      owners.set(ownerId, ownerRevisions);
+    }
+  }
+  return owners;
+}
+
 function mapCurrentDeviceEventOwners(
   entries: readonly PreparedDeviceEventEntry[],
   context: DeviceEventIdentityContext,
@@ -4560,25 +4587,7 @@ function mapCurrentDeviceEventOwners(
     if (context.index.latestById.has(entry.record.id)) {
       physicallyExistingPreparedIds.add(entry.record.id);
     }
-    const incomingContentFingerprint = deviceEventContentFingerprint(entry.record);
-    const historicalContentOwnerRevisions = new Map<string, Set<number>>();
-    for (const externalRef of [entry.record.externalRef, ...entry.legacyExternalRefs]) {
-      if (!externalRef) {
-        continue;
-      }
-      const refKey = eventExternalRefKey(externalRef);
-      const ownersByFingerprint =
-        context.index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey);
-      for (
-        const [ownerId, revisions] of ownersByFingerprint?.get(incomingContentFingerprint) ?? []
-      ) {
-        const ownerRevisions = historicalContentOwnerRevisions.get(ownerId) ?? new Set<number>();
-        for (const revision of revisions) {
-          ownerRevisions.add(revision);
-        }
-        historicalContentOwnerRevisions.set(ownerId, ownerRevisions);
-      }
-    }
+    const historicalContentOwnerRevisions = findHistoricalDeviceEventContentOwners(entry, context.index);
     if (historicalContentOwnerRevisions.size > 0) {
       historicalContentOwnerRevisionsByPreparedId.set(
         entry.record.id,
@@ -4701,6 +4710,51 @@ async function reconcileDeviceEventEntriesByExternalRef(
   let supersededCount = 0;
   let retractedCount = 0;
 
+  const retainRecord = (entryIndex: number, record: EventRecord, retainPreparedId = true) => {
+    if (retainPreparedId) {
+      retainedPreparedIds.add(entries[entryIndex]!.record.id);
+    }
+    recordsByEntryIndex.set(entryIndex, record);
+  };
+
+  // Keep the provider baseline and optional member overlay together in both
+  // the in-memory index and the ordered append list.
+  const stageProviderRevision = (input: {
+    refKey: string;
+    externalRef: ExternalRef;
+    providerEntry: PreparedJsonlEntry<EventRecord>;
+    memberEntry?: PreparedJsonlEntry<EventRecord>;
+    indexedRelativePath?: string;
+    matchedEntries?: ResolvedDeviceEventIdentity["matchedEntries"];
+  }) => {
+    const { refKey, externalRef, providerEntry, memberEntry } = input;
+    const current = memberEntry?.record ?? providerEntry.record;
+    forceAppendIds.add(providerEntry.record.id);
+    index.latestByRefKey.set(refKey, memberEntry
+      ? {
+          indexedExternalRef: externalRef,
+          indexedRecord: providerEntry.record,
+          relativePath: memberEntry.relativePath,
+          record: memberEntry.record,
+        }
+      : toIndexedExternalRefMatch(providerEntry.record, externalRef, input.indexedRelativePath));
+    for (const { refKey: matchedRefKey, indexedMatch } of input.matchedEntries ?? []) {
+      const currentMatch = index.latestByRefKey.get(matchedRefKey);
+      if (
+        matchedRefKey !== refKey
+        && indexedMatch.record.id === providerEntry.record.id
+        && currentMatch?.record.id === providerEntry.record.id
+      ) {
+        index.latestByRefKey.delete(matchedRefKey);
+      }
+    }
+    index.maxRevisionById.set(providerEntry.record.id, eventSpineRevision(current));
+    appendEntries.push(providerEntry);
+    if (memberEntry) {
+      appendEntries.push(memberEntry);
+    }
+  };
+
   const aliasRepairByEntryIndex = new Map<number, JunctionDailyAggregateAliasRepairPlan>();
   for (const [entryIndex, entry] of entries.entries()) {
     const aliasRepair = buildJunctionDailyAggregateAliasRepairPlan({
@@ -4754,11 +4808,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
     retractedCount += 1;
   }
 
-  for (const [entryIndex, originalEntry] of entries.entries()) {
+  for (const [entryIndex, entry] of entries.entries()) {
     if (aliasRepairByEntryIndex.has(entryIndex)) {
       continue;
     }
-    let entry = originalEntry;
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
@@ -4769,8 +4822,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
       ) {
         skippedDuplicateCount += 1;
-        retainedPreparedIds.add(entry.record.id);
-        recordsByEntryIndex.set(entryIndex, current);
+        retainRecord(entryIndex, current);
         continue;
       }
       appendEntries.push(entry);
@@ -4793,7 +4845,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
     const { matchedEntries, refKey } = resolved;
-    let latest = resolved.latest;
+    const latest = resolved.latest;
     const migratesJunctionNoIdProfileIdentity = isIncomingJunctionNoIdProfile(entry.record)
       && matchedEntries.some((match) => match.refKey !== refKey);
 
@@ -4820,8 +4872,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     if (replaysJunctionNoIdProfileTimestamp) {
       skippedDuplicateCount += 1;
-      retainedPreparedIds.add(entry.record.id);
-      recordsByEntryIndex.set(entryIndex, latest);
+      retainRecord(entryIndex, latest);
       continue;
     }
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
@@ -4847,8 +4898,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       && (migratesJunctionStableProfileTimestamp || retainsDeletedJunctionStableProfile)
     ) {
       skippedDuplicateCount += 1;
-      retainedPreparedIds.add(entry.record.id);
-      recordsByEntryIndex.set(entryIndex, latest);
+      retainRecord(entryIndex, latest);
       continue;
     }
 
@@ -4923,8 +4973,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       && !reassertsUnversionedSetMember
     ) {
       skippedDuplicateCount += 1;
-      retainedPreparedIds.add(entry.record.id);
-      recordsByEntryIndex.set(entryIndex, latest);
+      retainRecord(entryIndex, latest);
       continue;
     }
 
@@ -4955,28 +5004,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
         };
         const retainedMemberPath = historicalUserEditMatch.indexedMatch.relativePath
           || toEventLedgerFile(latest.occurredAt);
-        forceAppendIds.add(latest.id);
-        index.latestByRefKey.set(refKey, {
-          indexedExternalRef: externalRef,
-          indexedRecord: providerBaseline,
-          relativePath: retainedMemberPath,
-          record: retainedMemberRevision,
-        });
-        for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
-          const currentMatch = index.latestByRefKey.get(matchedRefKey);
-          if (
-            matchedRefKey !== refKey
-            && indexedMatch.record.id === latest.id
-            && currentMatch?.record.id === latest.id
-          ) {
-            index.latestByRefKey.delete(matchedRefKey);
-          }
-        }
-        index.maxRevisionById.set(latest.id, providerRevision + 1);
-        appendEntries.push({ relativePath: entry.relativePath, record: providerBaseline });
-        appendEntries.push({
-          relativePath: retainedMemberPath,
-          record: retainedMemberRevision,
+        stageProviderRevision({
+          refKey,
+          externalRef,
+          providerEntry: { relativePath: entry.relativePath, record: providerBaseline },
+          memberEntry: { relativePath: retainedMemberPath, record: retainedMemberRevision },
+          matchedEntries,
         });
         appendRecordIdByPreparedRecordId.set(entry.record.id, providerBaseline.id);
         recordsByEntryIndex.set(entryIndex, retainedMemberRevision);
@@ -4985,8 +5018,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       }
       if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
         skippedDuplicateCount += 1;
-        retainedPreparedIds.add(entry.record.id);
-        recordsByEntryIndex.set(entryIndex, latest);
+        retainRecord(entryIndex, latest);
         continue;
       }
     }
@@ -5026,10 +5058,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       }
       if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
         skippedDuplicateCount += 1;
-        if (eventSpineRevisionsAreComplete(index, latest.id)) {
-          retainedPreparedIds.add(entry.record.id);
-        }
-        recordsByEntryIndex.set(entryIndex, latest);
+        retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
         continue;
       }
       if (sourceVersionComparison === 0) {
@@ -5051,10 +5080,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
       if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
         skippedDuplicateCount += 1;
-        if (eventSpineRevisionsAreComplete(index, latest.id)) {
-          retainedPreparedIds.add(entry.record.id);
-        }
-        recordsByEntryIndex.set(entryIndex, latest);
+        retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
         continue;
       }
       const sleepTypeBaselineRevision = sourceVersionComparison === 0
@@ -5088,10 +5114,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         // backfill it; preserving this row also lets unrelated snapshot
         // resources commit.
         skippedDuplicateCount += 1;
-        if (eventSpineRevisionsAreComplete(index, latest.id)) {
-          retainedPreparedIds.add(entry.record.id);
-        }
-        recordsByEntryIndex.set(entryIndex, latest);
+        retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
         continue;
       }
     }
@@ -5100,10 +5123,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     // Keep this comparison scoped to that closed source type: other providers
     // use timestamp-shaped versions whose ordering semantics are not universal.
     if (shouldKeepExistingJunctionCompanionHealthMetadata(latest, entry.record)) {
-      if (eventSpineRevisionsAreComplete(index, latest.id)) {
-        retainedPreparedIds.add(entry.record.id);
-      }
-      recordsByEntryIndex.set(entryIndex, latest);
+      retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
       continue;
     }
 
@@ -5116,8 +5136,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     );
     if (replaysProviderOwnedRetractionWithoutSetAuthority) {
       skippedDuplicateCount += 1;
-      retainedPreparedIds.add(entry.record.id);
-      recordsByEntryIndex.set(entryIndex, latest);
+      retainRecord(entryIndex, latest);
       continue;
     }
 
@@ -5127,8 +5146,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       // later empty-then-populated cadence cannot launder the deletion away.
       if (authoritativeSet && indexedSourceVersionComparison === null) {
         skippedDuplicateCount += 1;
-        retainedPreparedIds.add(entry.record.id);
-        recordsByEntryIndex.set(entryIndex, latest);
+        retainRecord(entryIndex, latest);
         continue;
       }
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
@@ -5142,10 +5160,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     // the next serialized event-spine revision over the retraction tombstone.
 
     if (shouldKeepExistingJunctionSleepStageSummaryObservation(latest, entry.record)) {
-      if (eventSpineRevisionsAreComplete(index, latest.id)) {
-        retainedPreparedIds.add(entry.record.id);
-      }
-      recordsByEntryIndex.set(entryIndex, latest);
+      retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
       continue;
     }
 
@@ -5188,30 +5203,15 @@ async function reconcileDeviceEventEntriesByExternalRef(
       : historicalUserEditMatch?.indexedMatch.relativePath
         || toEventLedgerFile(latest.occurredAt);
 
-    forceAppendIds.add(latest.id);
-    index.latestByRefKey.set(refKey, retainedMemberRevision
-      ? {
-          indexedExternalRef: externalRef,
-          indexedRecord: superseding,
-          relativePath: retainedMemberPath,
-          record: retainedMemberRevision,
-        }
-      : toIndexedExternalRefMatch(superseding, externalRef));
-    for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
-      const currentMatch = index.latestByRefKey.get(matchedRefKey);
-      if (
-        matchedRefKey !== refKey &&
-        indexedMatch.record.id === latest.id &&
-        currentMatch?.record.id === latest.id
-      ) {
-        index.latestByRefKey.delete(matchedRefKey);
-      }
-    }
-    index.maxRevisionById.set(latest.id, retainedMemberRevision ? revision + 1 : revision);
-    appendEntries.push({ relativePath: entry.relativePath, record: superseding });
-    if (retainedMemberRevision) {
-      appendEntries.push({ relativePath: retainedMemberPath, record: retainedMemberRevision });
-    }
+    stageProviderRevision({
+      refKey,
+      externalRef,
+      providerEntry: { relativePath: entry.relativePath, record: superseding },
+      memberEntry: retainedMemberRevision
+        ? { relativePath: retainedMemberPath, record: retainedMemberRevision }
+        : undefined,
+      matchedEntries,
+    });
     appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
     recordsByEntryIndex.set(entryIndex, retainedMemberRevision ?? superseding);
     supersededCount += 1;
@@ -5281,23 +5281,15 @@ async function reconcileDeviceEventEntriesByExternalRef(
         : null;
       const latestPath = latestMatch.relativePath || toEventLedgerFile(latest.occurredAt);
 
-      forceAppendIds.add(latest.id);
-      index.latestByRefKey.set(
+      stageProviderRevision({
         refKey,
-        retainedMemberRevision
-          ? {
-              indexedExternalRef: incomingRef,
-              indexedRecord: tombstone,
-              relativePath: latestPath,
-              record: retainedMemberRevision,
-            }
-          : toIndexedExternalRefMatch(tombstone, incomingRef, latestPath),
-      );
-      index.maxRevisionById.set(latest.id, retainedMemberRevision ? revision + 1 : revision);
-      appendEntries.push({ relativePath: latestPath, record: tombstone });
-      if (retainedMemberRevision) {
-        appendEntries.push({ relativePath: latestPath, record: retainedMemberRevision });
-      }
+        externalRef: incomingRef,
+        providerEntry: { relativePath: latestPath, record: tombstone },
+        memberEntry: retainedMemberRevision
+          ? { relativePath: latestPath, record: retainedMemberRevision }
+          : undefined,
+        indexedRelativePath: latestPath,
+      });
       retractedCount += 1;
     }
   }
@@ -7852,7 +7844,7 @@ timing: DeviceBatchImportTiming,
     && sessionVaultState.dependencyChanges.every((dependencyChange) =>
       !deviceEventIdentityDependenciesOverlap(eventIdentityDependency, dependencyChange)
     )
-    ? cloneDeviceEventIdentityContext(sessionVaultState.eventIdentityContext)
+    ? sessionVaultState.eventIdentityContext
     : undefined;
   let initialEventIdentityContext = cachedEventIdentityContext
     ?? await buildDeviceEventIdentityContext(
@@ -7878,12 +7870,13 @@ timing: DeviceBatchImportTiming,
     timing.eventIdentityIndexCacheHit = true;
   }
   timing.eventIdentityIndexElapsedMs = Math.max(0, performance.now() - indexStartedAt);
-  if (requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
+  if (options.session && requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
     const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
     if (eventLedgerFingerprint) {
       replaceDeviceBatchImportSessionVaultState(options.session, vaultRoot, {
         dependencyChanges: [],
-        eventIdentityContext: cloneDeviceEventIdentityContext(initialEventIdentityContext),
+        // The baseline is read-only; reconciliation clones at its mutation boundary.
+        eventIdentityContext: initialEventIdentityContext,
         eventLedgerFingerprint,
       });
     } else {

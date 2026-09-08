@@ -164,6 +164,47 @@ describe("hosted device-sync due reconcile sweeper", () => {
     ]);
   });
 
+  it("counts multiple already-owned retries as accepted without sweep failures", async () => {
+    const logger = buildLogger();
+    const store = buildStore([
+      {
+        connectionId: "dsc_due_1",
+        connectedAt: "2026-05-04T12:00:00.000Z",
+        nextReconcileAt: "2026-05-05T00:00:00.000Z",
+        provider: "whoop",
+        userId: "member_due_shared",
+      },
+      {
+        connectionId: "dsc_due_2",
+        connectedAt: "2026-05-04T12:05:00.000Z",
+        nextReconcileAt: "2026-05-05T00:00:01.000Z",
+        provider: "oura",
+        userId: "member_due_shared",
+      },
+    ]);
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValue({
+      wakeAccepted: true,
+      wakeAppended: false,
+      wakeDuplicate: true,
+      wakeInserted: false,
+    });
+
+    await expect(runHostedDeviceSyncDueReconcileSweeper({
+      logger,
+      store,
+      wakeLimit: 2,
+    })).resolves.toEqual({
+      dueConnections: 2,
+      skippedDueConnections: 0,
+      wakeAccepted: 2,
+      wakeAttempted: 2,
+      wakeFailed: 0,
+      wakeLimit: 2,
+      wakeNotAccepted: 0,
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it("reports skipped due connections and wake failures without logging raw ids", async () => {
     const logger = buildLogger();
     const store = buildStore([

@@ -383,15 +383,31 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       },
     });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
-    const lockSql = String(tx.$queryRaw.mock.calls[0]?.[0].join("?"));
-    expect(lockSql).toContain(
+    const memberLockSql = String(tx.$queryRaw.mock.calls[0]?.[0].join("?"));
+    const oauthLockSql = String(tx.$queryRaw.mock.calls[1]?.[0].join("?"));
+    expect(memberLockSql).toContain('from "hosted_member"');
+    expect(memberLockSql).toContain('where "id" = ? for update');
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual([record.userId]);
+    expect(oauthLockSql).toContain(
       'FROM "device_oauth_session" AS oauth_session',
     );
-    expect(lockSql).toContain('WHERE oauth_session."state" = ?');
-    expect(lockSql).toContain("FOR UPDATE OF oauth_session");
-    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual([record.state]);
+    expect(oauthLockSql).toContain('WHERE oauth_session."state" = ?');
+    expect(oauthLockSql).toContain("FOR UPDATE OF oauth_session");
+    expect(tx.$queryRaw.mock.calls[1]?.slice(1)).toEqual([record.state]);
+    expect(
+      tx.$outerFindUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
     expect(
       tx.$queryRaw.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(
+      tx.$queryRaw.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
     ).toBeLessThan(
       tx.deviceOauthSession.findUnique.mock.invocationCallOrder[0]
         ?? Number.POSITIVE_INFINITY,
@@ -450,7 +466,25 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       consumedAt: consumedAt.toISOString(),
       status: "replayed",
     });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the state owner changes after the unlocked hint", async () => {
+    const record = buildOAuthSessionRow({ userId: "user_replacement" });
+    const tx = createTransaction({
+      ownerHint: { userId: "user_original" },
+      record,
+    });
+    const store = createStore(tx);
+
+    await expect(store.consumeOAuthState(
+      record.state,
+      record.createdAt.toISOString(),
+      record.provider,
+    )).resolves.toEqual({ status: "missing" });
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual(["user_original"]);
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
@@ -525,17 +559,28 @@ function buildOAuthSessionRow(
 function createTransaction(input: {
   record?: MockDeviceOauthSessionRow | null;
   deleteManyCount?: number;
+  ownerHint?: { userId: string | null } | null;
   owner?: { suspendedAt: Date | null } | null;
   replayConsumedAt?: Date;
   updateManyCount?: number;
 }) {
-  const findUnique = vi.fn().mockResolvedValue(input.record ?? null);
+  const findUnique = vi.fn().mockImplementation(async (args: {
+    where: { state: string; userId?: string | null };
+  }) => Object.hasOwn(args.where, "userId") && args.where.userId !== input.record?.userId
+    ? null
+    : input.record ?? null);
   if (input.replayConsumedAt) {
     findUnique
       .mockResolvedValueOnce(input.record ?? null)
       .mockResolvedValueOnce({ consumedAt: input.replayConsumedAt });
   }
+  const ownerHint = Object.hasOwn(input, "ownerHint")
+    ? input.ownerHint ?? null
+    : input.record
+      ? { userId: input.record.userId }
+      : null;
   return {
+    $outerFindUnique: vi.fn().mockResolvedValue(ownerHint),
     $queryRaw: vi.fn().mockResolvedValue(
       input.owner === null
         ? []
@@ -552,6 +597,10 @@ function createTransaction(input: {
 function createStore(tx: ReturnType<typeof createTransaction>) {
   return new PrismaHostedOAuthSessionStore({
     ...tx,
+    deviceOauthSession: {
+      ...tx.deviceOauthSession,
+      findUnique: tx.$outerFindUnique,
+    },
     $transaction: async <TResult>(
       callback: (transaction: typeof tx) => Promise<TResult>,
     ) => callback(tx),

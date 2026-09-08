@@ -195,6 +195,12 @@ export class RunnerContainer extends BaseRunnerContainer {
   }
 }
 
+export class NextRunnerContainer extends RunnerContainer {
+  constructor(state: unknown, env: Readonly<Record<string, unknown>>) {
+    super(state, env, "next");
+  }
+}
+
 // The hosted-local generated wrangler config omits the Workers AI binding for
 // the test-routes profile (dev profiles get the real binding), so the
 // transcribe egress handler would fail closed in E2E. Inject a
@@ -258,8 +264,7 @@ export type HostedLocalShutdownCheckpointPublicationBarrierState =
 interface HostedLocalShutdownCheckpointPublicationBarrier {
   entered: boolean;
   target: "canonical_runtime_commit" | "idle_shutdown" | "snapshot_start";
-  release(): void;
-  released: Promise<void>;
+  released: boolean;
 }
 
 const shutdownCheckpointPublicationBarriers =
@@ -393,15 +398,10 @@ function armCheckpointPublicationBarrier(
     );
   }
 
-  let release = () => {};
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
   shutdownCheckpointPublicationBarriers.set(normalizedUserId, {
     entered: false,
     target,
-    release,
-    released,
+    released: false,
   });
 }
 
@@ -425,7 +425,14 @@ export function releaseShutdownCheckpointPublicationBarrier(userId: string): boo
   }
 
   shutdownCheckpointPublicationBarriers.delete(normalizedUserId);
-  barrier.release();
+  barrier.released = true;
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: { barrierKind: barrier.target, checkpointBarrierStage: "released" },
+    message: "Hosted-local test released checkpoint publication.",
+    phase: "checkpoint",
+    userId: normalizedUserId,
+  });
   return true;
 }
 
@@ -458,7 +465,23 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       phase: "checkpoint",
       userId,
     });
-    await barrier.released;
+    // Outbound Worker requests need pending I/O to avoid workerd's hung-request
+    // cancellation. Create timers in this live request, never in the separate
+    // control object whose request context may have already hibernated.
+    while (!barrier.released && !request.signal.aborted) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        barrierKind: barrier.target,
+        checkpointBarrierStage: "resumed",
+        requestAborted: request.signal.aborted,
+      },
+      message: "Hosted-local checkpoint request resumed after its test barrier.",
+      phase: "checkpoint",
+      userId,
+    });
     if (request.signal.aborted) {
       throw request.signal.reason instanceof Error
         ? request.signal.reason
@@ -772,3 +795,4 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
 };
 
 RunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;
+NextRunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;

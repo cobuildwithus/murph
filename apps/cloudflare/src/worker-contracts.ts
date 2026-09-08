@@ -11,6 +11,12 @@ import type {
   HostedPrivateMediaPublishInput,
   HostedPrivateMediaPublishResult,
 } from "./private-media.ts";
+import type {
+  HostedMediaAssetDeletionInput,
+  HostedMediaAssetDescriptor,
+  HostedMediaAssetReadAdmissionResult,
+  HostedMediaAssetRegistrationInput,
+} from "./user-runner/hosted-media-retention.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,
@@ -206,6 +212,15 @@ export interface WorkerUserRunnerStubLike {
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  admitHostedMediaRead?(
+    input: HostedMediaAssetDescriptor,
+  ): Promise<HostedMediaAssetReadAdmissionResult>;
+  recordHostedMediaAsset?(
+    input: HostedMediaAssetRegistrationInput,
+  ): Promise<boolean>;
+  forgetHostedMediaAsset?(
+    input: HostedMediaAssetDeletionInput,
+  ): Promise<boolean>;
   recordRuntimeCompletionFromContainer?(
     input: WorkerRuntimeCompletionReceipt,
   ): Promise<{ completed: boolean }>;
@@ -369,6 +384,7 @@ export interface WorkerEnvironmentContract<
   MURPH_ELEVENLABS_MODEL_ID?: string;
   MURPH_ELEVENLABS_VOICE_ID?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
+  NEXT_RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
     WorkerDeploySmokeRunnerContainerStubLike
   >;

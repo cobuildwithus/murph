@@ -1,7 +1,7 @@
 import "server-only";
 
 import {
-  readPushPrimarySourceRecoveryNoticePolicy,
+  readSourceRecoveryNoticePolicy,
 } from "@murphai/device-syncd/source-staleness";
 
 type NoDataOutreachPreferenceStore = {
@@ -33,7 +33,7 @@ export async function readHostedSourceNoDataOutreachPolicy(input: {
   sourceProviderSlug: string;
 }): Promise<HostedSourceNoDataOutreachPolicy | null> {
   const sourceProviderSlug = input.sourceProviderSlug.trim().toLowerCase();
-  const providerPolicy = readPushPrimarySourceRecoveryNoticePolicy(sourceProviderSlug);
+  const providerPolicy = readSourceRecoveryNoticePolicy(sourceProviderSlug);
   if (!providerPolicy) {
     return null;
   }

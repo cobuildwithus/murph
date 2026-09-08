@@ -179,6 +179,14 @@ No drop shadows for cards. No elevation tokens. If something needs to "come forw
 
 Every component lives on cream paper, wears warm hairline borders, and speaks in Fraunces numbers + DM Sans copy + DM Mono labels. Touches are restrained — motion serves hierarchy, never decoration.
 
+### Dialogs
+
+Dialogs initially focus their neutral container instead of their first link or
+control. This keeps keyboard navigation inside the modal without making an
+arbitrary action appear selected. Purpose-built flows may set an explicit
+initial focus target when a loading, recovery, or safety interaction requires it;
+normal keyboard navigation retains the visible focus ring.
+
 ### Buttons
 
 - **Shape:** rounded-2xl (20px) for primary CTA; rounded-lg (12px) for secondary.
@@ -813,7 +821,7 @@ their calculations separate and identify the metric in each result popover.
 Keep outcome headings clear without separate help controls. Keep `No clear pattern`
 descriptions to one short sentence.
 
-Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts in accessible copy instead of repeating them visually. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
+Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts out of the main result grid; expose them in supporting detail. On narrow screens, use one card per factor with its illustration, compact evidence-coverage bars, and available comparisons in a two-column grid. Use serif values for changed results. Show changed results without a neutral-results footer. Neutral-only cards use a compact factor header with a plain `No clear changes` status beneath the name and no expandable list. Omit measures without enough comparable data from mobile cards. Open mobile result details in a bottom drawer with comparison bars, evidence dates, a close control, and safe-area spacing. Keep mobile result headlines free of redundant metric eyebrows. Show the number of days beside each comparison label in mobile detail drawers. Coverage bars open their own mobile drawer leading with the recorded-day count and the factor name underneath. Reuse the detail content in desktop hover popovers. Desktop keeps the sortable comparison matrix.
 
 ## 6. Do's and Don'ts
 

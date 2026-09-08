@@ -1,6 +1,7 @@
 ---
 title: 'Hosted Temporal E2E confuses row timestamps with lane consumption'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2772'
 ---
 
 ## Expected Behavior

@@ -47,6 +47,9 @@ export function readHostedRunnerInternalHostKind(hostname: string): string {
   if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
     return "artifact_store";
   }
+  if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore) {
+    return "media_store";
+  }
   if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
     return "browser_vault_replica_store";
   }
@@ -73,6 +76,9 @@ export function readHostedRunnerInternalOperation(input: {
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
     return input.method === "PUT" ? "artifact_upload" : "artifact_fetch";
+  }
+  if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore) {
+    return readHostedRunnerMediaOperation(input.method);
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
     return "browser_vault_replica_write";
@@ -115,6 +121,19 @@ export function readHostedRunnerInternalOperation(input: {
   }
 
   return "unknown_internal_operation";
+}
+
+function readHostedRunnerMediaOperation(method: string): string {
+  switch (method) {
+    case "DELETE":
+      return "media_delete";
+    case "POST":
+      return "media_record";
+    case "PUT":
+      return "media_upload";
+    default:
+      return "media_fetch";
+  }
 }
 
 function readHostedRunnerControlOperation(input: {

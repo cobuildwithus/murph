@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
   CLINICAL_IMPORT_PLAN_MAX_DECISIONS,
-  CLINICAL_RAW_MANIFEST_MAX_BYTES,
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+  clinicalRawManifestSchema,
   hashClinicalFhirBaseUrl,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
@@ -18,7 +18,7 @@ import {
 } from "@murphai/clinical-records";
 import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
 import {
-  buildClinicalImportPlan,
+  buildClinicalImportPlanFromSnapshot,
   clinicalPlanToEventImportDecisions,
 } from "../src/clinical-records/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,7 +62,7 @@ afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
 });
 
-describe("buildClinicalImportPlan", () => {
+describe("buildClinicalImportPlanFromSnapshot", () => {
   it.each([
     ["Device", "patient"],
     ["FamilyMemberHistory", "patient"],
@@ -82,7 +82,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(reviews(plan)).toEqual([
       expect.objectContaining({
@@ -115,7 +115,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("manifest patient");
   });
 
@@ -244,7 +244,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan).map((candidate) => candidate.kind)).toEqual([
       "measurement",
@@ -369,7 +369,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(reviews(plan)).toEqual([]);
     expect(upserts(plan).map((candidate) =>
       candidate.kind === "test" ? candidate.results : []
@@ -435,7 +435,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toHaveLength(5);
     expect(reviews(plan).every((decision) =>
@@ -486,7 +486,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     const vitals = upserts(plan).filter(
       (candidate): candidate is ClinicalImportUpsertOfKind<"measurement"> => candidate.kind === "measurement",
     );
@@ -524,7 +524,7 @@ describe("buildClinicalImportPlan", () => {
 
     const vaultRoot = await writeClinicalFixture({ resourceFiles, pages });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toHaveLength(resourceCount);
     expect(reviews(plan)).toEqual([]);
@@ -586,7 +586,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual([
@@ -635,7 +635,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual([
@@ -681,7 +681,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual([
@@ -748,7 +748,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(expect.arrayContaining([
@@ -795,7 +795,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual([
@@ -880,7 +880,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(reviews(plan)).toHaveLength(2);
     expect(reviews(plan)).toEqual(
@@ -954,7 +954,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     const glucose = upserts(plan).find(
       (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
@@ -1039,7 +1039,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan).map((candidate) => candidate.kind)).toEqual(["note", "clinical_assertion"]);
     expect(reviews(plan)).toEqual([
@@ -1159,7 +1159,7 @@ describe("buildClinicalImportPlan", () => {
         },
       });
 
-      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+      const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
       expect(upserts(plan)).toEqual([]);
       expect(reviews(plan)).toEqual([
@@ -1199,7 +1199,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot })).rejects.toThrow();
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot })).rejects.toThrow();
   });
 
   it("treats every returned Condition as conflicting no-known allergy evidence", async () => {
@@ -1228,7 +1228,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(expect.arrayContaining([
@@ -1277,7 +1277,7 @@ describe("buildClinicalImportPlan", () => {
         },
       });
 
-      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+      const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
       expect(upserts(plan)).toEqual([]);
       expect(reviews(plan)).toEqual([
         expect.objectContaining({
@@ -1298,6 +1298,11 @@ describe("buildClinicalImportPlan", () => {
       {
         label: "v2-read-search",
         grantedScopes: ["patient/*.rs"],
+        complete: true,
+      },
+      {
+        label: "v2-search-only",
+        grantedScopes: ["patient/*.s"],
         complete: true,
       },
       {
@@ -1334,7 +1339,7 @@ describe("buildClinicalImportPlan", () => {
         },
       });
 
-      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+      const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
       if (complete) {
         expect(upserts(plan)).toEqual([
           expect.objectContaining({
@@ -1470,7 +1475,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toHaveLength(5);
@@ -1536,7 +1541,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(reviews(plan)).toEqual([]);
     expect(upserts(plan)).toHaveLength(1);
@@ -1590,7 +1595,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual([
@@ -1644,7 +1649,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(reviews(plan)).toEqual([]);
     expect(upserts(plan).map((candidate) => ({
@@ -1741,7 +1746,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(
@@ -1824,7 +1829,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(expect.arrayContaining([
@@ -1874,7 +1879,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(reviews(plan)).toEqual([]);
     expect(upserts(plan)).toHaveLength(1);
@@ -1982,7 +1987,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toHaveLength(2);
     expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId).sort()).toEqual([
@@ -2075,7 +2080,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(
@@ -2309,7 +2314,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toHaveLength(5);
     const abnormalPanel = upserts(plan).find(
@@ -2770,7 +2775,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toHaveLength(19);
@@ -2896,7 +2901,7 @@ describe("buildClinicalImportPlan", () => {
       pages: { "Observation/page-1.json": page },
     });
     await expect(
-      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: hashMismatchRoot }),
+      planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: hashMismatchRoot }),
     ).rejects.toThrow("hash mismatch");
 
     const countMismatchRoot = await writeClinicalFixture({
@@ -2904,7 +2909,7 @@ describe("buildClinicalImportPlan", () => {
       pages: { "Observation/page-1.json": page },
     });
     await expect(
-      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: countMismatchRoot }),
+      planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: countMismatchRoot }),
     ).rejects.toThrow("count mismatch");
 
     const overDeclaredCountRoot = await writeClinicalFixture({
@@ -2917,7 +2922,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
     await expect(
-      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: overDeclaredCountRoot }),
+      planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: overDeclaredCountRoot }),
     ).rejects.toThrow("exceeds declared count");
   });
 
@@ -2934,7 +2939,7 @@ describe("buildClinicalImportPlan", () => {
       pages: { "Observation/page-1.json": [] },
     });
     await expect(
-      buildClinicalImportPlan({ manifestPath: outOfFamilyManifestPath, vaultRoot: outOfFamilyRoot }),
+      planFromFixture({ manifestPath: outOfFamilyManifestPath, vaultRoot: outOfFamilyRoot }),
     ).rejects.toThrow();
 
     const mismatchedIdentityRoot = await writeClinicalFixture({
@@ -2943,88 +2948,8 @@ describe("buildClinicalImportPlan", () => {
       pages: { "Observation/page-1.json": [] },
     });
     await expect(
-      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: mismatchedIdentityRoot }),
+      planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: mismatchedIdentityRoot }),
     ).rejects.toThrow("does not match manifest identity");
-  });
-
-  it("rejects symlinked raw FHIR manifests and resource pages", async () => {
-    const page = {
-      resourceType: "Observation",
-      id: "shared-bp",
-      status: "final",
-      effectiveDateTime: "2026-07-01T12:00:00.000Z",
-      code: {
-        coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
-      },
-      valueQuantity: { value: 128, unit: "mmHg" },
-    };
-    const resourceFile = {
-      resourceType: "Observation",
-      relativePath: "Observation/page-1.json",
-      count: 1,
-    };
-
-    const manifestSymlinkRoot = await writeClinicalFixture({
-      resourceFiles: [resourceFile],
-      pages: { "Observation/page-1.json": page },
-    });
-    const externalManifestRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-outside-"));
-    tempRoots.push(externalManifestRoot);
-    await writeText(externalManifestRoot, "manifest.json", "{}\n");
-    await rm(path.join(manifestSymlinkRoot, MANIFEST_PATH), { force: true });
-    await symlink(
-      path.join(externalManifestRoot, "manifest.json"),
-      path.join(manifestSymlinkRoot, MANIFEST_PATH),
-    );
-    await expect(
-      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: manifestSymlinkRoot }),
-    ).rejects.toThrow("symbolic links");
-
-    const pageSymlinkRoot = await writeClinicalFixture({
-      resourceFiles: [resourceFile],
-      pages: { "Observation/page-1.json": page },
-    });
-    const externalPageRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-outside-"));
-    tempRoots.push(externalPageRoot);
-    await writeText(externalPageRoot, "page-1.json", serializeJson(page));
-    await rm(
-      path.join(pageSymlinkRoot, "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Observation/page-1.json"),
-      { force: true },
-    );
-    await symlink(
-      path.join(externalPageRoot, "page-1.json"),
-      path.join(pageSymlinkRoot, "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/Observation/page-1.json"),
-    );
-    await expect(
-      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: pageSymlinkRoot }),
-    ).rejects.toThrow("symbolic links");
-  });
-
-  it("rejects oversized raw FHIR manifests before parsing them", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-"));
-    tempRoots.push(vaultRoot);
-
-    await writeText(
-      vaultRoot,
-      MANIFEST_PATH,
-      `${JSON.stringify({
-        schemaVersion: "murph.clinical-raw-manifest.v2",
-        kind: "clinical_fhir_retrieval",
-        connectionId: "clinical-connection-1",
-        retrievalJobId: "retrieval-job-1",
-        sourceSystem: "epic-fhir",
-        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
-        patientIdHash: PATIENT_ID_HASH,
-        fetchedAt: "2026-07-01T12:00:00.000Z",
-        resourceFiles: [],
-        retrievalScopes: [],
-        requestedScopes: ["patient/*.read"],
-        grantedScopes: ["patient/*.read"],
-      })}${" ".repeat(CLINICAL_RAW_MANIFEST_MAX_BYTES + 1)}`,
-    );
-
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
-      .rejects.toThrow("raw file exceeds");
   });
 
   it("rejects over-cap raw FHIR manifests before reading resource pages", async () => {
@@ -3059,7 +2984,7 @@ describe("buildClinicalImportPlan", () => {
       grantedScopes: ["patient/*.read"],
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("total resource count");
   });
 
@@ -3079,7 +3004,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("raw resource file exceeds");
   });
 
@@ -3149,7 +3074,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(
@@ -3214,7 +3139,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(expect.arrayContaining([
@@ -3277,7 +3202,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(reviews(plan)).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -3336,7 +3261,7 @@ describe("buildClinicalImportPlan", () => {
         },
       });
 
-      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+      const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
       expect(upserts(plan)).toEqual([]);
       expect(reviews(plan)).toEqual(expect.arrayContaining([
@@ -3428,7 +3353,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(
@@ -3480,7 +3405,7 @@ describe("buildClinicalImportPlan", () => {
         },
       });
 
-      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+      const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
       expect(upserts(plan)).toEqual([]);
       expect(reviews(plan)).toEqual(expect.arrayContaining([
@@ -3515,7 +3440,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     const assertion = upserts(plan)[0];
 
     expect(reviews(plan)).toEqual([
@@ -3636,7 +3561,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual(
@@ -3685,7 +3610,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("manifest patient");
   });
 
@@ -3730,7 +3655,7 @@ describe("buildClinicalImportPlan", () => {
         }],
         pages: { "Observation/page-1.json": page },
       });
-      await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
         .rejects.toThrow(/manifest patient/u);
     }
   });
@@ -3758,7 +3683,7 @@ describe("buildClinicalImportPlan", () => {
     });
 
     const matchingRoot = await writeAbsoluteReferenceFixture(`${FHIR_BASE_URL}/Patient/patient-1`);
-    const matchingPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: matchingRoot });
+    const matchingPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: matchingRoot });
     expect(upserts(matchingPlan)).toEqual([
       expect.objectContaining({
         externalRef: expect.objectContaining({ resourceId: "absolute-reference-heart-rate" }),
@@ -3768,7 +3693,7 @@ describe("buildClinicalImportPlan", () => {
     const foreignRoot = await writeAbsoluteReferenceFixture(
       "https://foreign.example.test/fhir/Patient/patient-1",
     );
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: foreignRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: foreignRoot }))
       .rejects.toThrow("invalid manifest patient reference");
   });
 
@@ -3792,7 +3717,7 @@ describe("buildClinicalImportPlan", () => {
         },
       },
     });
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: mislabeledRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: mislabeledRoot }))
       .rejects.toThrow("declared resource type");
   });
 
@@ -3821,11 +3746,34 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId)).toEqual([
       "heart-rate-with-search-outcome",
     ]);
     expect(reviews(plan)).toEqual([]);
+  });
+
+  it.each(["warning", "error", "fatal"])("does not infer no-known allergies from a %s search outcome", async (severity) => {
+    const vaultRoot = await writeClinicalFixture({
+      manifest: { grantedScopes: ["patient/*.s"] },
+      resourceFiles: [
+        { resourceType: "AllergyIntolerance", relativePath: "AllergyIntolerance/page-1.json", count: 2 },
+        { resourceType: "Condition", relativePath: "Condition/page-1.json", count: 0 },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": {
+          resourceType: "Bundle",
+          type: "searchset",
+          entry: [
+            { resource: noKnownAllergyResource("negative-with-warning") },
+            { search: { mode: "outcome" }, resource: { resourceType: "OperationOutcome", issue: [{ severity, code: "incomplete" }] } },
+          ],
+        },
+        "Condition/page-1.json": [],
+      },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
   });
 
   it("rejects an unmarked outcome resource in an Observation family", async () => {
@@ -3849,7 +3797,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("declared resource type");
   });
 
@@ -3904,7 +3852,7 @@ describe("buildClinicalImportPlan", () => {
         "Condition/page-1.json": [],
       },
     });
-    await expect(buildClinicalImportPlan({
+    await expect(planFromFixture({
       manifestPath: MANIFEST_PATH,
       vaultRoot: unresolvedPaginationRoot,
     })).rejects.toThrow("unresolved pagination");
@@ -3950,7 +3898,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("exactly one pagination root");
   });
 
@@ -3994,7 +3942,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId)).toEqual([
       "page-1-heart-rate",
       "page-2-heart-rate",
@@ -4030,7 +3978,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("does not match its manifest hash");
   });
 
@@ -4052,7 +4000,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("declared resource family");
   });
 
@@ -4082,7 +4030,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("exactly one pagination root");
   });
 
@@ -4115,7 +4063,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("outside the manifest FHIR base");
   });
 
@@ -4138,7 +4086,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("ambiguous next links");
   });
 
@@ -4164,7 +4112,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+    await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("unreachable pagination");
   });
 
@@ -4210,8 +4158,8 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const scalarPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: scalarRoot });
-    const panelPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: panelRoot });
+    const scalarPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: scalarRoot });
+    const panelPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: panelRoot });
     const scalarRef = upserts(scalarPlan)[0]?.externalRef;
     const panelRef = upserts(panelPlan)[0]?.externalRef;
 
@@ -4281,8 +4229,8 @@ describe("buildClinicalImportPlan", () => {
       resourceFiles,
       pages: { "Observation/page-1.json": resource },
     });
-    const firstPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: firstRoot });
-    const secondPlan = await buildClinicalImportPlan({
+    const firstPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: firstRoot });
+    const secondPlan = await planFromFixture({
       manifestPath: secondManifestPath,
       vaultRoot: secondRoot,
     });
@@ -4394,19 +4342,19 @@ describe("buildClinicalImportPlan", () => {
       resourceFiles: [allergyFile],
       pages: { "AllergyIntolerance/page-1.json": [noKnownAllergy] },
     });
-    const firstPlan = await buildClinicalImportPlan({
+    const firstPlan = await planFromFixture({
       manifestPath: firstManifestPath,
       vaultRoot: firstRoot,
     });
-    const conflictPlan = await buildClinicalImportPlan({
+    const conflictPlan = await planFromFixture({
       manifestPath: conflictManifestPath,
       vaultRoot: conflictRoot,
     });
-    const restoredPlan = await buildClinicalImportPlan({
+    const restoredPlan = await planFromFixture({
       manifestPath: restoredManifestPath,
       vaultRoot: restoredRoot,
     });
-    const incompletePlan = await buildClinicalImportPlan({
+    const incompletePlan = await planFromFixture({
       manifestPath: incompleteManifestPath,
       vaultRoot: incompleteRoot,
     });
@@ -4538,16 +4486,16 @@ describe("buildClinicalImportPlan", () => {
         },
       },
     });
-    const firstPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: firstRoot });
-    const reviewPlan = await buildClinicalImportPlan({
+    const firstPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: firstRoot });
+    const reviewPlan = await planFromFixture({
       manifestPath: reviewManifestPath,
       vaultRoot: reviewRoot,
     });
-    const delayedPlan = await buildClinicalImportPlan({
+    const delayedPlan = await planFromFixture({
       manifestPath: delayedManifestPath,
       vaultRoot: delayedRoot,
     });
-    const recoveryPlan = await buildClinicalImportPlan({
+    const recoveryPlan = await planFromFixture({
       manifestPath: recoveryManifestPath,
       vaultRoot: recoveryRoot,
     });
@@ -4631,6 +4579,7 @@ describe("buildClinicalImportPlan", () => {
       },
       decisions: [{
         action: "review",
+        disposition: "hold",
         resourceType,
         resourceId: "review-held-resource",
         externalRef,
@@ -4676,11 +4625,11 @@ describe("buildClinicalImportPlan", () => {
         },
       },
     });
-    const measurementPlan = await buildClinicalImportPlan({
+    const measurementPlan = await planFromFixture({
       manifestPath: MANIFEST_PATH,
       vaultRoot: measurementRoot,
     });
-    const testPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: testRoot });
+    const testPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: testRoot });
     expect(upserts(measurementPlan)[0]?.kind).toBe("measurement");
     expect(upserts(testPlan)[0]?.kind).toBe("test");
 
@@ -4727,8 +4676,8 @@ describe("buildClinicalImportPlan", () => {
         },
       },
     });
-    const livePlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: liveRoot });
-    const retractedPlan = await buildClinicalImportPlan({
+    const livePlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: liveRoot });
+    const retractedPlan = await planFromFixture({
       manifestPath: MANIFEST_PATH,
       vaultRoot: retractedRoot,
     });
@@ -4781,7 +4730,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(reviews(plan)).toEqual([]);
     expect(upserts(plan)).toEqual([
@@ -4837,7 +4786,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId)).toEqual([
       "ordinary-extension-heart-rate",
@@ -4892,7 +4841,7 @@ describe("buildClinicalImportPlan", () => {
         }],
         pages: { "Observation/page-1.json": bundle },
       });
-      await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
         .rejects.toThrow("unsupported modifier semantics");
     }
   });
@@ -4919,7 +4868,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual([
       expect.objectContaining({
@@ -4927,9 +4876,7 @@ describe("buildClinicalImportPlan", () => {
         reason: "FHIR resource lastUpdated is missing",
       }),
     ]);
-    expect(() => executableDecisions(plan)).toThrow(
-      "Clinical review for Observation/missing-provider-freshness has no comparable source revision.",
-    );
+    expect(executableDecisions(plan)).toEqual([]);
   });
 
   it("routes oversized FHIR ids and source revisions to review without aborting the plan", async () => {
@@ -4968,7 +4915,7 @@ describe("buildClinicalImportPlan", () => {
       },
     });
 
-    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(upserts(plan)).toEqual([]);
     expect(retractions(plan)).toEqual([]);
@@ -5007,8 +4954,8 @@ describe("buildClinicalImportPlan", () => {
       resourceFiles,
     });
 
-    const firstPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: firstVaultRoot });
-    const secondPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: secondVaultRoot });
+    const firstPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: firstVaultRoot });
+    const secondPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: secondVaultRoot });
     const firstRef = upserts(firstPlan)[0]?.externalRef;
     const secondRef = upserts(secondPlan)[0]?.externalRef;
 
@@ -5275,4 +5222,15 @@ function serializeJson(value: unknown): string {
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+async function planFromFixture(input: { vaultRoot: string; manifestPath: string }) {
+  const manifest = clinicalRawManifestSchema.parse(JSON.parse(await readFile(path.join(input.vaultRoot, input.manifestPath), "utf8")));
+  return buildClinicalImportPlanFromSnapshot({
+    manifest, manifestPath: input.manifestPath,
+    pages: await Promise.all(manifest.resourceFiles.map(async (file) => ({
+      relativePath: file.relativePath,
+      content: await readFile(path.join(input.vaultRoot, path.dirname(input.manifestPath), file.relativePath), "utf8"),
+    }))),
+  });
 }

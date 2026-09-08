@@ -14,6 +14,10 @@ Do not activate this lens merely because executable behavior, tests, fixtures,
 configuration, or proof scaffolding changed. The final ReviewGPT gate, when it
 applies, owns ordinary correctness and test adequacy.
 
+When used as the parent's checklist, the review-only restrictions apply to this
+inspection step, not to the surrounding authorized implementation. This file
+does not add a separate completion gate.
+
 Outcome:
 Determine whether the candidate implementation has truthful executable proof at
 the highest stable boundary. Report only missing proof that could conceal a

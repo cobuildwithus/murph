@@ -100,6 +100,8 @@ import {
   isRecognizedMurphOnboardingFollowupAutomation,
 } from './managed-automations.ts'
 
+export { getAssistantCronAutomationInspection } from './cron/inspection.js'
+export type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
 export type { AssistantCronTargetSnapshot } from '@murphai/operator-config/assistant-cli-contracts'
 export {
   reconcileAssistantCronDeliveryIntent,

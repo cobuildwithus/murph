@@ -1,4 +1,7 @@
-import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
+import {
+  MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -96,9 +99,9 @@ describe("production conversation canary runner", () => {
       inboundMessage({ text: "An older reply.", timestampMs: 999 }),
       inboundMessage({ spaceId: "other_space", text: "unrelated" }),
       inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
-      inboundMessage({ text: "A useful next question.", timestampMs: 2_000 }),
+      inboundMessage({ text: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal, timestampMs: 2_000 }),
       inboundMessage({ text: "A retained earlier reply.", timestampMs: 2_000 }),
-      inboundMessage({ text: "Start with a consistent wake time.", timestampMs: 3_000 }),
+      inboundMessage({ text: "What would you most like to improve about your health?", timestampMs: 3_000 }),
     ];
 
     await expect(runLinqProductionCanary(TEST_ENV)).resolves.toEqual({
@@ -109,13 +112,17 @@ describe("production conversation canary runner", () => {
         deliveryClaimCount: 1,
       },
       turns: [
-        { latencyMs: 15_000, turn: 1 },
-        { latencyMs: 15_000, turn: 2 },
-        { latencyMs: 15_000, turn: 3 },
+        { latencyMs: 15_000, stage: "welcome", turn: 1 },
+        { latencyMs: 15_000, stage: "identity-question", turn: 2 },
+        { latencyMs: 15_000, stage: "runtime-identity", turn: 3 },
       ],
     });
     expect(mocks.messages).toEqual([]);
-    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+    expect(mocks.spaceSend.mock.calls.map(([text]) => text)).toEqual([
+      "Hey Murph",
+      "Yes, ready.",
+      "My name is Robin. I am 32 and a woman.",
+    ]);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
@@ -139,10 +146,12 @@ describe("production conversation canary runner", () => {
       inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
     ];
 
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toHaveProperty(
+    const report = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, report)).rejects.toHaveProperty(
       "name",
       "reply-latency-budget-exceeded; turn=1; metric=send_to_reply; elapsed_ms=20000; budget_ms=20000",
     );
+    expect(report).toHaveBeenCalledWith({ latencyMs: 20_000, stage: "welcome", turn: 1 });
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
@@ -158,6 +167,69 @@ describe("production conversation canary runner", () => {
       "name",
       "reply-latency-budget-exceeded; turn=2; metric=inter_reply_gap; elapsed_ms=20000; budget_ms=20000",
     );
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("reports a slow first runtime identity reply without truncating its latency", async () => {
+    mocks.now = [0, 1_000, 1_000, 2_000, 2_000, 48_000];
+    mocks.sendResults = [true, true, true];
+    mocks.messages = [
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+      inboundMessage({ text: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual }),
+      inboundMessage({ text: "What would you most like to improve about your health?" }),
+    ];
+    const report = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, report)).rejects.toMatchObject({
+      name: "reply-latency-budget-exceeded; turn=3; metric=send_to_reply; elapsed_ms=46000; budget_ms=20000",
+    });
+    expect(report.mock.calls.map(([result]) => result)).toEqual([
+      { latencyMs: 1_000, stage: "welcome", turn: 1 },
+      { latencyMs: 1_000, stage: "identity-question", turn: 2 },
+      { latencyMs: 46_000, stage: "runtime-identity", turn: 3 },
+    ]);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual,
+    MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+  ])("rejects repeated opening copy on the runtime identity turn", async (reply) => {
+    mocks.now = [0, 1_000, 1_000, 2_000, 2_000, 3_000];
+    mocks.sendResults = [true, true, true];
+    mocks.messages = [
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+      inboundMessage({ text: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual }),
+      inboundMessage({ text: reply }),
+    ];
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
+      name: "reply-semantics-invalid",
+    });
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("does not mistake a non-identity second reply for the opening handoff", async () => {
+    mocks.now = [0, 10_000, 10_000, 15_000];
+    mocks.sendResults = [true, true];
+    mocks.messages = [
+      inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }),
+      inboundMessage({ text: "Here is a sleep plan." }),
+    ];
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
+      name: "reply-semantics-invalid",
+    });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(2);
+  });
+
+  it("identifies the unavailable turn after preserving earlier timing evidence", async () => {
+    mocks.now = [0, 10_000, 10_000];
+    mocks.sendResults = [true, true];
+    mocks.messages = [inboundMessage({ text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE })];
+    const report = vi.fn();
+    await expect(runLinqProductionCanary(TEST_ENV, report)).rejects.toMatchObject({
+      name: "reply-unavailable; turn=2; stage=identity-question; wait_limit_ms=90000",
+    });
+    expect(report).toHaveBeenCalledOnce();
+    expect(report).toHaveBeenCalledWith({ latencyMs: 10_000, stage: "welcome", turn: 1 });
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 });

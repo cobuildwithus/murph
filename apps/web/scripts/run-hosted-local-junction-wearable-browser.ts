@@ -271,6 +271,16 @@ async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession
     });
     const browser = await chromium.connectOverCDP(kernelBrowser.cdpWsUrl, {
       timeout: config.timeoutMs,
+    }).catch(async (error: unknown) => {
+      // Probe through Kernel's server-side transport without reading page content.
+      // Keep the original CDP failure and emit only the fixed diagnostic outcome.
+      const remoteResponsive = await kernelClient.executePlaywright({
+        code: "return true;",
+        sessionId: kernelBrowser.sessionId,
+        timeoutMs: 10_000,
+      }).then(({ result }) => result === true).catch(() => false);
+      process.stderr.write(`Kernel server-side browser probe: ${remoteResponsive ? "responsive" : "unavailable"}\n`);
+      throw error;
     });
     const context = browser.contexts()[0];
     if (!context) {

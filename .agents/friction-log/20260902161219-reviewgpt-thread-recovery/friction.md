@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT thread recovery wedges on duplicate conversation tabs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2787'
 ---
 
 ## Expected Behavior

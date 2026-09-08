@@ -33,6 +33,7 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
   constructor(state: DurableObjectStateLike, env: WorkerEnvironmentSource) {
     const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
       exactUser: env.RUNNER_CONTAINER,
+      next: env.NEXT_RUNNER_CONTAINER,
       standby: env.STANDBY_RUNNER_CONTAINER ?? null,
     });
     const testRunner = new HostedUserRunnerWithTestControls(
@@ -43,7 +44,6 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
       runnerContainerNamespace,
       env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
       env.STANDBY_COORDINATOR ?? null,
-      env.STANDBY_RUNNER_CONTAINER ?? null,
     );
     super(state, env, testRunner);
     this.testRunner = testRunner;

@@ -628,6 +628,7 @@ export const clinicalImportRetractDecisionSchema = eventImportRetractionDecision
 export const clinicalImportReviewDecisionSchema = z
   .object({
     action: z.literal("review"),
+    disposition: z.enum(["raw-only", "hold", "incomplete"]),
     resourceType: clinicalFhirResourceTypeSchema,
     resourceId: z.string().min(1).max(200).optional(),
     externalRef: clinicalFhirExternalRefSchema.optional(),
@@ -680,10 +681,6 @@ export function fhirResourceTypeToSlug(resourceType: string): string {
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/-+/gu, "-")
     .replace(/^-+|-+$/gu, "");
-}
-
-export function clinicalFacetSlug(value: string): string {
-  return fhirResourceTypeToSlug(value);
 }
 
 export function normalizeClinicalFhirPatientId(value: string): string | null {
@@ -981,4 +978,33 @@ function retrievalSliceIdentityKey(input: {
   sliceId: string;
 }): string {
   return `${input.queryScopeId}\n${input.sliceId}`;
+}
+
+/** Match the SMART operation that produced the retained evidence. */
+export function clinicalFhirScopeAllowsOperation(
+  scope: string,
+  resourceType: string,
+  operation: "read" | "search",
+): boolean {
+  const match = /^(?:patient|user|system)\/([^\s.]+)\.([a-z]+)$/u.exec(scope);
+  if (!match || (match[1] !== "*" && match[1] !== resourceType)) return false;
+  const permission = match[2] ?? "";
+  return permission === "read"
+    || (/^c?r?u?d?s?$/u.test(permission) && permission.includes(operation === "read" ? "r" : "s"));
+}
+
+/** Search warnings must not establish complete coverage or clinical absence. */
+export function clinicalFhirPageHasIncompleteSearchOutcome(content: string): boolean {
+  const value: unknown = JSON.parse(content);
+  if (!value || typeof value !== "object" || !("resourceType" in value) || value.resourceType !== "Bundle"
+    || !("entry" in value) || !Array.isArray(value.entry)) return false;
+  return value.entry.some((entry: unknown) => {
+    if (!entry || typeof entry !== "object" || !("resource" in entry)) return false;
+    const resource = entry.resource;
+    if (!resource || typeof resource !== "object" || !("resourceType" in resource)
+      || resource.resourceType !== "OperationOutcome") return false;
+    if (!("issue" in resource) || !Array.isArray(resource.issue) || resource.issue.length === 0) return true;
+    return resource.issue.some((issue: unknown) => !issue || typeof issue !== "object"
+      || !("severity" in issue) || issue.severity !== "information");
+  });
 }

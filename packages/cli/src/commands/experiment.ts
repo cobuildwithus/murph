@@ -2082,6 +2082,21 @@ export function registerExperimentCommands(
     output: experimentUpdateResultSchema,
     async run({ args, options }) {
       const hasStructuredHydration = options.hydrateProtocolDefaults === true
+      const hasAnalysisFields =
+        options.primaryBiomarkerKey !== undefined ||
+        options.primaryOutcomeKey !== undefined ||
+        options.primaryOutcomeKind !== undefined ||
+        options.primaryOutcomeLabel !== undefined ||
+        options.primaryOutcomeSessionField !== undefined ||
+        options.primaryOutcomeSourceMetricKey !== undefined ||
+        options.primaryOutcomeUnit !== undefined ||
+        options.comparisonStatistic !== undefined ||
+        options.secondaryBiomarkerKey !== undefined ||
+        options.desiredDirection !== undefined ||
+        options.expectedDirection !== undefined ||
+        options.analysisAnchor !== undefined ||
+        options.plannedMeasurement !== undefined ||
+        options.analysisNote !== undefined
       const hasTypedSetupFields =
         options.protocolKey !== undefined ||
         options.pageRevisionId !== undefined ||
@@ -2102,20 +2117,7 @@ export function registerExperimentCommands(
         options.sessionField !== undefined ||
         options.confounderField !== undefined ||
         options.stopCondition !== undefined ||
-        options.primaryBiomarkerKey !== undefined ||
-        options.primaryOutcomeKey !== undefined ||
-        options.primaryOutcomeKind !== undefined ||
-        options.primaryOutcomeLabel !== undefined ||
-        options.primaryOutcomeSessionField !== undefined ||
-        options.primaryOutcomeSourceMetricKey !== undefined ||
-        options.primaryOutcomeUnit !== undefined ||
-        options.comparisonStatistic !== undefined ||
-        options.secondaryBiomarkerKey !== undefined ||
-        options.desiredDirection !== undefined ||
-        options.expectedDirection !== undefined ||
-        options.analysisAnchor !== undefined ||
-        options.plannedMeasurement !== undefined ||
-        options.analysisNote !== undefined ||
+        hasAnalysisFields ||
         options.onboardingCompletedAt !== undefined ||
         options.setupAnswer !== undefined ||
         options.safetyCautionLevel !== undefined ||
@@ -2138,36 +2140,27 @@ export function registerExperimentCommands(
         (options.status !== undefined && !hasStructuredFields) ||
         options.body !== undefined ||
         options.tag !== undefined
-      const hasAnyUserField =
-        hasScalarWriteFields ||
-        options.status !== undefined ||
-        hasStructuredFields
-
-      if (!hasAnyUserField) {
+      if (!hasScalarWriteFields && !hasStructuredFields) {
         throw new VaultCliError(
           'invalid_option',
           'experiment edit requires at least one typed field to change.',
         )
       }
 
+      const updateScalarFields = () => services.core.updateExperiment({
+        vault: String(options.vault ?? ''),
+        requestId: requestIdFromOptions(options),
+        lookup: args.id,
+        title: options.title,
+        hypothesis: options.hypothesis,
+        startedOn: options.startedOn,
+        ...(hasStructuredFields ? {} : { status: options.status }),
+        body: options.body,
+        tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
+      })
+
       if (!hasStructuredFields) {
-        if (!hasScalarWriteFields) {
-          throw new VaultCliError(
-            'invalid_option',
-            'experiment edit requires at least one typed field to change.',
-          )
-        }
-        return services.core.updateExperiment({
-          vault: String(options.vault ?? ''),
-          requestId: requestIdFromOptions(options),
-          lookup: args.id,
-          title: options.title,
-          hypothesis: options.hypothesis,
-          startedOn: options.startedOn,
-          status: options.status,
-          body: options.body,
-          tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
-        })
+        return updateScalarFields()
       }
 
       const hydrationResult = hasStructuredHydration
@@ -2196,21 +2189,7 @@ export function registerExperimentCommands(
               ),
               safetyNote: normalizeRepeatableTextFlagOption(options.safetyNote),
               contextNote: normalizeRepeatableTextFlagOption(options.contextNote),
-              skipAnalysisPlanDefaults:
-                options.primaryBiomarkerKey !== undefined ||
-                options.primaryOutcomeKey !== undefined ||
-                options.primaryOutcomeKind !== undefined ||
-                options.primaryOutcomeLabel !== undefined ||
-                options.primaryOutcomeSessionField !== undefined ||
-                options.primaryOutcomeSourceMetricKey !== undefined ||
-                options.primaryOutcomeUnit !== undefined ||
-                options.comparisonStatistic !== undefined ||
-                options.secondaryBiomarkerKey !== undefined ||
-                options.desiredDirection !== undefined ||
-                options.expectedDirection !== undefined ||
-                options.analysisAnchor !== undefined ||
-                options.plannedMeasurement !== undefined ||
-                options.analysisNote !== undefined,
+              skipAnalysisPlanDefaults: hasAnalysisFields,
             },
           })
         : undefined
@@ -2225,16 +2204,7 @@ export function registerExperimentCommands(
         if (!hasScalarWriteFields) {
           return hydrationResult
         }
-        return services.core.updateExperiment({
-          vault: String(options.vault ?? ''),
-          requestId: requestIdFromOptions(options),
-          lookup: args.id,
-          title: options.title,
-          hypothesis: options.hypothesis,
-          startedOn: options.startedOn,
-          body: options.body,
-          tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
-        })
+        return updateScalarFields()
       }
 
       const structuredResult = await services.core.applyExperimentOnboarding({
@@ -2310,16 +2280,7 @@ export function registerExperimentCommands(
         return structuredResult
       }
 
-      return services.core.updateExperiment({
-        vault: String(options.vault ?? ''),
-        requestId: requestIdFromOptions(options),
-        lookup: args.id,
-        title: options.title,
-        hypothesis: options.hypothesis,
-        startedOn: options.startedOn,
-        body: options.body,
-        tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
-      })
+      return updateScalarFields()
     },
   })
 

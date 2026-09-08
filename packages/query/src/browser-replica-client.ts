@@ -92,7 +92,6 @@ export {
   BrowserVaultMetricBucketUnavailableError,
   createBrowserVaultCoreQueryClient,
   createBrowserVaultLabsQueryClient,
-  createBrowserVaultLoadedQueryClients,
   createBrowserVaultInteractiveMetricsQueryClient,
   createBrowserVaultInteractiveQueryClient,
   createBrowserVaultMetricsQueryClient,
@@ -107,7 +106,6 @@ export {
   requireBrowserVaultMetricBucketId,
 } from "./browser-replica/metric-buckets.ts";
 export type { BrowserVaultMetricBucketId } from "./browser-replica/metric-buckets.ts";
-export type { BrowserVaultLoadedQueryClients } from "./browser-replica/query.ts";
 export { buildBrowserVaultExperimentRunCards } from "./browser-replica/experiment-run-cards.ts";
 export {
   resolveBrowserVaultExperimentEntityMetricKeys,

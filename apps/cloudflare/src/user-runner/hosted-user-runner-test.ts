@@ -136,13 +136,14 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
+    const record = await this.stateStore.readState();
     const token = await this.stateStore.beginWriteFence({
-      runnerContainerName: input.sameWorkerVersion
+      runnerContainerName: record.pendingRunnerContainerName ?? (input.sameWorkerVersion
         ? resolveHostedExecutionRunnerContainerName({
             source: this.testRunnerRuntimeEnvSource,
             userId: input.userId,
           })
-        : input.userId,
+        : input.userId),
       userId: input.userId,
     });
     if (typeof input.startedAgoMs === "number") {

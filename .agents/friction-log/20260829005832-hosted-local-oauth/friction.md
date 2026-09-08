@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local OAuth start compares the callback host with the reverse-proxy upstream host'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2728'
 ---
 
 ## Expected Behavior

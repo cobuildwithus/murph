@@ -8,7 +8,6 @@ import {
   type AssistantContextSnapshotDirtyDomain,
 } from "@murphai/assistant-engine";
 import {
-  applyHostedCanonicalWriteReceipt,
   type HostedCanonicalWriteReceiptContentRef,
 } from "@murphai/core";
 import {
@@ -64,6 +63,7 @@ import {
 import {
   parseHostedCanonicalWriteReceiptArtifact,
 } from "./canonical-write-receipt.ts";
+import { applyHostedCanonicalWriteReceiptWithMedia } from "./canonical-write-media.ts";
 
 import {
   createHostedArtifactMaterializer,
@@ -118,7 +118,7 @@ export interface HostedWorkspaceRuntimeRestoreResult
 
 export type HostedWorkspaceRuntimeRestorePlatform = Pick<
   HostedRuntimePlatform,
-  "artifactStore" | "logPort" | "workspaceSnapshotPort"
+  "artifactStore" | "logPort" | "mediaStore" | "workspaceSnapshotPort"
 >;
 
 export type HostedWorkspaceWarmIdleCheckpointOpenResult =
@@ -205,14 +205,14 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   };
   const recoverCanonicalWriteReceipts = async (
     vaultRoot: string,
-    materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null,
+    materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer,
   ) => {
     try {
       return {
         count: await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+          materializeWorkspaceArtifacts,
           platform: input.platform,
           status: input.workspace?.redactedStatus ?? null,
-          materializeWorkspaceArtifacts,
           vaultRoot,
         }),
         restored: null,
@@ -253,8 +253,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     });
     if (warmRestored) {
       const receiptRecovery = await recoverCanonicalWriteReceipts(
-        warmRestored.vaultRoot,
-        warmRestored.materializeWorkspaceArtifacts,
+        warmRestored.vaultRoot, warmRestored.materializeWorkspaceArtifacts,
       );
       if (receiptRecovery.restored) {
         return receiptRecovery.restored;
@@ -286,7 +285,15 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
     });
-    const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
+    const materializeWorkspaceArtifacts = createHostedWorkspaceRuntimeArtifactMaterializer({
+      materializedArtifactPaths: restoredMaterializedArtifactPaths,
+      platform: input.platform,
+      restored,
+      readBundles: materializerBundles,
+    });
+    const receiptRecovery = await recoverCanonicalWriteReceipts(
+      restored.vaultRoot, materializeWorkspaceArtifacts,
+    );
     if (receiptRecovery.restored) {
       return receiptRecovery.restored;
     }
@@ -295,12 +302,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       ...restored,
       canonicalWriteReceiptCount: receiptRecovery.count,
       canonicalWriteReceiptRecoveryFailed: false,
-      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths: restoredMaterializedArtifactPaths,
-        platform: input.platform,
-        restored,
-        readBundles: materializerBundles,
-      }),
+      materializeWorkspaceArtifacts,
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "snapshot",
       restoreWasCold: true,
@@ -433,8 +435,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     readBundles: materializerBundles,
   });
   const receiptRecovery = await recoverCanonicalWriteReceipts(
-    restored.vaultRoot,
-    materializeWorkspaceArtifacts,
+    restored.vaultRoot, materializeWorkspaceArtifacts,
   );
   if (receiptRecovery.restored) {
     return receiptRecovery.restored;
@@ -1058,13 +1059,14 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
     }),
     bundles: input.readBundles,
     materializedArtifactPaths: input.materializedArtifactPaths,
+    mediaStore: input.platform.mediaStore ?? null,
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,
   });
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
-  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer;
   platform: HostedWorkspaceRuntimeRestorePlatform;
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
@@ -1119,10 +1121,15 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
       for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
         dirtyDomains.add(domain);
       }
-      await input.materializeWorkspaceArtifacts?.(
-        parsed.actions.map((action) => action.targetRelativePath),
-      );
-      await applyHostedCanonicalWriteReceipt({
+      // Guarded replacements need their preimage. Ordinary media receipts only
+      // restore references and must not download their payloads.
+      const preimagePaths = parsed.actions.filter((action) =>
+        action.kind === "text_upsert" && action.expectedSha256 !== undefined
+      ).map((action) => action.targetRelativePath);
+      if (preimagePaths.length > 0) {
+        await input.materializeWorkspaceArtifacts?.(preimagePaths);
+      }
+      await applyHostedCanonicalWriteReceiptWithMedia({
         readPayload: async (ref) =>
           await readHostedCanonicalWritePayloadForRestore({
             platform: input.platform,

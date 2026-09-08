@@ -17034,6 +17034,106 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it.each(["approved", "denied", "changed-file", "wrong-target", "stale-before-upload"] as const)(
+    "handles %s Telegram file delivery through the approval and provider boundaries",
+    async (scenario) => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const vaultFile = {
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: bytes.length,
+      };
+      const effect = createEffect({
+        bindingDeliveryKind: "thread", bindingDeliveryTarget: "123",
+        channel: "telegram", media: [vaultFile], transportIdempotent: false,
+      });
+      const intent = createPendingHostedDeliveryIntent({
+        bindingDelivery: { kind: "thread", target: "123" },
+        dedupeKey: effect.fingerprint,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        explicitTarget: null,
+        intentId: "intent_123",
+        media: [vaultFile], operation: null,
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(createMirrorState(intent));
+      mocks.readAssistantOutboxIntent.mockResolvedValue(intent);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      if (scenario === "changed-file") {
+        mocks.readVerifiedAssistantVaultFileBytes.mockRejectedValueOnce(
+          Object.assign(new Error("File changed"), { code: "ASSISTANT_VAULT_FILE_CHANGED" }),
+        );
+      }
+      let fileRead = false;
+      if (scenario === "stale-before-upload") {
+        mocks.readVerifiedAssistantVaultFileBytes.mockImplementationOnce(async () => {
+          fileRead = true;
+          return bytes;
+        });
+      }
+      const actionApprovalPort = {
+        consume: vi.fn(async () => ({
+          approvalGeneration: vaultFile.approvalGeneration,
+          approvalId: vaultFile.approvalId,
+          status: scenario === "denied" ? "denied" as const : "approved" as const,
+        })),
+        read: vi.fn(), request: vi.fn(),
+      };
+      const providerFetch = vi.fn<typeof fetch>(async () => Response.json({ ok: true, result: { message_id: 7 } }));
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendTelegramFile({
+          file: vaultFile, target: scenario === "wrong-target" ? "456" : "123",
+        });
+        return createDispatchResult({
+          delivery: createDelivery({ channel: "telegram", providerMessageId: delivery.providerMessageId, target: delivery.target }),
+          status: "sent",
+        });
+      });
+      const result = drainHostedPreparedAssistantDeliveries({
+        actionApprovalPort, assistantDeliveryEffects: [effect],
+        assertLiveness: async () => {
+          if (fileRead) {
+            throw Object.assign(new Error("Delivery authority expired"), {
+              code: "SYNTHETIC_DELIVERY_AUTHORITY_EXPIRED",
+            });
+          }
+        },
+        effectsPort: createHostedRuntimeEffectsPortStub(), providerFetch,
+        platformEnv: { TELEGRAM_BOT_TOKEN: "telegram-token" },
+        vaultRoot: HOSTED_WAKE.vaultRoot, wake: HOSTED_WAKE.wake,
+      });
+      if (scenario !== "approved") {
+        if (scenario === "stale-before-upload") {
+          await expect(result).rejects.toMatchObject({
+            code: "SYNTHETIC_DELIVERY_AUTHORITY_EXPIRED",
+            deliveryMayHaveSucceeded: false,
+          });
+        } else {
+          await expect(result).rejects.toThrow();
+        }
+        expect(providerFetch).not.toHaveBeenCalled();
+        if (scenario === "wrong-target") expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+        return;
+      }
+      expect(await result).toEqual([expect.objectContaining({
+        deliveryChannel: "telegram", deliveryStatus: "sent", providerMessageId: "7",
+      })]);
+      expect(actionApprovalPort.consume).toHaveBeenCalledTimes(1);
+      expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({ file: vaultFile, vaultRoot: HOSTED_WAKE.vaultRoot });
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      expect(actionApprovalPort.consume.mock.invocationCallOrder[0]).toBeLessThan(providerFetch.mock.invocationCallOrder[0]!);
+      const [url, init] = providerFetch.mock.calls[0]!;
+      expect(String(url)).toContain("/sendDocument");
+      const body = init!.body as FormData;
+      expect(body.get("chat_id")).toBe("123");
+      expect(new Uint8Array(await (body.get("document") as File).arrayBuffer())).toEqual(bytes);
+    },
+  );
+
   it("consumes approved vault-file actions before hosted Linq delivery", async () => {
     const vaultFile = {
       approvalGeneration: "b".repeat(64),

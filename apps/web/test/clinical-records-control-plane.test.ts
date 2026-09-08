@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   exchangeSmartAuthorizationCode: vi.fn(),
   getPrisma: vi.fn(),
   openClinicalOauthVerifier: vi.fn(),
+  openClinicalConnectionSecret: vi.fn(),
   readGrantedSmartResourceTypes: vi.fn(),
   resolveClinicalProviderDirectoryEntry: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
 }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalOauthVerifier: mocks.openClinicalOauthVerifier,
+  openClinicalConnectionSecret: mocks.openClinicalConnectionSecret,
   sealClinicalConnectionFhirBaseUrl: mocks.sealClinicalConnectionFhirBaseUrl,
   sealClinicalConnectionSecret: mocks.sealClinicalConnectionSecret,
   sealClinicalOauthVerifier: mocks.sealClinicalOauthVerifier,
@@ -114,6 +116,7 @@ describe("Clinical Records authorization persistence", () => {
       tokenEndpoint: "https://fhir.example.test/oauth2/token",
     });
     mocks.openClinicalOauthVerifier.mockResolvedValue("pkce-verifier");
+    mocks.openClinicalConnectionSecret.mockResolvedValue(createHash("sha256").update("patient-low-entropy").digest("hex"));
     mocks.exchangeSmartAuthorizationCode.mockResolvedValue({
       accessToken: "access-token",
       expiresInSeconds: 3_600,
@@ -144,6 +147,95 @@ describe("Clinical Records authorization persistence", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it.each(["active", "disconnected", "needs_reauth"] as const)(
+    "reuses a finalized %s source with a fresh credential epoch and run",
+    async (status) => {
+      const existing = existingConnection(status);
+      existing.retrievalRuns[0] = {
+        completedAt: new Date("2026-07-09T12:00:00Z"),
+        status: status === "needs_reauth" ? "needs_reauth" : "completed",
+        outcomeCountsJson: {},
+      };
+      const harness = createHarness(existing);
+      mocks.getPrisma.mockReturnValue(harness.prisma);
+      await finishAuthorization();
+      expect(harness.connectionCreate).not.toHaveBeenCalled();
+      expect(harness.tx.clinicalRecordConnection.update).toHaveBeenCalledWith({
+        where: { id: existing.id },
+        data: expect.objectContaining({
+          id: existing.id,
+          retrievalGeneration: 2,
+          tokenVersion: 2,
+          status: "active",
+          disconnectedAt: null,
+          patientBindingEncrypted: "sealed-patientBinding",
+        }),
+      });
+      expect(harness.retrievalRunCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ connectionId: existing.id, generation: 2 }),
+      });
+      expect(mocks.sealClinicalConnectionSecret).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionId: existing.id,
+          tokenVersion: 2,
+          field: "accessToken",
+        }),
+      );
+    },
+  );
+
+  it("bounds new source retention under the member lock", async () => {
+    const harness = createHarness(null);
+    harness.tx.clinicalRecordConnection.findMany.mockResolvedValue(
+      Array.from({ length: 20 }, (_, index) => ({ id: `source_${index}` })),
+    );
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await expect(finishAuthorization()).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_SOURCE_LIMIT_REACHED",
+    });
+    expect(harness.connectionCreate).not.toHaveBeenCalled();
+    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed patient before replacing a source", async () => {
+    const existing = existingConnection();
+    existing.retrievalRuns[0]!.completedAt = new Date("2026-07-09T12:00:00Z");
+    const harness = createHarness(existing);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    mocks.openClinicalConnectionSecret.mockResolvedValue("different-patient-binding");
+    await expect(finishAuthorization()).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_PATIENT_BINDING_CHANGED",
+    });
+    expect(harness.tx.clinicalRecordConnection.update).not.toHaveBeenCalled();
+    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects callbacks that predate disconnect even after consent is renewed", async () => {
+    const existing = existingConnection("disconnected");
+    existing.retrievalRuns[0]!.completedAt = new Date("2026-07-09T12:00:00Z");
+    existing.disconnectedAt = new Date("2026-07-11T12:00:00Z");
+    const harness = createHarness(existing);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await expect(finishAuthorization()).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
+    });
+    expect(harness.tx.clinicalRecordConnection.update).not.toHaveBeenCalled();
+    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
+  });
+
+  it("bounds retained snapshots per source before exchanging more credentials", async () => {
+    const existing = existingConnection();
+    existing.retrievalGeneration = 8;
+    existing.retrievalRuns[0]!.completedAt = new Date("2026-07-09T12:00:00Z");
+    const harness = createHarness(existing);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://join.example.test/api/clinical-records/connect-intents/start", { headers: { origin: "https://join.example.test" }, method: "POST" }),
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORD_IMPORT_LIMIT_REACHED" });
+    expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
   });
 
   it("persists only the provider base hash in the OAuth session", async () => {
@@ -231,12 +323,13 @@ describe("Clinical Records authorization persistence", () => {
     const created = harness.connectionCreate.mock.calls[0]?.[0]?.data as Record<string, unknown>;
     expect(created.patientIdEncrypted).toBe("sealed-patientId");
     expect(created.fhirBaseUrlEncrypted).toBe("sealed-fhir-base-url");
-    expect(created.refreshTokenEncrypted).toBeNull();
+    expect(created).not.toHaveProperty("refreshTokenEncrypted");
     expect(created.retrievalGeneration).toBe(1);
     expect(created).not.toHaveProperty("fhirBaseUrl");
     expect(created).not.toHaveProperty("patientIdHash");
     expect(mocks.sealClinicalConnectionSecret.mock.calls.map(([input]) => input.field)).toEqual([
       "patientId",
+      "patientBinding",
       "accessToken",
     ]);
     expect(harness.retrievalRunCreate).toHaveBeenCalledWith({
@@ -322,7 +415,7 @@ describe("Clinical Records authorization persistence", () => {
       "intent:complete",
       "wake:append",
     ]);
-    expect(harness.connectionFindUnique).toHaveBeenCalledTimes(1);
+    expect(harness.connectionFindUnique).toHaveBeenCalledTimes(2);
     expect(harness.durableConnections).toHaveLength(1);
     expect(harness.durableRetrievalRuns).toHaveLength(1);
   });
@@ -377,6 +470,7 @@ describe("Clinical Records authorization persistence", () => {
       "seal:fhirBaseUrl:start",
       "seal:fhirBaseUrl:end",
       "seal:patientId",
+      "seal:patientBinding",
       "seal:accessToken",
       "transaction:2:start",
       "connection:create",
@@ -393,6 +487,7 @@ describe("Clinical Records authorization persistence", () => {
         field: "patientId",
         tokenVersion: 1,
       }),
+      expect.objectContaining({ connectionId: fhirSealInput?.connectionId, field: "patientBinding", tokenVersion: 1 }),
       expect.objectContaining({
         connectionId: fhirSealInput?.connectionId,
         field: "accessToken",
@@ -525,7 +620,7 @@ describe("Clinical Records authorization persistence", () => {
       prisma: harness.tx,
       userId: MEMBER_ID,
     });
-    expect(sealScopes).toHaveLength(3);
+    expect(sealScopes).toHaveLength(4);
     expect(sealScopes.every((scope) => scope === prewarmScope)).toBe(true);
     expect(rootKeyAtPersistenceTransactionOpen).toEqual([0, 0, 0, 0]);
     expect(issuedRootKeys.map((rootKey) => [...rootKey])).toEqual([
@@ -665,7 +760,11 @@ describe("Clinical Records authorization persistence", () => {
 
     await finishAuthorization();
 
-    expect(harness.oauthSessionLock).toHaveBeenCalledTimes(1);
+    expect(harness.oauthSessionLock).toHaveBeenCalledTimes(3);
+    expect(String(harness.oauthSessionLock.mock.calls[1]?.[0].join("?"))).toContain("hosted_member");
+    expect(harness.oauthSessionLock.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.assertHostedLaunchRequiredConsentGranted.mock.invocationCallOrder.at(-1)!,
+    );
     const lockSql = String(
       harness.oauthSessionLock.mock.calls[0]?.[0].join("?"),
     );
@@ -826,6 +925,8 @@ function createHarness(
     clinicalRecordConnection: {
       create: connectionCreate,
       findUnique: connectionFindUnique,
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn(async (input: { data: Record<string, unknown> }) => input.data),
     },
     clinicalRecordOauthSession: {
       create: oauthSessionCreate,
@@ -917,6 +1018,12 @@ function existingConnection(status: "active" | "disconnected" | "needs_reauth" =
   return {
     id: "crc_existing",
     status,
+    tokenVersion: 1,
+    retrievalGeneration: 1,
+    patientBindingEncrypted: "sealed-patientBinding",
+    fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
+    disconnectedAt: null as Date | null,
+    retrievalRuns: [{ completedAt: null as Date | null, status: "retrieving", outcomeCountsJson: null as Record<string, unknown> | null }],
   };
 }
 

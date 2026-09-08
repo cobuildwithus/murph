@@ -66,6 +66,8 @@ import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/web
 import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 import { runHostedLinqMessageEditPreparedTransaction } from "@/src/lib/hosted-onboarding/webhook-service";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { readUnchangedHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-linq";
+import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
 
 const handlerPrismaClients = vi.hoisted(() => [] as PrismaClient[]);
 
@@ -175,6 +177,71 @@ async function acquireHostedMailboxSourceLocksForTest(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
+    it.each([false, true])("repairs a conflicting pending route without disturbing its home (has home: %s)", async (hasHome) => {
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `member_clean_binding_${randomUUID()}`;
+      const otherMemberId = `member_pending_conflict_${randomUUID()}`;
+      const chatId = `chat_clean_binding_${randomUUID()}`;
+      const homeLineAssignedAt = new Date("2026-08-01T00:00:00Z");
+      const recipientPhone = "+15550000000";
+      const participantContact = createHostedLinqParticipantContact({ kind: "phone", value: "+15551112222" });
+      if (!participantContact) throw new Error("Expected a synthetic contact.");
+      const release = createDeferred();
+      const locked = createDeferred();
+      let blockedTransaction: Promise<void> | null = null;
+      const otherHomeKey = hasHome ? createHostedLinqChatLookupKey(`other-${chatId}`) : null;
+      try {
+        await client.hostedMember.createMany({ data: [{ id: memberId }, { id: otherMemberId }] });
+        const bind = (tx: Prisma.TransactionClient) => upsertHostedMemberHomeLinqBindingTx({
+          clearPending: true, homeLineAssignedAt, linqChatId: chatId, memberId,
+          participantContact, prisma: tx, recipientPhone,
+        });
+        await client.$transaction(bind, transactionOptions);
+        await client.hostedMemberRouting.create({ data: {
+          memberId: otherMemberId,
+          linqChatLookupKey: otherHomeKey,
+          linqChatIdEncrypted: hasHome ? "synthetic-other-home" : null,
+          pendingLinqChatLookupKey: createHostedLinqChatLookupKey(chatId),
+          pendingLinqChatIdEncrypted: "synthetic-pending-chat",
+        } });
+        const admit = () => client.$transaction(async (tx) => {
+          await acquireHostedLinqParticipantPhoneLockTx({ phoneNumber: participantContact.value, tx });
+          await acquireHostedLinqChatOwnershipLockTx({ chatId, tx });
+          await lockHostedMemberRow(tx, memberId);
+          const routingRecord = await tx.hostedMemberRouting.findUnique({ where: { memberId } });
+          const retained = await readUnchangedHostedMemberHomeLinqBindingTx({
+            chatId, homeLineAssignedAt, memberId, prisma: tx, recipientPhone, routingRecord,
+          });
+          return retained ?? bind(tx);
+        }, transactionOptions);
+        blockedTransaction = blocker.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, otherMemberId);
+          locked.resolve();
+          await release.promise;
+        }, transactionOptions);
+        await locked.promise;
+        await expect(admit()).rejects.toMatchObject({ code: "HOSTED_LINQ_PENDING_ROUTE_BUSY", retryable: true });
+        expect(await client.hostedMemberRouting.findUnique({
+          where: { memberId: otherMemberId }, select: { pendingLinqChatLookupKey: true },
+        })).toEqual({ pendingLinqChatLookupKey: createHostedLinqChatLookupKey(chatId) });
+        release.resolve();
+        await blockedTransaction;
+        const participant = { kind: participantContact.kind, lookupKey: participantContact.lookupKey };
+        await expect(admit()).resolves.toEqual(participant);
+        await expect(admit()).resolves.toEqual(participant);
+        expect(await client.hostedMemberRouting.findUnique({
+          where: { memberId: otherMemberId },
+          select: { linqChatLookupKey: true, pendingLinqChatLookupKey: true, pendingLinqChatIdEncrypted: true },
+        })).toEqual({ linqChatLookupKey: otherHomeKey, pendingLinqChatLookupKey: null, pendingLinqChatIdEncrypted: null });
+      } finally {
+        release.resolve();
+        await blockedTransaction;
+        await client.hostedMember.deleteMany({ where: { id: { in: [memberId, otherMemberId] } } });
+        await disconnectClients([client, blocker]);
+      }
+    });
+
     it("serializes edits and rejects a stale prepared lineage after the winner appends", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -2058,8 +2125,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         const telegramRouteUpserted = createDeferred();
         const releaseTelegramUpsert = createDeferred();
-        const linqRouteUpsertReached = createDeferred();
-        const releaseLinqUpsert = createDeferred();
+        const linqRouteLockAcquired = createDeferred();
+        const releaseLinqRouteLock = createDeferred();
         const activationUpdated = createDeferred();
         const releaseActivation = createDeferred();
         const telegramPid = createDeferred<number>();
@@ -2080,14 +2147,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         const linqClient = linqBase.$extends({
           query: {
-            hostedMemberRouting: {
-              async upsert({ args, query }) {
-                if (startOrder === "linq-first") {
-                  linqRouteUpsertReached.resolve();
-                  await releaseLinqUpsert.promise;
-                }
-                return query(args);
-              },
+            async $queryRaw({ args, query }) {
+              const result = await query(args);
+              // An unchanged home route skips its upsert. Hold the actual
+              // member-row lock before the planner reaches mailbox writes.
+              if (
+                startOrder === "linq-first"
+                && args.sql.includes("FOR NO KEY UPDATE")
+              ) {
+                linqRouteLockAcquired.resolve();
+                await releaseLinqRouteLock.promise;
+              }
+              return result;
             },
           },
         });
@@ -2140,7 +2211,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const runLinq = () => {
             linqTransaction = linqClient.$transaction(async (tx) => {
               // Keep production planners on their ordinary transaction type;
-              // the extension changes only this test's routing-upsert timing.
+              // the extension changes only this test's route-lock timing.
               const prisma = tx as Prisma.TransactionClient;
               linqPid.resolve(await readBackendPid(prisma));
               const plan = await planHostedOnboardingLinqWebhook({
@@ -2183,7 +2254,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               });
               releaseActivation.resolve();
               await activationTransaction;
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
           }
 
@@ -2201,14 +2272,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           } else {
             if (memberState === "active") {
               runLinq();
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
             runTelegram();
             await waitForBlockedBackend({
               observer,
               pid: await telegramPid.promise,
             });
-            releaseLinqUpsert.resolve();
+            releaseLinqRouteLock.resolve();
           }
 
           await expect(
@@ -2249,7 +2320,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         } finally {
           releaseTelegramUpsert.resolve();
-          releaseLinqUpsert.resolve();
+          releaseLinqRouteLock.resolve();
           releaseActivation.resolve();
           await Promise.allSettled([
             activationTransaction,

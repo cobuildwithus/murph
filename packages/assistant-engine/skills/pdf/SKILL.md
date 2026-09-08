@@ -14,24 +14,17 @@ Finish with:
 - one valid `.pdf` file
 - a clear, safe filename
 - content that matches the requested scope
-- a brief final reply that attaches or points to the PDF without claiming delivery unless the runtime actually delivered it
+- for delivery requests, a PDF handed to `murph.send_vault_file` with a truthful approval or delivery outcome; for save-only requests, a document at its durable owner path
 
 ## Workflow
 
-1. Check availability with `command -v typst`. If it is unavailable, do not install anything at runtime; explain that PDF generation is unavailable in this runtime.
-2. Create a bounded workspace artifact directory with a short lowercase slug:
-   `workdir="$(pwd)/.artifacts/pdf/<short-slug>"; mkdir -p "$workdir"`
-3. Write the source to `$workdir/report.typ`. Copy only required local assets into the same directory. Keep the final PDF there so the runtime can publish it.
-4. Compile inside that bounded root:
-   `typst compile --root "$workdir" --ignore-system-fonts "$workdir/report.typ" "$workdir/report.pdf"`
+1. Before offering an attached PDF or starting a send-now request, confirm `murph.send_vault_file` is available for this conversation. If it is unavailable, explain that you cannot attach a PDF here and offer the requested content in the chat. A local path is not a downloadable attachment. If the user explicitly wants a saved document without delivery, keep it at its ordinary durable owner path.
+2. Check availability with `command -v typst`. If it is unavailable, do not install anything at runtime; explain that PDF generation is unavailable in this runtime.
+3. Write the Typst source and required local assets inside a bounded `.artifacts/pdf/<short-slug>` workspace directory. For an authorized send-now request, write the final PDF bytes directly to `.runtime/operations/assistant/generated-deliveries/<flat-filename>.pdf`, relative to the active vault. Do not copy or move existing files into delivery staging. Keep source and preview files outside delivery staging.
+4. Compile with `typst compile --root <source-directory> --ignore-system-fonts <source-file> <final-pdf-path>`.
 5. If compilation fails, use the diagnostic to fix the source and compile again.
-6. Validate the result:
-   - `test -s "$workdir/report.pdf"`
-   - `qpdf --check "$workdir/report.pdf"`
-   - `pdfinfo "$workdir/report.pdf"`
-   - `pdftotext -enc UTF-8 -nopgbrk "$workdir/report.pdf" -`
-7. For multi-page or visually complex documents, render representative pages with `pdftoppm` and inspect them for clipping, awkward breaks, tiny text, crowded tables, or missing images. Revise and recompile when needed.
-8. Attach or return the final PDF through the available file-delivery surface. If the runtime has no file-delivery surface, state that clearly and provide the safe local output path; do not claim it was sent.
+6. Validate the final PDF with `test -s`, `qpdf --check`, `pdfinfo`, and `pdftotext -enc UTF-8 -nopgbrk`. For multi-page or visually complex documents, render representative pages with `pdftoppm`, inspect them, and correct clipping, awkward breaks, tiny text, crowded tables, or missing images.
+7. For a delivery request, call `murph.send_vault_file` with the exact final vault-relative ref. Follow its approval result: for pending approval, briefly explain approval is required and let the runtime add the link; for approved, call `finish_without_reply` and let the runtime deliver the attachment. Do not claim delivery before sent evidence, expose a local path as a download, or recreate a file whose send is already pending.
 
 ## Authoring rules
 

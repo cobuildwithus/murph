@@ -37,6 +37,7 @@ import {
   AssistantActiveTurnInputUnavailableError,
   applyMurphManagedAutomations,
   getAssistantCronAutomationTimingProjection,
+  getAssistantCronAutomationInspection,
   getAssistantCronStatus,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
   readAssistantOnboardingState,
@@ -1957,6 +1958,12 @@ async function buildHostedAutomationToolResponse(
     return {
       action: "inspect" as const,
       ...responseFields,
+      executionInspection: await getAssistantCronAutomationInspection(
+        input.vaultRoot,
+        record.automationId,
+      ),
+      instructions: record.instructions,
+      title: record.title,
       routeBinding: "preserved" as const,
     };
   }
@@ -2965,7 +2972,7 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         assistantCronWakeAfterPassCandidate,
       ]);
-      const postDelivery = await drainHostedPostCheckpointDelivery({
+      const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
         assistantMetrics,
         assistantDeliveryEffects: deliveryEffects,
         assistantDeliveryPreparation: deliveryEffectsPreparation,
@@ -3151,7 +3158,7 @@ export async function runHostedWorkspaceAssistantPhase(
                   },
                 };
               }
-              return await drainHostedPostCheckpointDelivery({
+              return await drainHostedDeliveryWithFileCheckpoint({
                 assistantMetrics,
                 assistantDeliveryEffects: deliveryEffects,
                 assistantDeliveryPreparation: deliveryEffectsPreparation,
@@ -4177,7 +4184,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     baseNextWake: HostedRuntimeWakeCandidate,
   ) => {
     assertHostedAssistantPhaseLiveness(input.input.signal);
-    return await drainHostedPostCheckpointDelivery({
+    return await drainHostedDeliveryWithFileCheckpoint({
       assistantDeliveryEffects: [],
       baseNextWake,
       checkpointReason: "provider_cleanup",
@@ -5803,6 +5810,27 @@ function resolveDeferredPendingAssistantInputWakeAt(input: {
   ).toISOString();
 }
 
+async function resolveDisprovedDefaultWakeCheckpoint(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
+  requested: boolean;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  if (!input.requested) {
+    return null;
+  }
+  const wake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+    assistantCronWake: resolveHostedAssistantCronWakeCandidate({
+      phaseInput: input.phaseInput,
+      state: await input.readAssistantCronWakeState(),
+    }),
+    input: input.phaseInput,
+  });
+  return withHostedRuntimeWakeCandidate({
+    result: { progressed: false, runtimeProjectionCheckpointRequested: true },
+    wake,
+  });
+}
+
 async function runSystemMailboxMaintenancePhase(input: {
   backgroundRouteActions?: readonly HostedSystemMailboxRouteAction[];
   backgroundWakeKinds?: readonly HostedExecutionSystemWake["kind"][];
@@ -5848,24 +5876,35 @@ async function runSystemMailboxMaintenancePhase(input: {
     || input.exclusiveWakeKinds !== undefined;
   const hasBackgroundSelection = input.backgroundRouteActions !== undefined
     || input.backgroundWakeKinds !== undefined;
+  const prepareForegroundMailboxItem = (
+    selection: Pick<
+      Parameters<typeof prepareHostedSystemMailboxItemForCheckpoint>[0],
+      | "allowedMailboxDedupeKeyPrefixes"
+      | "allowedRouteActions"
+      | "allowedWakeKinds"
+      | "assistantAskCompletionOccurredBefore"
+    >,
+  ) => prepareHostedSystemMailboxItemForCheckpoint({
+    ...selection,
+    executionContext: input.executionContext,
+    ...(phaseInput.now ? { now: phaseInput.now } : {}),
+    operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+    runtime: phaseInput.runtime,
+    runtimeEnv: phaseInput.runtimeEnv,
+    signal: phaseInput.signal ?? null,
+    shouldYieldBackgroundMaintenance: null,
+    vaultRoot: phaseInput.restored.vaultRoot,
+  });
   let foregroundCausalPreparation = hasExclusiveSelection
-    ? await prepareHostedSystemMailboxItemForCheckpoint({
+    ? await prepareForegroundMailboxItem({
         allowedRouteActions: input.exclusiveRouteActions ?? null,
         allowedWakeKinds: input.exclusiveWakeKinds ?? null,
-        executionContext: input.executionContext,
-        ...(phaseInput.now ? { now: phaseInput.now } : {}),
-        operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-        runtime: phaseInput.runtime,
-        runtimeEnv: phaseInput.runtimeEnv,
-        signal: phaseInput.signal ?? null,
-        shouldYieldBackgroundMaintenance: null,
-        vaultRoot: phaseInput.restored.vaultRoot,
       })
     : (
       pendingAssistantInputWakeAt !== null
       || phaseInput.foregroundCausalOnly === true
     )
-      ? await prepareHostedSystemMailboxItemForCheckpoint({
+      ? await prepareForegroundMailboxItem({
           allowedRouteActions: phaseInput.foregroundCausalOnly === true
             ? HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS
             : HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS,
@@ -5875,14 +5914,6 @@ async function runSystemMailboxMaintenancePhase(input: {
           ...(assistantAskCompletionOccurredBefore === undefined
             ? {}
             : { assistantAskCompletionOccurredBefore }),
-          executionContext: input.executionContext,
-          ...(phaseInput.now ? { now: phaseInput.now } : {}),
-          operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-          runtime: phaseInput.runtime,
-          runtimeEnv: phaseInput.runtimeEnv,
-          signal: phaseInput.signal ?? null,
-          shouldYieldBackgroundMaintenance: null,
-          vaultRoot: phaseInput.restored.vaultRoot,
         })
       : null;
   if (hasExclusiveSelection && foregroundCausalPreparation === null) {
@@ -5911,7 +5942,7 @@ async function runSystemMailboxMaintenancePhase(input: {
             vaultRoot: phaseInput.restored.vaultRoot,
           });
     foregroundCausalPreparation =
-      await prepareHostedSystemMailboxItemForCheckpoint({
+      await prepareForegroundMailboxItem({
         allowedRouteActions:
           HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS,
         allowedWakeKinds:
@@ -5922,14 +5953,6 @@ async function runSystemMailboxMaintenancePhase(input: {
               assistantAskCompletionOccurredBefore:
                 preCheckpointCompletionOccurredBefore,
             }),
-        executionContext: input.executionContext,
-        ...(phaseInput.now ? { now: phaseInput.now } : {}),
-        operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-        runtime: phaseInput.runtime,
-        runtimeEnv: phaseInput.runtimeEnv,
-        signal: phaseInput.signal ?? null,
-        shouldYieldBackgroundMaintenance: null,
-        vaultRoot: phaseInput.restored.vaultRoot,
       });
   }
   if (
@@ -5938,43 +5961,25 @@ async function runSystemMailboxMaintenancePhase(input: {
     && pendingAssistantInputWakeAt === null
   ) {
     foregroundCausalPreparation =
-      await prepareHostedSystemMailboxItemForCheckpoint({
+      await prepareForegroundMailboxItem({
         allowedMailboxDedupeKeyPrefixes:
           HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES,
         allowedRouteActions:
           HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS,
         allowedWakeKinds:
           HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS,
-        executionContext: input.executionContext,
-        ...(phaseInput.now ? { now: phaseInput.now } : {}),
-        operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-        runtime: phaseInput.runtime,
-        runtimeEnv: phaseInput.runtimeEnv,
-        signal: phaseInput.signal ?? null,
-        shouldYieldBackgroundMaintenance: null,
-        vaultRoot: phaseInput.restored.vaultRoot,
       });
   }
   const foregroundCausalAttempted = foregroundCausalPreparation !== null;
   if (
-    phaseInput.foregroundCausalOnly === true
-    && !foregroundCausalAttempted
-  ) {
-    return {
-      backgroundMaintenanceYielded: false,
-      continueAssistantLane: false,
-      deviceSyncMaintenanceRan: false,
-      initialProviderCleanupCheckpoint: null,
-      pendingAssistantInputWakeAt,
-      result: null,
-    };
-  }
-  if (
-    (
-      input.hasFreshConversationInput
-      || input.input.shouldYieldBackgroundMaintenance?.() === true
+    (phaseInput.foregroundCausalOnly === true && !foregroundCausalAttempted)
+    || (
+      (
+        input.hasFreshConversationInput
+        || phaseInput.shouldYieldBackgroundMaintenance?.() === true
+      )
+      && !foregroundCausalAttempted
     )
-    && !foregroundCausalAttempted
   ) {
     return {
       backgroundMaintenanceYielded: false,
@@ -5997,9 +6002,6 @@ async function runSystemMailboxMaintenancePhase(input: {
       assistantCronWakeState = state;
     }
     return state;
-  };
-  const invalidateAssistantCronWakeState = (): void => {
-    assistantCronWakeState = null;
   };
   const pendingAssistantInputBlocksMaintenance =
     input.pendingAssistantInputBlocksMaintenance ?? true;
@@ -6253,7 +6255,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     })
     : null;
   if (dirtyDeviceSyncMetrics && !dirtyDeviceSyncMetrics.deviceSyncSkipped) {
-    invalidateAssistantCronWakeState();
+    assistantCronWakeState = null;
   }
   if (!systemMailboxPreparation) {
     if (pendingAssistantInputWakeAt && pendingAssistantInputBlocksMaintenance) {
@@ -6363,7 +6365,13 @@ async function runSystemMailboxMaintenancePhase(input: {
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
-      result: mergeMemberPreferencesPrePlanningResult(null),
+      result: mergeMemberPreferencesPrePlanningResult(
+        await resolveDisprovedDefaultWakeCheckpoint({
+          phaseInput,
+          readAssistantCronWakeState,
+          requested: staleDefaultProjectionDisproved,
+        }),
+      ),
     };
   }
   const systemMailboxDeliveryEffects =
@@ -6453,7 +6461,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   const systemMailboxDeviceSyncRan =
     systemMailboxPreparationRanDeviceSync(systemMailboxPreparation);
   if (systemMailboxDeviceSyncRan) {
-    invalidateAssistantCronWakeState();
+    assistantCronWakeState = null;
   }
   const deviceSyncMaintenanceRan =
     systemMailboxDeviceSyncRan
@@ -6585,36 +6593,35 @@ async function runSystemMailboxMaintenancePhase(input: {
       input: phaseInput,
     });
   }
+  const mailboxLogDetails = systemMailboxPreparation.status === "retryable_failed"
+    ? {
+        assistantNotificationValidationFailureReason:
+          systemMailboxPreparation.assistantNotificationValidationFailureReason ?? null,
+        attemptCount: systemMailboxPreparation.attemptCount,
+        errorCode: systemMailboxPreparation.errorCode,
+        errorMessage: systemMailboxPreparation.errorMessage,
+        legacyUsageReferralAuthorityClassification:
+          systemMailboxPreparation.legacyUsageReferralAuthorityClassification,
+        routeAction: systemMailboxPreparation.routeAction,
+        wakeKind: systemMailboxPreparation.wakeKind,
+      }
+    : {
+        assistantNotificationValidationFailureReason: null,
+        attemptCount: systemMailboxPreparation.item.attemptCount,
+        errorCode: null,
+        errorMessage: null,
+        legacyUsageReferralAuthorityClassification: null,
+        routeAction: systemMailboxPreparation.item.routeAction,
+        wakeKind: systemMailboxPreparation.item.wake.kind,
+      };
   await writeHostedSystemMailboxRuntimeLog({
-    assistantNotificationValidationFailureReason:
-      systemMailboxPreparation.status === "retryable_failed"
-        ? systemMailboxPreparation.assistantNotificationValidationFailureReason ?? null
-        : null,
+    ...mailboxLogDetails,
     assistantAskCompletionFirstAttemptDelayed,
-    attemptCount: systemMailboxPreparation.status === "retryable_failed"
-      ? systemMailboxPreparation.attemptCount
-      : systemMailboxPreparation.item.attemptCount,
-    errorCode: systemMailboxPreparation.status === "retryable_failed"
-      ? systemMailboxPreparation.errorCode
-      : null,
-    errorMessage: systemMailboxPreparation.status === "retryable_failed"
-      ? systemMailboxPreparation.errorMessage
-      : null,
     input: phaseInput,
-    legacyUsageReferralAuthorityClassification:
-      systemMailboxPreparation.status === "retryable_failed"
-        ? systemMailboxPreparation.legacyUsageReferralAuthorityClassification
-        : null,
     nextWakeAt,
     recorded: null,
     recordFailed: null,
-    routeAction: systemMailboxPreparation.status === "retryable_failed"
-      ? systemMailboxPreparation.routeAction
-      : systemMailboxPreparation.item.routeAction,
     status: systemMailboxPreparation.status,
-    wakeKind: systemMailboxPreparation.status === "retryable_failed"
-      ? systemMailboxPreparation.wakeKind
-      : systemMailboxPreparation.item.wake.kind,
   });
 
   return {
@@ -6961,7 +6968,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           redactedStatus: deliveryInput.redactedStatus,
         };
       }
-      return await drainHostedPostCheckpointDelivery({
+      return await drainHostedDeliveryWithFileCheckpoint({
         afterDurableCheckpoint,
         ...deliveryInput,
       });
@@ -6986,7 +6993,6 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         runtime: input.input.runtime,
       })
     : null;
-  const dirtyPostCheckpointWakeAt = dirtyPostCheckpoint?.nextWakeAt ?? null;
 
   if (!dirtyPostCheckpoint) {
     return null;
@@ -7010,9 +7016,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   ]);
   const dirtyNextWakeAt = dirtyNextWake.at;
   return {
-    ...(dirtyPostCheckpoint
-      ? { afterDurableCheckpoint: dirtyPostCheckpoint.afterDurableCheckpoint }
-      : {}),
+    afterDurableCheckpoint: dirtyPostCheckpoint.afterDurableCheckpoint,
     checkpointReason: "assistant_runtime_commit",
     nextWakeAt: dirtyNextWakeAt,
     nextWakeReason: dirtyNextWake.reason,
@@ -7167,7 +7171,7 @@ async function runForegroundAssistantReplyPhase(input: {
       systemMailboxWake: input.systemMailboxWake,
       systemMailboxWakeAt: input.systemMailboxWakeAt,
     });
-    const postDelivery = await drainHostedPostCheckpointDelivery({
+    const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
       assistantMetrics: input.assistantMetrics,
       assistantDeliveryEffects: deliveryEffects,
       assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
@@ -7323,7 +7327,7 @@ async function runForegroundAssistantReplyPhase(input: {
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,
             ]);
-            const postDelivery = await drainHostedPostCheckpointDelivery({
+            const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
               assistantMetrics: input.assistantMetrics,
               assistantDeliveryEffects: deliveryEffects,
               assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
@@ -7456,6 +7460,37 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
     redactedStatus: providerCleanupRedactedStatus,
     wake: providerCleanupWake,
   };
+}
+
+async function drainHostedDeliveryWithFileCheckpoint(
+  input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
+): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  // afterCheckpoint only marks local state dirty. The durable hook runs after
+  // publication of the prepared sending claim, before the file upload.
+  if (input.assistantDeliveryEffects.some((effect) =>
+    effect.payload.channel === "telegram"
+    && effect.payload.media.some((media) => media.kind === "vault_file")
+  )) {
+    const afterDurableCheckpoint = composeHostedAssistantPhaseDurableCheckpointEffects(
+      input.afterDurableCheckpoint ?? null,
+      deferHostedDeliveryUntilDurableCheckpoint(input),
+    );
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      input.baseNextWake,
+      createHostedRuntimeWakeCandidate(
+        await resolveHostedAssistantOutboxNextWakeAt({ vaultRoot: input.input.restored.vaultRoot }),
+        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      ),
+    ]);
+    return {
+      ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
+      checkpointReason: "outbox_sending",
+      nextWakeAt: nextWake.at,
+      nextWakeReason: nextWake.reason,
+      redactedStatus: input.redactedStatus ?? {},
+    };
+  }
+  return await drainHostedPostCheckpointDelivery(input);
 }
 
 async function drainHostedPostCheckpointDelivery(input: {

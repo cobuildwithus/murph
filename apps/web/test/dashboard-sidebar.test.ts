@@ -13,6 +13,8 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   logoutHostedAppSession: vi.fn(),
+  privyLogoutLoaded: vi.fn(),
+  privyLogoutLoadFails: false,
   refresh: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   setOpenMobile: vi.fn(),
@@ -45,12 +47,17 @@ vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
-  HostedPrivyLogout: ({ onDone }: { onDone: () => void }) => {
-    useEffect(() => {
-      onDone();
-    }, [onDone]);
-
-    return null;
+  get HostedPrivyLogout() {
+    mocks.privyLogoutLoaded();
+    if (mocks.privyLogoutLoadFails) {
+      throw new Error("chunk unavailable");
+    }
+    return function PrivyLogoutStub({ onDone }: { onDone: () => void }) {
+      useEffect(() => {
+        onDone();
+      }, [onDone]);
+      return null;
+    };
   },
 }));
 
@@ -180,6 +187,8 @@ afterEach(async () => {
 
 beforeEach(() => {
   mocks.usePathname.mockReturnValue("/experiments");
+  mocks.privyLogoutLoaded.mockClear();
+  mocks.privyLogoutLoadFails = false;
   mocks.logoutHostedAppSession.mockReset();
   mocks.logoutHostedAppSession.mockResolvedValue(undefined);
   mocks.requestHostedOnboardingJson.mockReset();
@@ -339,6 +348,36 @@ test("Sidebar renders signed-in account controls without a visible fallback labe
   assert.doesNotMatch(markup, /\*{3,4}\s*\d{4}/);
   assert.doesNotMatch(markup, /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/);
   assert.doesNotMatch(markup, /\bdid:[a-z]+:[\w.-]+\b/);
+});
+
+test("Sidebar defers logout code until sign-out and permits retry after a chunk failure", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(Sidebar, {
+      initialAuth: { authenticated: true, label: null },
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+  assert.equal(mocks.privyLogoutLoaded.mock.calls.length, 0);
+  const signOutItem = Array.from(container.querySelectorAll('[role="menuitem"]'))
+    .find((element) => element.textContent === "Sign out");
+  assert.ok(signOutItem);
+  mocks.privyLogoutLoadFails = true;
+  await act(async () => {
+    signOutItem.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  assert.equal(mocks.logoutHostedAppSession.mock.calls.length, 0);
+  assert.equal(mocks.refresh.mock.calls.length, 0);
+  assert.equal(container.querySelector('[role="alert"]')?.textContent,
+    "Sign out did not finish. Try again.");
+
+  mocks.privyLogoutLoadFails = false;
+  await act(async () => {
+    signOutItem.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  assert.equal(mocks.logoutHostedAppSession.mock.calls.length, 1);
+  assert.equal(mocks.refresh.mock.calls.length, 1);
+  assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
 test("Sidebar surfaces a visible error when sign out fails", async () => {

@@ -1,6 +1,7 @@
 ---
 title: 'Temporal proof-format fixes can cross and red every relevant PR'
 severity: 'major'
+issue: 'cobuildwithus/murph#2786'
 ---
 
 ## Expected Behavior

@@ -3,10 +3,14 @@ set -euo pipefail
 
 parent_old_space_mb=1024
 build_worker_old_space_mb=3072
-typecheck_old_space_mb=3584
+typecheck_old_space_mb=6144
 build_cache_epoch=webpack-next-16.3-v6-isolated-worker-no-webpack-cache
 build_cache_stamp=.next/cache/murph-production-build-epoch
 prepared_typecheck_env=MURPH_HOSTED_WEB_PREPARED_TYPECHECK
+webpack_cache_policy=disabled
+if [[ "${MURPH_HOSTED_WEB_WEBPACK_CACHE:-}" == "1" ]]; then
+  webpack_cache_policy=persistent
+fi
 
 # Never trust an inherited bypass. This runner earns the build-only flag again
 # after its own route-aware TypeScript check succeeds.
@@ -41,10 +45,11 @@ if [[ ! -f "$build_cache_stamp" ]] || [[ "$(< "$build_cache_stamp")" != "$build_
   cache_reset=1
 fi
 
-printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s build_worker_old_space_mb=%s typecheck_old_space_mb=%s webpack_cache=disabled webpack_build_worker=on\n' \
+printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s build_worker_old_space_mb=%s typecheck_old_space_mb=%s webpack_cache=%s webpack_build_worker=on\n' \
   "$parent_old_space_mb" \
   "$build_worker_old_space_mb" \
-  "$typecheck_old_space_mb"
+  "$typecheck_old_space_mb" \
+  "$webpack_cache_policy"
 
 # Generate the route declarations before running Next's app-local TypeScript 5
 # compatibility check. Keeping that check separate gives validation its own

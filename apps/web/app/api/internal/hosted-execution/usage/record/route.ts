@@ -6,8 +6,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { parseHostedRuntimeUsageRecordRequest } from "@murphai/hosted-execution/parsers";
-
-const HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES = 16_384;
+import { HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
 
 export const POST = withJsonError(async (request: Request) => {
   const { payload, userId } = await requireHostedCloudflareCallbackJsonRequest(request, {

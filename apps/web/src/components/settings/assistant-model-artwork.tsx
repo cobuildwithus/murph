@@ -1,8 +1,12 @@
 import { cn } from "@/src/lib/utils";
 
-type AssistantModelArtworkVariant = "luna" | "sol" | "terra";
+import styles from "./assistant-model-artwork.module.css";
+import { AstraStarfield } from "./astra-starfield";
+
+type AssistantModelArtworkVariant = "astra" | "luna" | "sol" | "terra";
 
 const ASSISTANT_MODEL_CHOICE_CARD_CLASSES = {
+  astra: "pointer-events-auto group-data-[disabled=true]:pointer-events-auto border-[#c5d5dd] [--primary:#426b80] [--primary-foreground:#fffcf6] [--muted-foreground:#435e6b] hover:border-[#7b9eaf] has-data-checked:border-[#426b80] has-data-checked:ring-[#7b9eaf]/20 has-data-checked:hover:border-[#426b80] data-[disabled=true]:hover:border-[#c5d5dd] [&>span[aria-hidden=true]]:w-full",
   luna:
     "hover:border-[#777b7d]/40 hover:bg-[#777b7d]/5 has-data-checked:border-[#777b7d] has-data-checked:bg-[#777b7d]/10 has-data-checked:ring-[#777b7d]/15 has-data-checked:hover:border-[#777b7d] has-data-checked:hover:bg-[#777b7d]/10 [&_[data-slot=radio-group-item][data-checked]]:border-[#777b7d] [&_[data-slot=radio-group-item][data-checked]]:bg-[#777b7d]",
   terra:
@@ -19,6 +23,19 @@ export function AssistantModelArtwork({
   className,
   variant,
 }: AssistantModelArtworkProps) {
+  if (variant === "astra") {
+    return (
+      <span
+        aria-hidden="true"
+        className={cn(styles.astra, className)}
+        data-model-artwork="astra"
+      >
+        <span className={styles.aurora} />
+        <AstraStarfield />
+      </span>
+    );
+  }
+
   return (
     <svg
       aria-hidden="true"

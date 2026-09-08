@@ -14,6 +14,8 @@ import {
   ChartTooltip,
   type ChartConfig,
 } from "@/src/components/ui/chart";
+import { LatestMetricResult } from "@/src/components/ui/metric-card";
+import { formatExperimentStatisticLabel } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentSignal, TrendData } from "@/src/types/experiments";
 import { cn } from "@/src/lib/utils";
 
@@ -74,13 +76,9 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
   const metricUnit = signal?.unit ?? data.unit;
   const delta = signal?.delta ?? data.delta;
   const statisticLabel = data.statistic
-    ? formatTrendStatisticLabel(data.statistic)
+    ? formatExperimentStatisticLabel(data.statistic)
     : null;
-  const accessibleLabel = statisticLabel
-    ? `${data.label}: baseline ${statisticLabel} ${formatValueWithUnit(data.baselineAvg, data.unit)}; experiment ${statisticLabel} ${formatValueWithUnit(data.currentValue, data.unit)}.`
-    : data.windowComparison
-      ? `${data.label}: baseline window average ${formatValueWithUnit(data.baselineAvg, data.unit)}; experiment window average ${formatValueWithUnit(data.currentValue, data.unit)}.`
-      : `${data.label}: daily baseline and experiment measurements${data.unit ? ` in ${data.unit}` : ""}.`;
+  const accessibleLabel = formatTrendAccessibleLabel(data, statisticLabel);
 
   return (
     <div
@@ -134,6 +132,8 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
           </div>
         )}
       </div>
+
+      {signal?.latestResult ? <LatestMetricResult result={signal.latestResult} /> : null}
 
       <ChartContainer
         aria-label={accessibleLabel}
@@ -300,14 +300,14 @@ function WindowComparisonFooter({ data }: { data: TrendData }) {
     <div className="grid grid-cols-2 gap-4 border-t border-border/70 pt-3">
       <WindowLabel
         coverage={baselineCoverage}
-        label={`Baseline ${data.statistic ? formatTrendStatisticLabel(data.statistic) : "average"}`}
+        label={`Baseline ${data.statistic ? formatExperimentStatisticLabel(data.statistic) : "average"}`}
         unit={data.unit}
         value={data.baselineAvg}
       />
       <WindowLabel
         align="right"
         coverage={interventionCoverage}
-        label={`Experiment ${data.statistic ? formatTrendStatisticLabel(data.statistic) : "average"}`}
+        label={`Experiment ${data.statistic ? formatExperimentStatisticLabel(data.statistic) : "average"}`}
         unit={data.unit}
         value={data.currentValue}
       />
@@ -388,29 +388,16 @@ function formatChartValue(value: number): string {
   }).format(value);
 }
 
-function formatValueWithUnit(value: number, unit: string): string {
-  return [formatChartValue(value), unit].filter(Boolean).join(" ");
+function formatTrendAccessibleLabel(data: TrendData, statisticLabel: string | null): string {
+  return statisticLabel
+    ? `${data.label}: baseline ${statisticLabel} ${formatValueWithUnit(data.baselineAvg, data.unit)}; experiment ${statisticLabel} ${formatValueWithUnit(data.currentValue, data.unit)}.`
+    : data.windowComparison
+      ? `${data.label}: baseline window average ${formatValueWithUnit(data.baselineAvg, data.unit)}; experiment window average ${formatValueWithUnit(data.currentValue, data.unit)}.`
+      : `${data.label}: daily baseline and experiment measurements${data.unit ? ` in ${data.unit}` : ""}.`;
 }
 
-function formatTrendStatisticLabel(
-  statistic: NonNullable<TrendData["statistic"]>,
-): string {
-  switch (statistic) {
-    case "count":
-      return "count";
-    case "latest":
-      return "latest";
-    case "max":
-      return "maximum";
-    case "mean":
-      return "average";
-    case "median":
-      return "median";
-    case "min":
-      return "minimum";
-    case "sum":
-      return "total";
-  }
+function formatValueWithUnit(value: number, unit: string): string {
+  return [formatChartValue(value), unit].filter(Boolean).join(" ");
 }
 
 export function buildTrendChartPoints(data: TrendData, showHistory: boolean): TrendChartPoint[] {

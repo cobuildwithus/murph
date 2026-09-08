@@ -343,7 +343,7 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
       {
         description: 'List semantic daily activity summaries.',
         hint:
-          'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.',
+          'One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Choose first; never probe and retry.',
         name: 'wearables activity list',
         schema: {
           options: {
@@ -397,7 +397,7 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
   )
   assert.match(
     contract,
-    /- `wearables activity list`: List semantic daily activity summaries\.; options --date=string, --includeWorkoutDetails; hint One data read only\. Day totals \(`sessionCount`, `sessionMinutes`, distinct `activityTypes`\): omit detail; no false flag or schema read\. Workout\/subset facts: include detail first\./u,
+    /- `wearables activity list`: List semantic daily activity summaries\.; options --date=string, --includeWorkoutDetails; hint One read: day totals omit flags; workout facts use --include-workout-summaries; lap\/split facts use --include-workout-details\. Choose first; never probe and retry\./u,
   )
   assert.doesNotMatch(contract, /Search the indexed documents/u)
   assert.doesNotMatch(contract, /Root command help/u)

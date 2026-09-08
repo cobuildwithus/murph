@@ -1,6 +1,7 @@
 ---
 title: 'Hosted MinIO cleanup test reuses a pre-loader readiness timeout'
 severity: 'major'
+issue: 'cobuildwithus/murph#2792'
 ---
 
 ## Expected Behavior

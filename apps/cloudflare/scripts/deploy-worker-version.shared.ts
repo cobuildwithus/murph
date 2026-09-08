@@ -11,7 +11,7 @@ import type {
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
-export type ContainerRolloutMode = "gradual" | "immediate";
+export type ContainerRolloutMode = "gradual" | "immediate" | "worker-only";
 
 export interface DeploymentStatusPayload {
   created_on: string;
@@ -225,11 +225,11 @@ function readContainerRolloutMode(
     return defaultMode;
   }
 
-  if (normalized === "gradual" || normalized === "immediate") {
+  if (normalized === "gradual" || normalized === "immediate" || normalized === "worker-only") {
     return normalized;
   }
 
-  throw new Error("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual' or 'immediate'.");
+  throw new Error("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual', 'immediate', or 'worker-only'.");
 }
 
 async function requireCurrentDeployment(

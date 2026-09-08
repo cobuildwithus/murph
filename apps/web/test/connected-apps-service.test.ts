@@ -772,6 +772,78 @@ describe("connected-app service", () => {
     expect(executeFetch).toHaveBeenCalledTimes(2);
   });
 
+  it.each([true, false])("reconciles service discovery with configured execution (weather configured=%s)", async (configured) => {
+    installPrismaHarness();
+    vi.stubEnv("OPENWEATHER_API_KEY", configured ? "synthetic-weather-key" : "");
+    const gmailStatus = {
+      toolkit: "gmail", has_active_connection: false,
+      status_message: "Connect Gmail to read messages.", account_selection: "required",
+    };
+    const catalog = {
+      success: true, error: null,
+      next_steps_guidance: ["Connect OpenWeather before using weather tools."],
+      toolkit_connection_statuses: [
+        { toolkit: "openweather_api", has_active_connection: false,
+          status_message: "Connect OpenWeather before continuing.", accounts: [], account_selection: "required" },
+        gmailStatus,
+      ],
+      results: [{ index: 1, toolkits: ["openweather_api", "gmail"],
+        primary_tool_slugs: ["OPENWEATHER_API_GET_CURRENT_WEATHER", "GMAIL_FETCH_EMAILS"],
+        error: "A related search was unavailable.",
+        execution_guidance: "Connect OpenWeather.", recommended_plan_steps: ["Connect OpenWeather."],
+        known_pitfalls: ["You must connect OpenWeather."] }],
+      tool_schemas: {
+        OPENWEATHER_API_GET_CURRENT_WEATHER: { toolkit: "openweather_api",
+          tool_slug: "OPENWEATHER_API_GET_CURRENT_WEATHER", input_schema: { type: "object", properties: { lat: { type: "number" }, lon: { type: "number" } } } },
+        GMAIL_FETCH_EMAILS: { toolkit: "gmail", tool_slug: "GMAIL_FETCH_EMAILS" },
+        OPENWEATHER_API_UNSUPPORTED_ACTION: { toolkit: "openweather_api", tool_slug: "OPENWEATHER_API_UNSUPPORTED_ACTION" },
+      },
+    };
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === "/api/v3.1/tool_router/session") return jsonResponse({ session_id: "trs_member" });
+      if (pathname === "/api/v3.1/tool_router/session/trs_member/search") return jsonResponse(catalog);
+      if (pathname === "/api/v3.1/tools/execute/OPENWEATHER_API_GET_CURRENT_WEATHER") return jsonResponse({ data: { temperature: 18 }, successful: true });
+      throw new Error("Unexpected provider request in service-discovery regression.");
+    });
+    const result = await executeHostedConnectedAppsRequest({ fetchImpl, memberId: "hbm_member",
+      request: { operation: "search", input: { query: "weather and email" } } });
+    expect(result).toMatchObject({
+      success: true, error: null, tool_schemas: catalog.tool_schemas,
+      service_tools: [{ tool_slug: "OPENWEATHER_API_GET_CURRENT_WEATHER", member_connection_required: false,
+        configuration_status: configured ? "ready" : "unavailable" }],
+      toolkit_connection_statuses: [expect.objectContaining({ toolkit: "openweather_api", member_connection_required: false,
+        enabled_tool_slugs: ["OPENWEATHER_API_GET_CURRENT_WEATHER"] }), gmailStatus],
+      results: [{ index: 1, error: "A related search was unavailable." }],
+    });
+    expect(JSON.stringify(result)).not.toContain("Connect OpenWeather");
+    expect(JSON.stringify(result)).not.toContain("must connect OpenWeather");
+    expect(JSON.stringify(result)).not.toContain("synthetic-weather-key");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const execute = executeHostedConnectedAppsRequest({ fetchImpl, memberId: "hbm_member", request: {
+      operation: "execute", input: { toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER", arguments: { lat: 40, lon: -75 } },
+    } });
+    if (configured) {
+      await expect(execute).resolves.toMatchObject({ temperature: 18 });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    } else {
+      await expect(execute).rejects.toMatchObject({ code: "CONNECTED_APPS_CONFIGURATION_UNAVAILABLE" });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("preserves personal-account and unknown catalog metadata without inferring service access", async () => {
+    installPrismaHarness();
+    const catalog = { tool_schemas: { OPENWEATHER_API_UNSUPPORTED_ACTION: { toolkit: "openweather_api" }, GMAIL_FETCH_EMAILS: { toolkit: "gmail" } },
+      toolkit_connection_statuses: [{ toolkit: "gmail", has_active_connection: false, status_message: "Connect Gmail." }],
+      next_steps_guidance: ["Connect Gmail."], results: [], success: false, error: "Partial search failure" };
+    const fetchImpl = vi.fn(async (url: string | URL | Request): Promise<Response> =>
+      new URL(String(url)).pathname.endsWith("/search") ? jsonResponse(catalog) : jsonResponse({ session_id: "trs_member" }));
+    await expect(executeHostedConnectedAppsRequest({ fetchImpl, memberId: "hbm_member",
+      request: { operation: "search", input: { query: "email" } } })).resolves.toEqual(catalog);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("delivers a markup-heavy mailbox read that the raw wire ceiling used to discard", async () => {
     // The provider answers 200 with full HTML envelopes. Judging that payload
     // on wire size threw away a result that fits the assistant budget once the

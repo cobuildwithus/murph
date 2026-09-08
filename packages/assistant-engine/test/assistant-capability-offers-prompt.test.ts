@@ -80,7 +80,6 @@ describe('assistant capability-offers prompt contract', () => {
 
     expect(section).toContain('Complete the request first')
     expect(section).toContain("turn priority's single next-step offer")
-    expect(section).toContain('not an additional item')
     expect(section).toContain('available now')
     expect(section).toContain('materially advances the same health goal')
     expect(section).toContain('No menus')
@@ -95,12 +94,11 @@ describe('assistant capability-offers prompt contract', () => {
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain('Undiscovered capabilities are effectively absent')
     expect(section).toContain('repeated manual health reporting')
     expect(section).toContain('recurring friction or forgetting')
-    expect(section).toContain('a named data source')
-    expect(section).toContain('longitudinal visual tracking')
-    expect(section).toContain('group accountability/update context')
+    expect(section).toContain('named data sources')
+    expect(section).toContain('visual tracking')
+    expect(section).toContain('group accountability')
     expect(section).toContain('owning availability and eligibility gates')
   })
 
@@ -116,7 +114,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('Recurrence, OAuth, shared health data, other people')
     expect(section).toContain('money, and irreversible actions')
     expect(section).toContain('concrete final scope and confirmation')
-    expect(section).toContain('subject to the owning action\'s consent')
+    expect(section).toContain('under its owner\'s consent')
   })
 
   it('suppresses harmful or misplaced offers while retaining narrow group gates', () => {
@@ -126,8 +124,8 @@ describe('assistant capability-offers prompt contract', () => {
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain('urgent, emotionally sensitive, flare, or low-capacity')
-    expect(section).toContain('suppress unrelated offers')
+    expect(section).toContain('urgency, distress, flares, or low capacity')
+    expect(section).toContain('Suppress unrelated offers')
     expect(section).toContain('broad account scans')
     expect(section).toContain('enrollment of other people')
     expect(section).toContain('spending, prescription changes')
@@ -572,7 +570,7 @@ describe('assistant capability-offers prompt contract', () => {
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain('Capability mechanics live in the owning')
+    expect(section).toContain('Follow owning capability guidance')
     expect(section).toContain('do not promise implementation beyond it')
     expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(1_600)
   })

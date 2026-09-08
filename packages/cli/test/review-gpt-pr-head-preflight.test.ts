@@ -180,7 +180,7 @@ describe('ReviewGPT PR context guard', () => {
 
       expect(result.status, result.stderr).toBe(0)
       expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-        `pr=42\nphase=final\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m ${preset} --dry-run\n`,
+        `pr=42\nphase=final\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 270s ${preset} --dry-run\n`,
       )
       expect(result.stdout).toContain(
         `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
@@ -194,7 +194,7 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status, result.stderr).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m simplify --dry-run\n',
+      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 270s simplify --dry-run\n',
     )
   })
 

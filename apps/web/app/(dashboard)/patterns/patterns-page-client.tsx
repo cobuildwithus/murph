@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import {
   resolveAdherenceObservationActivityKind,
   selectBrowserVaultJournal,
-  selectBrowserVaultOverview,
 } from "@murphai/query/browser-overview";
 
 import { PersonalPatternsSection } from "@/src/components/overview/personal-patterns-section";
@@ -17,10 +16,7 @@ export default function PatternsPageClient({
   debugFactor?: string | null;
 }) {
   const { client, refresh, refreshPending, status } = useBrowserVault();
-  const report = useMemo(
-    () => client ? selectBrowserVaultOverview(client).personalPatterns : null,
-    [client],
-  );
+  const report = client?.replica.personalPatterns ?? null;
   const diagnosticActivityEvents = useMemo(
     () => debugFactor && client
       ? collectDiagnosticActivityEvents(client, debugFactor)

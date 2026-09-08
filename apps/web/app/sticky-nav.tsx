@@ -43,7 +43,6 @@ export function StickyNav({
   authenticated,
   darkTop = false,
   githubStarCount = null,
-  preloadAuthPanel = false,
   splitUnauthenticatedAuth = true,
   unauthenticatedAuthLabel,
 }: {
@@ -55,7 +54,6 @@ export function StickyNav({
    */
   darkTop?: boolean;
   githubStarCount?: number | null;
-  preloadAuthPanel?: boolean;
   splitUnauthenticatedAuth?: boolean;
   unauthenticatedAuthLabel?: string;
 }) {
@@ -169,7 +167,6 @@ export function StickyNav({
           authenticated={authenticated}
           context="nav"
           {...(onDark ? { onDarkSurface: true } : {})}
-          {...(preloadAuthPanel ? { preloadAuthPanel: true } : {})}
           splitUnauthenticated={splitUnauthenticatedAuth}
         />
         <Drawer open={menuOpen} onOpenChange={setMenuOpen}>

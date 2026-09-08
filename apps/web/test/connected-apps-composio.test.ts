@@ -317,6 +317,46 @@ describe("Composio connected-app client", () => {
     })).resolves.toEqual([]);
   });
 
+  it.each([
+    {},
+    { items: null },
+    { items: [], next_cursor: 42 },
+    { items: [{ id: "ca_incomplete" }] },
+  ])("rejects malformed account inventories instead of reporting empty: %j", async (payload) => {
+    const fetchImpl = vi.fn(async () => jsonResponse(payload));
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    await expect(client.listAccounts({ userId: "hbm_member" }))
+      .rejects.toThrow("Composio returned an invalid account-list response.");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a malformed later page instead of returning a partial inventory", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [], next_cursor: "page-two" }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ id: "ca_incomplete" }] }));
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    await expect(client.listAccounts({ userId: "hbm_member" }))
+      .rejects.toThrow("Composio returned an invalid account-list response.");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves valid disabled and inactive records in explicitly unfiltered inventories", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      items: [{
+        id: "ca_revoked",
+        is_disabled: true,
+        status: "REVOKED",
+        toolkit: { slug: "gmail" },
+      }],
+    }));
+    const client = createComposioConnectedAppsClient({ config, fetchImpl });
+
+    await expect(client.listAccounts({ statuses: null, userId: "hbm_member" }))
+      .resolves.toMatchObject([{ id: "ca_revoked", isDisabled: true, status: "REVOKED" }]);
+  });
+
   it("paginates unfiltered owned account listing for deletion-time revocation", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,

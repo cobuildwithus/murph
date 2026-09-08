@@ -1,6 +1,6 @@
 {
   "id": "memory-forget",
-  "command": "vault-cli memory forget <memoryId> --vault <path>",
+  "command": "vault-cli memory forget <memoryId> --vault <path> [--compact]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

@@ -68,11 +68,13 @@ export async function sendHostedPersonalPatternsRunAlerts(input: {
         idempotencyKey: `personal-patterns-run-alert/${alertIdentity}`,
         subject: "Murph Personal Patterns runs need attention",
         text: [
-          "One or more Personal Patterns runs did not complete after automatic recovery.",
+          "One or more Personal Patterns runs expired or ended with a terminal failure.",
           "",
           `scheduled occurrence: ${occurrenceAt}`,
           "",
-          "Inspect hosted runtime logs for the matching occurrence.",
+          "An expired occurrence may not have reached model execution.",
+          "Inspect hosted runtime logs for the matching occurrence: cron.occurrence.expired reports lateness and recorded prior failures; cron.job.completed reports the terminal outcome.",
+          "For a late wake, inspect checkpoint.snapshot_finished and its nextDefaultProcessingWakeState and nextDefaultProcessingWakeOffsetMs fields.",
         ].join("\n"),
         to: emailConfig.recipients,
       });

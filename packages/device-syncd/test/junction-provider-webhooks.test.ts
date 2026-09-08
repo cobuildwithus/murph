@@ -1,5 +1,6 @@
 import {
   createAccount,
+  createConnectionSource,
   createEmptyJunctionBackfillProvider,
   createJob,
   createJunctionJobContext,
@@ -528,6 +529,86 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
     assert.equal(JSON.stringify(parsed.jobs).includes("junction-user-1"), false);
     assert.equal(JSON.stringify(importedSnapshots).includes("murph_blinded"), false);
   }
+});
+
+test("Junction replays Google Health completion's original history window after Fitbit cutover", async () => {
+  const requests: URL[] = [];
+  const snapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    requests.push(url);
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [{
+        slug: "google_health",
+        name: "Google Health",
+        status: "connected",
+        resource_availability: { sleep: true },
+      }] });
+    }
+    if (url.pathname === "/v2/summary/sleep/junction-user-1") {
+      return createJsonResponse({ data: [{
+        date: "2026-02-02",
+        id: "google-health-history-sleep",
+        source: { provider: "google_health" },
+        total_sleep_minutes: 420,
+      }] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep"],
+    timeseriesResources: [],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "historical.data.sleep.created",
+      user_id: "junction-user-1",
+      data: { provider: "google_health", start_date: "2026-02-01", end_date: "2026-02-02", is_final: true },
+    },
+    messageId: "msg_retained_google_health_history",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  assert.equal(parsed.dataSourceProviderSlug, null);
+  const prepared = requireValue(parsed.jobs[0], "Completion should prepare a resource fetch.");
+  const sources = ["fitbit", "google_health"].map((sourceProviderSlug) => ({
+    ...createConnectionSource({
+      id: `source-${sourceProviderSlug}`,
+      sourceProviderSlug,
+      sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+        connectionId: "acct-junction-1", sourceProviderSlug,
+      }), "Source key should be available."),
+      // No Fitbit canonical sleep coverage: this history is not replaced by cutover backfill.
+      resourceAvailabilitySummary: sourceProviderSlug === "fitbit" ? {} : { sleep: true },
+    }),
+    resourceCount: sourceProviderSlug === "fitbit" ? 0 : 1,
+  }));
+  const context = () => createJunctionJobContext({
+    account: createAccount({ sources }),
+    connectionSourceAdmissionMode: "listed_only",
+    importSnapshot: async (snapshot) => {
+      snapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+  const job = createJob(prepared.kind, prepared.payload ?? {});
+  await executeJunctionJob(provider, context(), job);
+  assert.equal(requests.length, 0, "Web must retain this work while execution is fenced.");
+  assert.equal(snapshots.length, 0);
+
+  sources[0]!.status = "disconnected";
+  sources[0]!.lastErrorCode = "SOURCE_USER_DISCONNECTED";
+  await executeJunctionJob(provider, context(), job);
+  const fetch = requests.find((url) => url.pathname === "/v2/summary/sleep/junction-user-1");
+  assert.ok(fetch);
+  assert.equal(fetch.searchParams.get("provider"), "google_health");
+  assert.equal(fetch.searchParams.get("start_date"), "2026-02-01");
+  assert.equal(fetch.searchParams.get("end_date"), "2026-02-02");
+  assert.equal(snapshots.length, 1);
 });
 
 test("Junction completion classification matches the pinned SDK serializer", async () => {

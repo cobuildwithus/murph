@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   hasHostedLinqInboundWithinDays: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
+  lockSource: vi.fn(),
   findDeviceConnectionSource: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedSourceNoDataOutreachPolicy: vi.fn(),
@@ -59,6 +60,7 @@ const BASE_INPUT = {
 const MAILBOX_ITEM = {
   consumedAt: null,
   id: "mailbox-1",
+  kind: "assistant.notification.requested",
   lane: "system",
   laneSeq: "7",
   userId: "member-1",
@@ -80,6 +82,7 @@ const DIRECT_LINQ_DESTINATION = {
 beforeEach(() => {
   vi.clearAllMocks();
   const tx = {
+    $queryRaw: mocks.lockSource,
     deviceConnectionSource: {
       findUnique: vi.fn().mockResolvedValue({
         id: BASE_INPUT.sourceId,
@@ -96,6 +99,7 @@ beforeEach(() => {
     $transaction: vi.fn((run: (client: typeof tx) => Promise<unknown>) => run(tx)),
   });
   mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+  mocks.lockSource.mockResolvedValue([{ id: BASE_INPUT.sourceId }]);
   mocks.findDeviceConnectionSource.mockResolvedValue({
     connection: { status: "active", userId: "member-1" },
     id: BASE_INPUT.sourceId,
@@ -169,6 +173,108 @@ describe("hosted source delivery-stall notice identity", () => {
 });
 
 describe("hosted source delivery-stall notice materialization", () => {
+  it.each(["connected", "error"] as const)("offers help once for a WHOOP %s silence episode", async (status) => {
+    const input = {
+      ...BASE_INPUT,
+      sourceProviderSlug: "whoop_v2",
+      status,
+      lastErrorCode: status === "error" ? "TOKEN_REFRESH_FAILED" : null,
+    };
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(input);
+    if (!candidate) throw new Error("Expected WHOOP recovery candidate");
+    const connected = resolveHostedSourceDeliveryStallNoticeCandidate({ ...input, status: "connected", lastErrorCode: null });
+    expect(candidate).toEqual(connected);
+    mocks.findDeviceConnectionSource.mockResolvedValue({
+      ...input,
+      connection: { status: "active", userId: "member-1" },
+      lastDataAt: new Date(input.lastDataAt),
+    });
+
+    await materializeHostedSourceDeliveryStallNotice({ candidate, now: input.now, userId: "member-1" });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+    const text = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0]?.envelope.notification.responsePolicy.text;
+    expect(text).toMatch(/WHOOP.*\?.*wait 5–30 days or stop these check-ins/su);
+    expect(text).not.toMatch(/reconnect|expired|revoked|charged|Junction|OAuth/iu);
+
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({ ...MAILBOX_ITEM, consumedAt: input.now });
+    await materializeHostedSourceDeliveryStallNotice({ candidate, now: input.now, userId: "member-1" });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { status: "disconnected", lastErrorCode: "TOKEN_REFRESH_FAILED" },
+    { status: "error", lastErrorCode: "PROVIDER_TIMEOUT" },
+    { status: "error", lastErrorCode: null },
+    { status: "connected", lastErrorCode: null, lastDataAt: new Date(BASE_INPUT.now) },
+    { status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED", lifecycleEpoch: 5 },
+  ])("revalidates WHOOP before queuing: %j", async (change) => {
+    const input = { ...BASE_INPUT, sourceProviderSlug: "whoop_v2", status: "error" as const, lastErrorCode: "TOKEN_REFRESH_FAILED" };
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(input);
+    if (!candidate) throw new Error("Expected WHOOP recovery candidate");
+    mocks.findDeviceConnectionSource.mockResolvedValue({
+      ...input,
+      connection: { status: "active", userId: "member-1" },
+      lastDataAt: new Date(input.lastDataAt),
+      ...change,
+    });
+    await materializeHostedSourceDeliveryStallNotice({ candidate, now: input.now, userId: "member-1" });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["eligible", "opted-out", "recovered", "group", "already-sent"])(
+    "handles an Apple Health silence episode: %s",
+    async (scenario) => {
+      const input = { ...BASE_INPUT, sourceProviderSlug: "apple_health_kit" };
+      const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(input);
+      expect(candidate).not.toBeNull();
+      if (!candidate) throw new Error("Expected an Apple Health recovery candidate");
+      mocks.findDeviceConnectionSource.mockResolvedValue({
+        connection: { status: "active", userId: "member-1" },
+        id: input.sourceId,
+        lastDataAt: new Date(scenario === "recovered" ? input.now : input.lastDataAt),
+        lifecycleEpoch: input.lifecycleEpoch,
+        sourceProviderSlug: input.sourceProviderSlug,
+        status: input.status,
+      });
+      mocks.readHostedSourceNoDataOutreachPolicy.mockResolvedValue(scenario === "opted-out"
+        ? { enabled: false, setting: "off" }
+        : { afterDays: 3, enabled: true, setting: "default", silentHours: 72 });
+      if (scenario === "group") {
+        mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue({
+          ...DIRECT_LINQ_DESTINATION, conversationShape: "group",
+        });
+      }
+      if (scenario === "already-sent") {
+        mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+          ...MAILBOX_ITEM, consumedAt: new Date(input.now),
+        });
+      }
+
+      await materializeHostedSourceDeliveryStallNotice({
+        candidate, now: input.now, userId: "member-1",
+      });
+
+      if (scenario !== "eligible") {
+        expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+        expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+        return;
+      }
+      expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+      const appendInput = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0];
+      expect(appendInput.envelope.notification).toMatchObject({
+        deliveryDispatchMode: "queue-only",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: expect.stringContaining("Apple Health"),
+        },
+        route: DIRECT_LINQ_DESTINATION.route,
+      });
+      for (const phrase of ["Murph", "Check for new data", "stop these check-ins"]) {
+        expect(appendInput.envelope.notification.responsePolicy.text).toContain(phrase);
+      }
+    },
+  );
+
   it("queues exact direct-thread copy through the existing durable mailbox", async () => {
     const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
     expect(candidate).not.toBeNull();
@@ -224,13 +330,119 @@ describe("hosted source delivery-stall notice materialization", () => {
 
     await materializeHostedSourceDeliveryStallNotice({
       candidate,
-      now: BASE_INPUT.now,
+      now: "2026-08-25T00:01:00.000Z",
       userId: "member-1",
     });
 
     expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).toHaveBeenCalledOnce();
-    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.findDeviceConnectionSource).toHaveBeenCalledOnce();
+    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledOnce();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+  });
+
+  it.each([null, BASE_INPUT.now])("reuses the item committed after the initial lookup (consumedAt: %s)", async (consumedAt) => {
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
+    if (!candidate) throw new Error("Expected recovery candidate");
+    mocks.readHostedMailboxItemByDedupeKey
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...MAILBOX_ITEM, consumedAt });
+
+    await materializeHostedSourceDeliveryStallNotice({
+      candidate,
+      now: "2026-08-25T00:02:00.000Z",
+      userId: "member-1",
+    });
+
+    expect(mocks.lockSource).toHaveBeenCalledOnce();
+    expect(mocks.lockSource.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.findDeviceConnectionSource.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.findDeviceConnectionSource.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.readHostedMailboxItemByDedupeKey.mock.invocationCallOrder[1]!,
+    );
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(consumedAt ? 0 : 1);
+  });
+
+  it("rejects a queued episode identity belonging to another mailbox kind", async () => {
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
+    if (!candidate) throw new Error("Expected recovery candidate");
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      ...MAILBOX_ITEM,
+      kind: "device-sync.wake",
+    });
+
+    await expect(materializeHostedSourceDeliveryStallNotice({
+      candidate, now: BASE_INPUT.now, userId: "member-1",
+    })).rejects.toThrow("another mailbox kind");
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("converges overlapping attempts with different timestamps on one stored notification", async () => {
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
+    if (!candidate) throw new Error("Expected recovery candidate");
+    let queued: typeof MAILBOX_ITEM | null = null;
+    let previousCommit = Promise.resolve();
+    type Tx = {
+      $queryRaw: () => Promise<void>;
+      deviceConnectionSource: { findUnique: typeof mocks.findDeviceConnectionSource };
+    };
+    mocks.getPrisma.mockReturnValue({
+      $transaction: async (run: (tx: Tx) => Promise<unknown>) => {
+        const prior = previousCommit;
+        let release = () => {};
+        previousCommit = new Promise<void>((resolve) => { release = resolve; });
+        try {
+          return await run({
+            $queryRaw: async () => { await prior; },
+            deviceConnectionSource: { findUnique: mocks.findDeviceConnectionSource },
+          });
+        } finally {
+          release();
+        }
+      },
+    });
+    mocks.readHostedMailboxItemByDedupeKey.mockImplementation(async () => queued);
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(async () => {
+      queued = MAILBOX_ITEM;
+      return { item: MAILBOX_ITEM };
+    });
+
+    await Promise.all([
+      materializeHostedSourceDeliveryStallNotice({
+        candidate, now: BASE_INPUT.now, userId: "member-1",
+      }),
+      materializeHostedSourceDeliveryStallNotice({
+        candidate, now: "2026-08-25T00:04:00.000Z", userId: "member-1",
+      }),
+    ]);
+
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMailboxAppendRuntime.mock.calls[1]?.[0]).toEqual(
+      mocks.signalHostedMailboxAppendRuntime.mock.calls[0]?.[0],
+    );
+  });
+
+  it("retries a failed signal using the original pending item", async () => {
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
+    if (!candidate) throw new Error("Expected recovery candidate");
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("Unavailable"));
+    await materializeHostedSourceDeliveryStallNotice({
+      candidate, now: BASE_INPUT.now, userId: "member-1",
+    });
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(MAILBOX_ITEM);
+    await materializeHostedSourceDeliveryStallNotice({
+      candidate, now: "2026-08-25T00:03:00.000Z", userId: "member-1",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMailboxAppendRuntime.mock.calls[1]?.[0]).toEqual(
+      mocks.signalHostedMailboxAppendRuntime.mock.calls[0]?.[0],
+    );
   });
 
   it("suppresses members without active access before appending", async () => {
@@ -290,7 +502,7 @@ describe("hosted source delivery-stall notice materialization", () => {
         status: BASE_INPUT.status,
       }),
     },
-  ])("suppresses the notice when $name", async ({ prepare }) => {
+  ])("suppresses a new or pending notice when $name", async ({ prepare }) => {
     const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
     expect(candidate).not.toBeNull();
     if (!candidate) {
@@ -298,11 +510,14 @@ describe("hosted source delivery-stall notice materialization", () => {
     }
     prepare();
 
-    await materializeHostedSourceDeliveryStallNotice({
-      candidate,
-      now: BASE_INPUT.now,
-      userId: "member-1",
-    });
+    for (const existing of [null, MAILBOX_ITEM]) {
+      mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(existing);
+      await materializeHostedSourceDeliveryStallNotice({
+        candidate,
+        now: BASE_INPUT.now,
+        userId: "member-1",
+      });
+    }
 
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import { listAutomations } from '@murphai/query'
 import { createHash, randomUUID } from 'node:crypto'
 import { access, readdir, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
@@ -222,6 +223,11 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
   }> = []
   const protectedGroupEmailOccurrencePrefixes =
     await readProtectedGroupEmailOccurrencePrefixes(input.paths)
+  const protectedFollowUpSources = new Set((await listAutomations(input.vault, {
+    status: ['active', 'paused'],
+  })).filter((record) => record.followUpSourceIntentId && record.activeUntil
+    && Date.parse(record.activeUntil) > input.now.getTime())
+    .map((record) => record.followUpSourceIntentId))
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) {
@@ -232,6 +238,7 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
     const intent = await readAssistantOutboxIntentInventoryEntry(input.vault, intentPath)
     if (
       !intent
+      || protectedFollowUpSources.has(intent.intentId)
       || !isTerminalAssistantOutboxIntent(intent)
       || isPruneProtectedAssistantOutboxIntent(
         intent,

@@ -19,9 +19,6 @@ import { after } from "next/server";
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
-  signalHostedBrowserVaultRefreshRuntime,
-} from "@/src/lib/hosted-orchestration/signal-runtime";
-import {
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -31,7 +28,7 @@ import {
   readHostedOnboardingJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
+import { readHostedBrowserVaultReplicaState } from "@/src/lib/hosted-workspace/store";
 import { getPrisma } from "@/src/lib/prisma";
 
 import { PrismaHostedDirtyConnectionStore } from "../device-sync/prisma-store/dirty-connections";
@@ -121,7 +118,7 @@ export function createBrowserVaultSessionRoute() {
       );
     }
     const [workspace, deviceSyncImportPending] = await Promise.all([
-      readHostedWorkspace({ userId: auth.member.id }),
+      readHostedBrowserVaultReplicaState({ userId: auth.member.id }),
       new PrismaHostedDirtyConnectionStore(prisma).hasPendingDirtyConnectionForUser(
         auth.member.id,
       ).catch(() => false),
@@ -340,6 +337,9 @@ async function scheduleBrowserVaultRefreshBestEffort(input: {
   userId: string;
 }): Promise<void> {
   try {
+    const { signalHostedBrowserVaultRefreshRuntime } = await import(
+      "@/src/lib/hosted-orchestration/signal-runtime"
+    );
     await signalHostedBrowserVaultRefreshRuntime({
       userId: input.userId,
     });

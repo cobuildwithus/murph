@@ -1025,6 +1025,55 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
   }
 });
 
+test("completed Home setup opens the shared Message Murph picker", async ({ page }, testInfo) => {
+  test.setTimeout(300_000);
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) route.continue();
+    else route.abort();
+  });
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  const response = await page.goto("/screenshots/home#home-onboarding-complete", { waitUntil: "load" });
+  expect(response?.status()).toBe(200);
+
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+    const emptyState = page.locator("#home-onboarding-complete");
+    // The public design study stays inert; exercise its real shared action only
+    // inside this browser test, with synthetic channels and external requests blocked.
+    await expect.poll(() => emptyState.locator("button").evaluate((element) =>
+      Object.keys(element).some((key) => key.startsWith("__reactFiber$"))
+    )).toBe(true);
+    await emptyState.evaluate((element) => {
+      let ancestor = element.closest("[inert]");
+      while (ancestor) {
+        ancestor.removeAttribute("inert");
+        ancestor = ancestor.parentElement?.closest("[inert]") ?? null;
+      }
+    });
+    const button = emptyState.getByRole("button", { name: "Message Murph", exact: true });
+    await expect(button).toBeVisible();
+    await expect(emptyState.locator("[data-onboarding-step]")).toHaveCount(0);
+    await page.evaluate(() => document.fonts.ready);
+    await emptyState.screenshot({ path: testInfo.outputPath(`home-message-${width}.png`) });
+    const bounds = await button.boundingBox();
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    expect(bounds?.x).toBeGreaterThanOrEqual(0);
+    expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(width);
+    await button.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("link", { name: "Messages" })).toHaveAttribute("href", "sms:+15550100001");
+    await expect(dialog.getByRole("link", { name: "Email" })).toHaveAttribute("href", "mailto:example@example.test");
+    await dialog.screenshot({ path: testInfo.outputPath(`home-message-picker-${width}.png`) });
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(button).toBeFocused();
+  }
+});
+
 test("home onboarding steps keep equal cards across dashboard widths", async ({
   page,
 }) => {
@@ -1123,7 +1172,9 @@ test("home onboarding steps keep equal cards across dashboard widths", async ({
     }
 
     expect(layout.display).toBe("flex");
-    expect(layout.scrollWidth).toBeGreaterThan(layout.clientWidth);
+    expect(layout.scrollWidth).toBeLessThanOrEqual(
+      layout.clientWidth + OVERFLOW_TOLERANCE_PX,
+    );
     expect(layout.maxCardWidthDelta).toBeLessThanOrEqual(
       OVERFLOW_TOLERANCE_PX,
     );

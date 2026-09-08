@@ -1,11 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import {
   ArrowRightIcon,
   Building2Icon,
-  FileTextIcon,
-  KeyRoundIcon,
   LockKeyholeIcon,
   MapPinIcon,
   RefreshCwIcon,
@@ -167,130 +164,26 @@ export function RecordsConnectClient({
     return <AuthRequiredState onSignIn={openAuthDialog} />;
   }
 
-  const currentStep = consentRequired === false ? 1 : 0;
-
   return (
-    <div className="max-w-5xl space-y-9">
-      <ConnectJourney currentStep={currentStep} />
-
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-12">
-        {consentRequired !== false ? (
-          <section aria-labelledby="records-consent-title" className="min-w-0 space-y-6">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-                Step 1 of 3
-              </p>
-              <h2 id="records-consent-title" className="mt-1 font-serif text-2xl font-medium tracking-tight text-foreground">
-                Review how Murph uses your health data
-              </h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                You control whether Murph can save these records. Review the terms that apply before choosing where you get care.
-              </p>
-            </div>
-            <HostedLegalConsentCard
-              acceptedPendingLabel="Opening records search"
-              initialStatus={null}
-              mode="compact"
-              onAccepted={reloadCurrentHostedAuthDocument}
-              onRequirementChange={setConsentRequired}
-              preferredScope="launch.legal"
-              source="clinical-records-connect"
-            />
-          </section>
-        ) : (
-          <ProviderSearch
-            intentClaim={intentClaim}
-            onConsentRequired={() => setConsentRequired(true)}
-          />
-        )}
-
-        <ImportBoundaryAside />
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      {consentRequired !== false ? (
+        <HostedLegalConsentCard
+          acceptedPendingLabel="Opening records search"
+          initialStatus={null}
+          mode="compact"
+          onAccepted={reloadCurrentHostedAuthDocument}
+          onRequirementChange={setConsentRequired}
+          preferredScope="launch.legal"
+          source="clinical-records-connect"
+        />
+      ) : (
+        <ProviderSearch intentClaim={intentClaim} onConsentRequired={() => setConsentRequired(true)} />
+      )}
     </div>
   );
 }
 
-function ConnectJourney({ currentStep }: { currentStep: number }) {
-  const steps = [
-    { description: "Check how Murph uses your health data", label: "Review" },
-    { description: "Find your hospital or clinic", label: "Where you get care" },
-    { description: "Sign in where you get care", label: "Patient portal" },
-  ] as const;
-
-  return (
-    <section aria-label="Medical records connection progress" className="border-y border-border py-4 sm:py-5">
-      <ol className="grid gap-4 sm:grid-cols-3 sm:gap-6">
-        {steps.map((step, index) => {
-          const active = index === currentStep;
-          const complete = index < currentStep;
-          return (
-            <li key={step.label} aria-current={active ? "step" : undefined} className="flex items-start gap-3">
-              <span
-                className={cn(
-                  "flex size-7 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] font-medium tabular-nums",
-                  active && "border-primary bg-primary text-primary-foreground",
-                  complete && "border-primary/30 bg-primary/10 text-primary",
-                  !active && !complete && "border-border text-muted-foreground",
-                )}
-              >
-                {index + 1}
-              </span>
-              <div className="pt-0.5">
-                <p className={cn("text-sm font-medium", active || complete ? "text-foreground" : "text-muted-foreground")}>
-                  {step.label}
-                </p>
-                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                  {step.description}
-                </p>
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-    </section>
-  );
-}
-
-function ImportBoundaryAside() {
-  const facts = [
-    {
-      description: "Your patient portal password never enters Murph.",
-      icon: KeyRoundIcon,
-      label: "Your portal handles sign-in",
-    },
-    {
-      description: "Murph copies records once. It does not keep checking your chart.",
-      icon: RefreshCwIcon,
-      label: "Copies once",
-    },
-    {
-      description: "Lab results and report summaries available through your portal.",
-      icon: FileTextIcon,
-      label: "What gets copied",
-    },
-  ] as const;
-
-  return (
-    <aside className="border-t border-border pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-      <p className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-        What to expect
-      </p>
-      <div className="mt-5 space-y-6">
-        {facts.map(({ description, icon: Icon, label }) => (
-          <div key={label} className="flex gap-3">
-            <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
-            <div>
-              <p className="text-sm font-medium text-foreground">{label}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function ProviderSearch({
+export function ProviderSearch({
   intentClaim,
   onConsentRequired,
 }: {
@@ -309,6 +202,7 @@ function ProviderSearch({
   const searchInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
   const startCommittedRef = useRef(false);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const operationGenerationRef = useRef(0);
   const attachSearchInput = useCallback((node: HTMLInputElement | null) => {
     searchInputRef.current = node;
@@ -389,11 +283,13 @@ function ProviderSearch({
   }
 
   async function startConnection(provider: ClinicalProviderSearchResultContract) {
+    if (selectedProviderId && selectedProviderId !== provider.id) return;
     if (searchInFlightRef.current || startInFlightRef.current) {
       return;
     }
 
     startInFlightRef.current = true;
+    setSelectedProviderId(provider.id);
     const operationGeneration = operationGenerationRef.current + 1;
     operationGenerationRef.current = operationGeneration;
     setStartingProviderId(provider.id);
@@ -456,7 +352,7 @@ function ProviderSearch({
 
       startInFlightRef.current = false;
       setStartError(
-        `Could not continue with ${provider.brandName}. Choose it again or try another result.`,
+        `Could not continue with ${provider.brandName}. Try this portal again, or start a new connection to choose another.`,
       );
       setStartingProviderId(null);
     }
@@ -469,14 +365,11 @@ function ProviderSearch({
   return (
     <section aria-labelledby="provider-search-title" className="min-w-0 space-y-7">
       <div>
-        <p className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
-          Step 2 of 3
-        </p>
         <h2 id="provider-search-title" className="mt-1 font-serif text-2xl font-medium tracking-tight text-foreground">
           Where do you get care?
         </h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Search for the hospital or clinic whose patient portal you use. Murph supports selected portals right now.
+          Search by hospital, clinic, or city.
         </p>
       </div>
 
@@ -533,7 +426,10 @@ function ProviderSearch({
       {startError ? (
         <Alert variant="destructive">
           <AlertTitle>Could not start the connection</AlertTitle>
-          <AlertDescription>{startError}</AlertDescription>
+          <AlertDescription>
+            {startError}
+            <a href="/records/connect?launch=clinical-records" onClick={() => clearClinicalRecordsConnectIntentFromBrowser()} className="underline underline-offset-4">Start a new connection</a>
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -562,7 +458,7 @@ function ProviderSearch({
               {providers.map((provider) => (
                 <ProviderResult
                   key={provider.id}
-                  disabled={searchPending || Boolean(startingProviderId)}
+                  disabled={searchPending || Boolean(startingProviderId) || Boolean(selectedProviderId && selectedProviderId !== provider.id)}
                   pending={startingProviderId === provider.id}
                   provider={provider}
                   onSelect={() => void startConnection(provider)}
@@ -659,17 +555,9 @@ export function RecordsConnectLauncherState({
 
 function ConnectPageSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Preparing records connection" className="max-w-5xl space-y-8" role="status">
-      <Skeleton className="h-4 w-36" />
-      <Skeleton className="h-20 w-full rounded-xl" />
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_17rem]">
-        <div className="space-y-5">
-          <Skeleton className="h-7 w-64" />
-          <Skeleton className="h-4 w-full max-w-xl" />
-          <Skeleton className="h-40 w-full rounded-xl" />
-        </div>
-        <Skeleton className="h-48 w-full rounded-xl" />
-      </div>
+    <div aria-busy="true" aria-label="Preparing records connection" className="flex max-w-2xl flex-col gap-4" role="status">
+      <Skeleton className="h-7 w-64" />
+      <Skeleton className="h-11 w-full" />
     </div>
   );
 }
@@ -728,12 +616,12 @@ function UnavailableIntentState() {
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
         This private link is missing, expired, or already used. Start a new connection from Medical records.
       </p>
-      <Link
-        href="/records"
+      <a
+        href="/records/connect?launch=clinical-records"
         className={cn(buttonVariants({ size: "lg" }), "mt-6 w-full sm:w-auto")}
       >
-        Back to medical records
-      </Link>
+        Start a new connection
+      </a>
     </section>
   );
 }

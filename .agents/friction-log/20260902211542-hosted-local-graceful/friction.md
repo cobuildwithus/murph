@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local graceful shutdown control ignores standby-owned runtime fences'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2754'
 ---
 
 ## Expected Behavior

@@ -11,6 +11,11 @@ const describeRealModel = RUN_REAL_MODEL ? describe : describe.skip;
 
 const CASES = [
   { expectedKind: "welcome", text: "Hey Murph" },
+  { expectedKind: "answer", text: "Yes, ready", openingTone: "formal" },
+  { expectedKind: "answer", text: "Yes, I want to get stronger", openingTone: "formal" },
+  { expectedKind: "handoff", text: "Call me Robin, I am 34", openingTone: "formal" },
+  { expectedKind: "handoff", text: "Can you help with a symptom first?", openingTone: "formal" },
+  { expectedKind: "handoff", text: "I would rather skip these questions", openingTone: "formal" },
   { expectedKind: "welcome", text: "What can you help me with?" },
   {
     expectedKind: "answer",
@@ -35,10 +40,8 @@ const CASES = [
 ] as const;
 
 describeRealModel("hosted Linq instant first-turn real-model semantics", () => {
-  it.each(CASES)("classifies and answers: $text", async ({
-    expectedKind,
-    text,
-  }) => {
+  it.each(CASES)("classifies and answers: $text", async (scenario) => {
+    const { expectedKind, text } = scenario;
     const apiKey =
       process.env.HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY
       ?? process.env.OPENAI_API_KEY;
@@ -49,7 +52,10 @@ describeRealModel("hosted Linq instant first-turn real-model semantics", () => {
     }
     const openAi = new OpenAI({ apiKey, maxRetries: 0 });
     const response = await openAi.responses.create(
-      buildHostedLinqInstantFirstTurnOpenAiBody({ text }),
+      buildHostedLinqInstantFirstTurnOpenAiBody({
+        text,
+        ...("openingTone" in scenario ? { openingTone: scenario.openingTone } : {}),
+      }),
       { maxRetries: 0, timeout: 18_000 },
     );
     expect(response.status).toBe("completed");

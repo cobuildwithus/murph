@@ -770,7 +770,23 @@ describe("legal consent routes", () => {
     await expect(response.json()).resolves.toEqual(currentStatus);
   });
 
-  it("does not schedule stale provider cleanup when concurrent renewal wins", async () => {
+  it("still runs withdrawal cleanup when the runtime stop fails", async () => {
+    mocks.reconcileHostedHealthDataRuntimeConsent.mockRejectedValueOnce(hostedOnboardingError({
+      message: "Runtime unavailable", code: "HOSTED_HEALTH_DATA_RUNTIME_CONSENT_RECONCILIATION_FAILED", httpStatus: 503, retryable: true,
+    }));
+    const response = await consentRevokeRoute.POST(new Request("https://join.example.test/api/legal/consent/revoke", {
+      body: JSON.stringify({ scope: "launch.health-data", source: "settings-health-data" }),
+      headers: { "Content-Type": "application/json", origin: "https://join.example.test" }, method: "POST",
+    }));
+    expect(response.status).toBe(503);
+    expect(mocks.after.mock.invocationCallOrder[0]).toBeLessThan(mocks.reconcileHostedHealthDataRuntimeConsent.mock.invocationCallOrder[0]!);
+    const cleanup = mocks.after.mock.calls[0]?.[0];
+    expect(cleanup).toBeTypeOf("function");
+    await cleanup();
+    expect(mocks.cleanupWithdrawnHostedHealthDataConsent).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules independently guarded cleanup when concurrent renewal wins", async () => {
     mocks.reconcileHostedHealthDataRuntimeConsent.mockResolvedValueOnce({
       consentState: "granted",
       processingAllowed: true,
@@ -793,7 +809,7 @@ describe("legal consent routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
     expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,

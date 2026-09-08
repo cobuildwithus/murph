@@ -19,6 +19,7 @@ export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/messaging-ingress": "../../packages/messaging-ingress/package.json",
   "@murphai/runtime-state": "../../packages/runtime-state/src/index.ts",
   "@murphai/query": "../../packages/query/src/index.ts",
+  "@murphai/vault-usecases": "../../packages/vault-usecases/src/index.ts",
   "@murphai/core": "../../packages/core/src/index.ts",
   "@murphai/importers": "../../packages/importers/src/index.ts",
   "@murphai/inboxd": "../../packages/inboxd/src/index.ts",

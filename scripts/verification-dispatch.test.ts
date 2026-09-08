@@ -201,7 +201,7 @@ describe("verification dispatcher", () => {
         "#!/bin/sh",
         'if [ "${1:-}" = "--version" ]; then exit 0; fi',
         `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
-        `printf "CRABBOX_STATIC_ID=%s\\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nMURPH_VERIFY_SSH_USER=%s\\nMURPH_VERIFY_SSH_PORT=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${MURPH_VERIFY_SSH_USER-unset}" "\${MURPH_VERIFY_SSH_PORT-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
+        `printf "CRABBOX_STATIC_ID=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nMURPH_VERIFY_SSH_USER=%s\\nMURPH_VERIFY_SSH_PORT=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${MURPH_VERIFY_SSH_USER-unset}" "\${MURPH_VERIFY_SSH_PORT-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
       ].join("\n"),
     );
     const result = spawnSync(
@@ -214,7 +214,6 @@ describe("verification dispatcher", () => {
           ...withoutVerificationRoutingEnvironment(process.env),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
-          MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
           NODE_OPTIONS: "--trace-warnings",
           OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -248,7 +247,7 @@ describe("verification dispatcher", () => {
       "packages/assistant-engine",
     ]);
     expect(readFileSync(environmentPath, "utf8")).toMatch(
-      /^CRABBOX_STATIC_ID=static_murph_[a-f0-9]{16}\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=unset\nMURPH_VERIFY_SSH_HOST=unset\nMURPH_VERIFY_SSH_USER=unset\nMURPH_VERIFY_SSH_PORT=unset\nOPENAI_API_KEY=unset\nNODE_OPTIONS=unset\n$/u,
+      /^CRABBOX_STATIC_ID=static_murph_[a-f0-9]{16}\nMURPH_VERIFY_SSH_HOST=unset\nMURPH_VERIFY_SSH_USER=unset\nMURPH_VERIFY_SSH_PORT=unset\nOPENAI_API_KEY=unset\nNODE_OPTIONS=unset\n$/u,
     );
 
     const firstIdentity = callDispatcherExport<Record<string, string>>(
@@ -268,154 +267,6 @@ describe("verification dispatcher", () => {
     expect(secondIdentity.staticId).not.toBe(firstIdentity.staticId);
     expect(secondIdentity.workRoot).not.toBe(firstIdentity.workRoot);
     expect(Object.values(firstIdentity).join(" ")).not.toContain("/workspace/one");
-
-    expect(callDispatcherExport<Record<string, unknown>>(
-      "buildLockedRemoteDispatcherInvocation",
-      {
-        request: {
-          commandArgs: [],
-          verificationCommand: "verify:acceptance",
-        },
-        argv: ["verify:acceptance"],
-      },
-    )).toMatchObject({
-      command: "node",
-      args: [
-        "scripts/run-with-workspace-artifact-lock.mjs",
-        "remote verify:acceptance",
-        "--",
-        "node",
-        "scripts/verification-dispatch.mjs",
-        "verify:acceptance",
-      ],
-    });
-  });
-
-  it("checks the remote sync candidate only after acquiring the workspace lock", async () => {
-    const tempRoot = makeTempRoot();
-    const repoDir = path.join(tempRoot, "repo");
-    const scriptsDir = path.join(repoDir, "scripts");
-    const binDir = path.join(tempRoot, "bin");
-    const lockReadyPath = path.join(tempRoot, "lock-ready");
-    const lockReleasePath = path.join(tempRoot, "lock-release");
-    const providerMarkerPath = path.join(tempRoot, "provider-called");
-    mkdirSync(scriptsDir, { recursive: true });
-    writeFileSync(
-      path.join(scriptsDir, "verification-dispatch.mjs"),
-      readFileSync(dispatcherPath, "utf8"),
-      "utf8",
-    );
-    writeFileSync(
-      path.join(scriptsDir, "run-with-workspace-artifact-lock.mjs"),
-      readFileSync(
-        path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs"),
-        "utf8",
-      ),
-      "utf8",
-    );
-    writeExecutable(
-      path.join(scriptsDir, "hold-lock.sh"),
-      [
-        "#!/bin/sh",
-        `: > ${shellQuote(lockReadyPath)}`,
-        `while [ ! -f ${shellQuote(lockReleasePath)} ]; do sleep 0.05; done`,
-      ].join("\n"),
-    );
-    writeExecutable(
-      path.join(binDir, "crabbox"),
-      [
-        "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        `: > ${shellQuote(providerMarkerPath)}`,
-      ].join("\n"),
-    );
-    runGit(repoDir, ["init", "--quiet"]);
-    runGit(repoDir, ["add", "scripts"]);
-    runGit(repoDir, [
-      "-c",
-      "user.name=Crabbox Test",
-      "-c",
-      "user.email=crabbox-test@users.noreply.github.com",
-      "commit",
-      "--quiet",
-      "-m",
-      "initial",
-    ]);
-
-    const baseEnvironment: NodeJS.ProcessEnv = {
-      ...withoutVerificationRoutingEnvironment(process.env),
-      HOME: path.join(tempRoot, "home"),
-      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-    };
-    const lockHolder = spawn(
-      process.execPath,
-      [
-        path.join(scriptsDir, "run-with-workspace-artifact-lock.mjs"),
-        "test lock holder",
-        "--",
-        path.join(scriptsDir, "hold-lock.sh"),
-      ],
-      {
-        cwd: repoDir,
-        env: baseEnvironment,
-        stdio: "ignore",
-      },
-    );
-    await waitForFile(lockReadyPath);
-
-    const dispatcher = spawn(
-      process.execPath,
-      [
-        realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
-        "test:diff",
-        "scripts/verification-dispatch.mjs",
-      ],
-      {
-        cwd: repoDir,
-        env: {
-          ...baseEnvironment,
-          MURPH_VERIFY_EXECUTOR: "ssh",
-          ...validSshRoutingEnvironment,
-        },
-        stdio: ["ignore", "ignore", "pipe"],
-      },
-    );
-    const stderrChunks: Buffer[] = [];
-    dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-    try {
-      await waitForCondition(
-        () => Buffer.concat(stderrChunks).toString("utf8").includes(
-          "state=waiting-for-workspace-lock",
-        ) || dispatcher.exitCode !== null,
-        "dispatcher to enter or reject the workspace lock",
-      );
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(
-        Buffer.concat(stderrChunks).toString("utf8"),
-        `dispatcher exited with code ${dispatcher.exitCode} before waiting for the workspace lock`,
-      ).toContain("state=waiting-for-workspace-lock");
-      writeFileSync(path.join(repoDir, "raced.txt"), "changed while waiting\n", "utf8");
-      writeFileSync(lockReleasePath, "release\n", "utf8");
-
-      const [lockResult, dispatcherResult] = await Promise.all([
-        waitForChild(lockHolder),
-        waitForChild(dispatcher),
-      ]);
-      expect(lockResult).toEqual({ code: 0, signal: null });
-      expect(dispatcherResult).toEqual({ code: 1, signal: null });
-      expect(Buffer.concat(stderrChunks).toString("utf8")).toContain(
-        "unauthorized Git state (untracked=1)",
-      );
-      expect(existsSync(providerMarkerPath)).toBe(false);
-    } finally {
-      if (!existsSync(lockReleasePath)) {
-        writeFileSync(lockReleasePath, "release\n", "utf8");
-      }
-      await Promise.allSettled([
-        waitForChild(lockHolder),
-        waitForChild(dispatcher),
-      ]);
-    }
   });
 
   it("freezes one candidate before provider sync and preserves implicit diff scope", async () => {
@@ -486,7 +337,7 @@ describe("verification dispatcher", () => {
       {
         cwd: repoDir,
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
@@ -596,7 +447,7 @@ describe("verification dispatcher", () => {
       {
         cwd: repoDir,
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
@@ -684,7 +535,7 @@ describe("verification dispatcher", () => {
       {
         cwd: repoDir,
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
@@ -749,16 +600,11 @@ describe("verification dispatcher", () => {
       const overlapPath = path.join(tempRoot, "overlap");
       const retryPath = path.join(tempRoot, "retry-complete");
       mkdirSync(scriptsDir, { recursive: true });
-      for (const scriptName of [
-        "verification-dispatch.mjs",
-        "run-with-workspace-artifact-lock.mjs",
-      ]) {
-        writeFileSync(
-          path.join(scriptsDir, scriptName),
-          readFileSync(path.join(repoRoot, "scripts", scriptName), "utf8"),
-          "utf8",
-        );
-      }
+      writeFileSync(
+        path.join(scriptsDir, "verification-dispatch.mjs"),
+        readFileSync(dispatcherPath, "utf8"),
+        "utf8",
+      );
       const sshWrapperSource = readFileSync(
         path.join(
           repoRoot,
@@ -850,20 +696,12 @@ describe("verification dispatcher", () => {
         ...validSshRoutingEnvironment,
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
       };
-      const lockWrapperPath = path.join(
-        scriptsDir,
-        "run-with-workspace-artifact-lock.mjs",
-      );
       const dispatcherPathInRepo = realpathSync(
         path.join(scriptsDir, "verification-dispatch.mjs"),
       );
       const runRemoteDiff = () => spawn(
         process.execPath,
         [
-          lockWrapperPath,
-          "remote test:diff",
-          "--",
-          process.execPath,
           dispatcherPathInRepo,
           "test:diff",
           "scripts/verification-dispatch.mjs",
@@ -873,12 +711,6 @@ describe("verification dispatcher", () => {
           env: baseEnvironment,
           stdio: "ignore",
         },
-      );
-      const lockPath = path.join(
-        repoDir,
-        ".git",
-        "murph-locks",
-        "workspace-artifacts.lock",
       );
       try {
         const firstRun = runRemoteDiff();
@@ -892,7 +724,6 @@ describe("verification dispatcher", () => {
         );
         expect(Number.isInteger(remotePid)).toBe(true);
         expect(isProcessRunning(remotePid)).toBe(true);
-        expect(existsSync(lockPath)).toBe(false);
         expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(
           false,
         );
@@ -901,7 +732,6 @@ describe("verification dispatcher", () => {
         expect(existsSync(blockedPath)).toBe(true);
         expect(existsSync(overlapPath)).toBe(false);
         expect(existsSync(retryPath)).toBe(false);
-        expect(existsSync(lockPath)).toBe(false);
 
         writeFileSync(remoteReleasePath, "release\n", "utf8");
         await waitForFile(remoteDonePath);
@@ -915,7 +745,6 @@ describe("verification dispatcher", () => {
           signal: null,
         });
         expect(existsSync(retryPath)).toBe(true);
-        expect(existsSync(lockPath)).toBe(false);
       } finally {
         if (!existsSync(remoteReleasePath)) {
           writeFileSync(remoteReleasePath, "release\n", "utf8");
@@ -1045,7 +874,7 @@ describe("verification dispatcher", () => {
           cwd: repoRoot,
           encoding: "utf8",
           env: {
-            ...insideWorkspaceArtifactLockEnvironment(process.env),
+            ...withoutVerificationRoutingEnvironment(process.env),
             MURPH_VERIFY_EXECUTOR: "ssh",
             ...validSshRoutingEnvironment,
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -1077,7 +906,7 @@ describe("verification dispatcher", () => {
         cwd: repoRoot,
         encoding: "utf8",
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -1122,7 +951,7 @@ describe("verification dispatcher", () => {
         cwd: repoRoot,
         encoding: "utf8",
         env: {
-          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          ...withoutVerificationRoutingEnvironment(process.env),
           MURPH_VERIFY_EXECUTOR: "ssh",
           ...validSshRoutingEnvironment,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -1426,17 +1255,7 @@ function withoutVerificationRoutingEnvironment(
   delete sanitized.MURPH_VERIFY_SSH_HOST;
   delete sanitized.MURPH_VERIFY_SSH_PORT;
   delete sanitized.MURPH_VERIFY_SSH_USER;
-  delete sanitized.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD;
   return sanitized;
-}
-
-function insideWorkspaceArtifactLockEnvironment(
-  environment: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  return {
-    ...withoutVerificationRoutingEnvironment(environment),
-    MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
-  };
 }
 
 function runGit(

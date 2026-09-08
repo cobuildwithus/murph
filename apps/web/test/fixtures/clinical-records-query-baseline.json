@@ -1,0 +1,284 @@
+[
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "88d92077d0be4a279fcfe9ece4c4704192e9e0d2bba15caac1b08d6608ebd75a",
+      "queryScopeId": "patient-demographics",
+      "resourceType": "Patient",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Patient/patient-1",
+    "scope": "patient/Patient.r"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "d66cc398ce9224292aee420a8b5268ea4f17adbe4b3c0d3378a26fc9fe707d91",
+      "queryScopeId": "laboratory-observations",
+      "resourceType": "Observation",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=laboratory&_count=100",
+    "scope": "patient/Observation.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "04d9f124b040fbafa131ad885e1b7213351a020fd29898a34bdd751cb9598c75",
+      "queryScopeId": "diagnostic-reports",
+      "resourceType": "DiagnosticReport",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/DiagnosticReport?patient=patient-1&_count=100",
+    "scope": "patient/DiagnosticReport.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "291f72dc7f01d4c1f250a900a37f9543243a8aae8711700d1a2df8f0562f8ae1",
+      "queryScopeId": "allergies",
+      "resourceType": "AllergyIntolerance",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/AllergyIntolerance?patient=patient-1&_count=100",
+    "scope": "patient/AllergyIntolerance.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "7d17432e0bfa5f30d239432d969938f8300b18807e5bfddf6f0c10097e997258",
+      "queryScopeId": "care-plans",
+      "resourceType": "CarePlan",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/CarePlan?patient=patient-1&_count=100",
+    "scope": "patient/CarePlan.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "12b17febb9a3418ada2f3490053e2b5defa9cbe88c611521010a2da6f3e4b7fa",
+      "queryScopeId": "care-teams",
+      "resourceType": "CareTeam",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/CareTeam?patient=patient-1&_count=100",
+    "scope": "patient/CareTeam.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "361888afe1705b20dd6491f09e3c7829e981a6a6d881d11e3f69ffe5aa73382e",
+      "queryScopeId": "condition-encounter-diagnoses",
+      "resourceType": "Condition",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Condition?patient=patient-1&category=encounter-diagnosis&_count=100",
+    "scope": "patient/Condition.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "bb5eb9b754bb7d245792b2f3e5ece58d3a62c753619fdc62daf915433a8cfab6",
+      "queryScopeId": "condition-problem-list",
+      "resourceType": "Condition",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Condition?patient=patient-1&category=problem-list-item&_count=100",
+    "scope": "patient/Condition.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "2c8fd62a3ce1d660054e4d2b801d6b4408259a0309b2d3f51903b97b39a42042",
+      "queryScopeId": "device-implants",
+      "resourceType": "Device",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Device?patient=patient-1&_count=100",
+    "scope": "patient/Device.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "c048ee3f3dc578da0a818c8f5426eb177837e3654a613f62644fcfa3bba57486",
+      "queryScopeId": "document-references-notes",
+      "resourceType": "DocumentReference",
+      "sliceId": "window-20260422-20260721",
+      "from": "2026-04-22T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/DocumentReference?patient=patient-1&category=clinical-note&period=ge2026-04-22T12%3A00%3A00.000Z&period=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/DocumentReference.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "220bc16fd931f0740ebb80ebd0e0ea16207db937a859c730e869e2c20ebd5a02",
+      "queryScopeId": "encounters",
+      "resourceType": "Encounter",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Encounter?patient=patient-1&date=ge2025-07-21T12%3A00%3A00.000Z&date=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Encounter.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "e05cb9c8977fedc75331520b58109581d2b0cc8c2f0ba05bf084e3e84717f303",
+      "queryScopeId": "family-member-history",
+      "resourceType": "FamilyMemberHistory",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/FamilyMemberHistory?patient=patient-1&_count=100",
+    "scope": "patient/FamilyMemberHistory.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "5cb31dfbe149e351196c18e8f7195d0f0a6950cd21bc1fe9d3e947f4ad3a52d2",
+      "queryScopeId": "immunizations",
+      "resourceType": "Immunization",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Immunization?patient=patient-1&date=ge2025-07-21T12%3A00%3A00.000Z&date=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Immunization.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "6e249051e75576c4b62f1aad528d26241c03d3b3c769c43cd4b7fc2eaa6c9bcd",
+      "queryScopeId": "medication-dispenses",
+      "resourceType": "MedicationDispense",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/MedicationDispense?patient=patient-1&_count=100",
+    "scope": "patient/MedicationDispense.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "5e823283ec838a47baa15a27d75322abb8e886b1edc0a35db4279e419809ecd5",
+      "queryScopeId": "medication-requests",
+      "resourceType": "MedicationRequest",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/MedicationRequest?patient=patient-1&_count=100",
+    "scope": "patient/MedicationRequest.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "6b0ba54edd60f52b11fce163e9fd205dde9fffee91ee65abd8533b029d4c166b",
+      "queryScopeId": "observation-assessments",
+      "resourceType": "Observation",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=survey&date=ge2025-07-21T12%3A00%3A00.000Z&date=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Observation.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "df0548dea894b310b37ff715c4a3c7c9474aa14bd796fadfa1ee8db262074235",
+      "queryScopeId": "observation-sdoh-assessments",
+      "resourceType": "Observation",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=sdoh&date=ge2025-07-21T12%3A00%3A00.000Z&date=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Observation.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "2ab29672dae00be2383c3d0fc781266182bdf16f3aa920447a6bc45a1f73823d",
+      "queryScopeId": "observation-social-history",
+      "resourceType": "Observation",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=social-history&issued=ge2025-07-21T12%3A00%3A00.000Z&issued=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Observation.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "46171e83d27dc3fa64e1e0004822ef61d43d37682874138f1ed752a38c94ebf5",
+      "queryScopeId": "procedure-orders",
+      "resourceType": "Procedure",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Procedure?patient=patient-1&date=ge2025-07-21T12%3A00%3A00.000Z&date=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Procedure.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "a911b0489cf4a0b8f5d4a23c8fbde804224c6583b78c19d23db5a066b5a7ace8",
+      "queryScopeId": "procedure-surgeries",
+      "resourceType": "Procedure",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Procedure?patient=patient-1&category=387713003&date=ge2025-07-21T12%3A00%3A00.000Z&date=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Procedure.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "a911b0489cf4a0b8f5d4a23c8fbde804224c6583b78c19d23db5a066b5a7ace8",
+      "queryScopeId": "procedure-surgical-history",
+      "resourceType": "Procedure",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Procedure?patient=patient-1&category=387713003&_count=100",
+    "scope": "patient/Procedure.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "25d3a6a02b20e62c9ac677506161f29eee6b4e7bae42684cf50459c12ee6544d",
+      "queryScopeId": "provider-goals",
+      "resourceType": "Goal",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Goal?patient=patient-1&_count=100",
+    "scope": "patient/Goal.s"
+  },
+  {
+    "slice": {
+      "coverage": "whole-family",
+      "queryFingerprint": "abb60afbb67a16418f689fe86b9cf60b36d7450e568927ff4ef9658126527953",
+      "queryScopeId": "service-requests",
+      "resourceType": "ServiceRequest",
+      "sliceId": "whole"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/ServiceRequest?patient=patient-1&_count=100",
+    "scope": "patient/ServiceRequest.s"
+  },
+  {
+    "slice": {
+      "coverage": "bounded-window",
+      "queryFingerprint": "76d9ebab5b8f191974112b5d1860af5bbc874cea9d72a2451ff217d099295e52",
+      "queryScopeId": "vital-sign-observations",
+      "resourceType": "Observation",
+      "sliceId": "window-20250721-20260721",
+      "from": "2025-07-21T12:00:00.000Z",
+      "to": "2026-07-21T12:00:00.000Z"
+    },
+    "url": "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=vital-signs&date=ge2025-07-21T12%3A00%3A00.000Z&date=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
+    "scope": "patient/Observation.s"
+  }
+]

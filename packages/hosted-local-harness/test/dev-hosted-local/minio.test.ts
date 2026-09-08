@@ -7,8 +7,10 @@ import { buildHostedLocalMinioDockerUserArgs } from "../../src/dev-hosted-local/
 
 const runtimeMocks = vi.hoisted(() => ({
   spawnChildProcess: vi.fn(),
+  terminateChildProcess: vi.fn(),
+  throwIfAbortSignalAborted: (signal?: AbortSignal) => signal?.throwIfAborted(),
   terminateChildProcessAndWait: vi.fn(async () => {}),
-  waitForHealthyHttpEndpoint: vi.fn(async () => {}),
+  waitForHealthyHttpEndpoint: vi.fn(async (_input: { signal?: AbortSignal }) => {}),
 }));
 
 const childProcessMocks = vi.hoisted(() => ({
@@ -158,6 +160,36 @@ describe("hosted-local MinIO sidecar", () => {
       "502:501",
     ]);
     expect(buildHostedLocalMinioDockerUserArgs("darwin", identity)).toEqual([]);
+  });
+
+  it.each(["SIGTERM", "SIGKILL"] as const)("cancels an unpublished MinIO child with %s while health is pending", async (signal) => {
+    const abortController = new AbortController();
+    const child = { child: new EventEmitter(), name: "minio", stderrTail: () => "", stdoutTail: () => "" };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    let releaseHealth: () => void = () => {};
+    runtimeMocks.waitForHealthyHttpEndpoint.mockImplementationOnce(async (input) => {
+      await new Promise<void>((resolve, reject) => {
+        releaseHealth = resolve;
+        input.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+      });
+    });
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
+    const startup = maybeStartHostedLocalMinio({
+      abortSignal: abortController.signal,
+      buildId: "pending-health",
+      containerHost: "host.docker.internal",
+      env: { MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1" },
+      pullImage: async () => true,
+      tempDir: "/tmp/hosted-local-minio-pending-test",
+    });
+    const outcome = startup.then(() => "ready", () => "cancelled");
+    await vi.waitFor(() => expect(runtimeMocks.waitForHealthyHttpEndpoint).toHaveBeenCalledOnce());
+    abortController.abort(signal);
+    const signalsAtAbort = [...runtimeMocks.terminateChildProcess.mock.calls];
+    releaseHealth();
+    expect(await outcome).toBe("cancelled");
+    expect(signalsAtAbort).toEqual([[child.child, signal]]);
+    expect(runtimeMocks.terminateChildProcessAndWait).toHaveBeenCalledWith(child.child, { signal: "SIGTERM" });
   });
 
   it("starts a container-reachable S3-compatible endpoint for hosted-local E2E", async () => {

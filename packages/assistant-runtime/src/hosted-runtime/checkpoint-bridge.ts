@@ -33,6 +33,10 @@ export class HostedRuntimeBridgeCheckpointLeaseError extends Error {
   constructor(
     readonly code: HostedRuntimeBridgeCheckpointLeaseErrorCode,
     readonly stage: HostedRuntimeBridgeCheckpointLeaseStage,
+    readonly postWebCheckpoint?: {
+      responseCheckpointed: boolean;
+      leaseMatchesResponse: boolean;
+    },
   ) {
     super(`Hosted runtime bridge checkpoint lease validation failed ${stage}.`);
     this.name = "HostedRuntimeBridgeCheckpointLeaseError";
@@ -166,6 +170,7 @@ export async function checkpointHostedRuntimeBridgeWebWorkspace(
   requireCheckpointLeaseMatchesRequest({
     lease: await input.readCurrentLease(),
     request: input.request,
+    response,
     stage: "after_web_checkpoint",
     userId: input.userId,
   });
@@ -176,6 +181,7 @@ export async function checkpointHostedRuntimeBridgeWebWorkspace(
 function requireCheckpointLeaseMatchesRequest(input: {
   lease: HostedRuntimeBridgeCheckpointLease | null;
   request: HostedWorkspaceCheckpointRequest;
+  response?: HostedWorkspaceCheckpointResponse;
   stage: HostedRuntimeBridgeCheckpointLeaseStage;
   userId: string;
 }): HostedRuntimeBridgeCheckpointLease {
@@ -192,7 +198,17 @@ function requireCheckpointLeaseMatchesRequest(input: {
     throw new HostedRuntimeBridgeCheckpointLeaseError("stale_lease_generation", input.stage);
   }
   if (input.lease.workspaceVersion !== input.request.expectedWorkspaceVersion) {
-    throw new HostedRuntimeBridgeCheckpointLeaseError("stale_workspace_version", input.stage);
+    throw new HostedRuntimeBridgeCheckpointLeaseError(
+      "stale_workspace_version",
+      input.stage,
+      input.stage === "after_web_checkpoint" && input.response
+        ? {
+            responseCheckpointed: input.response.checkpointed,
+            leaseMatchesResponse:
+              input.lease.workspaceVersion === input.response.workspace.version,
+          }
+        : undefined,
+    );
   }
 
   return input.lease;

@@ -119,6 +119,12 @@ import {
 import {
   recordHostedStripeEvent,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
+import {
+  claimHostedMailboxConversationSubscriptionAction,
+} from "@/src/lib/hosted-mailbox/store";
+import {
+  createHostedAssistantInputLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   startHostedStripeHttpFixture,
@@ -140,6 +146,100 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted Stripe webhook entitlement with PostgreSQL",
   () => {
+    it.each([
+      ["start_pulse_now", "replayed"],
+      ["upgrade_edge", "conflict"],
+    ] as const)("admits one subscription action when concurrent %s returns %s", async (secondAction, losingResult) => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_subscription_claim_${randomUUID()}`;
+      const assistantInputId = `ain_${randomUUID()}`;
+      const mailboxItemId = `mailbox_${randomUUID()}`;
+      const contenders = [
+        { action: "start_pulse_now", prisma: firstClient },
+        { action: secondAction, prisma: secondClient },
+      ] as const;
+      const ownerLocked = createDeferred();
+      const releaseOwner = createDeferred();
+      const pending: Promise<unknown>[] = [];
+
+      try {
+        await observer.hostedMember.create({ data: { id: memberId } });
+        await observer.hostedMailboxItem.create({
+          data: {
+            assistantInputLookupKey: createHostedAssistantInputLookupKey(assistantInputId),
+            causalSeq: 1n,
+            dedupeKey: mailboxItemId,
+            id: mailboxItemId,
+            kind: "conversation.message",
+            lane: "conversation",
+            laneSeq: 1n,
+            occurredAt: new Date(),
+            payloadSchema: "hosted.mailbox.item.v1",
+            userId: memberId,
+          },
+        });
+        const pids = await Promise.all([
+          readBackendPid(firstClient),
+          readBackendPid(secondClient),
+        ]);
+        const lock = observer.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id FROM hosted_mailbox_item
+            WHERE id = ${mailboxItemId} FOR UPDATE
+          `;
+          ownerLocked.resolve();
+          await releaseOwner.promise;
+        }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+        pending.push(lock);
+        await Promise.race([ownerLocked.promise, lock]);
+
+        const claims = Promise.allSettled(contenders.map(({ action, prisma }) =>
+          claimHostedMailboxConversationSubscriptionAction({
+            action,
+            assistantInputId,
+            memberId,
+            prisma,
+          })
+        ));
+        pending.push(claims);
+        // Both real transactions must read the unclaimed input and reach its
+        // locked write before either can win. No query result is simulated.
+        await Promise.all(pids.map((pid) => waitForBlockedBackend({ observer, pid })));
+        releaseOwner.resolve();
+        await lock;
+
+        const results = await claims;
+        expect(results).toEqual(expect.arrayContaining([
+          { status: "fulfilled", value: "claimed" },
+          { status: "fulfilled", value: losingResult },
+        ]));
+        const winner = results.findIndex((result) =>
+          result.status === "fulfilled" && result.value === "claimed"
+        );
+        const winningAction = contenders[winner]?.action;
+        if (!winningAction) {
+          throw new Error("Expected exactly one subscription action winner.");
+        }
+        await expect(observer.hostedMailboxItem.findUniqueOrThrow({
+          select: { subscriptionActionClaim: true },
+          where: { id: mailboxItemId },
+        })).resolves.toEqual({ subscriptionActionClaim: winningAction });
+        await expect(claimHostedMailboxConversationSubscriptionAction({
+          action: winningAction,
+          assistantInputId,
+          memberId,
+          prisma: observer,
+        })).resolves.toBe("replayed");
+      } finally {
+        releaseOwner.resolve();
+        await Promise.allSettled(pending);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await Promise.all([observer, firstClient, secondClient].map((client) => client.$disconnect()));
+      }
+    });
+
     it("applies an older proven-current full refund without moving the billing cursor backward", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const fixtureId = randomUUID();

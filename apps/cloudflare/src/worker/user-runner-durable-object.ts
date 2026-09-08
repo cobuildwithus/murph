@@ -124,6 +124,24 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
+  async admitHostedMediaRead(
+    input: Parameters<HostedUserRunner["admitHostedMediaRead"]>[0],
+  ): ReturnType<HostedUserRunner["admitHostedMediaRead"]> {
+    return this.runner.admitHostedMediaRead(input);
+  }
+
+  async recordHostedMediaAsset(
+    input: Parameters<HostedUserRunner["recordHostedMediaAsset"]>[0],
+  ): ReturnType<HostedUserRunner["recordHostedMediaAsset"]> {
+    return this.runner.recordHostedMediaAsset(input);
+  }
+
+  async forgetHostedMediaAsset(
+    input: Parameters<HostedUserRunner["forgetHostedMediaAsset"]>[0],
+  ): ReturnType<HostedUserRunner["forgetHostedMediaAsset"]> {
+    return this.runner.forgetHostedMediaAsset(input);
+  }
+
   async revokeActiveRuntimePlatformAiUsage(
     input: Parameters<HostedUserRunner["revokeActiveRuntimePlatformAiUsage"]>[0],
   ): ReturnType<HostedUserRunner["revokeActiveRuntimePlatformAiUsage"]> {
@@ -232,6 +250,7 @@ function createHostedUserRunner(
 ): HostedUserRunner {
   const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
     exactUser: env.RUNNER_CONTAINER,
+    next: env.NEXT_RUNNER_CONTAINER,
     standby: env.STANDBY_RUNNER_CONTAINER ?? null,
   });
   return new HostedUserRunner(
@@ -242,6 +261,5 @@ function createHostedUserRunner(
     runnerContainerNamespace,
     env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
     env.STANDBY_COORDINATOR ?? null,
-    env.STANDBY_RUNNER_CONTAINER ?? null,
   );
 }

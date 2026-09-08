@@ -1,6 +1,6 @@
-import {
-  parseHostedRuntimeHealthDataAdmissionResponse,
-} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRuntimeHealthDataAdmissionResponse,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -39,10 +39,10 @@ export const GET = withJsonError(async (request: Request) => {
     member?.consentGrants,
   );
 
-  return jsonOk(parseHostedRuntimeHealthDataAdmissionResponse({
+  return jsonOk({
     consentState,
     processingAllowed:
       member?.suspendedAt === null && consentState !== "revoked",
     userId,
-  }));
+  } satisfies HostedRuntimeHealthDataAdmissionResponse);
 });

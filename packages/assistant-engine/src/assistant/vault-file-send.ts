@@ -396,6 +396,14 @@ export async function resolveAssistantVaultImageResponseMedia(input: {
   }
 }
 
+export function supportsAssistantVaultFileDelivery(input: {
+  channel?: string | null
+  threadIsDirect?: boolean | null
+}): boolean {
+  const channel = input.channel?.trim().toLowerCase()
+  return channel === 'linq' || (channel === 'telegram' && input.threadIsDirect === true)
+}
+
 export function readAssistantVaultFileMedia(
   intent: AssistantOutboxIntent,
 ): AssistantVaultFileResponseMedia | null {
@@ -411,10 +419,10 @@ export function readAssistantVaultFileMedia(
       'Vault-file delivery must contain exactly one vault file and no other media.',
     )
   }
-  if (intent.operation !== null || intent.channel?.trim().toLowerCase() !== 'linq') {
+  if (intent.operation !== null || !supportsAssistantVaultFileDelivery(intent)) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_INTENT_INVALID',
-      'Vault-file delivery requires a standard Linq message intent.',
+      'Vault-file delivery requires a supported conversation message intent.',
     )
   }
   return vaultFiles[0]
@@ -484,7 +492,7 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
     actionId: `vault-file-send:${actionIdentity}`,
     actionKind: ASSISTANT_VAULT_FILE_SEND_ACTION_KIND,
     presentation: {
-      body: `Murph will send “${input.file.filename}” (${formatByteCount(input.file.sizeBytes)}) to your current iMessage conversation. This approval applies only to this file and destination.`,
+      body: `Murph will send “${input.file.filename}” (${formatByteCount(input.file.sizeBytes)}) to your current ${channel === 'telegram' ? 'Telegram' : 'iMessage'} conversation. This approval applies only to this file and destination.`,
       title: 'Send a file from your vault?',
     },
     returnContactKind,

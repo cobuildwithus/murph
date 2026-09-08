@@ -1,7 +1,11 @@
 import "server-only";
 
+import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
+
 import { createHash, randomBytes } from "node:crypto";
 
+import { hashClinicalFhirPatientId } from "@murphai/clinical-records";
+import { CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE, CLINICAL_RECORD_MAX_SOURCES } from "./client-contracts";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import type { Prisma } from "@prisma/client";
 
@@ -26,6 +30,7 @@ import {
 } from "./provider-directory";
 import { resolveClinicalProviderDirectoryEntry } from "./provider-directory-store";
 import {
+  openClinicalConnectionSecret,
   openClinicalOauthVerifier,
   sealClinicalConnectionFhirBaseUrl,
   sealClinicalConnectionSecret,
@@ -197,10 +202,9 @@ export async function finishClinicalRecordAuthorization(input: {
     memberId: auth.member.id,
     now: new Date(),
     provider,
-    clientId: session.clientId,
     requestedScopes,
     resourceTypes,
-    tokenEndpoint: session.tokenEndpoint,
+    authorizationStartedAt: session.createdAt,
     token,
   }));
   await signalClinicalRetrievalWake(persisted.wake);
@@ -265,7 +269,7 @@ async function consumeClinicalOauthSession(input: {
 }
 
 async function persistClinicalConnection(input: {
-  clientId: string;
+  authorizationStartedAt: Date;
   connectIntentClaimHash: string;
   fhirBaseHash: string;
   memberId: string;
@@ -273,7 +277,6 @@ async function persistClinicalConnection(input: {
   provider: ClinicalProviderDirectoryEntry;
   requestedScopes: readonly string[];
   resourceTypes: readonly string[];
-  tokenEndpoint: string;
   token: Awaited<ReturnType<typeof exchangeSmartAuthorizationCode>>;
 }): Promise<{
   connectionId: string;
@@ -281,15 +284,35 @@ async function persistClinicalConnection(input: {
   wake: Awaited<ReturnType<typeof appendClinicalRetrievalWakeTx>>;
 }> {
   const prisma = getPrisma();
-  await assertClinicalRecordConnectionAvailable({
+  const existing = await assertClinicalRecordConnectionAvailable({
     memberId: input.memberId,
     providerDirectoryEntryId: input.provider.id,
   });
 
-  const connectionId = generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
+  const connectionId = existing?.id ?? generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
   const retrievalRunId = generateOpaqueId(CLINICAL_RETRIEVAL_RUN_ID_PREFIX);
-  const tokenVersion = 1;
-  const retrievalGeneration = 1;
+  const tokenVersion = (existing?.tokenVersion ?? 0) + 1;
+  const retrievalGeneration = (existing?.retrievalGeneration ?? 0) + 1;
+  const patientIdHash = hashClinicalFhirPatientId(input.token.patientId);
+  const priorPatientBinding = existing
+    ? await openClinicalConnectionSecret({
+        connectionId: existing.id,
+        encrypted: existing.patientBindingEncrypted,
+        field: "patientBinding",
+        memberId: input.memberId,
+        tokenVersion: existing.tokenVersion,
+      })
+    : null;
+  if (
+    existing &&
+    (priorPatientBinding !== patientIdHash || existing.fhirBaseHash !== input.fhirBaseHash)
+  ) {
+    throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_PATIENT_BINDING_CHANGED",
+      httpStatus: 409,
+      message: "Sign in to the same patient record used for this source.",
+    });
+  }
   const fhirBaseUrlEncrypted = await sealClinicalConnectionFhirBaseUrl({
     connectionId,
     memberId: input.memberId,
@@ -302,6 +325,13 @@ async function persistClinicalConnection(input: {
     tokenVersion,
     value: input.token.patientId,
   });
+  const patientBindingEncrypted = await sealClinicalConnectionSecret({
+    connectionId,
+    field: "patientBinding",
+    memberId: input.memberId,
+    tokenVersion,
+    value: patientIdHash,
+  });
   const accessTokenEncrypted = await sealClinicalConnectionSecret({
     connectionId,
     field: "accessToken",
@@ -309,7 +339,7 @@ async function persistClinicalConnection(input: {
     tokenVersion,
     value: input.token.accessToken,
   });
-  if (!patientIdEncrypted || !accessTokenEncrypted) {
+  if (!patientIdEncrypted || !patientBindingEncrypted || !accessTokenEncrypted) {
     throw new TypeError("Clinical Records connection encryption returned an empty required value.");
   }
   const connectionData = {
@@ -318,23 +348,20 @@ async function persistClinicalConnection(input: {
       ? new Date(input.now.getTime() + input.token.expiresInSeconds * 1_000)
       : null,
     connectedAt: input.now,
-    clientId: input.clientId,
     disconnectedAt: null,
     displayName: input.provider.brandName,
     fhirBaseHash: input.fhirBaseHash,
     fhirBaseUrlEncrypted,
-    grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
     id: connectionId,
     lastErrorCode: null,
     memberId: input.memberId,
     patientIdEncrypted,
+    patientBindingEncrypted,
     providerDirectoryEntryId: input.provider.id,
-    refreshTokenEncrypted: null,
     requestedScopesJson: toClinicalJsonArray(input.requestedScopes),
     retrievalGeneration,
     sourceSystem: input.provider.sourceSystem,
     status: "active",
-    tokenEndpoint: input.tokenEndpoint,
     tokenVersion,
   } satisfies Prisma.ClinicalRecordConnectionUncheckedCreateInput;
   const retrievalRunData = {
@@ -350,7 +377,6 @@ async function persistClinicalConnection(input: {
       resourceTypes: input.resourceTypes,
     }),
     retrievalProtocol: "query-slices-v2",
-    resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
     status: "queued",
   } satisfies Prisma.ClinicalRecordRetrievalRunUncheckedCreateInput;
 
@@ -372,18 +398,56 @@ async function persistClinicalConnection(input: {
   };
   try {
     persisted = await prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, input.memberId);
+      if ((await readHostedMemberSuspensionAfterLockTx(tx, input.memberId)) !== "active") {
+        throw clinicalRecordsError({
+          code: "CLINICAL_RECORD_MEMBER_UNAVAILABLE",
+          httpStatus: 409,
+          message: "This account cannot receive medical records.",
+        });
+      }
       await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: tx });
-      await tx.clinicalRecordConnection.create({
-        data: connectionData,
-      });
+      const current = await assertClinicalRecordConnectionAvailable(
+        { memberId: input.memberId, providerDirectoryEntryId: input.provider.id },
+        tx,
+      );
+      if (
+        current?.id !== existing?.id ||
+        current?.tokenVersion !== existing?.tokenVersion ||
+        current?.retrievalGeneration !== existing?.retrievalGeneration ||
+        (current?.disconnectedAt && current.disconnectedAt >= input.authorizationStartedAt)
+      )
+        throw connectionAlreadyExistsError();
+      if (current) {
+        await tx.clinicalRecordConnection.update({
+          where: { id: current.id },
+          data: connectionData,
+        });
+      } else {
+        const sources = await tx.clinicalRecordConnection.findMany({
+          where: { memberId: input.memberId },
+          select: { id: true },
+          take: CLINICAL_RECORD_MAX_SOURCES,
+        });
+        if (sources.length >= CLINICAL_RECORD_MAX_SOURCES)
+          throw clinicalRecordsError({
+            code: "CLINICAL_RECORD_SOURCE_LIMIT_REACHED",
+            httpStatus: 409,
+            message: "The medical record source limit has been reached.",
+          });
+        await tx.clinicalRecordConnection.create({ data: connectionData });
+      }
       await tx.clinicalRecordRetrievalRun.create({
         data: retrievalRunData,
       });
-      await completeClinicalRecordConnectIntent({
-        claimHash: input.connectIntentClaimHash,
-        memberId: input.memberId,
-        now: input.now,
-      }, tx);
+      await completeClinicalRecordConnectIntent(
+        {
+          claimHash: input.connectIntentClaimHash,
+          memberId: input.memberId,
+          now: input.now,
+        },
+        tx,
+      );
       const wake = await appendClinicalRetrievalWakeTx({
         generation: retrievalGeneration,
         memberId: input.memberId,
@@ -401,25 +465,45 @@ async function persistClinicalConnection(input: {
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && "code" in error
-    && error.code === "P2002",
-  );
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
 }
 
-async function assertClinicalRecordConnectionAvailable(input: {
-  memberId: string;
-  providerDirectoryEntryId: string;
-}): Promise<void> {
-  const existing = await getPrisma().clinicalRecordConnection.findUnique({
-    select: { id: true },
-    where: {
-      memberId_providerDirectoryEntryId: input,
+async function assertClinicalRecordConnectionAvailable(
+  input: {
+    memberId: string;
+    providerDirectoryEntryId: string;
+  },
+  prisma: Pick<Prisma.TransactionClient, "clinicalRecordConnection"> = getPrisma(),
+) {
+  const existing = await prisma.clinicalRecordConnection.findUnique({
+    select: {
+      id: true,
+      tokenVersion: true,
+      retrievalGeneration: true,
+      patientBindingEncrypted: true,
+      fhirBaseHash: true,
+      disconnectedAt: true,
+      retrievalRuns: {
+        orderBy: { generation: "desc" },
+        take: 1,
+        select: { completedAt: true, status: true, outcomeCountsJson: true },
+      },
     },
+    where: { memberId_providerDirectoryEntryId: input },
   });
-  if (existing) throw connectionAlreadyExistsError();
+  if (existing) {
+    const run = existing.retrievalRuns[0];
+    if (!run?.completedAt || (run.status === "needs_reauth" && run.outcomeCountsJson === null))
+      throw connectionAlreadyExistsError();
+    if (existing.retrievalGeneration >= CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE)
+      throw clinicalRecordsError({
+        code: "CLINICAL_RECORD_IMPORT_LIMIT_REACHED",
+        httpStatus: 409,
+        message:
+          "This source has reached its retained import limit. Saved records remain available.",
+      });
+  }
+  return existing;
 }
 
 function requireProviderEntry(entryId: string): ClinicalProviderDirectoryEntry {
@@ -480,7 +564,7 @@ function connectionAlreadyExistsError() {
   return clinicalRecordsError({
     code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
     httpStatus: 409,
-    message: "This Clinical Records provider is already connected.",
+    message: "This source is still finishing an import. Check its status before trying again.",
   });
 }
 

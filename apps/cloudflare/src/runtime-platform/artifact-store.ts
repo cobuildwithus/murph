@@ -7,6 +7,7 @@ import {
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import {
+  HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER,
   HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -117,6 +118,8 @@ export function createCloudflareArtifactStore(input: {
 
     let response: Response;
     try {
+      // Inform the Worker of this fetch's existing budget, never a fresh retry budget.
+      headers.set(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER, String(Date.now() + timeoutMs));
       response = await fetchHostedResponse({
         description: "Hosted artifact upload",
         fetchImpl,

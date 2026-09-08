@@ -16,9 +16,6 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import {
-  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
-} from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
 
 export async function handleHostedRuntimeAssistantConfigurationTool(input: {
@@ -38,6 +35,9 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
     };
   }
   const updateRequest = input.request;
+  const {
+    readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
+  } = await import("../hosted-mailbox/store");
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
@@ -84,6 +84,8 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
       !isHostedOnboardingError(error) ||
       (
         error.code !== "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" &&
+        error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE" &&
+        error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_OPENAI" &&
         error.code !== "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE" &&
         error.code !== "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED" &&
         error.code !== "HOSTED_ACCESS_REQUIRED"
@@ -98,14 +100,15 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
         prisma,
       }),
     );
-    const upgradeRequired = error.code === "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
+    const requiredPlan = error.code === "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"
+      || error.code === "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" ? "edge" : null;
     return {
       action: "update",
       result: {
         ...current,
         appliesAt: "next_turn",
-        requiredPlan: upgradeRequired ? "edge" : null,
-        status: upgradeRequired ? "upgrade_required" : "unavailable",
+        requiredPlan,
+        status: requiredPlan ? "upgrade_required" : "unavailable",
       },
     };
   }

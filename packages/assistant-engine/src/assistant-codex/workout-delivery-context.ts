@@ -232,6 +232,11 @@ function readTrackedOuterCommandKind(
 function readWorkoutCommandKind(
   argv: readonly string[],
 ): WorkoutCommandKind | null {
+  // Help and schema inspection produce no canonical read or mutation result.
+  for (const token of argv) {
+    if (token === '--') break
+    if (token === '--help' || token === '-h' || token === '--schema') return null
+  }
   const [root, command] = resolveVaultCliCommandPath(argv)
   if (root !== 'workout') {
     return null

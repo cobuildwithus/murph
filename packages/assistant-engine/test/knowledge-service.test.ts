@@ -924,6 +924,11 @@ describe('knowledge service helpers', () => {
       vault: vaultRoot,
     })).rejects.toMatchObject({
       code: 'knowledge_page_not_found',
+      context: {
+        retryable: false,
+        stage: 'read',
+        hint: expect.stringContaining('If this was an existence check before an authorized write'),
+      },
     })
   })
 

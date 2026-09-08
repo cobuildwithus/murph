@@ -4,7 +4,8 @@ import type Stripe from "stripe";
 import { coerceStripeObjectId } from "./billing";
 import { withHostedMemberStripeMutationLock } from "./hosted-member-billing-store";
 import { requireHostedStripeApiMode } from "./runtime";
-import { normalizeNullableString } from "./shared";
+import { lockHostedMemberRow, normalizeNullableString } from "./shared";
+import { readHostedUsageCreditPurchaseMemberLockOrder } from "./usage-credit-purchase-reservation-lock";
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
@@ -114,6 +115,7 @@ type HostedUsageCreditPreparedReconciliation =
   | {
       candidate: HostedUsageCreditStripeEventCandidate;
       kind: "prepared";
+      firstMemberId: string;
       prepared: HostedUsageCreditPreparedStripeEvent;
     };
 
@@ -144,16 +146,19 @@ export async function reconcileHostedUsageCreditStripeEvent(input: {
   if (preparation.kind === "unhandled") {
     return { handled: false };
   }
-  const { candidate, prepared } = preparation;
+  const { candidate, firstMemberId, prepared } = preparation;
 
   let reconciliation: Awaited<
     ReturnType<typeof reconcileHostedUsageCreditCheckoutEventTx>
   >;
   try {
     reconciliation = await withHostedMemberStripeMutationLock({
-      memberId: candidate.beneficiaryMemberId,
+      memberId: firstMemberId,
       prisma: input.prisma,
       run: async (tx) => {
+        if (firstMemberId !== candidate.beneficiaryMemberId) {
+          await lockHostedMemberRow(tx, candidate.beneficiaryMemberId);
+        }
         const purchase = await runHostedUsageCreditDatabaseOperation({
           read: () => tx.hostedUsageCreditPurchase.findUnique({
             select: HOSTED_USAGE_CREDIT_PURCHASE_SELECT,
@@ -171,7 +176,8 @@ export async function reconcileHostedUsageCreditStripeEvent(input: {
           );
         }
         if (
-          purchase.reconciliationVersion !== prepared.reconciliationVersion
+          purchase.reconciliationVersion !== prepared.reconciliationVersion ||
+          readStripeReconciliationFirstMemberId(input.event, purchase) !== firstMemberId
         ) {
           throw buildHostedUsageCreditStripeRetryableError(
             new Error(
@@ -224,6 +230,26 @@ export async function reconcileHostedUsageCreditStripeEvent(input: {
   };
 }
 
+// Choose before the transaction wrapper takes its first member lock. A nested
+// reservation helper cannot reorder a beneficiary lock already held by Stripe.
+function readStripeReconciliationFirstMemberId(
+  event: Stripe.Event,
+  purchase: HostedUsageCreditPurchaseForReconciliation,
+): string {
+  if (
+    event.type === "checkout.session.expired" &&
+    purchase.payerMemberId &&
+    readHostedUsageCreditPurchaseMemberLockOrder({
+      beneficiaryMemberId: purchase.beneficiaryMemberId,
+      checkoutSuccessUrl: purchase.checkoutSuccessUrl,
+      payerMemberId: purchase.payerMemberId,
+    }) === "payer_first"
+  ) {
+    return purchase.payerMemberId;
+  }
+  return purchase.beneficiaryMemberId;
+}
+
 async function prepareHostedUsageCreditStripeReconciliation(input: {
   context: HostedUsageCreditStripePreparationContext;
   event: Stripe.Event;
@@ -267,6 +293,7 @@ async function prepareHostedUsageCreditStripeReconciliation(input: {
     return {
       candidate,
       kind: "prepared",
+      firstMemberId: readStripeReconciliationFirstMemberId(input.event, purchase),
       prepared,
     };
   }

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "optional-private-follow-ups",
+    "kind": "feature",
+    "priority": 3,
+    "title": "A thoughtful follow-up when it helps",
+    "summary": "Murph can check back once on a private reminder or an important unanswered question, even if you've talked about something else since.",
+    "details": "Before following up, Murph checks the conversation again and can stay quiet if the matter is resolved or the check is no longer useful. Follow-ups expire, won't create a chain, and can be stopped or postponed in conversation.",
+    "relevanceTags": ["conversation", "reminders"],
+    "sourcePullRequests": [2916]
+  }
+}

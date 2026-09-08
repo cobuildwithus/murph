@@ -391,7 +391,7 @@ test.each([
 
   await vi.waitFor(() => {
     expect(rendered.container.textContent).toContain(
-      "Review how Murph uses your health data",
+      submittedScopes.includes("launch.health-data") ? "Use your health data" : "Review Murph’s terms",
     );
   });
   expect(rendered.container.textContent).not.toContain("Finish your consent");

@@ -398,12 +398,20 @@ async function runUp(
   }
 }
 
-async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
-  const parsed = parseProfileArgs(args, "e2e:stub");
+function parseE2eOptions(args: readonly string[]) {
   let prepareRunnerBundle = true;
+  let processShard: string | undefined;
   let listOnly = false;
   const positional: string[] = [];
-  for (const arg of parsed.args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg === "--process-shard") {
+      if (processShard !== undefined || !args[index + 1]) {
+        throw new Error("Pass --process-shard i/n exactly once with a value.");
+      }
+      processShard = args[++index];
+      continue;
+    }
     if (arg === "--no-bundle") {
       prepareRunnerBundle = false;
       continue;
@@ -413,10 +421,19 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      printE2eHelp(io.stdout ?? process.stdout);
-      return;
+      return { prepareRunnerBundle, processShard, listOnly, positional, help: true };
     }
     positional.push(arg);
+  }
+  return { prepareRunnerBundle, processShard, listOnly, positional, help: false };
+}
+
+async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
+  const parsed = parseProfileArgs(args, "e2e:stub");
+  const { prepareRunnerBundle, processShard, listOnly, positional, help } = parseE2eOptions(parsed.args);
+  if (help) {
+    printE2eHelp(io.stdout ?? process.stdout);
+    return;
   }
   if (listOnly) {
     printE2eScenarios(io.stdout ?? process.stdout);
@@ -444,6 +461,7 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
     const result = await runHostedLocalE2eSuite({
       env,
       prepareRunnerBundle,
+      ...(processShard === undefined ? {} : { processShard }),
       scenario: scenarioNames,
     });
     if (result.terminationSignal) {
@@ -527,6 +545,7 @@ async function runDoctor(
     runDoctorCommand("node", ["--version"]),
     runDoctorCommand("pnpm", ["--version"]),
     runDoctorCommand("docker", ["info"]),
+    runDoctorCommand("docker", ["buildx", "version"]),
     runDoctorCommand("createdb", ["--version"]),
   ];
   const result = {
@@ -680,11 +699,12 @@ function printWorktreeHelp(stdout: NodeJS.WritableStream): void {
 function printE2eHelp(stdout: NodeJS.WritableStream): void {
   stdout.write(
     [
-      "Usage: hosted-local e2e [scenario ...] [--profile e2e:stub|e2e:live] [--no-bundle] [--list]",
+      "Usage: hosted-local e2e [scenario ...] [--profile e2e:stub|e2e:live] [--no-bundle] [--process-shard i/n] [--list]",
       "",
       "The command prepares one hosted-local runner bundle, runs the selected Vitest files,",
       "and cleans stale Cloudflare runner containers once in a finally block. Named scenarios",
       "run serially in one prepared suite so they can reuse the runner image and smoke proof.",
+      "--process-shard i/n isolates one declared process; all n shards are required for full proof.",
       "",
     ].join("\n"),
   );

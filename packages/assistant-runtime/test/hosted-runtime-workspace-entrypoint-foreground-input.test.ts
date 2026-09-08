@@ -1591,6 +1591,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const exportedIssues: unknown[] = [];
+    const providerStartMetadataPresent: boolean[] = [];
     const releaseSha = "0123456789abcdef0123456789abcdef01234567";
     const runtimeAttemptId =
       "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda";
@@ -1877,6 +1878,10 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
+          async runAssistantPhase(input) {
+            providerStartMetadataPresent.push(input.providerStartCriticalPath != null);
+            return await runHostedWorkspaceAssistantPhase(input);
+          },
           runtimeIssueProvenance: {
             releaseSha,
             runtimeName,
@@ -1894,6 +1899,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       );
       await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(providerStartMetadataPresent, [true, false]);
       assert.equal(completionInputIds.length, 2);
       expect(exportedIssues).toEqual([
         expect.objectContaining({
@@ -4067,6 +4073,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     let checkpointCount = 0;
     let classifierFailures = 0;
     let pendingConversationInputId: string | null = null;
+    let conversationImportedAtMonotonicMs: number | null = null;
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -4123,6 +4130,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               item: item.item,
               vaultRoot,
             });
+            conversationImportedAtMonotonicMs = Math.floor(performance.now());
             return {
               assistantInputId: pendingConversationInputId,
               status: "imported",
@@ -4172,8 +4180,25 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(phaseInput) {
             if (pendingConversationInputId) {
+              const timing = phaseInput.providerStartCriticalPath;
+              assert.ok(timing, "a hot imported input must receive detailed admission timing");
+              assert.notEqual(conversationImportedAtMonotonicMs, null);
+              const boundaries = [
+                conversationImportedAtMonotonicMs,
+                timing.mailboxImportDoneAtMonotonicMs,
+                timing.foregroundPassStartedAtMonotonicMs,
+                timing.workspaceForegroundPassStartedAtMonotonicMs,
+                timing.assistantPhaseCallbackStartedAtMonotonicMs,
+              ];
+              for (let index = 1; index < boundaries.length; index += 1) {
+                const previous = boundaries[index - 1];
+                const current = boundaries[index];
+                assert.ok(typeof previous === "number");
+                assert.ok(typeof current === "number");
+                assert.ok(current >= previous, "hot admission boundaries must stay ordered");
+              }
               admittedConversationInputId = pendingConversationInputId;
               pendingConversationInputId = null;
               await writeSyntheticAssistantAutoReplyTerminalEvidence({

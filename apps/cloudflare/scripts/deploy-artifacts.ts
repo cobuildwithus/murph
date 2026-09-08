@@ -290,7 +290,7 @@ export async function assertPreparedRunnerBundle(input: {
   return manifest;
 }
 
-async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {
+export async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {
   const manifest = await readJsonObjectFile(
     path.join(bundleDir, runnerBundleManifestFileName),
     "runner bundle manifest",
@@ -463,6 +463,11 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
   assertGeneratedContainerUsesPreparedImage(runnerContainer);
   assertGeneratedContainerUsesPreparedImage(deploySmokeContainer);
   assertGeneratedContainerUsesPreparedImage(standbyRunnerContainer);
+  const nextRunnerContainer = findGeneratedContainerConfig(containers, "NextRunnerContainer");
+  if (!nextRunnerContainer) {
+    throw new Error("Generated Wrangler config is missing the NextRunnerContainer entry.");
+  }
+  assertGeneratedContainerUsesPreparedImage(nextRunnerContainer);
 }
 
 function findGeneratedContainerConfig(

@@ -205,53 +205,56 @@ describe("automation helpers", () => {
     });
   });
 
-  it("loads device activity automation schedules with open activity kinds", async () => {
-    const vaultRoot = await createVaultRoot();
-    await writeAutomationDocument(
-      vaultRoot,
-      "after-dancing",
-      [
-        "---",
-        "schemaVersion: murph.frontmatter.automation.v1",
-        "docType: automation",
-        "automationId: auto_after_dancing",
-        "slug: after-dancing",
-        "title: After dancing",
-        "status: active",
-        "schedule:",
-        "  kind: deviceActivity",
-        "  after: 2026-06-07T12:00:00.000Z",
-        "  source: whoop",
-        "  activityKind: Dancing",
-        "route:",
-        "  channel: linq",
-        "  deliverResponse: true",
-        "  deliveryTarget: linq-target-dancing",
-        "  identityId: null",
-        "  participantId: null",
-        "  threadId: null",
-        "continuityPolicy: preserve",
-        "createdAt: 2026-06-07T12:00:00.000Z",
-        "updatedAt: 2026-06-07T12:00:00.000Z",
-        "---",
-        "",
-        "Ask how dancing felt.",
-        "",
-      ].join("\n"),
-    );
+  it.each(["whoop", "whoop_v2", "garmin", "oura", "fitbit"])(
+    "loads %s device activity automation schedules with open activity kinds",
+    async (source) => {
+      const vaultRoot = await createVaultRoot();
+      await writeAutomationDocument(
+        vaultRoot,
+        "after-dancing",
+        [
+          "---",
+          "schemaVersion: murph.frontmatter.automation.v1",
+          "docType: automation",
+          "automationId: auto_after_dancing",
+          "slug: after-dancing",
+          "title: After dancing",
+          "status: active",
+          "schedule:",
+          "  kind: deviceActivity",
+          "  after: 2026-06-07T12:00:00.000Z",
+          `  source: ${source}`,
+          "  activityKind: Dancing",
+          "route:",
+          "  channel: linq",
+          "  deliverResponse: true",
+          "  deliveryTarget: linq-target-dancing",
+          "  identityId: null",
+          "  participantId: null",
+          "  threadId: null",
+          "continuityPolicy: preserve",
+          "createdAt: 2026-06-07T12:00:00.000Z",
+          "updatedAt: 2026-06-07T12:00:00.000Z",
+          "---",
+          "",
+          "Ask how dancing felt.",
+          "",
+        ].join("\n"),
+      );
 
-    await expect(listAutomations(vaultRoot)).resolves.toMatchObject([
-      {
-        automationId: "auto_after_dancing",
-        schedule: {
-          activityKind: "dancing",
-          after: "2026-06-07T12:00:00.000Z",
-          kind: "deviceActivity",
-          source: "whoop",
+      await expect(listAutomations(vaultRoot)).resolves.toMatchObject([
+        {
+          automationId: "auto_after_dancing",
+          schedule: {
+            activityKind: "dancing",
+            after: "2026-06-07T12:00:00.000Z",
+            kind: "deviceActivity",
+            source,
+          },
         },
-      },
-    ]);
-  });
+      ]);
+    },
+  );
 
   it("rejects malformed automation schedules instead of silently coercing them", async () => {
     const vaultRoot = await createVaultRoot();
@@ -342,7 +345,7 @@ describe("automation helpers", () => {
         "schedule:",
         "  kind: deviceActivity",
         "  after: 2026-06-07T12:00:00.000Z",
-        "  source: garmin",
+        "  source: unsupported-device",
         "route:",
         "  channel: linq",
         "  deliverResponse: true",

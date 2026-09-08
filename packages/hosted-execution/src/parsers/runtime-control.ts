@@ -9,15 +9,10 @@ import { parseHostedExecutionDeviceSyncExpectedConnectedAt } from "./device-sync
 import { parseAssistantUsageRecord } from "../assistant-usage.ts";
 import { parseHostedAssistantCustomInferenceOverride } from "../assistant-inference.ts";
 import {
-  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-  isHostedAssistantProductModel,
-  isHostedAssistantProvider,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
   parseHostedAssistantProviderOverride,
   parseHostedAssistantReasoningEffortOverride,
-  type HostedAssistantProductModel,
-  type HostedAssistantProvider,
   type HostedAssistantReasoningEffort,
 } from "../assistant-model.ts";
 import { parseAssistantRuntimeIssueRecord } from "@murphai/runtime-state/node/assistant-runtime-issues";
@@ -61,6 +56,8 @@ import {
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH,
+  HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
@@ -131,11 +128,6 @@ import {
   type HostedFamilyPlanCode,
   type HostedRuntimeIMessageContactToolRequest,
   type HostedRuntimeIMessageContactToolResponse,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationToolRequest,
-  type HostedRuntimeAssistantConfigurationToolResponse,
-  type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   hostedRuntimeLinqProviderErrorMessageForCode,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
@@ -230,6 +222,7 @@ import {
   type HostedVaultShareSelectableProjectionScope,
 } from "../vault-share.ts";
 import {
+  assertAllowedObjectKeys,
   rejectLegacyAliases,
   requireArray,
   requireBoolean,
@@ -358,7 +351,6 @@ const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
 const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET = new Set<string>(
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
 );
-const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_RUNTIME_DEVICE_SYNC_JOB_TIMING_MAX_KEYS = 32;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
@@ -3354,59 +3346,159 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
-  if (action === "read_current") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool read_current response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool read_current response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set([
-          "disclosureGrantsTruncated",
-          "group",
-          "nextDisclosureGrantCursor",
-          "status",
-        ]),
-        "Hosted runtime group tool read_current ok response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          ...(result.disclosureGrantsTruncated === undefined
-            ? {}
-            : {
-                disclosureGrantsTruncated: requireBoolean(
-                  result.disclosureGrantsTruncated,
-                  "Hosted runtime group tool read_current disclosureGrantsTruncated",
-                ),
-              }),
-          group: parseHostedRuntimeGroupSummary(result.group),
-          ...parseHostedRuntimeGroupDisclosureNextCursor(
-            result.nextDisclosureGrantCursor,
-            "Hosted runtime group tool read_current nextDisclosureGrantCursor",
-          ),
-        },
-      };
-    }
-    if (status === "none") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group"]),
-        "Hosted runtime group tool read_current none response result",
-      );
-      return { action, result: { status, group: null } };
+  if (
+    action === "read_current" ||
+    action === "create_join_link" ||
+    action === "update_display_name" ||
+    action === "post_join_offer"
+  ) {
+    const label = `Hosted runtime group tool ${action}`;
+    const result = requireObject(record.result, `${label} response result`);
+    const status = requireString(result.status, `${label} response status`);
+    if (action === "read_current") {
+      if (status === "ok") {
+        assertAllowedObjectKeys(
+          result,
+          new Set([
+            "disclosureGrantsTruncated",
+            "group",
+            "nextDisclosureGrantCursor",
+            "status",
+          ]),
+          "Hosted runtime group tool read_current ok response result",
+        );
+        return {
+          action,
+          result: {
+            status,
+            ...(result.disclosureGrantsTruncated === undefined
+              ? {}
+              : {
+                  disclosureGrantsTruncated: requireBoolean(
+                    result.disclosureGrantsTruncated,
+                    "Hosted runtime group tool read_current disclosureGrantsTruncated",
+                  ),
+                }),
+            group: parseHostedRuntimeGroupSummary(result.group),
+            ...parseHostedRuntimeGroupDisclosureNextCursor(
+              result.nextDisclosureGrantCursor,
+              "Hosted runtime group tool read_current nextDisclosureGrantCursor",
+            ),
+          },
+        };
+      }
+      if (status === "none") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group"]),
+          "Hosted runtime group tool read_current none response result",
+        );
+        return { action, result: { status, group: null } };
+      }
+    } else if (action === "create_join_link") {
+      if (status === "ok") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group", "joinUrl", "offeredAt"]),
+          "Hosted runtime group tool create_join_link ok response result",
+        );
+        const offeredAt =
+          result.offeredAt === undefined
+            ? undefined
+            : parseHostedRuntimeGroupCanonicalTimestamp(
+                result.offeredAt,
+                "Hosted runtime group tool create_join_link offeredAt",
+              );
+        return {
+          action,
+          result: {
+            status,
+            group: parseHostedRuntimeGroupSummary(result.group),
+            joinUrl: requireString(
+              result.joinUrl,
+              "Hosted runtime group tool create_join_link joinUrl",
+            ),
+            ...(offeredAt === undefined ? {} : { offeredAt }),
+          },
+        };
+      }
+    } else if (action === "update_display_name") {
+      if (status === "ok") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group"]),
+          "Hosted runtime group tool update_display_name ok response result",
+        );
+        return {
+          action,
+          result: {
+            status,
+            group:
+              result.group === null
+                ? null
+                : parseHostedRuntimeGroupSummary(result.group),
+          },
+        };
+      }
+    } else {
+      if (status === "sent") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group", "joinUrl", "offeredAt", "offerState"]),
+          "Hosted runtime group tool post_join_offer sent response result",
+        );
+        const offeredAt =
+          result.offeredAt === undefined
+            ? undefined
+            : parseHostedRuntimeGroupCanonicalTimestamp(
+                result.offeredAt,
+                "Hosted runtime group tool post_join_offer offeredAt",
+              );
+        const offerState =
+          result.offerState === undefined
+            ? undefined
+            : requireString(
+                result.offerState,
+                "Hosted runtime group tool post_join_offer offerState",
+              );
+        if (
+          offerState !== undefined &&
+          offerState !== "existing" &&
+          offerState !== "posted"
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool post_join_offer offerState is invalid.",
+          );
+        }
+        if (offeredAt !== undefined && offerState === undefined) {
+          throw new TypeError(
+            "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
+          );
+        }
+        return {
+          action,
+          result: {
+            status,
+            group: parseHostedRuntimeGroupSummary(result.group),
+            joinUrl: requireString(
+              result.joinUrl,
+              "Hosted runtime group tool post_join_offer joinUrl",
+            ),
+            ...(offerState === undefined
+              ? {}
+              : {
+                  offerState,
+                  ...(offeredAt === undefined ? {} : { offeredAt }),
+                }),
+          },
+        };
+      }
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(
         result,
         new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool read_current unavailable response result",
+        `${label} unavailable response result`,
       );
       return {
         action,
@@ -3993,188 +4085,6 @@ export function parseHostedRuntimeGroupToolResponse(
             result.unavailableReason,
             "Hosted runtime group tool leave_membership unavailableReason",
           ),
-        },
-      };
-    }
-  }
-
-  if (action === "create_join_link") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool create_join_link response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool create_join_link response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group", "joinUrl", "offeredAt"]),
-        "Hosted runtime group tool create_join_link ok response result",
-      );
-      const offeredAt =
-        result.offeredAt === undefined
-          ? undefined
-          : parseHostedRuntimeGroupCanonicalTimestamp(
-              result.offeredAt,
-              "Hosted runtime group tool create_join_link offeredAt",
-            );
-      return {
-        action,
-        result: {
-          status,
-          group: parseHostedRuntimeGroupSummary(result.group),
-          joinUrl: requireString(
-            result.joinUrl,
-            "Hosted runtime group tool create_join_link joinUrl",
-          ),
-          ...(offeredAt === undefined ? {} : { offeredAt }),
-        },
-      };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool create_join_link unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-          group: null,
-        },
-      };
-    }
-  }
-
-  if (action === "update_display_name") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool update_display_name response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool update_display_name response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group"]),
-        "Hosted runtime group tool update_display_name ok response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          group:
-            result.group === null
-              ? null
-              : parseHostedRuntimeGroupSummary(result.group),
-        },
-      };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool update_display_name unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-          group: null,
-        },
-      };
-    }
-  }
-
-  if (action === "post_join_offer") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool post_join_offer response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool post_join_offer response status",
-    );
-    if (status === "sent") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group", "joinUrl", "offeredAt", "offerState"]),
-        "Hosted runtime group tool post_join_offer sent response result",
-      );
-      const offeredAt =
-        result.offeredAt === undefined
-          ? undefined
-          : parseHostedRuntimeGroupCanonicalTimestamp(
-              result.offeredAt,
-              "Hosted runtime group tool post_join_offer offeredAt",
-            );
-      const offerState =
-        result.offerState === undefined
-          ? undefined
-          : requireString(
-              result.offerState,
-              "Hosted runtime group tool post_join_offer offerState",
-            );
-      if (
-        offerState !== undefined &&
-        offerState !== "existing" &&
-        offerState !== "posted"
-      ) {
-        throw new TypeError(
-          "Hosted runtime group tool post_join_offer offerState is invalid.",
-        );
-      }
-      if (offeredAt !== undefined && offerState === undefined) {
-        throw new TypeError(
-          "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
-        );
-      }
-      return {
-        action,
-        result: {
-          status,
-          group: parseHostedRuntimeGroupSummary(result.group),
-          joinUrl: requireString(
-            result.joinUrl,
-            "Hosted runtime group tool post_join_offer joinUrl",
-          ),
-          ...(offerState === undefined
-            ? {}
-            : {
-                offerState,
-                ...(offeredAt === undefined ? {} : { offeredAt }),
-              }),
-        },
-      };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool post_join_offer unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-          group: null,
         },
       };
     }
@@ -5885,399 +5795,11 @@ export function parseHostedRuntimeIMessageContactToolResponse(
   return { phoneNumber, status, verifiedSenderPhoneHint };
 }
 
-export function parseHostedRuntimeAssistantConfigurationToolRequest(
-  value: unknown,
-): HostedRuntimeAssistantConfigurationToolRequest {
-  const record = requireObject(
-    value,
-    "Hosted runtime assistant configuration tool request",
-  );
-  const action = requireString(
-    record.action,
-    "Hosted runtime assistant configuration tool request action",
-  );
-  if (action === "read") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action"]),
-      "Hosted runtime assistant configuration tool read request",
-    );
-    return { action };
-  }
-  if (action !== "update") {
-    throw new TypeError(
-      "Hosted runtime assistant configuration tool action is not supported.",
-    );
-  }
-
-  assertAllowedObjectKeys(
-    record,
-    new Set(["action", "model", "provider", "reasoningEffort"]),
-    "Hosted runtime assistant configuration tool update request",
-  );
-  const model =
-    record.model === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantProductModel(
-          record.model,
-          "Hosted runtime assistant configuration tool model",
-        );
-  const reasoningEffort =
-    record.reasoningEffort === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantReasoningEffort(
-          record.reasoningEffort,
-          "Hosted runtime assistant configuration tool reasoningEffort",
-        );
-  const provider =
-    record.provider === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantProvider(
-          record.provider,
-          "Hosted runtime assistant configuration tool provider",
-        );
-  if (model === undefined) {
-    if (provider !== undefined) {
-      return reasoningEffort === undefined
-        ? { action, provider }
-        : { action, provider, reasoningEffort };
-    }
-    if (reasoningEffort === undefined) {
-      throw new TypeError(
-        "Hosted runtime assistant configuration update requires a model, provider, or reasoning effort.",
-      );
-    }
-    return { action, reasoningEffort };
-  }
-
-  return {
-    action,
-    model,
-    ...(provider === undefined ? {} : { provider }),
-    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-  };
-}
-
-export function parseHostedRuntimeAssistantConfigurationControlRequest(
-  value: unknown,
-): HostedRuntimeAssistantConfigurationControlRequest {
-  const record = requireObject(
-    value,
-    "Hosted runtime assistant configuration control request",
-  );
-  const action = requireString(
-    record.action,
-    "Hosted runtime assistant configuration control request action",
-  );
-  if (action === "read") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action"]),
-      "Hosted runtime assistant configuration control read request",
-    );
-    return { action };
-  }
-  if (action !== "update") {
-    throw new TypeError(
-      "Hosted runtime assistant configuration control action is not supported.",
-    );
-  }
-
-  assertAllowedObjectKeys(
-    record,
-    new Set([
-      "action",
-      "assistantInputId",
-      "model",
-      "provider",
-      "reasoningEffort",
-    ]),
-    "Hosted runtime assistant configuration control update request",
-  );
-  const assistantInputId = requireString(
-    record.assistantInputId,
-    "Hosted runtime assistant configuration control assistantInputId",
-  );
-  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
-    throw new TypeError(
-      "Hosted runtime assistant configuration control assistantInputId is invalid.",
-    );
-  }
-  const changes = parseHostedRuntimeAssistantConfigurationChanges(
-    record,
-    "Hosted runtime assistant configuration control",
-  );
-  return { action, assistantInputId, ...changes };
-}
-
-function parseHostedRuntimeAssistantConfigurationChanges(
-  record: Record<string, unknown>,
-  label: string,
-):
-  | {
-      model: HostedAssistantProductModel;
-      provider?: HostedAssistantProvider;
-      reasoningEffort?: HostedAssistantReasoningEffort;
-    }
-  | {
-      model?: never;
-      provider: HostedAssistantProvider;
-      reasoningEffort?: HostedAssistantReasoningEffort;
-    }
-  | {
-      model?: never;
-      provider?: never;
-      reasoningEffort: HostedAssistantReasoningEffort;
-    } {
-  const model =
-    record.model === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantProductModel(record.model, `${label} model`);
-  const provider =
-    record.provider === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantProvider(
-          record.provider,
-          `${label} provider`,
-        );
-  const reasoningEffort =
-    record.reasoningEffort === undefined
-      ? undefined
-      : parseHostedRuntimeAssistantReasoningEffort(
-          record.reasoningEffort,
-          `${label} reasoningEffort`,
-        );
-  if (model === undefined) {
-    if (provider !== undefined) {
-      return reasoningEffort === undefined
-        ? { provider }
-        : { provider, reasoningEffort };
-    }
-    if (reasoningEffort === undefined) {
-      throw new TypeError(
-        `${label} update requires a model, provider, or reasoning effort.`,
-      );
-    }
-    return { reasoningEffort };
-  }
-  return {
-    model,
-    ...(provider === undefined ? {} : { provider }),
-    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-  };
-}
-
-export function parseHostedRuntimeAssistantConfigurationToolResponse(
-  value: unknown,
-): HostedRuntimeAssistantConfigurationToolResponse {
-  const record = requireObject(
-    value,
-    "Hosted runtime assistant configuration tool response",
-  );
-  assertAllowedObjectKeys(
-    record,
-    new Set(["action", "result"]),
-    "Hosted runtime assistant configuration tool response",
-  );
-  const action = requireString(
-    record.action,
-    "Hosted runtime assistant configuration tool response action",
-  );
-  const result = requireObject(
-    record.result,
-    "Hosted runtime assistant configuration tool response result",
-  );
-  if (action === "read") {
-    return {
-      action,
-      result: parseHostedRuntimeAssistantConfigurationSnapshot(result, {
-        extraKeys: [],
-      }),
-    };
-  }
-  if (action !== "update") {
-    throw new TypeError(
-      "Hosted runtime assistant configuration tool response action is not supported.",
-    );
-  }
-
-  const snapshot = parseHostedRuntimeAssistantConfigurationSnapshot(result, {
-    extraKeys: ["appliesAt", "requiredPlan", "status"],
-  });
-  const appliesAt = requireString(
-    result.appliesAt,
-    "Hosted runtime assistant configuration tool appliesAt",
-  );
-  if (appliesAt !== "next_turn") {
-    throw new TypeError(
-      "Hosted runtime assistant configuration tool appliesAt is not supported.",
-    );
-  }
-  const requiredPlan =
-    result.requiredPlan === null
-      ? null
-      : requireString(
-          result.requiredPlan,
-          "Hosted runtime assistant configuration tool requiredPlan",
-        );
-  if (requiredPlan !== null && requiredPlan !== "edge") {
-    throw new TypeError(
-      "Hosted runtime assistant configuration tool requiredPlan is not supported.",
-    );
-  }
-
-  return {
-    action,
-    result: {
-      ...snapshot,
-      appliesAt,
-      requiredPlan,
-      status: parseHostedRuntimeAssistantConfigurationUpdateStatus(
-        result.status,
-      ),
-    },
-  };
-}
-
-function parseHostedRuntimeAssistantConfigurationSnapshot(
-  record: Record<string, unknown>,
-  options: { extraKeys: readonly string[] },
-): HostedRuntimeAssistantConfigurationSnapshot {
-  assertAllowedObjectKeys(
-    record,
-    new Set([
-      "availableModels",
-      "availableProviders",
-      "availableReasoningEfforts",
-      "configurationAvailable",
-      "dormantSolPreference",
-      "model",
-      "provider",
-      "reasoningEffort",
-      "solAvailable",
-      ...options.extraKeys,
-    ]),
-    "Hosted runtime assistant configuration tool response result",
-  );
-  const availableModels = requireArray(
-    record.availableModels,
-    "Hosted runtime assistant configuration availableModels",
-  ).map((model) =>
-    parseHostedRuntimeAssistantProductModel(
-      model,
-      "Hosted runtime assistant configuration available model",
-    ),
-  );
-  const configurationAvailable = requireBoolean(
-    record.configurationAvailable,
-    "Hosted runtime assistant configuration configurationAvailable",
-  );
-  const hasAvailableProviders = Object.hasOwn(record, "availableProviders");
-  const hasProvider = Object.hasOwn(record, "provider");
-  if (hasAvailableProviders !== hasProvider) {
-    throw new TypeError(
-      "Hosted runtime assistant configuration provider fields must be supplied together.",
-    );
-  }
-  const availableProviders = hasAvailableProviders
-    ? requireArray(
-        record.availableProviders,
-        "Hosted runtime assistant configuration availableProviders",
-      ).map((provider) =>
-        parseHostedRuntimeAssistantProvider(
-          provider,
-          "Hosted runtime assistant configuration available provider",
-        ),
-      )
-    : configurationAvailable
-    ? [HOSTED_ASSISTANT_DEFAULT_PROVIDER]
-    : [];
-  const availableReasoningEfforts = requireArray(
-    record.availableReasoningEfforts,
-    "Hosted runtime assistant configuration availableReasoningEfforts",
-  ).map((effort) =>
-    parseHostedRuntimeAssistantReasoningEffort(
-      effort,
-      "Hosted runtime assistant configuration available reasoning effort",
-    ),
-  );
-
-  return {
-    availableModels,
-    availableProviders,
-    availableReasoningEfforts,
-    configurationAvailable,
-    dormantSolPreference: requireBoolean(
-      record.dormantSolPreference,
-      "Hosted runtime assistant configuration dormantSolPreference",
-    ),
-    model: parseHostedRuntimeAssistantProductModel(
-      record.model,
-      "Hosted runtime assistant configuration model",
-    ),
-    provider: hasProvider
-      ? parseHostedRuntimeAssistantProvider(
-          record.provider,
-          "Hosted runtime assistant configuration provider",
-        )
-      : HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-    reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(
-      record.reasoningEffort,
-      "Hosted runtime assistant configuration reasoningEffort",
-    ),
-    solAvailable: requireBoolean(
-      record.solAvailable,
-      "Hosted runtime assistant configuration solAvailable",
-    ),
-  };
-}
-
-function parseHostedRuntimeAssistantProvider(value: unknown, label: string) {
-  if (!isHostedAssistantProvider(value)) {
-    throw new TypeError(`${label} is not supported.`);
-  }
-  return value;
-}
-
-function parseHostedRuntimeAssistantProductModel(
-  value: unknown,
-  label: string,
-) {
-  if (!isHostedAssistantProductModel(value)) {
-    throw new TypeError(`${label} is not supported.`);
-  }
-  return value;
-}
-
-function parseHostedRuntimeAssistantReasoningEffort(
-  value: unknown,
-  label: string,
-) {
-  if (!isHostedAssistantReasoningEffort(value)) {
-    throw new TypeError(`${label} is not supported.`);
-  }
-  return value;
-}
-
-function parseHostedRuntimeAssistantConfigurationUpdateStatus(
-  value: unknown,
-): HostedRuntimeAssistantConfigurationUpdateStatus {
-  const status = requireString(
-    value,
-    "Hosted runtime assistant configuration tool status",
-  );
-  if (
-    status !== "unchanged" &&
-    status !== "unavailable" &&
-    status !== "updated" &&
-    status !== "upgrade_required"
-  ) {
-    throw new TypeError(
-      "Hosted runtime assistant configuration tool status is not supported.",
-    );
-  }
-  return status;
-}
+export {
+  parseHostedRuntimeAssistantConfigurationControlRequest,
+  parseHostedRuntimeAssistantConfigurationToolRequest,
+  parseHostedRuntimeAssistantConfigurationToolResponse,
+} from "../assistant-model.ts";
 
 function parseHostedRuntimeFamilyPlanInviteRequest(
   value: unknown,
@@ -7511,6 +7033,9 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "freshStartRequestedAtEpochMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetReconcileElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "standbyClaimElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerTargetBindElapsedMs", orchestrationLabel),
       ...requireOptionalStandbyAllocationDiagnostics(
         orchestration,
         orchestrationLabel,
@@ -8631,6 +8156,9 @@ export function parseHostedWorkspaceReadResponse(
           record.hostedAssistantSubagentModelOverridesAllowed,
           "Hosted workspace read response hostedAssistantSubagentModelOverridesAllowed",
         );
+  const hostedAssistantAstraAllowed = record.hostedAssistantAstraAllowed === undefined
+    ? null
+    : requireBoolean(record.hostedAssistantAstraAllowed, "Hosted workspace read response hostedAssistantAstraAllowed");
 
   return {
     fetchedAt: requireString(
@@ -8650,6 +8178,7 @@ export function parseHostedWorkspaceReadResponse(
     ...(hostedAssistantSubagentModelOverridesAllowed === null
       ? {}
       : { hostedAssistantSubagentModelOverridesAllowed }),
+    ...(hostedAssistantAstraAllowed === null ? {} : { hostedAssistantAstraAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace:
       record.workspace === null
@@ -9889,9 +9418,12 @@ function parseHostedRuntimeRedactedValue(
   }
 
   if (Array.isArray(value)) {
-    if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
+    const maxLength = key === "hostedMailboxSystemDeviceSyncContinuationSeqs"
+      ? HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT
+      : HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH;
+    if (value.length > maxLength) {
       throw new TypeError(
-        `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH} redacted values.`,
+        `${label} must contain at most ${maxLength} redacted values.`,
       );
     }
 
@@ -10193,18 +9725,6 @@ function assertNoForbiddenRuntimeLogKeys(
       throw new TypeError(
         `${label}.${key} is not allowed in hosted runtime log entries.`,
       );
-    }
-  }
-}
-
-function assertAllowedObjectKeys(
-  record: Record<string, unknown>,
-  allowedKeys: ReadonlySet<string>,
-  label: string,
-): void {
-  for (const key of Object.keys(record)) {
-    if (!allowedKeys.has(key)) {
-      throw new TypeError(`${label}.${key} is not allowed.`);
     }
   }
 }

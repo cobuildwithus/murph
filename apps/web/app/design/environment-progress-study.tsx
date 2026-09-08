@@ -186,6 +186,7 @@ export function EnvironmentProgressStudy() {
           authGate={false}
           contactOptions={DESIGN_CONTACT_OPTIONS}
           initialTopicId="air"
+          presentation="inline"
           preview={{
             state: "idle",
           }}
@@ -199,6 +200,7 @@ export function EnvironmentProgressStudy() {
           authGate={false}
           contactOptions={DESIGN_CONTACT_OPTIONS}
           initialTopicId="workspace:0"
+          presentation="inline"
           preview={{
             capturedFieldKeys: ["workspace.work_mode", "workspace.standing_desk"],
             speaking: true,

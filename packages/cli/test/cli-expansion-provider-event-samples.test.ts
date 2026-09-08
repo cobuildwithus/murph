@@ -656,7 +656,7 @@ test('generic read and semantic summary help surfaces explain when to use them',
   )
   assert.match(
     wearablesDayHelp,
-    /Use `wearables day` as the first read for date-specific wearable questions except workout activity questions; use `wearables activity list` for those\. Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail\. Omit workout detail only when the answer is entirely available from day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes`; include it whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits\./u,
+    /Use `wearables day` first for date-specific questions except workouts; use `wearables activity list` for workouts\. Choose the output before the first and only data read: day totals omit both detail options; individual workout facts use --include-workout-summaries; lap\/split facts use --include-workout-details\. Never probe with smaller output and retry\./u,
   )
   assert.match(
     mealManifestHelp,

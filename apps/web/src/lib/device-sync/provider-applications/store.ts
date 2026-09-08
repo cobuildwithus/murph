@@ -265,7 +265,10 @@ export async function saveDeviceProviderApplication(input: {
       },
     });
     await tx.deviceOauthSession.deleteMany({
-      where: { providerApplicationId: current.id },
+      where: {
+        consumedAt: null,
+        providerApplicationId: current.id,
+      },
     });
 
     return tx.deviceProviderApplication.update({

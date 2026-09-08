@@ -3,6 +3,7 @@ import {
   type AutomationAssistantTargetOverride,
 } from '@murphai/contracts'
 import {
+  HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
@@ -28,6 +29,7 @@ const AUTOMATION_DEFAULT_REASONING_BY_HOSTED_PRODUCT_MODEL = {
   [HOSTED_ASSISTANT_LUNA_MODEL]: 'high',
   [HOSTED_ASSISTANT_TERRA_MODEL]: 'low',
   [HOSTED_ASSISTANT_SOL_MODEL]: 'low',
+  [HOSTED_ASSISTANT_ASTRA_MODEL]: 'low',
 } as const satisfies Record<
   HostedAssistantProductModel,
   HostedAssistantReasoningEffort

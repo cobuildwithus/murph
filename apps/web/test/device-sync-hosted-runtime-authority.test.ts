@@ -1,4 +1,5 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
@@ -1022,6 +1023,76 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
 });
 
 describe("applyHostedDeviceSyncRuntimeResult", () => {
+  it("accepts full-envelope sync progress after a canonical version retry", async () => {
+    const progress = {
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-01-01",
+      junctionHistoricalBackfillWindowEnd: "2025-04-01",
+    };
+    const metadata = {
+      ...Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`diagnostic${index}`, index])),
+      ...progress,
+    };
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({ provider: "junction", metadata }),
+    });
+    const store = new SqliteDeviceSyncStore(":memory:");
+    try {
+      const account = store.upsertAccount({
+        provider: "junction",
+        externalAccountId: "synthetic-progress-account",
+        credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+        scopes: [],
+        metadata,
+        connectedAt: "2026-04-06T09:00:00.000Z",
+      });
+      store.markSyncSucceeded(account.id, "2026-04-06T10:05:00.000Z", account.disconnectGeneration, {
+        metadataPatch: {
+          junctionProfileSummaryCheckedAt: "2026-04-06T10:05:00.000Z",
+          junctionProfileSummaryNormalizationRevision: 2,
+        },
+      });
+      const updated = store.getAccountById(account.id);
+      expect(updated).not.toBeNull();
+      const { applyHostedDeviceSyncRuntimeResult } = await import(
+        "@/src/lib/device-sync/hosted-runtime-authority"
+      );
+      const apply = (observedUpdatedAt: string) => applyHostedDeviceSyncRuntimeResult({
+        request: new Request("https://example.test/device-sync/runtime/apply", {
+          method: "POST",
+          body: JSON.stringify({
+            userId: "user_123",
+            updates: [{
+              connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
+              observedUpdatedAt,
+              connection: { metadata: updated?.metadata },
+              localState: { nextReconcileAt: "2026-04-06T11:00:00.000Z" },
+            }],
+          }),
+        }),
+        trustedUserId: "user_123",
+      });
+      const stale = await apply("2026-04-06T09:59:00.000Z");
+      expect(stale.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+      expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+
+      const accepted = await apply("2026-04-06T10:00:00.000Z");
+      expect(accepted.updates[0]?.writeUpdate).toBe("applied");
+      expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+      expect(harness.record.metadata).toMatchObject({
+        ...progress,
+        junctionProfileSummaryNormalizationRevision: 2,
+      });
+      expect(Object.keys(harness.record.metadata)).toHaveLength(16);
+      expect(harness.record.nextReconcileAt).toBe("2026-04-06T11:00:00.000Z");
+    } finally {
+      store.close();
+    }
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveDeviceProviderApplication.mockReset();
@@ -1124,14 +1195,21 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     ]);
   });
 
-  it("hands an established eligible source to the existing notice scheduler", async () => {
+  it.each([
+    { sourceProviderSlug: "garmin", status: "connected", lastErrorCode: null },
+    { sourceProviderSlug: "whoop_v2", status: "connected", lastErrorCode: null },
+    { sourceProviderSlug: "whoop_v2", status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED" },
+    { sourceProviderSlug: "whoop_v2", status: "error", lastErrorCode: "token_refresh_failed" },
+  ] as const)("hands an established $sourceProviderSlug $status source to the existing notice scheduler", async ({ sourceProviderSlug, status, lastErrorCode }) => {
     createAuthorityHarness({
       connectionSources: [{
-        displayName: "Garmin",
+        displayName: sourceProviderSlug,
+        status,
+        lastErrorCode,
         id: "dcs_abcdefghijklmnop",
         lastDataAt: "2026-08-01T00:00:00.000Z",
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
+        sourceInstanceKey: `junction:${sourceProviderSlug}`,
+        sourceProviderSlug,
       }],
     });
     const { applyHostedDeviceSyncRuntimeResult } = await import(
@@ -1155,8 +1233,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         lastDataAt: "2026-08-01T00:00:00.000Z",
         lifecycleEpoch: 1,
         sourceId: "dcs_abcdefghijklmnop",
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
+        sourceInstanceKey: `junction:${sourceProviderSlug}`,
+        sourceProviderSlug,
       }],
       now: expect.any(String),
       userId: "user_123",

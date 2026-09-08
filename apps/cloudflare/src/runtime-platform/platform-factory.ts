@@ -9,6 +9,7 @@ import type {
 } from "../workspace-snapshot-restore-preparation.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { createCloudflareArtifactStore } from "./artifact-store.ts";
+import { createCloudflareMediaStore } from "./media-store.ts";
 import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
 import { createHostedRuntimeAssistantPersonalizationToolPort } from "./assistant-personalization-tool-port.ts";
 import { createHostedRuntimeAssistantConfigurationToolPort } from "./assistant-configuration-tool-port.ts";
@@ -127,6 +128,11 @@ export function buildHostedExecutionRuntimePlatform(input: {
             boundUserId: input.boundUserId,
             fetchImpl: trustedInternalFetchImpl,
             preparedSnapshotRestore: input.preparedSnapshotRestore ?? null,
+            timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
+          mediaStore: createCloudflareMediaStore({
+            fetchImpl: trustedInternalFetchImpl,
             timeoutMs,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           }),

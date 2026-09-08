@@ -2594,48 +2594,67 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
-  it.each([
-    ["missing", () => null],
-    [
-      "group",
-      () => ({
-        acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
-        conversationId: "conversation_group",
-        conversationScope: "group" as const,
-        inboundMailboxItemIds: ["mailbox_group"],
-        originSessionId: "session_group",
-        recipientKey: "recipient_group",
-      }),
-    ],
-  ])("does not admit a context handoff with %s private-user authority", async (
-    _case,
-    currentUserActionScope,
-  ) => {
-    const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "handoff",
-      context: "A bounded fact.",
-      membershipId: "membership_lifting_club",
-    }));
-    if (!request || request.kind !== "group") {
-      throw new Error("Expected group request.");
-    }
-    const groupRequest = vi.fn<GroupToolRequest>();
+  describe.each(["ask", "handoff"] as const)("%s direct authority", (action) => {
+    it.each([
+      ["missing", () => null],
+      ["empty direct", () => ({
+        acceptedInputIds: [],
+        conversationId: "conversation_private",
+        conversationScope: "direct" as const,
+        inboundMailboxItemIds: [],
+        originSessionId: "session_private",
+        recipientKey: "recipient_private",
+      })],
+      [
+        "group",
+        () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group" as const,
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+      ],
+    ])("rejects %s authority before the hosted request", async (
+      _case,
+      currentUserActionScope,
+    ) => {
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action,
+        ...(action === "handoff"
+          ? { context: "A bounded fact." }
+          : { question: "Which day is planned?" }),
+        membershipId: "membership_lifting_club",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+      const groupRequest = vi.fn<GroupToolRequest>();
 
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createGroupHostedToolContext({
-        currentUserActionScope,
-        groupRequest,
-      }),
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request,
-      vaultRoot: null,
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope,
+          groupRequest,
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      });
+
+      expect(result.rpcResult.success).toBe(false);
+      expect(groupRequest).not.toHaveBeenCalled();
+      expect(result.rpcResult.contentItems).toEqual([{
+        type: "inputText",
+        text: _case === "empty direct"
+          ? `group ${action} requires fresh user-sourced input for this turn`
+          : `group ${action} requires a fresh user request in a personal direct conversation`,
+      }]);
     });
 
-    expect(result.rpcResult.success).toBe(false);
-    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("enforces group ask bounds in Unicode code points", () => {
@@ -2832,6 +2851,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "response_schema_invalid",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "invalid_result",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID",
         issueKind: "schema_rejection",
@@ -2852,6 +2875,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "http_5xx",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unavailable",
+          diagnosticRole: "classification",
           retryable: true,
           statusClass: "5xx",
         },
@@ -2874,6 +2901,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "http_4xx",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "rate_limited",
+          diagnosticRole: "classification",
           retryable: false,
           statusClass: "4xx",
         },
@@ -2895,6 +2926,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "timeout",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TIMEOUT",
         issueKind: "timeout",
@@ -2914,6 +2949,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "transport",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
         issueKind: "tool_error",
@@ -2933,6 +2972,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "transport",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
         issueKind: "tool_error",
@@ -2951,6 +2994,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "transport",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_TRANSPORT_FAILED",
         issueKind: "tool_error",
@@ -2969,6 +3016,10 @@ describe("murph.group dynamic tool", () => {
         details: {
           action: "read_usage",
           failureCategory: "unknown",
+          failureStage: "execution",
+          failureReason: "handler_exception",
+          errorCategory: "unknown",
+          diagnosticRole: "classification",
         },
         errorCode: "HOSTED_GROUP_TOOL_FAILED",
         issueKind: "tool_error",
@@ -3012,7 +3063,7 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(result)).not.toContain("PRIVATE_");
   });
 
-  it("does not report caller-owned group-tool cancellation as a runtime failure", async () => {
+  it("keeps returned caller cancellation out of group-specific failure classification", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "read_usage",
     }));
@@ -3038,7 +3089,20 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
-    expect(result.runtimeIssueInputs).toBeUndefined();
+    expect(result.runtimeIssueInputs).toEqual([{
+      component: "assistant.codex-dynamic-tool",
+      operation: "group",
+      phase: "tool_call",
+      issueKind: "tool_error",
+      severity: "warning",
+      errorCode: "ASSISTANT_DYNAMIC_TOOL_FAILED",
+      summary: "Murph dynamic tool execution failed.",
+      details: {
+        requestKind: "group", failureStage: "execution",
+        failureReason: "handler_exception", errorCategory: "unknown",
+        diagnosticRole: "classification",
+      },
+    }]);
     expect(JSON.stringify(result)).not.toContain(privateDetail);
   });
 
@@ -3073,6 +3137,8 @@ describe("murph.group dynamic tool", () => {
       details: {
         action: "read_usage",
         failureCategory: "timeout",
+        failureStage: "execution", failureReason: "handler_exception",
+        errorCategory: "unknown", diagnosticRole: "classification",
       },
       errorCode: "HOSTED_GROUP_TOOL_TIMEOUT",
       issueKind: "timeout",

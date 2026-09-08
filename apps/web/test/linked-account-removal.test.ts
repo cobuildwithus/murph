@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
+vi.mock("@/src/lib/hosted-onboarding/contact-privacy", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/contact-privacy")>()),
   createHostedEmailLookupKeyReadCandidates: () => ["email-key"],
   createHostedPhoneLookupKeyReadCandidates: () => ["phone-key"],
   createHostedTelegramUserLookupKeyReadCandidates: () => ["telegram-key"],
@@ -73,6 +74,7 @@ describe("linked account projection removal", () => {
 
   it("revokes verified email authority, its Linq route, and its reply alias", async () => {
     const prisma = makePrisma({
+      identity: { linqEmailHandleLookupKey: "email-key", linqEmailHandleEncrypted: "sealed-email" },
       authorization: makeEmailAuthorization(),
       routing: {
         ...makeLinqRouting({
@@ -91,6 +93,11 @@ describe("linked account projection removal", () => {
       prisma,
     })).resolves.toBe(true);
 
+    expect(prisma.hostedMemberIdentity.updateMany).toHaveBeenCalledWith({
+      where: { memberId: "member_123", linqEmailHandleLookupKey: { in: ["email-key"] } },
+      data: { linqEmailHandleLookupKey: null, linqEmailHandleEncrypted: null },
+    });
+    expect(prisma.$executeRaw).toHaveBeenCalledBefore(mocks.lockHostedMemberRow);
     expect(prisma.hostedMemberEmailAuthorization.update).toHaveBeenCalledWith({
       where: { memberId: "member_123" },
       data: {
@@ -273,6 +280,16 @@ describe("linked account projection removal", () => {
     expect(prisma.hostedMemberRouting.update).not.toHaveBeenCalled();
   });
 
+  it("preserves a replacement Linq email handle when removing the former verified email", async () => {
+    const identity = { linqEmailHandleLookupKey: "replacement-key", linqEmailHandleEncrypted: "replacement-source" };
+    const prisma = makePrisma({ identity, authorization: makeEmailAuthorization() });
+    await expect(removeHostedMemberLinkedAccountProjectionTx({
+      expectedIdentity: "member@example.com", memberId: "member_123", method: "email", prisma,
+    })).resolves.toBe(true);
+    expect(identity).toEqual({ linqEmailHandleLookupKey: "replacement-key", linqEmailHandleEncrypted: "replacement-source" });
+    expect(prisma.hostedMemberIdentity.update).not.toHaveBeenCalled();
+  });
+
   it("treats already-cleared projections as an idempotent no-op", async () => {
     const prisma = makePrisma({});
 
@@ -294,6 +311,7 @@ function makePrisma(input: {
   const prisma = {} as Prisma.TransactionClient;
 
   return Object.assign(prisma, {
+    $executeRaw: vi.fn().mockResolvedValue(1),
     hostedMemberEmailAuthorization: {
       findUnique: vi.fn().mockResolvedValue(input.authorization ?? null),
       update: vi.fn(),
@@ -301,6 +319,12 @@ function makePrisma(input: {
     hostedMemberIdentity: {
       findUnique: vi.fn().mockResolvedValue(input.identity ?? null),
       update: vi.fn(),
+      updateMany: vi.fn(async ({ where }: {
+        where: { linqEmailHandleLookupKey: { in: string[] } };
+      }) => ({
+        count: typeof input.identity?.linqEmailHandleLookupKey === "string"
+          && where.linqEmailHandleLookupKey.in.includes(input.identity.linqEmailHandleLookupKey) ? 1 : 0,
+      })),
     },
     hostedMemberRouting: {
       findUnique: vi.fn().mockResolvedValue(input.routing ?? null),

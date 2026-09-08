@@ -565,6 +565,95 @@ exec "\${RETIRE_TEST_REAL_GIT:?}" "$@"
     }
   })
 
+  it.each(['partial', 'detached-partial', 'missing-directory', 'new-content', 'restore-race', 'index-drift', 'head-drift', 'gate-head-drift', 'missing-gitfile', 'symlink-parent'])(
+    'recovers only unchanged missing tracked files after removal failure: %s',
+    (failureMode) => {
+      const harness = createHarness()
+      try {
+        const realGit = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim()
+        const outside = path.join(harness.root, 'outside')
+        mkdirSync(outside)
+        const modeArgs = failureMode === 'detached-partial' ? ['--contained-detached'] : []
+        if (failureMode === 'detached-partial') {
+          runGit(harness.primary, ['update-ref', 'refs/remotes/origin/main', harness.head])
+          runGit(harness.target, ['checkout', '--detach'])
+        }
+        writeExecutable(
+          path.join(harness.fakeBin, 'git'),
+          `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${3:-}" == 'checkout-index' && "$RETIRE_TEST_FAILURE_MODE" == 'restore-race' ]]; then
+  printf 'concurrent change\n' > "$2/task-change.txt"
+fi
+if [[ "\${1:-}" == 'worktree' && "\${2:-}" == 'remove' && ! -e "$RETIRE_TEST_MARKER" ]]; then
+  touch "$RETIRE_TEST_MARKER"
+  target="\${@: -1}"
+  rm "$target/task-change.txt"
+  case "$RETIRE_TEST_FAILURE_MODE" in
+    new-content) printf 'concurrent change\n' > "$target/task-change.txt" ;;
+    missing-directory)
+      rm "$target/agent-docs/exec-plans/active/README.md"
+      rmdir "$target/agent-docs/exec-plans/active"
+      ;;
+    head-drift) "$RETIRE_TEST_REAL_GIT" -C "$target" update-ref HEAD HEAD^ ;;
+    index-drift) "$RETIRE_TEST_REAL_GIT" -C "$target" update-index --force-remove .gitignore ;;
+    missing-gitfile) rm "$target/.git" ;;
+    symlink-parent)
+      rm "$target/agent-docs/exec-plans/active/README.md"
+      rmdir "$target/agent-docs/exec-plans/active"
+      ln -s "$RETIRE_TEST_OUTSIDE" "$target/agent-docs/exec-plans/active"
+      ;;
+  esac
+  printf 'synthetic removal failure in %s: permission denied\n' "$target" >&2
+  exit 1
+fi
+exec "$RETIRE_TEST_REAL_GIT" "$@"
+`,
+        )
+        if (failureMode === 'gate-head-drift') {
+          writeExecutable(path.join(harness.fakeBin, 'gh'), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ -e "$RETIRE_TEST_MARKER" ]]; then
+  "$RETIRE_TEST_REAL_GIT" -C "$RETIRE_TEST_QUARANTINE" update-ref HEAD HEAD^
+fi
+printf '%s\n' "$RETIRE_TEST_PR_JSON"
+`)
+        }
+        const env = {
+          RETIRE_TEST_QUARANTINE: `${harness.target}.retiring-${harness.head.slice(0, 12)}`,
+          RETIRE_TEST_REAL_GIT: realGit,
+          RETIRE_TEST_FAILURE_MODE: failureMode,
+          RETIRE_TEST_MARKER: path.join(harness.root, 'failed-once'),
+          RETIRE_TEST_OUTSIDE: outside,
+        }
+        const first = runRetirement(harness, [terminalPullRequest(harness)], [...modeArgs, harness.target], env)
+        const quarantine = `${harness.target}.retiring-${harness.head.slice(0, 12)}`
+        expect(first.status).toBe(1)
+        expect(first.stderr).toContain('synthetic removal failure')
+        expect(first.stderr).not.toContain(harness.root)
+        expect(existsSync(quarantine)).toBe(true)
+        if (failureMode === 'partial' || failureMode === 'detached-partial' || failureMode === 'missing-directory') {
+          expect(readFileSync(path.join(quarantine, 'task-change.txt'), 'utf8')).toBe('task change\n')
+          expect(runGit(quarantine, ['status', '--porcelain'])).toBe('')
+          const retry = runRetirement(harness, [terminalPullRequest(harness)], [...modeArgs, quarantine], env)
+          expect(retry.status, retry.stderr).toBe(0)
+          expect(existsSync(quarantine)).toBe(false)
+          expect(runGit(harness.primary, ['rev-parse', harness.branch])).toBe(harness.head)
+        } else {
+          expect(first.stderr).toContain('recovery could not be proved safe')
+          if (failureMode === 'new-content' || failureMode === 'restore-race') {
+            expect(readFileSync(path.join(quarantine, 'task-change.txt'), 'utf8')).toBe('concurrent change\n')
+          } else {
+            expect(existsSync(path.join(quarantine, 'task-change.txt'))).toBe(false)
+          }
+          expect(readdirSync(outside)).toEqual([])
+        }
+      } finally {
+        rmSync(harness.root, { recursive: true, force: true })
+      }
+    },
+  )
+
   it('refuses open PRs and active-task references', () => {
     const harness = createHarness()
     try {

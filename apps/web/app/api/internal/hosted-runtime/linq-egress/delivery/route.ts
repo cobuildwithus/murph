@@ -13,6 +13,9 @@ import {
   recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
+  retryHostedLinqTerminalSend,
+} from "@/src/lib/hosted-onboarding/linq-terminal-retry";
+import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -188,6 +191,14 @@ export const POST = withJsonError(async (request: Request) => {
         prisma,
       });
 
+  scheduleHostedLinqTerminalRetriesAfterResponse({
+    acceptedAt,
+    recorded: result.recorded,
+    chatId: linqChatId,
+    messageIds: providerMessageIds,
+    prisma,
+  });
+
   if (
     acceptedAt
     && result.recorded
@@ -209,6 +220,37 @@ export const POST = withJsonError(async (request: Request) => {
     recorded: result.recorded,
   });
 });
+
+function scheduleHostedLinqTerminalRetriesAfterResponse(input: {
+  acceptedAt: Date | null;
+  recorded: boolean;
+  chatId: string | null;
+  messageIds: readonly string[];
+  prisma: ReturnType<typeof getPrisma>;
+}): void {
+  const { chatId, messageIds, prisma } = input;
+  if (!input.acceptedAt || !input.recorded || !chatId || messageIds.length === 0) return;
+  // A failure receipt can beat the acceptance callback. Reconcile after the
+  // normal handoff; successful replies do no provider work here.
+  try {
+    after(async () => {
+      for (const messageId of messageIds) {
+        try {
+          await retryHostedLinqTerminalSend({ chatId, messageId, prisma });
+        } catch {
+          console.warn("Hosted Linq terminal retry did not complete.", {
+            code: "HOSTED_LINQ_TERMINAL_RETRY_INCOMPLETE",
+          });
+        }
+      }
+    });
+  } catch {
+    // Scheduling failure must not invalidate an accepted runtime handoff.
+    console.warn("Hosted Linq terminal retry could not be scheduled.", {
+      code: "HOSTED_LINQ_TERMINAL_RETRY_NOT_SCHEDULED",
+    });
+  }
+}
 
 function parseHostedSignupWelcomeIdempotencyKey(
   value: string | null,

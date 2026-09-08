@@ -1,6 +1,7 @@
 ---
 title: 'Native voice preview URLs inherit non-playable development origins'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2765'
 ---
 
 ## Expected Behavior

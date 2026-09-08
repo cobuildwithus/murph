@@ -1,0 +1,24 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "medical-records-import-and-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer medical record imports",
+    "summary": "Find your provider, authorize in your patient portal, and see what was saved, including useful results from an incomplete import.",
+    "details": "Saved lab results link to Biomarkers. You can disconnect portal access while keeping saved records, or reconnect to the same patient record within the source\u2019s import limit. Some chart records are retained only as source evidence.",
+    "relevanceTags": [
+      "medical-records",
+      "labs",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      2918
+    ],
+    "tryIt": {
+      "label": "Open medical records",
+      "href": "/records"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import {
+  cliTimingLaunchArgs,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MockChildProcess,
   asRecord,
@@ -1743,6 +1744,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         'model_provider="openai"',
         '--config',
         'cli_auth_credentials_store="file"',
+        ...cliTimingLaunchArgs,
         'app-server',
       ],
       expect.any(Object),
@@ -2849,6 +2851,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
         dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+        experimentalRawEvents: true,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)

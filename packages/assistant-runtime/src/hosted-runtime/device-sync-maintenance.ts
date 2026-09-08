@@ -22,6 +22,7 @@ import type {
   DeviceSyncJobTimingDiagnostic,
 } from "@murphai/device-syncd/types";
 import {
+  JUNCTION_ECG_BINDING_REASONS,
   resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
   type DeviceSyncService,
@@ -2031,6 +2032,16 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
   const redacted: Record<string, boolean | number | string | null> = {
     failureRetryable: diagnostic.retryable,
   };
+
+  // Keep this finite reason ahead of optional details for bounded log sanitizers.
+  const ecgBindingReason = diagnostic.details.junctionEcgBindingReason;
+  if (
+    diagnostic.code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE"
+    && typeof ecgBindingReason === "string"
+    && JUNCTION_ECG_BINDING_REASONS.has(ecgBindingReason)
+  ) {
+    redacted.junctionEcgBindingReason = ecgBindingReason;
+  }
 
   if (diagnostic.accountStatus) {
     redacted.providerAccountStatus = toHostedRuntimeLogCode(diagnostic.accountStatus);

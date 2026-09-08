@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AUTOMATION_DOC_TYPE,
+  AUTOMATION_SCHEMA_VERSION,
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
+  automationFrontmatterSchema,
   automationScaffoldPayloadSchema,
+  automationScheduleSchema,
   buildAutomationSupportSeriesTag,
   parseAutomationSupportSeriesTag,
 } from "../src/automation.ts";
@@ -29,6 +33,49 @@ function automationPayload() {
 }
 
 describe("automation lifecycle contracts", () => {
+  it.each([undefined, "whoop", "whoop_v2", "garmin", "oura", "fitbit"])(
+    "accepts persisted device activity source %s",
+    (source) => {
+      const schedule = {
+        kind: "deviceActivity",
+        after: "2026-06-07T11:00:00.000Z",
+        afterOccurredAt: "2026-06-07T10:55:00.000Z",
+        afterEntityId: "evt_previous_activity",
+        activityKind: "running",
+        ...(source === undefined ? {} : { source }),
+      };
+      expect(automationScheduleSchema.parse(schedule)).toEqual(schedule);
+      const payload = { ...automationPayload(), schedule };
+      expect(automationScaffoldPayloadSchema.parse(payload).schedule).toEqual(schedule);
+      const { instructions, ...frontmatter } = payload;
+      void instructions;
+      expect(automationFrontmatterSchema.parse({
+        ...frontmatter,
+        schemaVersion: AUTOMATION_SCHEMA_VERSION,
+        docType: AUTOMATION_DOC_TYPE,
+        automationId: "auto_device_activity",
+        createdAt: "2026-06-07T10:00:00.000Z",
+        updatedAt: "2026-06-07T11:00:00.000Z",
+      }).schedule).toEqual(schedule);
+    },
+  );
+
+  it.each(["unknown-provider", "google_health", "google-health", "google_fit", "whoop-v2", "Garmin", "", null])(
+    "rejects unsupported public device activity source %s",
+    (source) => {
+      const schedule = {
+        kind: "deviceActivity",
+        after: "2026-06-07T11:00:00.000Z",
+        source,
+      };
+      expect(automationScheduleSchema.safeParse(schedule).success).toBe(false);
+      expect(automationScaffoldPayloadSchema.safeParse({
+        ...automationPayload(),
+        schedule,
+      }).success).toBe(false);
+    },
+  );
+
   it("builds and parses one canonical support-series tag", () => {
     const tag = buildAutomationSupportSeriesTag("experiment:exp_sleep");
 

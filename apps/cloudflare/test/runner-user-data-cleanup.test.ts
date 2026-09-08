@@ -245,8 +245,10 @@ describe("hosted runner user data cleanup", () => {
             state: bindingState,
             userId: USER_ID,
           });
-    const retireStandbySlot = vi.fn(async (input: { claimId?: string }) => {
-      expect(input).toEqual({ claimId });
+    const retireStandbySlot = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["retireStandbySlot"]>
+    >(async (input) => {
+      expect(input).toEqual({ target: { slotName, userId: USER_ID } });
       expect(stateStore.runnerContainerName).toBe(slotName);
       if (retireStandbySlot.mock.calls.length === 1) {
         bindingState = "retiring";
@@ -291,7 +293,7 @@ describe("hosted runner user data cleanup", () => {
       ok: true,
     });
     expect(requestedRunnerContainerNames).toEqual([slotName, slotName]);
-    expect(readStandbySlotBinding).toHaveBeenCalledTimes(2);
+    expect(readStandbySlotBinding).toHaveBeenCalledOnce();
     expect(retireStandbySlot).toHaveBeenCalledTimes(2);
     expect(destroyInstance).not.toHaveBeenCalled();
     expect(stateStore.runnerContainerName).toBeNull();

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "whoop-data-check-ins",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A check-in when WHOOP data stops arriving",
+    "summary": "Murph can offer connection help in your private text conversation after five days without data from an established WHOOP connection.",
+    "details": "The check-in applies to existing direct WHOOP connections, including confirmed authorization failures, when you have been chatting recently. Murph asks once per data gap. You can ask it to wait 5–30 days or stop these check-ins while keeping your connection and syncing on.",
+    "relevanceTags": ["wearables", "whoop", "sync"],
+    "sourcePullRequests": [2850]
+  }
+}

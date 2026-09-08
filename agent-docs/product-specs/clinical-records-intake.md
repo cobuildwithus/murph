@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-07-21
+Last verified: 2026-09-05
 
 ## Product outcome
 
@@ -10,9 +10,10 @@ the provider's own SMART-on-FHIR sign-in, and import the authorized record
 families into the member's encrypted vault. The common path asks for no portal
 password inside Murph and no manual file download.
 
-The Epic beta imports the launch Patient binding, laboratory Observations, and
-DiagnosticReport result summaries. It intentionally does not claim a complete
-medical record.
+The Epic policy collects 24 queries across 17 resource families, including
+labs, reports, medications, allergies and other chart records. Supported facts
+become canonical records; other evidence remains raw. This is a bounded
+one-time import, not a complete medical record or continuous sync.
 
 This first release is an Epic SMART foundation, not a TEFCA/QHIN replacement.
 It does not claim nationwide identity matching, discover every organization a
@@ -43,25 +44,29 @@ does not expose a compatible patient-facing SMART endpoint.
    session and pinned provider endpoint, exchanges the code, and accepts the
    actual partial grant only when it includes Patient read plus at least one
    granted Epic beta search family.
-5. A successful member/provider connection atomically creates its one queued
-   retrieval generation and durable system-mailbox wake. A second authorization
-   for that member/provider pair fails closed before provider discovery when
-   possible and again at the unique persistence boundary. The existing Temporal
-   recovery schedule's shared mailbox handoff sweep re-signals at most one
-   exact pending item per member, including a current queued-generation wake
-   that remains ahead of its mailbox lane watermark. It creates no second run,
-   wake, receipt, or retrieval generation.
+5. The callback locks the member, rechecks consent and suspension, then
+   atomically persists the connection, next retrieval generation and existing
+   system-mailbox wake. Reauthorization reuses that connection only after its
+   prior run is finalized, with the same patient and FHIR base. The existing
+   Temporal handoff sweep re-signals pending work without creating another run.
 6. The hosted runtime reads a credential-free run descriptor, asks the web
    control plane for bounded FHIR pages, and imports raw-first evidence through
    the Clinical Records vault use case. The web control plane records only
    operational counts and terminal status; raw FHIR truth stays in the
    encrypted vault.
 
-The later records page can show each active connection and its latest queued,
-retrieving, importing, complete, partial, authorization-required, or failed
-state. This backend foundation exposes status and disconnect only. Disconnect
-immediately clears provider tokens and patient context from the live connection
-and cancels its active run while retaining a minimal row for status/history.
+The records page has one import action through the shared authenticated
+launcher. Connect opens provider search immediately after required consent.
+The return page shows saved counts, partial or failed status, and a link to
+`/biomarkers` only when recognized lab results were saved. Raw evidence does
+not imply usable results or a human review queue. Callback replay never claims
+that no earlier records were copied. A failed start can retry the same provider;
+selecting another starts a fresh document and claim.
+
+Disconnect remains available to authenticated owners after entitlement ends.
+It clears temporary credentials and patient context, cancels unfinished runs,
+and invalidates older OAuth sessions. Saved outcomes remain visible. Reconnect
+and import-again actions follow the same launcher and bounded lifecycle below.
 
 ## Ownership and data boundaries
 
@@ -77,10 +82,12 @@ and cancels its active run while retaining a minimal row for status/history.
   `packages/vault-usecases` own raw-page integrity, FHIR import decisions,
   canonical mutation, and composed vault execution respectively.
 - Postgres stores no raw FHIR resource or record body. Patient ids, access
-  tokens, refresh tokens, PKCE verifiers, and continuation cursors use
+  tokens, PKCE verifiers, and continuation cursors use
   purpose-specific hosted crypto lanes. The runtime manifest's canonical
   patient-id hash is derived in memory from the decrypted patient context and
-  is never stored in Postgres. Caller request ids and page URLs are not
+  is never stored in plaintext in Postgres. An encrypted patient binding survives
+  temporary credential erasure so reauthorization can compare the same patient
+  using the existing member/connection/token-version crypto owner. Caller request ids and page URLs are not
   persisted in the web database; only a server-derived run/page fingerprint
   coordinates page claims.
 - Provider credentials and patient ids never enter prompts, Temporal workflow
@@ -117,10 +124,9 @@ provider-directory tests. The importer is byte-deterministic for fixed source
 bytes and canonicalizes provider and facility order; the source hash remains
 an exact-byte hash, so a reordered source bundle correctly receives a different
 hash. The v2 parser rejects duplicate or unsorted ids, unknown policy/query
-references, malformed capability evidence, non-HTTPS URLs,
+references, non-HTTPS URLs,
 credentials/query/fragment components, and private, loopback, link-local, or
-mapped-private IP literals. The v1 parser remains available for one
-compatibility window.
+mapped-private IP literals. Only the v2 directory parser remains.
 
 The artifact also carries one curated `Epic Sandbox (test data only)` entry for
 Epic's official R4 sandbox. It uses only
@@ -129,19 +135,14 @@ Epic's official R4 sandbox. It uses only
 
 ## Epic acquisition policy
 
-`epic-policy.ts` is the single source of truth for Epic SMART base scopes,
-query-scope definitions, required FHIR operations, deterministic query
-templates, slicing rules, bounded dependency traversal, and the Epic API keys
-that must be registered. All 24 primary query scopes are active. They span 17
-unique FHIR resource families because Condition, Observation, and Procedure each
-have multiple policy-owned query variants. Provider endpoint presence still does
-not establish a provider-specific capability claim; any such claim requires a
-sorted capability override with an evidence version.
-
-Dependency policies are purpose-bound, restricted to the selected provider's
-FHIR base, capped at traversal depth two, and charged against the parent slice
-limits. They are not a generic reference crawler, and dependency reads remain
-registration-only until that bounded traversal owner lands.
+`epic-policy.ts` authors one ordered literal query catalog: stable ids,
+resource family, operation, fingerprint template, fixed search parameters,
+optional executed window, and registration API keys. Scopes, family order and
+frozen plans derive from that catalog. All 24 queries across 17 families remain
+active; each granted family expands into all of its variants. The 37 API
+registration entries also cover supporting reads, but runtime performs no
+reference traversal or backfill. Unused capability and traversal metadata is
+absent; directory presence is not a capability guarantee.
 
 ## Retrieval contract and limits
 
@@ -195,9 +196,9 @@ MedicationStatement family, for 18 total.
 New runs freeze an adapter-owned retrieval plan with stable query-scope ids and
 deterministic slice ids. That plan can represent multiple queries for one FHIR
 resource type and ordered, non-overlapping bounded windows without treating
-either id as canonical clinical identity. Each run also pins its retrieval
-protocol: existing nullable-protocol rows remain legacy until terminal, while
-new runs emit `query-slices-v2`. Every query-aware page request, opaque cursor,
+either id as canonical clinical identity. Hosted runs use only `query-slices-v2`. The run-owned frozen slice list is the
+single retrieval representation; completed-slice references own completion.
+Families and counts are derived. Every page request, opaque cursor,
 server-derived request fingerprint, durable request claim, and terminal outcome
 is checked against the frozen query-scope and slice identity before provider
 egress or outcome mutation. New OAuth requests deduplicate the 24 queries into
@@ -206,7 +207,8 @@ query variant in the frozen run plan. A partial grant still requires Patient plu
 at least one clinical family and executes all active queries for each granted
 family.
 Each fetch reserves the full page allowance atomically before provider egress,
-then settles to the actual bytes after a valid response. A provider-side or
+then settles to the actual received UTF-8 bytes after a valid response,
+including whitespace. Normalized snapshot bounds are separate. A provider-side or
 ambiguous failure keeps the full reservation charged; a failure before FHIR
 egress releases it. Provider bodies are streamed through a bounded reader and
 canceled at limit+1 even when `Content-Length` is absent or false. SMART
@@ -235,39 +237,78 @@ ranges hold the containing observation for review instead of being dropped.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final
-outcomes are idempotent under JSON key reordering. The member/provider unique
-connection plus its single generation bound the retained raw-evidence family;
-no retry, reconnect, or refresh surface may create another retrieval job until
-the vault owns a lifecycle that preserves every canonical raw reference while
-bounding retained evidence over time.
+outcomes are idempotent under JSON key reordering. Runtime checkpoints use v3;
+only the external snapshot importer retains local v2/v3 manifest compatibility.
+The hosted writer emits v3 manifests and derives outgoing pagination edges
+from raw Bundles, preserving root/reachability/cycle/family/base validation.
+
+Completed slices survive an unrelated later byte/page/resource bound. The
+unfinished slice is discarded without refunding historical charges. Meaningful
+OperationOutcome warnings/errors mark coverage incomplete; empty uncertain
+searches never establish allergy absence. SMART `.s` grants authorize search.
+SUBSETTED resources and unorderable same-identity siblings remain raw evidence
+with an explicit incomplete disposition, leaving validated canonical facts
+unchanged. Comparable clinical holds retain the existing revision protection.
+Web accepts partial received-page counts below served counts, rejects
+excess counts, and records same-generation saved counts after authorization
+ends without restoring access. Permanent outcome conflicts leave the mailbox
+retry loop; transient failures retain it.
+
+### Bounded repeat import
+
+The existing member/provider unique source admits at most eight immutable
+retrieval snapshots and a member has at most twenty sources. A snapshot remains
+bounded to 32 MiB plus its 1 MiB manifest, so retained raw snapshot content is
+at most 264 MiB per source. Generations consume that allowance even when a run
+fails. No raw evidence is pruned, so canonical raw references remain valid.
+This bounds snapshots without a garbage collector, new service or state owner.
+Repeated unchanged facts use existing canonical idempotency; newer comparable
+corrections use existing revision handling. A fresh authorization increments
+both generation and credential epoch under the member lock. Old callbacks,
+patient/source changes and stale outcomes cannot replace that generation.
 
 HTTP 401 or a token at or within the retrieval expiry leeway transitions the
 current credential version and run to authorization-required. HTTP 403 marks
 only that family unavailable.
 429/5xx and transport failures are retryable; malformed pages, escaped
-pagination, and configured bounds fail closed.
+pagination fail closed. Configured bounds preserve already-completed valid slices.
 
 ## Privacy lifecycle
 
-Account deletion explicitly removes retrieval requests, runs, OAuth sessions,
-connect intents, and encrypted connection rows before the member row. The
-account-data store coverage registry documents all five stores. Normal vault
-export continues to export canonical browser-safe vault projections, not web
-control-plane credentials, OAuth state, page fingerprints, or raw provider pages.
+Health-data withdrawal fences admission immediately through the existing
+member consent owner. Clinical cleanup is scheduled before runtime-stop
+reconciliation, so a failed stop cannot skip credential/session invalidation
+and run cancellation. Cleanup takes the same member lock and rechecks for a
+newer consent grant before mutation. Callback persistence also checks member
+suspension after locking. Network and crypto preparation remain outside the
+persistence transaction; mailbox sealing reuses the prewarmed ingress root. A timestamped
+`needs_reauth` run without outcome counts still has unfinished finalization:
+disconnect and withdrawal cancel it so it cannot strand reconnect. Runs with
+finalized counts retain those results; late outcomes cannot alter a new generation.
+
+Account deletion removes requests, runs, OAuth sessions, intents and encrypted
+connections. Normal vault export never exposes control-plane credentials.
 
 ## Deployment
 
-Deploy the additive Prisma migration and Web control plane first. Existing run
-rows retain the nullable legacy protocol for their entire lifecycle; new runs
-pin `query-slices-v2`. The already-compatible reader can consume the new
-descriptor during this deploy window, while Web temporarily accepts its page
-request without `queryFingerprint` and its legacy aggregate terminal outcome.
-Then deploy Cloudflare and the hosted runner so page requests and outcomes echo
-the full frozen identity. Remove that narrow compatibility only after all old
-runner bundles and in-flight runs they can service have drained and the runtime
-rollback floor has advanced. Never fall back to direct unfenced provider access.
-After all three surfaces converge, smoke-test both browser-started and
-assistant-started links, one legacy run, and one new query-aware run.
+Recheck the bounded production aggregate for retained connections, runs,
+requests and unconsumed OAuth sessions before removing old hosted readers.
+The implementation-time aggregate was zero; that is not a rollout-time proof.
+Deploy the additive binding/default migration and compatible Web reader first,
+then the current Cloudflare/runner contract. Drain older runner work before
+admitting v3 checkpoints; v3-capable runners are the workspace rollback floor.
+Do not revert to a runner that cannot read a retained checkpoint.
+
+The four obsolete connection columns and duplicate run family list are removed
+from Prisma's reader. Their physical deletion lives in the existing postdeploy
+contract-migration lane, never the predeploy Prisma path. Invoke that lane only
+with its exact current-production deployment proof after older Web readers
+have drained. That Web deployment is then the rollback floor. The drop has
+bounded lock/statement timeouts and requires no data backfill. Until it runs,
+extra columns with defaults are harmless to both readers. Postdeploy checks:
+current Web/Worker/runner versions, no old active runs, ordinary pagination,
+saved partial counts, and a same-patient repeat import. Keep signed runtime
+fencing throughout; no direct provider-access fallback.
 
 Register an incoming OAuth 2.0 app for the patient consumer with a
 non-confidential client and S256 PKCE in
@@ -354,10 +395,5 @@ client id fails closed before redirect.
 - Email scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
 - Background scheduled refresh and provider-directory network refresh jobs.
-- Retry, reconnect, and reauthorization after the initial retrieval. Active,
-  disconnected, and `needs_reauth` member/provider rows all remain ineligible
-  for another OAuth start in this beta. Supporting another generation requires
-  a bounded raw-evidence retention lifecycle that preserves every canonical
-  raw reference.
 - Claims-based matching or promises that the result is a complete legal
   medical record.

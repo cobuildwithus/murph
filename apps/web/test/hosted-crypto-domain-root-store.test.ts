@@ -2126,6 +2126,76 @@ test("batch private-field decrypt zeroizes invalid KMS plaintext and stops befor
   )).toBe(true);
 });
 
+test("a 500-payload dirty page unwraps each root once and preserves payload authentication", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const { sealHostedDeviceSyncDirtyPayloadJson } = await import("../src/lib/device-sync/prisma-store/dirty-payloads");
+  const { PrismaHostedDirtyConnectionStore } = await import("../src/lib/device-sync/prisma-store/dirty-connections");
+  const userId = "member-test-dirty-hydration";
+  const connectionId = "dsc_test_dirty_hydration";
+  const dirtyAt = new Date("2026-08-11T12:00:00.000Z");
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: tx.prisma,
+    reason: "test.dirty-hydration", userId });
+  const payloadRows = await runWithHostedDomainRootUnwrapCache(async () => {
+    const rows = [];
+    for (let index = 0; index < 500; index += 1) {
+      const id = `dsp_hydration_${index}`;
+      const dirtyRevision = BigInt(index + 1);
+      rows.push({ connectionId, dirtyRevision, id, provider: "junction",
+        resourceEncrypted: await sealHostedDeviceSyncDirtyPayloadJson({ connectionId, dirtyRevision,
+          payloadId: id, prisma: tx.prisma, provider: "junction", userId,
+          value: { count: 1, jobKind: "resource", payload: { webhookDataJson: JSON.stringify({ ordinal: index }) },
+            resource: "heartrate", resourceCategory: "timeseries", sourceProviderSlug: "garmin" } }),
+      });
+    }
+    return rows;
+  });
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+  const findPayloads = vi.fn(async () => payloadRows);
+  const prisma = {
+    ...counting.client,
+    $queryRaw: async (...args: Parameters<typeof tx.prisma.$queryRaw>) => {
+      const statement = args[0];
+      return "sql" in statement && statement.sql.includes('from "device_sync_dirty_connection"')
+        ? [{ connection_id: connectionId }]
+        : counting.client.$queryRaw(...args);
+    },
+    deviceSyncDirtyConnection: { findMany: async () => [{
+      connectionId, userId, provider: "junction", dirtyRevision: 500n, processedRevision: 0n,
+      createdAt: dirtyAt, updatedAt: dirtyAt, firstDirtyAt: dirtyAt, latestDirtyAt: dirtyAt,
+      dirtyResourcesJson: {}, eventCount: 500n, latestTraceId: null, latestEventType: null,
+      latestResourceCategory: null, resourceCategoryCountsJson: {}, sourceProviderCountsJson: {},
+      windowStart: null, windowEnd: null,
+    }] },
+    deviceSyncDirtyPayload: { findMany: findPayloads },
+  };
+  const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+  const readPage = () => store.listPendingDirtyConnectionsForUser({ connectionId, limit: 1, userId });
+  const expectedPayloads = payloadRows.map((_, ordinal) => JSON.stringify({ ordinal })).sort();
+  const decryptsBefore = decryptMetrics.calls.length;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const result = await readPage();
+    const resources = Object.values(result.items[0]?.dirtyResources ?? {});
+    expect(result.hasMore).toBe(false);
+    expect(resources.map((resource) => resource.payload?.webhookDataJson).sort()).toEqual(expectedPayloads);
+    expect(counting.readCount()).toBe(attempt);
+    expect(decryptMetrics.calls.length - decryptsBefore).toBe(attempt);
+    expect(decryptMetrics.returnedPlaintexts.every((key) => key.every((byte) => byte === 0))).toBe(true);
+  }
+  // Reusing a ciphertext for another row must still fail its per-payload AAD.
+  const secondCiphertext = payloadRows[1]!.resourceEncrypted;
+  payloadRows[1]!.resourceEncrypted = payloadRows[0]!.resourceEncrypted;
+  await expect(readPage()).rejects.toThrow();
+  expect(counting.readCount()).toBe(3);
+  expect(decryptMetrics.returnedPlaintexts.every((key) => key.every((byte) => byte === 0))).toBe(true);
+  payloadRows[1]!.resourceEncrypted = secondCiphertext;
+  expect(Object.values((await readPage()).items[0]?.dirtyResources ?? {})).toHaveLength(500);
+  expect(counting.readCount()).toBe(4);
+  expect(decryptMetrics.calls.length - decryptsBefore).toBe(4);
+  expect(findPayloads).toHaveBeenCalledTimes(4);
+});
+
 test("domain root unwraps are memoized inside the scoped cache and wiped at scope end", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const {
@@ -2256,6 +2326,216 @@ test("a prepared domain root warms the scoped active key before its row exists",
   assert.equal(counting.readCount(), 0);
   assert.equal(decryptMetrics.calls.length, 1);
   assert.equal(tx.persistedEnvelopes.length, 0);
+});
+
+test.each(["create", "replace", "consent_revoked", "suspended", "root_race"] as const)(
+  "connection %s prepares KMS before its transaction and rechecks authority",
+  async (scenario) => {
+    const { tx } = await createHostedWebCryptoTransactionFixture();
+    const { PrismaHostedConnectionStore } = await import(
+      "../src/lib/device-sync/prisma-store/connections"
+    );
+    const steps: string[] = [];
+    assert.ok(gcpKmsMock.client);
+    gcpKmsMock.client = createStepRecordingKmsClient({ client: gcpKmsMock.client, steps });
+    const userId = "member-connection-prepared-root";
+    let insideTransaction = false;
+    const state: { stored: HostedConnectionRecord | null } = { stored: null };
+    let attempts = 0;
+    const { prepareHostedCryptoDomainRootCandidates } = await import("../src/lib/hosted-crypto/domain-root-store");
+    const winner = scenario === "root_race"
+      ? (await prepareHostedCryptoDomainRootCandidates({ domains: ["device"], prisma: tx.prisma, userId })).get("device")
+      : null;
+    const active = (await prepareHostedCryptoDomainRootCandidates({
+      domains: ["device"], prisma: tx.prisma, userId,
+    })).get("device");
+    assert.ok(active);
+    tx.persistedEnvelopes.push(active);
+    const baseQuery = tx.prisma.$queryRaw.bind(tx.prisma);
+    const client = Object.assign(tx.prisma, {
+      async $queryRaw<T = unknown>(...args: Parameters<Prisma.TransactionClient["$queryRaw"]>): Promise<T> {
+        const query = args[0] as TemplateStringsArray | Prisma.Sql;
+        const sql = !Array.isArray(query) && "sql" in query ? query.sql : query.join("?");
+        if (sql.includes('from "hosted_member"')) {
+          steps.push("member.lock");
+          return [] as T;
+        }
+        if (sql.includes("suspended_at")) {
+          return [{ suspendedAt: insideTransaction && scenario === "suspended" ? new Date() : null }] as T;
+        }
+        if (sql.includes("device_sync_dirty_connection")) {
+          return [] as T;
+        }
+        return baseQuery<T>(...args);
+      },
+      async $transaction<T>(run: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+        attempts += 1;
+        if (winner && attempts === 1) tx.persistedEnvelopes.splice(0, 1, winner);
+        steps.push("transaction.begin");
+        insideTransaction = true;
+        try {
+          return await run(client);
+        } finally {
+          insideTransaction = false;
+          steps.push("transaction.end");
+        }
+      },
+      hostedConsentGrant: {
+        async findUnique() {
+          return {
+            scope: "launch.health-data",
+            status: insideTransaction && scenario === "consent_revoked" ? "revoked" : "granted",
+          };
+        },
+      },
+      deviceConnection: {
+        async findUnique() { return state.stored; },
+        async findFirst() { return null; },
+        async create({ data }: { data: Record<string, unknown> }) {
+          steps.push("connection.write");
+          state.stored = Object.assign(createHostedRuntimeDeviceSecretRecord({
+            accessTokenEncrypted: "",
+            connectionId: "dsc_prepared",
+            externalAccountIdEncrypted: "",
+            refreshTokenEncrypted: "",
+            tokenVersion: 1,
+            userId,
+          }), data);
+          return state.stored;
+        },
+        async update({ data }: { data: Record<string, unknown> }) {
+          steps.push("connection.write");
+          assert.ok(state.stored);
+          state.stored = Object.assign({}, state.stored, data);
+          return state.stored;
+        },
+      },
+    });
+    // The full store uses the real crypto implementation and only this narrow
+    // in-memory database boundary; KMS performs real local envelope cryptography.
+    const { createPrismaClient } = await import("../src/lib/prisma");
+    const backingClient = createPrismaClient({
+      databaseUrl: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      poolMax: 1,
+    });
+    const prisma = new Proxy(backingClient, {
+      get(target, property) {
+        const owner = Reflect.has(client, property) ? client : target;
+        const value = Reflect.get(owner, property, owner);
+        return typeof value === "function" ? value.bind(owner) : value;
+      },
+    });
+    const store = new PrismaHostedConnectionStore({
+      prisma,
+      providerAccountBlindIndexKey: Buffer.alloc(32, 17),
+    });
+    const input = {
+      connectedAt: "2026-09-01T12:00:00.000Z",
+      existingAccountPolicy: "replace" as const,
+      externalAccountId: "account-prepared-root",
+      ownerId: userId,
+      provider: "oura",
+      tokens: { accessToken: "access-old", refreshToken: "refresh-old" },
+    };
+    if (scenario === "consent_revoked" || scenario === "suspended") {
+      await expect(store.upsertConnection(input)).rejects.toMatchObject({
+        code: scenario === "suspended" ? "CONNECTION_OWNER_SUSPENDED" : "HEALTH_DATA_CONSENT_REQUIRED",
+      });
+      expect(steps).not.toContain("connection.write");
+      expect(tx.persistedEnvelopes).toEqual([active]);
+    } else {
+      const { runWithHostedDomainRootUnwrapCache } = await import(
+        "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+      );
+      const created = await runWithHostedDomainRootUnwrapCache(() => store.upsertConnection(input));
+      expect(created.externalAccountId).toBe(input.externalAccountId);
+      if (scenario === "replace") {
+        await store.upsertConnection({
+          ...input,
+          connectedAt: "2026-09-02T12:00:00.000Z",
+          tokens: { accessToken: "access-new", refreshToken: "refresh-new" },
+        });
+      }
+      assert.ok(state.stored);
+      expect(state.stored.tokenVersion).toBe(scenario === "replace" ? 2 : 1);
+      expect(parseSerializedHostedSecureBoxEnvelope(state.stored.accessTokenEncrypted ?? "").rootKeyId)
+        .toBe(tx.persistedEnvelopes[0]?.rootKeyId);
+    }
+    if (scenario === "root_race") {
+      expect(attempts).toBe(2);
+      expect(steps.filter((step) => step === "connection.write")).toHaveLength(1);
+    }
+    await backingClient.$disconnect();
+    let locked = false;
+    for (const step of steps) {
+      if (step === "transaction.begin") locked = true;
+      if (step === "transaction.end") locked = false;
+      if (step.startsWith("kms.")) expect(locked, step).toBe(false);
+    }
+    expect(steps).toContain("kms.decrypt");
+    expect(steps.indexOf("kms.decrypt")).toBeLessThan(steps.indexOf("member.lock"));
+  },
+);
+
+test.each([true, false])("discovers a control/ingress preparation batch once (existing roots: %s)", async (existing) => {
+  const steps: string[] = [];
+  const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture(
+    () => createStepRecordingTransaction(steps),
+  );
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    prepareHostedDomainRootForWeb,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    revalidatePreparedHostedDomainRootForWebTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-batch-discovery";
+  const domains = ["control", "ingress"] as const;
+  if (existing) {
+    for (const domain of domains) {
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+        domain, prisma: tx.prisma, reason: "test.seed", userId,
+      });
+    }
+  }
+  steps.length = 0;
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const preparedCandidates = await prepareHostedCryptoDomainRootCandidates({
+      domains, maxConcurrency: 2, prisma: tx.prisma, userId,
+    });
+    const preparedRoots = await Promise.all(domains.map((domain) =>
+      prepareHostedDomainRootForWeb({
+        domain, preparedCandidates, prisma: tx.prisma, reason: "test.batch", userId,
+      }),
+    ));
+    expect(steps).toEqual(existing
+      ? ["db.read-active-domains", "db.read-active-envelope", "db.read-active-envelope"]
+      : ["db.read-active-domains"]);
+    expect(decryptMetrics.calls).toHaveLength(2);
+    for (const prepared of preparedRoots) {
+      await revalidatePreparedHostedDomainRootForWebTx({ prepared, tx: tx.prisma });
+    }
+    expect(decryptMetrics.calls).toHaveLength(2);
+    expect(tx.persistedEnvelopes).toHaveLength(2);
+  });
+  expect(decryptMetrics.returnedPlaintexts.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+});
+
+test("an empty supplied candidate map does not authorize a missing active root", async () => {
+  const { tx, signCalls, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+  const { prepareHostedDomainRootForWeb } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(prepareHostedDomainRootForWeb({
+      domain: "control", preparedCandidates: new Map(), prisma: tx.prisma,
+      reason: "test.missing-active", userId: "member-test-missing-active",
+    })).rejects.toMatchObject({ name: "HostedDomainRootEnvelopeUnavailableError" });
+  });
+  expect(signCalls).toHaveLength(0);
+  expect(decryptMetrics.calls).toHaveLength(0);
+  expect(tx.persistedEnvelopes).toHaveLength(0);
 });
 
 test("the prepared Web root token commits and reuses only its exact scoped root", async () => {
@@ -3481,10 +3761,7 @@ function createStepRecordingKmsClient(input: {
   };
 }
 
-function createStepRecordingTransaction(steps: string[]): {
-  persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[];
-  prisma: Prisma.TransactionClient;
-} {
+function createStepRecordingTransaction(steps: string[]): HostedCryptoTestTransaction {
   const tx = createCapturingTransaction();
   const base = {
     $executeRaw: async (...args: Parameters<Prisma.TransactionClient["$executeRaw"]>) => {
@@ -3502,7 +3779,7 @@ function createStepRecordingTransaction(steps: string[]): {
   // plus the interactive-transaction root here.
   const recorded = base as Prisma.TransactionClient;
   return {
-    persistedEnvelopes: tx.persistedEnvelopes,
+    ...tx,
     prisma: Object.assign(recorded, {
       async $transaction<T>(
         run: (transaction: Prisma.TransactionClient) => Promise<T>,
@@ -3652,6 +3929,8 @@ function buildHostedMemberIdentityRecord(
   const now = new Date("2026-05-02T00:00:00.000Z");
   return {
     createdAt: now,
+    linqEmailHandleLookupKey: nullableString(input.linqEmailHandleLookupKey),
+    linqEmailHandleEncrypted: null,
     maskedPhoneNumberHint: nullableString(input.maskedPhoneNumberHint),
     memberId: input.memberId,
     phoneLookupKey: nullableString(input.phoneLookupKey),

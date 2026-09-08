@@ -1,6 +1,7 @@
 ---
 title: 'Interactive HTTPS preview omits authenticated backend'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2727'
 ---
 
 ## Expected Behavior

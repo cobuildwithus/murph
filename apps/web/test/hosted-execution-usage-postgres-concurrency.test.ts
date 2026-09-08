@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it } from "vitest";
 
 import { recordHostedAiUsageRecords } from "@/src/lib/hosted-execution/usage";
@@ -84,8 +85,95 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
 }
 
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "hosted usage PostgreSQL idempotency",
+  "hosted usage PostgreSQL integration",
   () => {
+    it("persists and settles OpenAI priority usage at the documented rate", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_usage_priority_${fixtureId}`;
+      const turnId = `turn_usage_priority_${fixtureId}`;
+      const usageId = `${turnId}.attempt-1`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const usage = [{
+        apiKeyEnv: "OPENAI_API_KEY",
+        attemptCount: 1,
+        baseUrl: "https://api.openai.com/v1",
+        cacheWriteTokens: null,
+        cachedInputTokens: 12,
+        credentialSource: "platform",
+        featureKey: "linq-instant-first-turn",
+        gatewayTags: [],
+        inputTokens: 120,
+        memberId,
+        occurredAt: new Date().toISOString(),
+        outputTokens: 45,
+        provider: "openai",
+        providerName: "OpenAI",
+        providerRequestId: `req_${fixtureId}`,
+        providerRequestOutcome: "succeeded",
+        providerRequestOrdinal: 0,
+        rawUsageJson: null,
+        rawUsageJsonHash: null,
+        reasoningTokens: 0,
+        reportingUserId: null,
+        requestedModel: "gpt-5.6-luna",
+        routeId: null,
+        schema: "murph.assistant-usage.v1",
+        servedModel: "gpt-5.6-luna",
+        sessionId: turnId,
+        stripeMeterSource: "murph",
+        surface: "hosted-web",
+        tokenPricingBasis: "openai-priority",
+        totalTokens: 165,
+        triggerKind: "linq-instant-first-turn",
+        turnId,
+        turnProfileJson: null,
+        usageId,
+        usageExtractionSourcePath: "openai.responses.usage",
+        usageExtractionVersion: "openai-responses-v1",
+      }] satisfies AssistantUsageRecord[];
+
+      await prisma.hostedMember.create({
+        data: { billingStatus: "active", id: memberId },
+      });
+      try {
+        await expect(recordHostedAiUsageRecords({
+          accountAllowance: true,
+          prisma,
+          trustedUserId: memberId,
+          usage,
+        })).resolves.toEqual({ recordedIds: [usageId] });
+        await expect(prisma.hostedAiUsage.findUniqueOrThrow({
+          select: {
+            allowanceCostUsdMicros: true,
+            allowancePricingSnapshotJson: true,
+            allowancePricingVersion: true,
+            tokenPricingBasis: true,
+          },
+          where: { id: usageId },
+        })).resolves.toMatchObject({
+          allowanceCostUsdMicros: 154n,
+          allowancePricingSnapshotJson: {
+            standardCostUsdMicros: "77",
+            tokenPricingAdjustment: {
+              denominator: "1",
+              numerator: "2",
+            },
+            tokenPricingBasis: "openai-priority",
+          },
+          allowancePricingVersion:
+            "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority",
+          tokenPricingBasis: "openai-priority",
+        });
+        await expect(prisma.hostedAiUsagePeriod.findMany({
+          select: { spentUsdMicros: true },
+          where: { memberId },
+        })).resolves.toEqual([{ spentUsdMicros: 154n }]);
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it("converges concurrent first writes on one immutable usage row", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_usage_replay_${fixtureId}`;

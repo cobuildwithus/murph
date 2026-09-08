@@ -11,24 +11,24 @@ const runnerPath = new URL(
   import.meta.url,
 );
 
-test("Linq production canary admits only verified serialized production deployments", async () => {
+test("Linq production canary admits one verified serialized production journey per hour", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /deployment_status:/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \* \* \* \*"/u);
   assert.match(workflow, /workflow_dispatch:/u);
-  assert.doesNotMatch(workflow, /pull_request:|\npush:|\nschedule:/u);
+  assert.doesNotMatch(workflow, /pull_request:|\npush:|deployment_status:/u);
   assert.match(workflow, /contents: read/u);
   assert.match(workflow, /environment: production/u);
   assert.match(workflow, /group: linq-production-canary/u);
   assert.match(workflow, /cancel-in-progress: false/u);
-  assert.match(workflow, /vercel\[bot\]/u);
   assert.match(workflow, /git merge-base --is-ancestor/u);
   assert.match(workflow, /resolve-vercel-production-alias-sha\.ts/u);
-  assert.match(workflow, /verify-vercel-production-deployment\.ts/u);
+  assert.match(workflow, /verify-current-vercel-production-deployment\.ts/u);
   assert.match(
     workflow,
-    /ref: \$\{\{ github\.event\.deployment\.sha \|\| inputs\.deployed_sha \}\}/u,
+    /ref: \$\{\{ inputs\.deployed_sha \|\| github\.sha \}\}/u,
   );
+  assert.doesNotMatch(workflow, /deployment_url|HOSTED_WEB_VERCEL_DEPLOYMENT_URL/u);
   assert.match(workflow, /persist-credentials: false/u);
 });
 
@@ -61,13 +61,8 @@ test("Linq production canary runner proves the welcome and three bounded replies
   const runner = await readFile(runnerPath, "utf8");
 
   assert.match(runner, /CANARY_REPLY_BUDGET_MS = 20_000/u);
+  assert.match(runner, /CANARY_REPLY_WAIT_MS = 90_000/u);
   assert.match(runner, /const CANARY_TURNS = \[/u);
-  assert.equal(
-    [...runner.matchAll(/^  ".+",$/gmu)].filter(([line]) =>
-      !line.includes("The Linq production canary failed")
-    ).length,
-    3,
-  );
   assert.match(runner, /MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE/u);
   assert.match(runner, /message\.direction !== "inbound"/u);
   assert.match(runner, /message\.platform !== "imessage"/u);

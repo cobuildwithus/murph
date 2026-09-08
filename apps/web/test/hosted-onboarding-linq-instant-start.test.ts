@@ -43,12 +43,16 @@ describe("Linq instant start", () => {
       phonePrefixes: ["+1"],
     })).toBe(true);
     expect(isHostedLinqInstantStartEventCandidate({
+      event: buildMessageEvent({ sender: "person@example.com" }),
+      phonePrefixes: [],
+    })).toBe(true);
+    expect(isHostedLinqInstantStartEventCandidate({
       event: buildMessageEvent({ service: "SMS" }),
       phonePrefixes: ["+1"],
     })).toBe(false);
   });
 
-  it("admits only a model-approved direct iMessage from an allowed phone prefix", () => {
+  it("admits a model-approved direct iMessage from an allowed phone prefix", () => {
     expect(phoneContact).not.toBeNull();
     if (!phoneContact) {
       throw new Error("Expected a valid phone contact fixture.");
@@ -102,7 +106,7 @@ describe("Linq instant start", () => {
     },
   );
 
-  it("rejects an email-handle participant", () => {
+  it("admits an email-handle participant without applying phone prefixes", () => {
     const emailContact = createHostedLinqParticipantContact({
       kind: "email",
       value: "person@example.com",
@@ -115,8 +119,8 @@ describe("Linq instant start", () => {
       admissionDecision: modelAllow,
       event: buildMessageEvent({ sender: "person@example.com" }),
       participantContact: emailContact,
-      phonePrefixes: ["+1"],
-    })).toBe(false);
+      phonePrefixes: [],
+    })).toBe(true);
   });
 });
 

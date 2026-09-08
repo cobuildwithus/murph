@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT retrospective requires an unrelated new PR head'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2734'
 ---
 
 ## Expected Behavior

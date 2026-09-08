@@ -36,7 +36,7 @@ import {
   ensureAssistantState,
   inspectAssistantSessionStorage,
   isAssistantSessionExpired,
-  loadAndPersistResolvedSession,
+  loadResolvedSession,
   pruneAssistantTranscriptRetention,
   readAssistantRecentSessionIds,
   readAssistantSession,
@@ -649,7 +649,7 @@ describe('assistant store persistence seams', () => {
       throw new Error('Expected stale routing records to resolve a session id.')
     }
 
-    await expect(loadAndPersistResolvedSession({
+    await expect(loadResolvedSession({
       expectedAlias: 'stale-alias',
       paths,
       sessionId: staleAliasSessionId,
@@ -659,7 +659,7 @@ describe('assistant store persistence seams', () => {
         lookupSource: 'alias',
       },
     })).resolves.toBeNull()
-    await expect(loadAndPersistResolvedSession({
+    await expect(loadResolvedSession({
       expectedConversationKey: 'telegram:user-1:thread-stale',
       paths,
       sessionId: staleConversationSessionId,

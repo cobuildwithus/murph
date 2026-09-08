@@ -17,7 +17,6 @@ export default async function MurphSafeLayout(input: { children: ReactNode }) {
       <StickyNav
         authenticated={authenticated}
         githubStarCount={githubStarCount}
-        preloadAuthPanel
       />
       <div className="flex flex-1 flex-col">{input.children}</div>
       <MurphSafeFooter />

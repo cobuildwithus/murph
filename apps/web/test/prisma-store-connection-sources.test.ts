@@ -1384,6 +1384,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     };
     vi.spyOn(store, "listMemberConnectionStatuses").mockResolvedValue([{
       id: connection.id,
+      setupPhase: "source_confirmed",
       status: "active",
     }]);
 

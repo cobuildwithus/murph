@@ -280,7 +280,6 @@ describe("release verification executable lanes", () => {
         MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1",
         MURPH_VERIFY_SHARED_HOST: "0",
         MURPH_VERIFY_STEP_PARALLEL: "0",
-        MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
       };
       const testShard = spawnSync("/bin/bash", [hostedWebVerifyPath], {
         cwd: repoRoot,

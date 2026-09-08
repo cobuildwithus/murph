@@ -21,6 +21,9 @@
       "@murphai/contracts/browser-vault": [
         "./packages/contracts/src/browser-vault.ts"
       ],
+      "@murphai/contracts/journal-presentation": [
+        "./packages/contracts/src/journal-presentation.ts"
+      ],
       "@murphai/contracts/generated/*": [
         "./packages/contracts/generated/*"
       ],
@@ -179,6 +182,12 @@
       ],
       "@murphai/messaging-ingress/telegram-webhook-payload": [
         "./packages/messaging-ingress/src/telegram-webhook-payload.ts"
+      ],
+      "@murphai/runtime-state/cli-timing": [
+        "./packages/runtime-state/src/cli-timing.ts"
+      ],
+      "@murphai/runtime-state/node/cli-timing": [
+        "./packages/runtime-state/src/node/cli-timing.ts"
       ],
       "@murphai/runtime-state": [
         "./packages/runtime-state/src/index.ts"

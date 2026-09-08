@@ -66,6 +66,7 @@ export {
   GENERATED_IMAGE_CAPTURE_PROVENANCE_SCHEMA,
   GENERATED_IMAGE_CAPTURE_SOURCE,
   GENERATED_IMAGE_CAPTURE_TAGS,
+  isGeneratedImageCaptureEvent,
   runGeneratedImageCaptureRetention,
 } from "./events/generated-image-capture-retention.ts";
 export {

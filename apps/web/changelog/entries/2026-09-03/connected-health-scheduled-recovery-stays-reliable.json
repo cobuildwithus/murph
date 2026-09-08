@@ -9,6 +9,6 @@
     "summary": "Long-running connected-health syncs now keep their recovery path after older private queue content reaches its retention limit.",
     "details": "Retired content stays deleted. Murph continues only work already accepted for processing and does not recreate old payloads or duplicate completed work.",
     "relevanceTags": ["wearables", "reliability", "privacy"],
-    "sourcePullRequests": [2779]
+    "sourcePullRequests": [2779, 2801]
   }
 }

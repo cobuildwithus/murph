@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "connected-health-sync-keeps-progress",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected health sync keeps its progress",
+    "summary": "Connected-health refreshes keep their saved progress as new sync details arrive.",
+    "details": "This fixes a case where a refresh could repeatedly retry instead of finishing.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": [2824]
+  }
+}

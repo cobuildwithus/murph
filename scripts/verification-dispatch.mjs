@@ -23,7 +23,6 @@ const SSH_VERIFICATION_ENTRYPOINT =
   "scripts/crabbox/run-ssh-locked-verification.sh";
 const STATIC_GIT_SNAPSHOT_DIRECTORY = ".murph-static-git-snapshot";
 const SNAPSHOT_ORIGIN = "https://github.com/cobuildwithus/murph.git";
-const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "HOME",
   "LANG",
@@ -164,35 +163,9 @@ export function buildSshWorktreeIdentity(
   };
 }
 
-export function buildLockedRemoteDispatcherInvocation({ request, argv }) {
-  return {
-    args: [
-      WORKSPACE_ARTIFACT_LOCK,
-      `remote ${request.verificationCommand}`,
-      "--",
-      "node",
-      "scripts/verification-dispatch.mjs",
-      ...argv,
-    ],
-    command: "node",
-  };
-}
-
 export async function runVerification(argv, env = process.env) {
   const request = parseVerificationRequest(argv);
   const resolution = resolveVerificationExecutor({ env });
-  const isRemote = resolution.executor === "ssh";
-
-  if (isRemote && env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
-    process.stderr.write(
-      `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason} state=waiting-for-workspace-lock\n`,
-    );
-    return await runChild(
-      buildLockedRemoteDispatcherInvocation({ request, argv }),
-      env,
-    );
-  }
-
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const remoteInvocation = resolution.executor === "ssh"
     ? buildSshInvocation(request, readSshRoutingInputs(env), repoRoot)

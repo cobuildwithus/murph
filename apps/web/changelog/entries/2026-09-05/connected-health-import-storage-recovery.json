@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "connected-health-import-storage-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fewer restarts after brief connected-health import interruptions",
+    "summary": "Connected-health imports can recover from a brief storage interruption without starting the import over.",
+    "details": "Murph makes one short, permission-checked retry while saving the same artifact. Longer interruptions still use the existing import retry schedule; cancelled or no-longer-authorized requests are not retried.",
+    "relevanceTags": [
+      "integrations"
+    ],
+    "sourcePullRequests": [
+      2915
+    ]
+  }
+}

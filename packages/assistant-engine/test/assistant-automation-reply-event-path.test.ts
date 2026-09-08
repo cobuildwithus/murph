@@ -52,7 +52,7 @@ const replyEventPathMocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
   listAssistantTranscriptEntries: vi.fn(),
   listAssistantTurnReceipts: vi.fn(),
-  resolveAssistantSession: vi.fn(),
+  lookupAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
 }))
 
@@ -84,7 +84,7 @@ vi.mock('../src/assistant/store.ts', async () => {
     ...actual,
     listAssistantTranscriptEntries:
       replyEventPathMocks.listAssistantTranscriptEntries,
-    resolveAssistantSession: replyEventPathMocks.resolveAssistantSession,
+    lookupAssistantSession: replyEventPathMocks.lookupAssistantSession,
   }
 })
 
@@ -107,7 +107,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue([])
   replyEventPathMocks.listAssistantTurnReceipts.mockReset().mockResolvedValue([])
-  replyEventPathMocks.resolveAssistantSession.mockReset().mockRejectedValue(
+  replyEventPathMocks.lookupAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('session not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
     }),
@@ -420,7 +420,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('loads every exact Murph anchor in a compound native-reply group', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-08-07T21:09:30.000Z',
@@ -1597,7 +1597,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).toContain(media.sha256)
     expect(prompt).not.toContain(otherMedia.ref)
     expect(prompt).not.toContain(otherMedia.sha256)
-    expect(replyEventPathMocks.resolveAssistantSession).toHaveBeenCalled()
+    expect(replyEventPathMocks.lookupAssistantSession).toHaveBeenCalled()
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     if (!terminalRetry) {
       const route = resolveAssistantAutoReplyOutboxExactRoute(persistedPartial)
@@ -3209,7 +3209,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('injects ordered eligible prior deliveries without replacing the chat session', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3337,7 +3337,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('preserves only the latest referenced context across a newer unrelated delivery', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3424,7 +3424,7 @@ describe('assistant auto-reply event-first path', () => {
     visible,
   }) => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3502,7 +3502,7 @@ describe('assistant auto-reply event-first path', () => {
       const referenceId = 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WM'
       const providerMessageId = 'linq-msg-reminder-matrix'
       const deliveryText = 'Matrix reminder text.'
-      replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
         created: false,
         session: {
           lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3592,7 +3592,7 @@ describe('assistant auto-reply event-first path', () => {
     const vault = await createTempVault()
     const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM41WB'
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM41WC'
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3727,7 +3727,7 @@ describe('assistant auto-reply event-first path', () => {
     const vault = await createTempVault()
     const automationId = 'automation_device_activity_context'
     const experimentId = 'exp_device_activity_context'
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3830,7 +3830,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('records the selected cross-session intent in receipt metadata so subsequent turns can suppress it', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3873,7 +3873,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('injects prior delivery context for an actor-less direct Telegram route', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3917,7 +3917,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('does not inject prior delivery context for an actor-less direct email route', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -3966,7 +3966,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('injects cross-session context across provider and local clock skew', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4007,7 +4007,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('does not inject outbox context sent after the input was durably received', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4376,7 +4376,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('uses the conversation thread only as legacy outbox-history fallback', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4431,7 +4431,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('matches Telegram sent outbox history with normalized conversation identity', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4475,7 +4475,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('anchors a Telegram native reply to the exact older reminder without hiding newer context', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4592,7 +4592,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('matches Linq materialized provider threads before cron route fields align', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4673,7 +4673,7 @@ describe('assistant auto-reply event-first path', () => {
       subject: 'Thread context',
       to: ['assistant@example.test'],
     })
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4764,7 +4764,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('fails closed for unanchored legacy wildcard matches without one exact route partition', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -4820,7 +4820,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('does not repeat consumed delivery context or replay older deliveries', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:06:00.000Z',
@@ -4886,7 +4886,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('honors an attested cross-session affirmative Linq reaction after the watermark consumed a newer delivery', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:06:00.000Z',
@@ -4967,7 +4967,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('anchors a direct Linq native reply to an exact same-session message', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:06:00.000Z',
@@ -5037,7 +5037,7 @@ describe('assistant auto-reply event-first path', () => {
     const vault = await createTempVault()
     const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM42AA'
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM42AB'
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:06:00.000Z',
@@ -5179,7 +5179,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('uses the anchored input timestamps to compute the causal cutoff so an anchored delivery sent after the oldest grouped input is still eligible', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -5264,7 +5264,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('still resolves an anchored delivery whose local sentAt is stamped after the inbound reply was received (send-ack/webhook race)', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -5318,7 +5318,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('resolves a direct anchored reaction from a persisted delivery completion checkpoint', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -5385,7 +5385,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('marks the grouped Linq native reply target while preserving the ordered prior delivery window', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -5483,7 +5483,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('suppresses cross-session context in hosted queue-only mode via receipt metadata', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:06:00.000Z',
@@ -5537,7 +5537,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('never calls receipt inventory for steady-state unanchored resolution after one-time migration', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -5740,7 +5740,7 @@ describe('assistant auto-reply event-first path', () => {
     sessionId,
   }) => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:02:00.000Z',
@@ -5789,7 +5789,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('keeps cross-session context after session advance when only a failed receipt mentions it', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:06:00.000Z',
@@ -5851,7 +5851,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it('suppresses a self-authored echo using recent assistant transcript despite timestamp skew', async () => {
     const vault = await createTempVault()
-    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:05:01.000Z',

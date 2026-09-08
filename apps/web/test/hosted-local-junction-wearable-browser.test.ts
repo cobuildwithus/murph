@@ -8,6 +8,7 @@ const kernelLifecycleMocks = vi.hoisted(() => {
   const createAutomationBrowser = vi.fn();
   const deleteBrowserByIdOrName = vi.fn();
   const ensureProfile = vi.fn();
+  const executePlaywright = vi.fn();
   const launch = vi.fn();
   const spawn = vi.fn();
 
@@ -15,6 +16,7 @@ const kernelLifecycleMocks = vi.hoisted(() => {
     createAutomationBrowser = createAutomationBrowser;
     deleteBrowserByIdOrName = deleteBrowserByIdOrName;
     ensureProfile = ensureProfile;
+    executePlaywright = executePlaywright;
   }
 
   return {
@@ -22,6 +24,7 @@ const kernelLifecycleMocks = vi.hoisted(() => {
     createAutomationBrowser,
     deleteBrowserByIdOrName,
     ensureProfile,
+    executePlaywright,
     KernelComputerClient,
     launch,
     spawn,
@@ -501,6 +504,53 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }
     }
   });
+
+  it.each([true, false, "private-provider-result", new Error("private-provider-error")])(
+    "probes a failed CDP attachment without publishing provider data: %s",
+    async (result) => {
+      const child = createKernelTunnelChild();
+      const config = createConfig({
+        KERNEL_API_KEY: "kernel-test-key",
+        MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+        MURPH_E2E_PROVIDER_BROWSER: "kernel",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+        MURPH_E2E_CONNECT_URL: "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_HEADLESS: "0",
+        MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+      });
+      const failure = new Error("CDP attachment timed out");
+      kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
+        cdpWsUrl: "wss://cdp.example.test/private-capability",
+        sessionId: "synthetic-session",
+      });
+      kernelLifecycleMocks.spawn.mockReturnValueOnce(child);
+      kernelLifecycleMocks.connectOverCDP.mockRejectedValueOnce(failure);
+      kernelLifecycleMocks.deleteBrowserByIdOrName.mockResolvedValueOnce(undefined);
+      if (result instanceof Error) {
+        kernelLifecycleMocks.executePlaywright.mockRejectedValueOnce(result);
+      } else {
+        kernelLifecycleMocks.executePlaywright.mockResolvedValueOnce({ result });
+      }
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      try {
+        await expect(openHostedLocalJunctionBrowserSessionForTest(config))
+          .rejects.toBe(failure);
+        expect(kernelLifecycleMocks.executePlaywright).toHaveBeenCalledWith({
+          code: "return true;",
+          sessionId: "synthetic-session",
+          timeoutMs: 10_000,
+        });
+        expect(stderr).toHaveBeenCalledWith(
+          `Kernel server-side browser probe: ${result === true ? "responsive" : "unavailable"}\n`,
+        );
+        expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+        expect(kernelLifecycleMocks.deleteBrowserByIdOrName)
+          .toHaveBeenCalledWith("synthetic-session");
+      } finally {
+        stderr.mockRestore();
+      }
+    },
+  );
 
   it("deletes the created Kernel browser when CDP exposes no context", async () => {
     const child = createKernelTunnelChild();

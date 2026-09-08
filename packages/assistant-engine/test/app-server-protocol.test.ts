@@ -57,6 +57,17 @@ describe('Codex app-server protocol boundary', () => {
       },
     },
     {
+      id: 'resume-153',
+      result: { thread: { id: 'thread-153', model: null, reasoningEffort: null } },
+    },
+    ...['modelProvider/authRecoveryStarted', 'modelProvider/authRecoveryCompleted'].map(method => ({
+      method,
+      params: {
+        threadId: 'thread-153', turnId: 'turn-153', provider: 'openai',
+        message: 'Provider authentication recovery status.',
+      },
+    })),
+    {
       method: 'future/newNotification',
       params: { opaque: true },
     },

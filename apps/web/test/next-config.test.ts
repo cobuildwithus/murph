@@ -153,6 +153,33 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
   );
 });
 
+test("hosted web resolves both CLI timing imports directly from source", () => {
+  // Use Web's TypeScript version/config, not the root paths map or built dist.
+  const ts: typeof import("typescript") = createRequire(
+    path.join(repoRoot, "apps/web/package.json"),
+  )("typescript");
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    path.join(repoRoot, "apps/web/tsconfig.json"),
+    {},
+    { ...ts.sys, onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+      assert.fail(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+    } },
+  );
+  assert.ok(parsed);
+  assert.deepEqual(parsed.errors, []);
+  for (const [specifier, importer, source] of [
+    ["@murphai/runtime-state/cli-timing", "packages/hosted-execution/src/assistant-usage.ts",
+      "packages/runtime-state/src/cli-timing.ts"],
+    ["@murphai/runtime-state/node/cli-timing", "packages/query/src/query-projection.ts",
+      "packages/runtime-state/src/node/cli-timing.ts"],
+  ] as const) {
+    const resolved: import("typescript").ResolvedModuleFull | undefined = ts.resolveModuleName(
+      specifier, path.join(repoRoot, importer), parsed.options, ts.sys,
+    ).resolvedModule;
+    assert.equal(resolved?.resolvedFileName, path.join(repoRoot, source));
+  }
+});
+
 test("hosted web build tsconfig keeps tests out of Next production checks", () => {
   const tsconfig = JSON.parse(
     readFileSync(path.join(repoRoot, "apps/web/tsconfig.next.json"), "utf8"),
@@ -361,7 +388,7 @@ test("hosted web dev filesystem cache defaults off and allows explicit opt-in", 
 
 test("next.config keeps both bundlers focused without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
-  assert.equal(productionNextConfig.webpack, configureHostedWebWebpack);
+  assert.equal(typeof productionNextConfig.webpack, "function");
   assert.deepEqual(productionNextConfig.typescript, {
     ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
@@ -650,8 +677,30 @@ test("configureHostedWebWebpack disables the production cache and aliases Privy'
   }
 });
 
+test("the Webpack callback retains Next compiler caching only for explicit CI opt-in", () => {
+  const cache = {
+    type: "filesystem",
+    version: "next-owned",
+    maxMemoryGenerations: Infinity,
+    buildDependencies: { config: ["next.config.ts"] },
+  };
+  for (const value of [undefined, "0", "true", "1"]) {
+    const config = { cache, resolve: {} };
+    const environment = createProcessEnv(
+      value === undefined ? {} : { MURPH_HOSTED_WEB_WEBPACK_CACHE: value },
+    );
+    const { webpack } = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD, environment);
+    assert(webpack);
+    webpack(config, { dev: false } as Parameters<typeof webpack>[1]);
+    assert.equal(config.cache, value === "1" ? cache : false);
+    assert.equal(cache.maxMemoryGenerations, value === "1" ? 0 : Infinity);
+    assert.equal(cache.version, "next-owned");
+    assert.deepEqual(cache.buildDependencies, { config: ["next.config.ts"] });
+  }
+});
+
 test("configureHostedWebWebpack preserves development caching", () => {
-  const cache = { type: "filesystem" };
+  const cache = { type: "filesystem", maxMemoryGenerations: Infinity };
   const webpackConfig = {
     cache,
     resolve: {},
@@ -660,6 +709,7 @@ test("configureHostedWebWebpack preserves development caching", () => {
   configureHostedWebWebpack(webpackConfig, { dev: true });
 
   assert.equal(webpackConfig.cache, cache);
+  assert.equal(cache.maxMemoryGenerations, Infinity);
 });
 
 test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy origin", () => {

@@ -7,6 +7,7 @@ import {
   unwrapHostedBrowserSessionKey,
   type HostedBrowserSessionKeyEnvelope,
   type HostedCipherEnvelope,
+  type HostedUserRecipientPrivateKeyJwk,
 } from "@murphai/runtime-state";
 import {
   BROWSER_VAULT_CORE_SHARD_SCHEMA,
@@ -15,7 +16,10 @@ import {
   BROWSER_VAULT_METRICS_SHARD_SCHEMA,
   buildBrowserVaultExperimentRunCards,
   createBrowserVaultQueryClient,
-  createBrowserVaultLoadedQueryClients,
+  createBrowserVaultCoreQueryClient,
+  createBrowserVaultInteractiveMetricsQueryClient,
+  createBrowserVaultInteractiveQueryClient,
+  createBrowserVaultLabsQueryClient,
   parseBrowserVaultCoreShard,
   parseBrowserVaultLabsShard,
   parseBrowserVaultMetricBucketShard,
@@ -265,6 +269,36 @@ export async function loadBrowserVaultReplica({
     };
   }
 
+  return decodeReadyBrowserVaultSession({
+    session, privateKeyJwk, expectedMemberId: responseMemberId,
+    knownReplicaRef, knownReplicaShards, requestedMetricBuckets, requestedShards, signal,
+  });
+}
+
+/** Shared authenticated replica decoding for browser and companion readers. */
+export async function decodeReadyBrowserVaultSession({
+  session,
+  privateKeyJwk,
+  expectedMemberId,
+  knownReplicaRef = null,
+  knownReplicaShards = null,
+  requestedMetricBuckets = [],
+  requestedShards = ["core"],
+  signal,
+}: {
+  session: Extract<BrowserVaultSessionResponse, { state: "ready" }>;
+  privateKeyJwk: HostedUserRecipientPrivateKeyJwk;
+  expectedMemberId: string;
+  knownReplicaRef?: HostedBrowserVaultReplicaRef | null;
+  knownReplicaShards?: BrowserVaultReplicaShardSelection | null;
+  requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
+  requestedShards?: readonly BrowserVaultReplicaShard[];
+  signal?: AbortSignal;
+}): Promise<Extract<BrowserVaultSessionLoadResult, { state: "ready" }>> {
+  const responseMemberId = getReadySessionMemberId(session);
+  if (responseMemberId !== expectedMemberId) {
+    throw new Error("Browser vault session member did not match the authorized member.");
+  }
   const replicaKey = await unwrapHostedBrowserSessionKey({
     envelope: session.replicaKeyEnvelope,
     recipientPrivateKeyJwk: privateKeyJwk,
@@ -628,31 +662,30 @@ export function createBrowserVaultRouteQueryClient(
   requestedShards: readonly BrowserVaultReplicaShard[],
   requestedMetricBuckets: readonly BrowserVaultMetricBucketId[] = [],
 ): BrowserVaultAnyQueryClient {
-  const clients = createBrowserVaultLoadedQueryClients(shards);
-  if (requestedShards.includes("metricsIndex") && requestedShards.includes("labs")) {
-    if (!clients.interactive) {
-      throw new Error("Browser vault session did not provide all requested shards.");
-    }
-    assertBrowserVaultClientCoversMetricBuckets(clients.interactive, requestedMetricBuckets);
-    return clients.interactive;
-  }
   if (requestedShards.includes("metricsIndex")) {
-    if (!clients.interactiveMetrics) {
+    if (!shards.metrics) {
       throw new Error("Browser vault session did not provide the requested metrics index shard.");
     }
-    assertBrowserVaultClientCoversMetricBuckets(
-      clients.interactiveMetrics,
-      requestedMetricBuckets,
-    );
-    return clients.interactiveMetrics;
+    if (requestedShards.includes("labs") && !shards.labs) {
+      throw new Error("Browser vault session did not provide all requested shards.");
+    }
+    const client = requestedShards.includes("labs") && shards.labs
+      ? createBrowserVaultInteractiveQueryClient(
+          shards.core, shards.metrics, shards.labs, shards.metricBuckets,
+        )
+      : createBrowserVaultInteractiveMetricsQueryClient(
+          shards.core, shards.metrics, shards.metricBuckets,
+        );
+    assertBrowserVaultClientCoversMetricBuckets(client, requestedMetricBuckets);
+    return client;
   }
   if (requestedShards.includes("labs")) {
-    if (!clients.labs) {
+    if (!shards.labs) {
       throw new Error("Browser vault session did not provide the requested labs shard.");
     }
-    return clients.labs;
+    return createBrowserVaultLabsQueryClient(shards.core, shards.labs);
   }
-  return clients.core;
+  return createBrowserVaultCoreQueryClient(shards.core);
 }
 
 function listLoadedBrowserVaultShards(

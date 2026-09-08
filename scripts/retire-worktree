@@ -441,8 +441,47 @@ verify_target_gates() {
   verify_no_process_cwd
 }
 
+verify_recovery_git_identity() {
+  local expected_git_dir="$1" expected_index="$2" expected_head="$3" expected_branch="$4"
+  local current_git_dir current_index
+  [[ -d "$target_worktree" && ! -L "$target_worktree" \
+    && -f "$target_worktree/.git" && ! -L "$target_worktree/.git" \
+    && -f "$expected_git_dir/index" && ! -L "$expected_git_dir/index" ]] || return 1
+  current_git_dir="$(git -C "$target_worktree" rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  [[ "$current_git_dir" == "$expected_git_dir" ]] || return 1
+  current_index="$(git hash-object "$expected_git_dir/index" 2>/dev/null)" || return 1
+  [[ "$current_index" == "$expected_index" \
+    && "$(git -C "$target_worktree" rev-parse HEAD 2>/dev/null)" == "$expected_head" \
+    && "$(git -C "$target_worktree" symbolic-ref -q HEAD 2>/dev/null)" == "$expected_branch" ]] || return 1
+}
+
+recover_removed_tracked_files() {
+  local other_changes
+  verify_recovery_git_identity "$@" || return 1
+  # No admission gate is relaxed. Only deletion-only dirt from this failed
+  # removal may be repaired, and checkout-index must never overwrite a file.
+  verify_registry_state
+  verify_terminal_history
+  verify_no_process_cwd
+  verify_primary_package_links "$target_worktree"
+  git -C "$target_worktree" diff-files --quiet --diff-filter=ACMRTUXB || return 1
+  other_changes="$(git -C "$target_worktree" ls-files --others --exclude-standard 2>/dev/null)" || return 1
+  [[ -z "$other_changes" ]] || return 1
+  verify_recovery_git_identity "$@" || return 1
+  git -C "$target_worktree" diff-files --name-only --diff-filter=D -z \
+    | git -C "$target_worktree" checkout-index --stdin -z 2>/dev/null || return 1
+  verify_no_active_task_reference
+  verify_clean
+}
+
 retire_selected_target() {
   local retired_worktree="$target_worktree"
+  local expected_git_dir expected_index expected_head="$target_head" expected_branch="$target_branch_ref"
+  local removal_error
+  expected_git_dir="$(git -C "$target_worktree" rev-parse --absolute-git-dir 2>/dev/null)" \
+    || refuse 'target Git metadata cannot be captured'
+  expected_index="$(git hash-object "$expected_git_dir/index" 2>/dev/null)" \
+    || refuse 'target index cannot be captured'
   local quarantine_worktree="${target_worktree}.retiring-${target_head:0:12}"
   [[ ! -e "$quarantine_worktree" && ! -L "$quarantine_worktree" ]] \
     || refuse 'worktree quarantine path already exists'
@@ -450,8 +489,14 @@ retire_selected_target() {
     refuse 'worktree could not be moved into retirement quarantine'
   fi
   target_worktree="$quarantine_worktree"
-  if ! git worktree remove -- "$target_worktree" >/dev/null 2>&1; then
-    refuse "non-force Git worktree removal did not finish; the registered checkout remains visibly quarantined as $(basename "$target_worktree")"
+  if ! removal_error="$(GIT_OPTIONAL_LOCKS=0 git worktree remove -- "$target_worktree" 2>&1)"; then
+    removal_error="${removal_error//"$target_worktree"/<task-worktree>}"
+    removal_error="${removal_error//"$HOME"/<home>}"
+    printf 'retire-worktree: non-force removal failed: %.4096s\n' "$removal_error" >&2
+    if ! (recover_removed_tracked_files "$expected_git_dir" "$expected_index" "$expected_head" "$expected_branch"); then
+      refuse 'recovery could not be proved safe; inspect the registered quarantine without forcing removal'
+    fi
+    refuse "non-force Git worktree removal did not finish; the registered checkout remains visibly quarantined as $(basename "$target_worktree"), clean and retryable"
   fi
 
   if [[ "$target_branch_ref" == refs/heads/* ]]; then

@@ -123,3 +123,15 @@ export function requireBigIntString(value: unknown, label: string): string {
 
   return text;
 }
+
+export function assertAllowedObjectKeys(
+  record: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>,
+  label: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new TypeError(`${label}.${key} is not allowed.`);
+    }
+  }
+}

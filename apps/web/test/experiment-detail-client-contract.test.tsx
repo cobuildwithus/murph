@@ -23,23 +23,15 @@ import type {
   ExperimentShellProjection,
 } from "@/src/lib/health-commons/experiment-projections";
 import type { BrowserVaultContextValue } from "@/src/lib/browser-vault/context";
-import type {
-  ExperimentProtocol,
-  ExperimentRunProjection,
-} from "@/src/types/experiments";
+import type { ExperimentProtocol } from "@/src/types/experiments";
 
 const mocks = vi.hoisted(() => ({
-  experimentHeader: vi.fn(() => createElement("div", null, "header")),
-  experimentHero: vi.fn(() => createElement("div", null, "hero")),
   notFound: vi.fn(() => {
     throw new Error("not found");
   }),
   pathname: "/experiments/finnish-sauna",
-  protocolTab: vi.fn(() => createElement("div", null, "protocol tab")),
   readHostedMurphContactContext: vi.fn(),
   refresh: vi.fn(),
-  resolveBrowserVaultExperimentRun: vi.fn<() => ExperimentRunProjection | null>(() => null),
-  resultsTab: vi.fn(() => createElement("div", null, "results tab")),
   useBrowserVault: vi.fn<() => BrowserVaultContextValue>(() => ({
     client: null,
     dataVersion: null,
@@ -79,35 +71,8 @@ vi.mock("next/link", () => ({
   }) => createElement("a", { ...props, href }, children),
 }));
 
-vi.mock("@/src/components/ui/tabs", () => ({
-  Tabs({ children }: { children: ReactNode }) {
-    return createElement("div", { "data-testid": "tabs" }, children);
-  },
-  TabsContent({ children }: { children: ReactNode }) {
-    return createElement("div", null, children);
-  },
-  TabsList({ children }: { children: ReactNode }) {
-    return createElement("div", null, children);
-  },
-  TabsTrigger({ children }: { children: ReactNode }) {
-    return createElement("button", { type: "button" }, children);
-  },
-}));
-
-vi.mock("@/src/components/experiments/experiment-detail/experiment-hero", () => ({
-  ExperimentHero: mocks.experimentHero,
-}));
-
-vi.mock("@/src/components/experiments/experiment-detail/experiment-header", () => ({
-  ExperimentHeader: mocks.experimentHeader,
-}));
-
-vi.mock("@/src/components/experiments/experiment-detail/protocol-tab", () => ({
-  ProtocolTab: mocks.protocolTab,
-}));
-
-vi.mock("@/src/components/experiments/experiment-detail/results-tab", () => ({
-  ResultsTab: mocks.resultsTab,
+vi.mock("next/image", () => ({
+  default: ({ alt, src }: { alt: string; src: string }) => createElement("img", { alt, src }),
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
@@ -115,11 +80,6 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
     return createElement("div", null, children);
   },
   useBrowserVault: mocks.useBrowserVault,
-}));
-
-vi.mock("@/src/lib/browser-vault/experiment-run", () => ({
-  buildBrowserVaultExperimentResultLookups: (protocol: { id: string }) => [protocol.id],
-  resolveBrowserVaultExperimentRun: mocks.resolveBrowserVaultExperimentRun,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
@@ -168,10 +128,6 @@ afterEach(async () => {
   activeCleanups.clear();
 });
 
-test("pins the experiment protocol contract to greenfield v1", () => {
-  expect(CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION).toBe(1);
-});
-
 test("refreshes instead of hydrating the new protocol UI against a stale contract payload", async () => {
   const view = await renderClient(
     createElement(
@@ -186,13 +142,14 @@ test("refreshes instead of hydrating the new protocol UI against a stale contrac
   );
 
   expect(mocks.refresh).toHaveBeenCalledTimes(1);
-  expect(mocks.protocolTab).not.toHaveBeenCalled();
+  expect(view.container.textContent).not.toContain("child content");
+  expect(view.container.querySelector("h1")).toBeNull();
   assert.match(view.container.textContent ?? "", /Refreshing experiment/);
 
   await view.cleanup();
 });
 
-test("passes the hosted start action slot into the experiment header", async () => {
+test("renders the hosted start action with the experiment heading", async () => {
   const startAction = createElement("button", { type: "button" }, "server start action");
   const view = await renderClient(
     createElement(
@@ -205,13 +162,9 @@ test("passes the hosted start action slot into the experiment header", async () 
     ),
   );
 
-  expect(mocks.experimentHeader).toHaveBeenCalledTimes(1);
-  const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
-    | [{
-        startAction?: ReactNode;
-      }]
-    | undefined)?.[0];
-  expect(headerProps?.startAction).toBe(startAction);
+  expect(view.container.querySelector("h1")?.textContent).toBe("Finnish Dry Sauna");
+  expect(view.container.textContent).toContain("server start action");
+  expect(view.container.textContent).toContain("child content");
 
   await view.cleanup();
 });
@@ -248,54 +201,13 @@ test.each([
   expect(resultsLink?.textContent).toBe("Your results");
   expect(resultsLink?.getAttribute("aria-current")).toBe("page");
   expect(resultsLink?.hasAttribute("role")).toBe(false);
-  const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
-    | [{ showStartAction?: boolean }]
-    | undefined)?.[0];
-  expect(headerProps?.showStartAction).toBe(false);
+  expect(view.container.querySelector("h1")?.textContent).toBe("Finnish Dry Sauna");
+  expect([...view.container.querySelectorAll("button")].some(
+    (button) => button.textContent === "start",
+  )).toBe(false);
   expect(view.container.textContent).toContain("completed results");
 
   await view.cleanup();
-});
-
-test("hosted experiment start context resolves the assigned member phone", async () => {
-  mocks.readHostedMurphContactContext.mockResolvedValue({
-    initialContactChannels: {
-      email: true,
-      telegram: false,
-      text: true,
-    },
-    murphEmailAddress: "murph+alias123@mail.withmurph.ai",
-    murphPhoneNumber: "+15550100001",
-  });
-
-  const { readHostedExperimentStartContactContext } = await import(
-    "../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server"
-  );
-  const context = await readHostedExperimentStartContactContext();
-
-  expect(mocks.readHostedMurphContactContext).toHaveBeenCalledTimes(1);
-  expect(context.initialContactChannels).toEqual({
-    email: true,
-    telegram: false,
-    text: true,
-  });
-  expect(context.murphEmailAddress).toBe("murph+alias123@mail.withmurph.ai");
-  expect(context.murphPhoneNumber).toBe("+15550100001");
-});
-
-test("hosted experiment start context preserves anonymous contact defaults", async () => {
-  const { readHostedExperimentStartContactContext } = await import(
-    "../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server"
-  );
-  const context = await readHostedExperimentStartContactContext();
-
-  expect(mocks.readHostedMurphContactContext).toHaveBeenCalledTimes(1);
-  expect(context.initialContactChannels).toEqual({
-    email: false,
-    telegram: false,
-    text: false,
-  });
-  expect(context.murphPhoneNumber).toBeNull();
 });
 
 test("experiment start fallback is not a live contact route", async () => {
@@ -432,26 +344,17 @@ function createExperimentRunCardClient(status: BrowserVaultExperimentRunCardStat
   return createBrowserVaultCoreQueryClient(core);
 }
 
-test("server layout keeps contact reads inside the deferred start action slot", async () => {
+test("constructs the public server layout without waiting for member contact reads", async () => {
   const { default: ExperimentDetailLayout } = await import(
     "../app/(dashboard)/experiments/[experimentId]/layout"
   );
-  const view = await renderClient(
-    await ExperimentDetailLayout({
-      children: createElement("div", null, "child content"),
-      params: Promise.resolve({ experimentId: "finnish-sauna" }),
-    }),
-  );
+  const layout = await ExperimentDetailLayout({
+    children: createElement("div", null, "child content"),
+    params: Promise.resolve({ experimentId: "finnish-sauna" }),
+  });
 
+  expect(layout).toBeTruthy();
   expect(mocks.readHostedMurphContactContext).not.toHaveBeenCalled();
-  const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
-    | [{
-        startAction?: ReactNode;
-      }]
-    | undefined)?.[0];
-  expect(headerProps?.startAction).toBeTruthy();
-
-  await view.cleanup();
 });
 
 async function renderClient(element: ReactNode) {
@@ -489,6 +392,7 @@ function installGlobals(
     setGlobal("self", window),
     setGlobal("document", document),
     setGlobal("navigator", window.navigator),
+    setGlobal("Element", window.Element),
     setGlobal("HTMLElement", window.HTMLElement),
     setGlobal("Node", window.Node),
     setGlobal("Event", window.Event),

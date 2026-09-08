@@ -489,7 +489,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   Resolve mutable target and effect authority from durable owner facts only at
   the irreversible-effect boundary. Later authority loss takes a typed durable
   disposition rather than retroactively erasing accepted work or spawning
-  repair machinery.
+  repair machinery. Invocation configuration remains a separate lifecycle
+  responsibility: a warm provider-specific invocation checks the saved provider
+  at provider entry to recover missed settings-change wakes. A mismatch hands
+  accepted work to a fresh invocation without consuming or rejecting it; an
+  unavailable settings read retains the work for retry. This check does not
+  reauthorize the accepted inputs.
 - When provider target identity and audience privacy are coupled, one live
   owner resolves the effective target and audience class atomically before
   model work. Persisted routes, snapshots, and legacy markers are hints, never

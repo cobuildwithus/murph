@@ -337,6 +337,7 @@ export async function sendAssistantAskContinuationLocal(
       }
 
       const deliveryOutcome = await deliverAssistantReply({
+        followUpRequest: providerResult.followUpRequest,
         dedupeToken: input.deliveryIdempotencyKey,
         input: messageInput,
         media: [],

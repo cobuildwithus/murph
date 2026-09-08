@@ -131,7 +131,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
       : null;
   },
   preloadHostedAuthPanelIsland: vi.fn(),
-  useHostedAuthPanelIslandIdlePreload: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/settings-service", () => ({

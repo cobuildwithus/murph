@@ -1,6 +1,7 @@
 ---
 title: 'Hosted Web release CI can retain stale OpenAPI parsed-default assertions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2788'
 ---
 
 ## Expected Behavior

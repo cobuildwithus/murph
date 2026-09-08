@@ -421,6 +421,28 @@ function createAbortGuardedHostedWorkspaceRestorePlatform(
         guard(() => platform.artifactStore.get(sha256, context)),
       put: (putInput) => guard(() => platform.artifactStore.put(putInput)),
     },
+    ...(platform.mediaStore
+      ? {
+          mediaStore: {
+            ...(platform.mediaStore.delete
+              ? {
+                  delete: (deleteInput) =>
+                    guard(() => platform.mediaStore!.delete!(deleteInput)),
+                }
+              : {}),
+            get: (getInput, context) =>
+              guard(() => platform.mediaStore!.get(getInput, context)),
+            ...(platform.mediaStore.record
+              ? {
+                  record: (recordInput) =>
+                    guard(() => platform.mediaStore!.record!(recordInput)),
+                }
+              : {}),
+            put: (putInput) =>
+              guard(() => platform.mediaStore!.put(putInput)),
+          },
+        }
+      : {}),
   };
 }
 

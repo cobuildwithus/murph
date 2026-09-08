@@ -5793,6 +5793,17 @@ describe("hosted Family plan", () => {
       groupId: "hbag_family",
     });
 
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      1,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_owner",
+    );
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      2,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_mom",
+    );
+
     expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         billedSeatCount: 4,

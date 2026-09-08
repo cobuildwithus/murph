@@ -14,6 +14,7 @@ import {
   shouldRetryHostedRuntimeReplaySafeRead,
   sleepHostedReplaySafeReadRetryDelay,
 } from "./control-plane-fetch.ts";
+import { HostedRuntimeResponseBodyIdleTimeoutError } from "./hosted-response-body.ts";
 
 const HOSTED_WORKSPACE_SNAPSHOT_RESTORE_STEP_MARKER =
   "hostedWorkspaceSnapshotRestoreStep";
@@ -47,6 +48,7 @@ export function buildHostedWorkspaceSnapshotRestoreLogDetails(input: {
 
 export async function runHostedWorkspaceSnapshotRestoreReplaySafeReadStep<T>(input: {
   details: HostedExecutionStructuredLogDetails;
+  signal?: AbortSignal | null;
   onAttempt?(attempt: number): void;
   run(): Promise<T>;
   step: HostedWorkspaceSnapshotRestoreStep;
@@ -72,10 +74,11 @@ export async function runHostedWorkspaceSnapshotRestoreReplaySafeReadStep<T>(inp
       });
     } catch (error) {
       lastError = error;
-      const retrying = shouldRetryHostedRuntimeReplaySafeRead({
-        attempt,
-        error,
-      });
+      const retrying = !input.signal?.aborted && (
+        (error instanceof HostedRuntimeResponseBodyIdleTimeoutError
+          && attempt < HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS)
+        || shouldRetryHostedRuntimeReplaySafeRead({ attempt, error })
+      );
       if (!retrying) {
         throw error;
       }
@@ -239,6 +242,9 @@ export function buildHostedRuntimeSafeErrorMetadata(
           fetchCauseKind: fetchFailureDiagnostics.fetchCauseKind,
           ...(fetchFailureDiagnostics.fetchCauseName
             ? { fetchCauseName: fetchFailureDiagnostics.fetchCauseName }
+            : {}),
+          ...(fetchFailureDiagnostics.fetchNetworkErrorCode
+            ? { fetchNetworkErrorCode: fetchFailureDiagnostics.fetchNetworkErrorCode }
             : {}),
           fetchRequestSignalAborted:
             fetchFailureDiagnostics.fetchRequestSignalAborted,

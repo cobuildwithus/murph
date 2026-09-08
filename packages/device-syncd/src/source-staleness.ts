@@ -37,13 +37,13 @@ export interface PushPrimarySourcePolicy {
    * threshold: a connect that never streams is a total outage for that member.
    */
   neverDeliveredHours: number;
-  /** Optional member-facing recovery prompt for evidence-backed providers. */
-  recoveryNotice?: {
-    companionAppName: string;
-    deviceDisplayName: string;
-    providerDisplayName: string;
-    silentHours: number;
-  };
+}
+
+export interface SourceRecoveryNoticePolicy {
+  companionAppName: string;
+  deviceDisplayName: string;
+  providerDisplayName: string;
+  silentHours: number;
 }
 
 const HOUR_MS = 60 * 60_000;
@@ -57,12 +57,28 @@ const PUSH_PRIMARY_SOURCE_POLICIES: ReadonlyMap<string, PushPrimarySourcePolicy>
   ["garmin", {
     silentHours: 36,
     neverDeliveredHours: 6,
-    recoveryNotice: {
-      companionAppName: "Garmin Connect",
-      deviceDisplayName: "Garmin device",
-      providerDisplayName: "Garmin",
-      silentHours: 5 * 24,
-    },
+  }],
+]);
+
+// Receipt-based recovery must not change a provider's polling strategy.
+const SOURCE_RECOVERY_NOTICE_POLICIES: ReadonlyMap<string, SourceRecoveryNoticePolicy> = new Map([
+  ["garmin", {
+    companionAppName: "Garmin Connect",
+    deviceDisplayName: "Garmin device",
+    providerDisplayName: "Garmin",
+    silentHours: 5 * 24,
+  }],
+  ["apple_health_kit", {
+    companionAppName: "Murph",
+    deviceDisplayName: "iPhone",
+    providerDisplayName: "Apple Health",
+    silentHours: 3 * 24,
+  }],
+  ["whoop_v2", {
+    companionAppName: "WHOOP",
+    deviceDisplayName: "WHOOP",
+    providerDisplayName: "WHOOP",
+    silentHours: 5 * 24,
   }],
 ]);
 
@@ -100,23 +116,29 @@ export function isPushPrimarySourceProvider(sourceProviderSlug: string): boolean
   return readPushPrimarySourcePolicy(sourceProviderSlug) !== null;
 }
 
-export function readPushPrimarySourceRecoveryNoticePolicy(
+export function readSourceRecoveryNoticePolicy(
   sourceProviderSlug: string,
-): NonNullable<PushPrimarySourcePolicy["recoveryNotice"]> | null {
-  return readPushPrimarySourcePolicy(sourceProviderSlug)?.recoveryNotice ?? null;
+): SourceRecoveryNoticePolicy | null {
+  return SOURCE_RECOVERY_NOTICE_POLICIES.get(sourceProviderSlug.trim().toLowerCase()) ?? null;
 }
 
-export function isPushPrimarySourceRecoveryNoticeEligible(input: {
+export function isSourceRecoveryNoticeEligible(input: {
   lastDataAt: string | null;
+  lastErrorCode?: string | null;
   now: string;
   silentHours?: number;
   sourceProviderSlug: string;
   status: string;
 }): boolean {
-  if (input.status !== "connected" || input.lastDataAt === null) {
+  // A confirmed WHOOP refresh failure also stops delivery. Keep it in the same
+  // silence episode so status changes cannot generate a second check-in.
+  const whoopRefreshFailed = input.sourceProviderSlug.trim().toLowerCase() === "whoop_v2"
+    && input.status === "error"
+    && input.lastErrorCode?.trim().toUpperCase() === "TOKEN_REFRESH_FAILED";
+  if ((input.status !== "connected" && !whoopRefreshFailed) || input.lastDataAt === null) {
     return false;
   }
-  const policy = readPushPrimarySourceRecoveryNoticePolicy(input.sourceProviderSlug);
+  const policy = readSourceRecoveryNoticePolicy(input.sourceProviderSlug);
   const now = parseTimestamp(input.now);
   const lastDataAt = parseTimestamp(input.lastDataAt);
   return policy !== null

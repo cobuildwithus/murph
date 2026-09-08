@@ -94,7 +94,7 @@ describe("KernelComputerClient", () => {
     });
   });
 
-  it("creates stealth automation browsers without recording the canary session", async () => {
+  it("starts automation on a blank page while preserving login state and disabling telemetry", async () => {
     kernelSdkMocks.browserCreate.mockResolvedValueOnce({
       cdp_ws_url: "wss://cdp.test-browser.onkernel.com/session/1",
       session_id: "kernel-session-1",
@@ -117,6 +117,7 @@ describe("KernelComputerClient", () => {
         name: "profile-1",
         save_changes: true,
       },
+      start_url: "about:blank",
       stealth: true,
       telemetry: { enabled: false },
       timeout_seconds: 480,

@@ -152,8 +152,20 @@ export const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES = [
 export type HostedRuntimeArtifactReadPurpose =
   typeof HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES[number];
 
+export const HOSTED_RUNTIME_MEDIA_READ_PURPOSES = [
+  "workspace_media_materialization",
+] as const;
+
+export type HostedRuntimeMediaReadPurpose =
+  typeof HOSTED_RUNTIME_MEDIA_READ_PURPOSES[number];
+
 export interface HostedRuntimeArtifactReadContext {
   purpose: HostedRuntimeArtifactReadPurpose;
+  signal?: AbortSignal | null;
+}
+
+export interface HostedRuntimeMediaReadContext {
+  purpose: HostedRuntimeMediaReadPurpose;
   signal?: AbortSignal | null;
 }
 
@@ -161,6 +173,22 @@ export interface HostedRuntimeArtifactReader {
   get(
     sha256: string,
     context: HostedRuntimeArtifactReadContext,
+  ): Promise<Uint8Array | null>;
+}
+
+export type HostedRuntimeMediaKind = "image" | "video";
+
+export interface HostedRuntimeMediaDescriptor {
+  byteSize: number;
+  mediaId: string;
+  mediaKind: HostedRuntimeMediaKind;
+  sha256: string;
+}
+
+export interface HostedRuntimeMediaReader {
+  get(
+    input: HostedRuntimeMediaDescriptor,
+    context: HostedRuntimeMediaReadContext,
   ): Promise<Uint8Array | null>;
 }
 
@@ -190,6 +218,36 @@ export class HostedRuntimeArtifactWriteError extends Error {
       { cause: input.cause },
     );
     this.name = "HostedRuntimeArtifactWriteError";
+    this.retryable = input.retryable;
+  }
+}
+
+export class HostedRuntimeMediaReadError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime media read failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeMediaReadError";
+    this.retryable = input.retryable;
+  }
+}
+
+export class HostedRuntimeMediaWriteError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime media write failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeMediaWriteError";
     this.retryable = input.retryable;
   }
 }
@@ -231,6 +289,21 @@ export interface HostedRuntimeArtifactWriter {
 export interface HostedRuntimeArtifactStore extends
   HostedRuntimeArtifactReader,
   HostedRuntimeArtifactWriter {}
+
+export interface HostedRuntimeMediaWriter {
+  delete?(input: Pick<HostedRuntimeMediaDescriptor, "mediaId">): Promise<void>;
+  record?(input: HostedRuntimeMediaDescriptor & {
+    expiresAt?: string | null;
+  }): Promise<void>;
+  put(input: HostedRuntimeMediaDescriptor & {
+    bytes: Uint8Array;
+    expiresAt?: string | null;
+  }): Promise<void>;
+}
+
+export interface HostedRuntimeMediaStore extends
+  HostedRuntimeMediaReader,
+  HostedRuntimeMediaWriter {}
 
 export interface HostedRuntimeBrowserVaultReplicaPort {
   publishRef?(input: {
@@ -792,6 +865,7 @@ export interface HostedRuntimePlatform {
   assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
+  mediaStore?: HostedRuntimeMediaStore | null;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;

@@ -73,6 +73,12 @@ export interface DatabaseMetricObservationSnapshot {
 
 export interface DatabaseMetricObservation {
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
+  postgresStateSeries: {
+    branch: number;
+    primary: number;
+    replica: number;
+    unrecognizedRole: number;
+  };
   snapshot: DatabaseMetricObservationSnapshot;
 }
 
@@ -329,6 +335,7 @@ export function parsePlanetScaleDatabaseMetricObservation(
   );
   return {
     missingMetrics,
+    postgresStateSeries: summarizePostgresStateSeries(points),
     snapshot: {
       clientWaitSeconds: clientWaitPoints.length === 0
         ? null
@@ -629,6 +636,25 @@ function parsePrometheusLabels(value: string): Readonly<Record<string, string>> 
   return labels;
 }
 
+function summarizePostgresStateSeries(
+  points: readonly PrometheusMetricPoint[],
+): DatabaseMetricObservation["postgresStateSeries"] {
+  const counts = { branch: 0, primary: 0, replica: 0, unrecognizedRole: 0 };
+  for (const point of points) {
+    if (point.name !== "planetscale_postgres_connection_state") {
+      continue;
+    }
+    counts.branch += 1;
+    const role = point.labels[ROLE_LABEL];
+    if (role === "primary" || role === "replica") {
+      counts[role] += 1;
+    } else {
+      counts.unrecognizedRole += 1;
+    }
+  }
+  return counts;
+}
+
 function isPrimaryMetricPoint(point: PrometheusMetricPoint): boolean {
   return point.labels[ROLE_LABEL] === "primary";
 }
@@ -639,8 +665,10 @@ function sumByLabel(
 ): Record<string, number> | null {
   const totals: Record<string, number> = {};
   for (const point of points) {
-    const key = point.labels[label];
-    if (!key) {
+    // Unclassified Postgres counts remain observed counts. Prometheus treats
+    // empty and omitted labels alike; pool identifiers still require a value.
+    const key = point.labels[label] ?? "";
+    if (!key && label !== CONNECTION_STATE_LABEL) {
       return null;
     }
     totals[key] = (totals[key] ?? 0) + point.value;

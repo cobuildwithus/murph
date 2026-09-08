@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { afterEach, expect, test } from 'vitest'
 
 import {
@@ -10,6 +10,7 @@ import {
   ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING,
   ASSISTANT_MAINTENANCE_EVIDENCE_HEADING,
   buildAssistantMaintenanceConversationEvidence,
+  readAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
 import {
   appendAssistantTranscriptEntries,
@@ -18,6 +19,7 @@ import {
   saveAssistantSession,
 } from '../src/assistant/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import { resolveAssistantTranscriptPath } from '../src/assistant/store/persistence.ts'
 import { buildAssistantNoReplyTranscriptMarkerText } from '../src/assistant/turn-finalizer.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
@@ -127,6 +129,8 @@ test('builds bounded committed conversation evidence across recent sessions', as
   })
 
   expect(evidence).toContain(ASSISTANT_MAINTENANCE_EVIDENCE_HEADING)
+  expect((await readAssistantMaintenanceConversationEvidence({ now, vault: vaultRoot })).status)
+    .toBe('available')
   expect(evidence).toContain(
     '- [2026-06-28T09:00:00.000Z] user: I switched to decaf coffee this week.',
   )
@@ -302,6 +306,46 @@ test('returns an explicit empty evidence section when the window has no messages
 
   expect(evidence).toContain(ASSISTANT_MAINTENANCE_EVIDENCE_HEADING)
   expect(evidence).toContain('Do not write any new memory this run.')
+  expect((await readAssistantMaintenanceConversationEvidence({
+    now: new Date('2026-06-30T03:00:00.000Z'),
+    vault: vaultRoot,
+  })).status).toBe('empty')
+})
+
+test('failed transcript collection is unavailable rather than a proven empty window', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-maintenance-read-failure-')
+  cleanupPaths.push(parentRoot)
+  const sessionId = 'session-unreadable-evidence'
+  await saveAssistantSession(vaultRoot, createEvidenceTestSession({
+    lastTurnAt: '2026-06-29T21:00:00.000Z',
+    sessionId,
+  }))
+  await mkdir(resolveAssistantTranscriptPath(resolveAssistantStatePaths(vaultRoot), sessionId))
+  const result = await readAssistantMaintenanceConversationEvidence({
+    now: new Date('2026-06-30T03:00:00.000Z'),
+    vault: vaultRoot,
+  })
+  expect(result.status).toBe('unavailable')
+})
+
+test('a later committed correction or forget request makes an empty window eligible', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-maintenance-late-correction-')
+  cleanupPaths.push(parentRoot)
+  const input = { now: new Date('2026-06-30T03:00:00.000Z'), vault: vaultRoot }
+  expect((await readAssistantMaintenanceConversationEvidence(input)).status).toBe('empty')
+  const sessionId = 'session-late-correction'
+  await saveAssistantSession(vaultRoot, createEvidenceTestSession({
+    lastTurnAt: '2026-06-29T21:00:00.000Z',
+    sessionId,
+  }))
+  await appendAssistantTranscriptEntries(vaultRoot, sessionId, [{
+    createdAt: '2026-06-28T09:00:00.000Z',
+    kind: 'user',
+    text: 'Please forget my old summary preference. I prefer bullet points now.',
+  }])
+  const result = await readAssistantMaintenanceConversationEvidence(input)
+  expect(result.status).toBe('available')
+  expect(result.prompt).toContain('Please forget my old summary preference.')
 })
 
 test('builds structured group evidence only from group-bound sessions', async () => {

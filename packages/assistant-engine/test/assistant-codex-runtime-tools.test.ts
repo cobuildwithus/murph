@@ -1054,6 +1054,28 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
       }),
     ).resolves.toMatchObject({
       sessionId: 'thread-progress-disabled',
+      runtimeIssueInputs: [
+        {
+          errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED',
+          operation: 'send-progress-update',
+          details: {
+            requestKind: 'send-progress-update',
+            failureStage: 'admission',
+            failureReason: 'authority_rejected',
+            diagnosticRole: 'classification',
+          },
+        },
+        {
+          errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED',
+          operation: 'assistant-style',
+          details: {
+            requestKind: 'assistant-style',
+            failureStage: 'admission',
+            failureReason: 'authority_rejected',
+            diagnosticRole: 'classification',
+          },
+        },
+      ],
     })
   })
 
@@ -1779,6 +1801,9 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
         errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
         summary: 'Tool input failed schema validation.',
         details: expect.objectContaining({
+          failureStage: 'validation',
+          failureReason: 'invalid_input',
+          diagnosticRole: 'classification',
           detailsSchema: 'murph.tool-call-validation-digest.v1',
           toolName: 'murph.send_progress_update',
           schemaName: 'murph.send_progress_update.input',
@@ -1883,6 +1908,9 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
         errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
         summary: 'Tool input failed schema validation.',
         details: expect.objectContaining({
+          failureStage: 'validation',
+          failureReason: 'invalid_input',
+          diagnosticRole: 'classification',
           detailsSchema: 'murph.tool-call-validation-digest.v1',
           inputShape: [
             'root.object.count_1_10',
@@ -2017,6 +2045,9 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
         summary: 'Tool input failed schema validation.',
         errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
         details: expect.objectContaining({
+          failureStage: 'validation',
+          failureReason: 'invalid_input',
+          diagnosticRole: 'classification',
           detailsSchema: 'murph.tool-call-validation-digest.v1',
           invalidPaths: ['intentIds[]'],
           pathIssues: [{

@@ -56,7 +56,7 @@ export async function encodeHostedBrowserVaultReplicaShardJson(input: {
     byteLength: decodedBytes.byteLength,
     maxBytes: input.maxBytes,
   });
-  const body = new Blob([toArrayBuffer(decodedBytes)])
+  const body = new Blob([decodedBytes])
     .stream()
     .pipeThrough(new CompressionStream("gzip"));
   const bytes = new Uint8Array(await new Response(body).arrayBuffer());
@@ -91,11 +91,4 @@ export function assertHostedBrowserVaultReplicaByteLength(input: {
       maxBytes,
     });
   }
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer;
 }

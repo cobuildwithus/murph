@@ -80,4 +80,50 @@ mailbox frontier in existing privacy-safe runtime logs.
 ## State
 
 Status: active
-Updated: 2026-09-04
+Updated: 2026-09-08
+
+## Authorized takeover
+
+- The user requested takeover and landing after confirming no active owner.
+  The existing branch was clean and its published head unchanged. This task
+  owns the existing PR and worktree through completion.
+- Reconcile current main with an ordinary merge, preserving the newer explicit
+  device-sync continuation owner and bounded alert scan. The diagnostic codes
+  must describe that current authority rather than obsolete retry scheduling.
+- Correct two source-confirmed advisory observations: imported frontiers above
+  durable high water are unknown, and a system-mailbox return without a
+  checkpoint still needs current terminal progress evidence.
+- ReviewGPT authors the implementation patch; local work owns inspection,
+  focused verification, Git operations, evidence, and completion.
+- The two files responsible for the prior assistant-engine CI failure now pass
+  all 104 tests with current main. An isolated local PostgreSQL database is
+  prepared for direct query proof. These results do not replace validation of
+  the final diagnostic patch or exact-head CI.
+- Two pre-send ReviewGPT staging attempts failed (surface confirmation and
+  attachment confirmation). A fresh managed lane accepted the implementation
+  request; no duplicate accepted request was sent.
+
+## Takeover verification
+
+- Accepted the ReviewGPT-authored patch after source inspection. The patch
+  reconciles explicit continuation ownership, restores the diagnostic SQL
+  projection, classifies impossible imports as unknown, and shares the current
+  mailbox read between return-time progress and wake selection.
+- Focused Assistant Runtime proof: 216 tests passed across seven mailbox,
+  checkpoint, startup, restore, scheduling, preemption, and system-mailbox files.
+  The existing projection-deferral journey now proves complete terminal
+  progress, the same selected wake, and zero checkpoint requests.
+- Web monitor unit tests: 19 passed. Five focused PostgreSQL scenarios passed,
+  including impossible-frontier classification and equality coverage. The
+  unchanged large-cardinality scenario exceeded its existing transaction
+  timeout. The exact merged base also timed out in the same test (240 seconds),
+  so this is a pre-existing local stress-proof limitation, not a demonstrated
+  diagnostic regression. The accepted source was restored byte-for-byte.
+  This reuses the large-PostgreSQL-fixture friction tracked in issue #2804.
+- Web and Assistant Runtime typechecks, changed Web ESLint, documentation drift,
+  and whitespace checks passed. The complexity guard passed against the exact
+  merged base: no changed-file debt or maximum increase across four source
+  owners. Existing runtime orchestration and parser hotspots remain unchanged;
+  diagnostic helpers are below the threshold and reuse existing owners.
+- Internal-only diagnostic change: no member-facing UX or changelog item.
+  No provider input, scheduling policy, schema, new query, or durable owner.

@@ -81,6 +81,7 @@ import {
 } from "@murphai/runtime-state";
 import {
   sendTelegramImageMessage,
+  sendTelegramFileMessage,
   sendTelegramRichMessage,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
 import type {
@@ -1939,8 +1940,10 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
   explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
-  return !hasHostedAssistantVaultFileMedia(effect.payload)
-    && (explicitlyPrepareNonIdempotent
+  if (hasHostedAssistantVaultFileMedia(effect.payload)) {
+    return effect.payload.channel === "telegram";
+  }
+  return (explicitlyPrepareNonIdempotent
       || effect.payload.transportIdempotent
       || isHostedAssistantReactionOnlyEffect(effect)
       || hasHostedAssistantVoiceMemoMedia(effect.payload)
@@ -3711,6 +3714,59 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
+        sendTelegramFile: async (request) => {
+          const intent = mirrorState.intent;
+          if (
+            !intent
+            || intent.channel !== "telegram"
+            || intent.threadIsDirect !== true
+            || readHostedAssistantDeliveryPayloadTarget(
+              buildHostedAssistantDeliveryPayloadFromIntent(intent),
+            ).target !== request.target
+          ) {
+            throw createAssistantDeliveryTerminalError(
+              "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+              "Secure vault-file delivery target or audience changed after approval.",
+            );
+          }
+          await assertHostedDeliveryCanEnterProvider(input);
+          const verifiedFiles = await preloadApprovedHostedAssistantVaultFiles({
+            actionApprovalPort: input.actionApprovalPort,
+            expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
+            intentId: intent.intentId,
+            media: [request.file],
+            vaultRoot: input.vaultRoot,
+          });
+          const dependencies = requireHostedProviderFetchDependencies({
+            env: input.telegramEnv,
+            fetchImplementation: createHostedProviderFetchBoundary({
+              assertProviderEntryLive: async () => {
+                try {
+                  await assertHostedDeliveryCanEnterProvider(input);
+                } catch (error) {
+                  throw markHostedDeliveryPreProvider(error);
+                }
+              },
+              onProviderDispatchEntered: () => { providerDispatchEntered = true; },
+              operation: "Hosted assistant Telegram file delivery",
+              providerFetch: input.providerFetch,
+            }),
+            ...(input.signal ? { signal: input.signal } : {}),
+            loadVaultFile: async (file: typeof request.file) => {
+              const bytes = verifiedFiles.get(buildHostedVaultFileMediaIdentity(file));
+              if (!bytes) {
+                throw new VaultCliError(
+                  "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+                  "The prepared vault file no longer matches the approved action.",
+                );
+              }
+              return bytes;
+            },
+          }, "Hosted assistant Telegram file delivery");
+          const result = await sendTelegramFileMessage(request, dependencies);
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
         sendTelegramImage: async (request) => {
           const verifiedVaultImages = await preloadHostedAssistantVaultImages({
             media: request.media,
@@ -4600,7 +4656,14 @@ function createHostedAssistantLinqSendDependency(input: {
     ) === true;
     const includesVaultFile =
       request.media?.some((media) => media.kind === "vault_file") === true;
-    if (privateAssistantAskCompletion) {
+    const assertPrivateAssistantAskCompletionRoute = async (route: {
+      fromPhoneNumber: string | null;
+      kind: HostedExecutionAssistantNotificationRoute["delivery"]["kind"];
+      target: string;
+    }) => {
+      if (!privateAssistantAskCompletion) {
+        return;
+      }
       const routeContext = input.deliveryRouteContext;
       if (!routeContext) {
         throw new VaultCliError(
@@ -4609,22 +4672,21 @@ function createHostedAssistantLinqSendDependency(input: {
           { retryable: false },
         );
       }
-      const targetKind = request.targetKind ?? "thread";
       await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
         actualRoute: {
           actorId: routeContext.actorId,
           channel: "linq",
           delivery: {
-            kind: targetKind,
-            ...(targetKind === "participant" && candidateFromPhoneNumber
+            kind: route.kind,
+            ...(route.kind === "participant" && route.fromPhoneNumber
               ? {
                   source: {
-                    fromPhoneNumber: candidateFromPhoneNumber,
+                    fromPhoneNumber: route.fromPhoneNumber,
                     kind: "linq" as const,
                   },
                 }
               : {}),
-            target: deliveryContext?.target ?? request.target,
+            target: route.target,
           },
           identityId: routeContext.identityId,
           threadId: routeContext.threadId,
@@ -4637,6 +4699,13 @@ function createHostedAssistantLinqSendDependency(input: {
         now: new Date(),
         signal: signal ?? null,
         vaultRoot: input.vaultRoot ?? null,
+      });
+    };
+    if (privateAssistantAskCompletion) {
+      await assertPrivateAssistantAskCompletionRoute({
+        fromPhoneNumber: candidateFromPhoneNumber,
+        kind: request.targetKind ?? "thread",
+        target: deliveryContext?.target ?? request.target,
       });
     }
     const engagement =
@@ -4707,54 +4776,36 @@ function createHostedAssistantLinqSendDependency(input: {
     const hasVerifiedVaultAttachment =
       verifiedVaultFiles.size > 0 || verifiedVaultImages.size > 0;
     const readProviderAttempt = () => providerAttempt;
-    const assertPrivateAssistantAskCompletionAtProviderEntry = async () => {
-      if (!privateAssistantAskCompletion) {
-        return;
-      }
-      const routeContext = input.deliveryRouteContext;
-      if (!routeContext) {
-        throw new VaultCliError(
-          "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_UNAVAILABLE",
-          "Private Assistant Ask completion route is unavailable.",
-          { retryable: false },
-        );
-      }
-      await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
-        actualRoute: {
-          actorId: routeContext.actorId,
-          channel: "linq",
-          delivery: {
-            kind: providerTargetKind ?? "explicit",
-            ...(providerTargetKind === "participant" && fromPhoneNumber
-              ? {
-                  source: {
-                    fromPhoneNumber,
-                    kind: "linq" as const,
-                  },
-                }
-              : {}),
-            target: providerTarget,
-          },
-          identityId: routeContext.identityId,
-          threadId: routeContext.threadId,
-          threadIsDirect: routeContext.threadIsDirect,
-        },
-        effectsPort: input.effectsPort ?? null,
-        intentId: input.intentId ?? null,
-        media: request.media ?? [],
-        message: request.message,
-        now: new Date(),
-        signal: signal ?? null,
-        vaultRoot: input.vaultRoot ?? null,
-      });
-    };
+    const readResolvedEngagementInput = () => ({
+      answeredMailboxItemIds: request.answeredMailboxItemIds,
+      assistantAskFallback: reviewedAssistantAskCompletion
+        ? isHostedReviewedAssistantAskFallbackPayload({
+            media: request.media,
+            message: request.message,
+          })
+        : undefined,
+      directRecipientPhoneNumber,
+      effectsPort: input.effectsPort ?? null,
+      expectedResolvedRoute: resolvedRoute,
+      fromPhoneNumber,
+      homeRouteFallbackAllowed: false,
+      intentId: input.intentId ?? null,
+      replyToMessageId: request.replyToMessageId ?? null,
+      signal: signal ?? null,
+      target: providerTarget,
+      targetKind: providerTargetKind,
+    });
     const createMessageFetchBoundary = (
       deliveryIdempotencyKey: string | null,
     ): typeof fetch => createHostedProviderFetchBoundary({
       assertProviderEntryLive: async () => {
         try {
           await assertHostedDeliveryCanEnterProvider(input);
-          await assertPrivateAssistantAskCompletionAtProviderEntry();
+          await assertPrivateAssistantAskCompletionRoute({
+            fromPhoneNumber,
+            kind: providerTargetKind ?? "explicit",
+            target: providerTarget,
+          });
         } catch (error) {
           if (providerAttempt && hasVerifiedVaultAttachment) {
             throw markHostedLinqAttachmentReservationMayHaveSucceeded(error);
@@ -4775,28 +4826,11 @@ function createHostedAssistantLinqSendDependency(input: {
             : undefined;
           const providerEntry =
             await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-              answeredMailboxItemIds: request.answeredMailboxItemIds,
+              ...readResolvedEngagementInput(),
               assistantAskCompletionExpiresAt: reviewedCompletionExpiresAt,
-              assistantAskFallback:
-                reviewedAssistantAskCompletion
-                  ? isHostedReviewedAssistantAskFallbackPayload({
-                      media: request.media,
-                      message: request.message,
-                    })
-                  : undefined,
               authorityCheckOnly: false,
-              directRecipientPhoneNumber,
-              effectsPort: input.effectsPort ?? null,
-              expectedResolvedRoute: resolvedRoute,
-              fromPhoneNumber,
-              homeRouteFallbackAllowed: false,
               idempotencyKey: deliveryIdempotencyKey,
-              intentId: input.intentId ?? null,
-              replyToMessageId: request.replyToMessageId ?? null,
               providerDispatchRetrySafe: true,
-              signal: signal ?? null,
-              target: providerTarget,
-              targetKind: providerTargetKind,
             });
           if (providerEntry.assistantAskFallbackRequired === true) {
             if (!input.intentId || !input.vaultRoot) {
@@ -4839,28 +4873,15 @@ function createHostedAssistantLinqSendDependency(input: {
       assertProviderEntryLive: async () => {
         try {
           await assertHostedDeliveryCanEnterProvider(input);
-          await assertPrivateAssistantAskCompletionAtProviderEntry();
-          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-            answeredMailboxItemIds: request.answeredMailboxItemIds,
-            assistantAskFallback:
-              reviewedAssistantAskCompletion
-                ? isHostedReviewedAssistantAskFallbackPayload({
-                    media: request.media,
-                    message: request.message,
-                  })
-                : undefined,
-            authorityCheckOnly: true,
-            directRecipientPhoneNumber,
-            effectsPort: input.effectsPort ?? null,
-            expectedResolvedRoute: resolvedRoute,
+          await assertPrivateAssistantAskCompletionRoute({
             fromPhoneNumber,
-            homeRouteFallbackAllowed: false,
-            idempotencyKey,
-            intentId: input.intentId ?? null,
-            replyToMessageId: request.replyToMessageId ?? null,
-            signal: signal ?? null,
+            kind: providerTargetKind ?? "explicit",
             target: providerTarget,
-            targetKind: providerTargetKind,
+          });
+          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            ...readResolvedEngagementInput(),
+            authorityCheckOnly: true,
+            idempotencyKey,
           });
         } catch (error) {
           throw markHostedDeliveryPreProvider(error);
@@ -4884,6 +4905,25 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: createMessageFetchBoundary(idempotencyKey),
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
+    const buildDeliveryOutcome = (outcome: Omit<
+      Parameters<typeof buildHostedAssistantLinqDeliveryOutcomeRequest>[0],
+      | "directRecipientPhoneNumber"
+      | "fromPhoneNumber"
+      | "intentId"
+      | "providerTarget"
+      | "target"
+      | "targetKind"
+      | "threadIsDirect"
+    >) => buildHostedAssistantLinqDeliveryOutcomeRequest({
+      ...outcome,
+      directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
+      fromPhoneNumber,
+      intentId: input.intentId ?? null,
+      providerTarget,
+      target: providerTarget,
+      targetKind: providerTargetKind,
+      threadIsDirect: resolvedRoute.threadIsDirect,
+    });
     let result: HostedRuntimeLinqSendResponse;
     try {
       result = await sendHostedProviderLinqMessage({
@@ -4953,24 +4993,15 @@ function createHostedAssistantLinqSendDependency(input: {
                 ) {
                   await recordHostedAssistantLinqDeliveryOutcomeRequired({
                     effectsPort: input.effectsPort ?? null,
-                    outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+                    outcome: buildDeliveryOutcome({
                       attemptedAt: providerAttempt.attemptedAt,
                       answeredMailboxItemIds: [],
-                      directRecipientPhoneNumber:
-                        originalParticipantRecipientPhoneNumber,
                       failedAt: new Date(),
                       failureCode: HOSTED_LINQ_APP_CARD_REJECTED_FAILURE_CODE,
                       failureReason: null,
-                      fromPhoneNumber,
                       idempotencyKey: providerAttempt.idempotencyKey,
-                      intentId: input.intentId ?? null,
-                      providerTarget,
                       providerThreadId: null,
                       result: null,
-                      target: providerTarget,
-                      targetKind: providerTargetKind,
-                      threadIsDirect:
-                        resolvedRoute.threadIsDirect,
                     }),
                   });
                   providerAttempt = null;
@@ -4991,23 +5022,15 @@ function createHostedAssistantLinqSendDependency(input: {
       if (partialRichLinkResult) {
         await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
           effectsPort: input.effectsPort ?? null,
-          outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+          outcome: buildDeliveryOutcome({
             attemptedAt: failedProviderAttempt.attemptedAt,
             answeredMailboxItemIds: [],
-            directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
             failedAt: new Date(),
             failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
             failureReason: null,
-            fromPhoneNumber,
             idempotencyKey: failedProviderAttempt.idempotencyKey,
-            intentId: input.intentId ?? null,
-            providerTarget,
             providerThreadId: partialRichLinkResult.providerThreadId ?? null,
             result: partialRichLinkResult,
-            target: providerTarget,
-            targetKind: providerTargetKind,
-            threadIsDirect:
-              resolvedRoute.threadIsDirect,
           }),
         });
         throw markHostedDeliveryMayHaveSucceeded(error);
@@ -5023,22 +5046,15 @@ function createHostedAssistantLinqSendDependency(input: {
       }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
-        outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+        outcome: buildDeliveryOutcome({
           attemptedAt: failedProviderAttempt.attemptedAt,
           answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
-          directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
-          fromPhoneNumber,
           idempotencyKey: failedProviderAttempt.idempotencyKey,
-          intentId: input.intentId ?? null,
-          providerTarget,
           providerThreadId: null,
           result: null,
-          target: providerTarget,
-          targetKind: providerTargetKind,
-          threadIsDirect: resolvedRoute.threadIsDirect,
         }),
       });
       throw error;
@@ -5055,22 +5071,15 @@ function createHostedAssistantLinqSendDependency(input: {
     });
     await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
-      outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+      outcome: buildDeliveryOutcome({
         acceptedAt,
         attemptedAt: requireHostedLinqProviderAttemptedAt(
           acceptedProviderAttempt?.attemptedAt ?? null,
         ),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
-        directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
-        fromPhoneNumber,
         idempotencyKey: acceptedIdempotencyKey,
-        intentId: input.intentId ?? null,
-        providerTarget,
         providerThreadId: result.providerThreadId ?? null,
         result,
-        target: providerTarget,
-        targetKind: providerTargetKind,
-        threadIsDirect: resolvedRoute.threadIsDirect,
       }),
     });
     await assertHostedDeliveryLiveNow(input);

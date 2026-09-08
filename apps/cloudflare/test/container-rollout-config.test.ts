@@ -23,6 +23,62 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
 } as const;
 
 describe("Cloudflare container rollout config", () => {
+  it.each([
+    { total: undefined, legacy: undefined, expectedMain: 1000, expectedLegacy: 0 },
+    { total: "748", legacy: "100", expectedMain: 648, expectedLegacy: 100 },
+    { total: "648", legacy: "0", expectedMain: 648, expectedLegacy: 0 },
+    { total: "748", legacy: "0", expectedMain: 748, expectedLegacy: 0 },
+    { total: "1", legacy: "0", expectedMain: 1, expectedLegacy: 0 },
+    { total: "3", legacy: "1", expectedMain: 2, expectedLegacy: 1 },
+    { total: "5", legacy: "2", expectedMain: 3, expectedLegacy: 2 },
+    { total: "7", legacy: "3", expectedMain: 4, expectedLegacy: 3 },
+  ])("gives each release the member budget while retaining legacy identity: %j", ({
+    total, legacy, expectedMain, expectedLegacy,
+  }) => {
+    const source = {
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      CF_CONTAINER_MAX_INSTANCES: total,
+      CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: legacy,
+      HOSTED_EXECUTION_STANDBY_TARGET: String(Math.min(2, expectedMain)),
+    };
+    const config = buildHostedWranglerDeployConfig(readHostedDeployAutomationEnvironment(source));
+    const containers = config.containers as Array<{
+      class_name: string;
+      max_instances: number;
+      rollout_step_percentage?: number[];
+    }>;
+    expect(containers.map(({ class_name, max_instances }) => ({ class_name, max_instances }))).toEqual([
+      { class_name: "RunnerContainer", max_instances: expectedMain },
+      { class_name: "NextRunnerContainer", max_instances: expectedMain },
+      { class_name: "DeploySmokeRunnerContainer", max_instances: 1 },
+      { class_name: "StandbyRunnerContainer", max_instances: expectedLegacy },
+    ]);
+    expect(containers.reduce((sum, container) => sum + container.max_instances, 0))
+      .toBe(Number(total ?? "1000") + expectedMain + 1);
+    expect(containers[0]).not.toHaveProperty("constraints");
+    expect(config.vars).toMatchObject({
+      HOSTED_EXECUTION_STANDBY_MODE: "off",
+      HOSTED_EXECUTION_STANDBY_TARGET: String(Math.min(2, expectedMain)),
+    });
+    expect(config.vars).not.toHaveProperty("CF_CONTAINER_MAX_INSTANCES");
+    expect(config.vars).not.toHaveProperty("CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES");
+    for (const container of containers) {
+      if (container.max_instances === 0) {
+        expect(container).not.toHaveProperty("rollout_step_percentage");
+      } else {
+        const steps = container.rollout_step_percentage!;
+        expect(steps).toEqual([10, 25, 50, 100].slice(-Math.min(container.max_instances, 4)));
+        expect(steps.length).toBeLessThanOrEqual(container.max_instances);
+      }
+    }
+    expect(config.containers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ class_name: "StandbyRunnerContainer", constraints: { regions: ["ENAM"] } }),
+    ]));
+  });
+
   it("renders conservative rollout defaults for hosted runner containers", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
@@ -58,13 +114,14 @@ describe("Cloudflare container rollout config", () => {
       }>;
     };
 
-    expect(renderedConfig.containers[1]).toMatchObject({
+    const smoke = renderedConfig.containers.find((container) => container.class_name === "DeploySmokeRunnerContainer");
+    expect(smoke).toMatchObject({
       class_name: "DeploySmokeRunnerContainer",
       max_instances: 1,
       rollout_step_percentage: [100],
     });
-    expect(renderedConfig.containers[1]?.rollout_step_percentage).toHaveLength(
-      renderedConfig.containers[1]?.max_instances ?? 0,
+    expect(smoke?.rollout_step_percentage).toHaveLength(
+      smoke?.max_instances ?? 0,
     );
   });
 
@@ -98,9 +155,10 @@ describe("Cloudflare container rollout config", () => {
       rollout_active_grace_period: renderedConfig.containers[1]?.rollout_active_grace_period,
       rollout_step_percentage: renderedConfig.containers[1]?.rollout_step_percentage,
     });
-    expect(checkedInConfig.containers[2]).toMatchObject({
-      rollout_active_grace_period: renderedConfig.containers[2]?.rollout_active_grace_period,
-      rollout_step_percentage: renderedConfig.containers[2]?.rollout_step_percentage,
+    expect(checkedInConfig.containers[3]).toMatchObject({
+      rollout_active_grace_period: renderedConfig.containers[3]?.rollout_active_grace_period,
     });
+    expect(renderedConfig.containers[3]).not.toHaveProperty("rollout_step_percentage");
+    expect(checkedInConfig.containers[3]).not.toHaveProperty("rollout_step_percentage");
   });
 });

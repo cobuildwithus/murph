@@ -1,8 +1,8 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-// Version 17 is also a semantic rollback floor: its runner can persist the
-// outbound message-volume receipt marker inside strict outbox intents.
-export const RUNNER_STATE_SCHEMA_VERSION = 17;
+// Version 19 preserves terminal media retirement before asynchronous object deletion.
+// Older writers must not revive retired identities.
+export const RUNNER_STATE_SCHEMA_VERSION = 19;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -40,6 +40,33 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       last_error_code TEXT,
       last_invocation_at TEXT
     )
+  `);
+
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS runner_hosted_media_asset (
+      media_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      media_kind TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      expires_at TEXT,
+      retired_at TEXT,
+      purged_at TEXT,
+      revision INTEGER NOT NULL DEFAULT 0,
+      object_key TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  ensureRunnerStateTableColumn(sql, "runner_hosted_media_asset", "retired_at", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_hosted_media_asset", "purged_at", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_hosted_media_asset", "revision", "INTEGER NOT NULL DEFAULT 0");
+
+  sql.exec("DROP INDEX IF EXISTS runner_hosted_media_asset_expiry_idx");
+  sql.exec(`
+    CREATE INDEX IF NOT EXISTS runner_hosted_media_asset_expiry_idx
+    ON runner_hosted_media_asset (user_id, expires_at, media_id)
+    WHERE expires_at IS NOT NULL AND purged_at IS NULL
   `);
 
   for (const [columnName, definition] of Object.entries({
@@ -82,6 +109,21 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "last_error_at",
       "last_error_code",
       "last_invocation_at",
+    ],
+  });
+  assertRunnerStateTableColumns(sql, "runner_hosted_media_asset", {
+    requiredColumns: [
+      "media_id",
+      "user_id",
+      "media_kind",
+      "byte_size",
+      "sha256",
+      "expires_at",
+      "retired_at",
+      "purged_at",
+      "revision",
+      "object_key",
+      "updated_at",
     ],
   });
 }

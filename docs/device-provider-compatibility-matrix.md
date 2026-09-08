@@ -95,11 +95,29 @@ recovery, and a failure to evaluate or report must not fail the sync pass. A
 source that has never delivered is measured from `first_seen_at`, so a connect
 that emits its opening burst and then goes quiet is caught by the same rule.
 
-Member no-data checks are a separate, opt-in field on that same provider policy.
-Garmin currently admits one direct Linq check after five days without a delivery,
-only for an active member with a recent inbound and an established direct thread.
+Member no-data checks have a separate policy from push-primary classification.
+Garmin and Junction WHOOP (`whoop_v2`) admit one direct Linq check after five
+days without a delivery; Apple Health admits one after three days. WHOOP stays
+pull-capable and also qualifies when its source has the explicit
+`TOKEN_REFRESH_FAILED` error. Its neutral connection-help question does not
+infer disconnection, prescribe reconnect, or claim an automatic repair. Error
+transitions keep the same lifecycle/last-delivery episode key, so they cannot
+produce another check for the same gap. Never-delivered sources and other
+WHOOP error states do not qualify. Apple Health retains ordinary polling and
+its recovery text suggests opening Murph and tapping Check for new data,
+without treating silence as proof of app closure, permissions, or disconnection.
+These checks are only for an active member with a recent inbound and an established
+direct thread.
 Canonical member-plus-source-provider preference state may extend that wait to
-5–30 days or disable it; missing preference state means the five-day default.
+5–30 days or disable it; missing preference state means the provider's default.
+The no-data preference response parser accepts Apple Health's three-day default
+while custom waits remain 5–30 days. Deploy the updated Cloudflare runtime and
+converge runner containers before enabling this Web policy: older consumers
+reject a three-day default response. The updated consumer accepts every existing
+Garmin/off/custom response; the independent iOS receipt refresh can ship first
+or last. After Web rollout, verify Apple Health default/reset and off replies,
+one eligible private notice, and suppression after fresh data or opt-out. Keep
+the updated runtime as the compatibility floor while Web returns three days.
 Only accepted input from the member's current direct conversation may change the
 preference. The existing mailbox dedupe key is scoped to source lifecycle and
 `last_data_at`, so repeated stale passes preserve one message per silence episode;

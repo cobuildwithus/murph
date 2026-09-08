@@ -2,6 +2,771 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.3.3] - 2026-09-06
+
+### Added
+- expose bounded fetch network diagnostics (#2987)
+- extend native auth recovery diagnostics (#2957)
+- externalize hosted media retention
+- unlock Astra on Edge with a rotating galaxy
+- make Astra stars gravitate toward the pointer
+- add depth and cursor motion to Astra stars
+- animate Astra model artwork
+- add GPT-6 Astra for Max members
+- share the goal composer between the homepage and /goals
+- focus the homepage goal field as it scrolls into view
+- make the homepage goals section a composer
+- introduce goals on the homepage under the hero
+- strip homepage accents and add Try it now CTA
+- derive release admission from private main (#2683)
+- complete health goal artwork
+- polish health goal discovery
+- illustrate goal cards with Quiver-drawn subjects
+- open Messages from goal pages and track the outline on scroll
+- adapt journal details for mobile
+- complete journal connected context
+- capture group facts in private journal
+- alert on failed personal patterns runs
+- complete journal and personal patterns cycle
+- enrich journal context
+- enrich journal event details
+- refine journal and patterns insights
+- connect journal context and personal patterns
+- group sleep quality patterns
+- expand journal and patterns development coverage
+- complete journal and personal patterns
+- implement editorial Journal week
+- refine Journal around wearable data
+- add journal and rebuild personal patterns
+- redesign public goal guide pages
+- emit exact deploy release receipt (#2688)
+- add one-slot warm standby (#2615)
+- upgrade Incur and type parse failures
+- add public health goal guides
+- group feedback digest by member
+- email operators for Stripe payments
+- add detailed Gemini video analysis
+
+### Fixed
+- retain unclassified Postgres connection counts (#2993)
+- keep automation controls out of routine updates (#2989)
+- share archive recognition with canonical write policy
+- keep routine recognition free of disclaimers
+- recover partial worktree retirement without overwriting files (#2973)
+- make recovery and update messages natural
+- verify standby inventory during deployment (#2968)
+- preserve new Pattern notification decisions
+- expire task results after two days
+- persist reference-only media preservation
+- resolve clinical retrieval source during clean typechecks (#2952)
+- preserve media kind in canonical receipts
+- enforce the marked response minimum (#2933)
+- reject misplaced workout exercise fields (#2893)
+- show latest dated experiment results (#2889)
+- preserve earlier accepted reply targets (#2882)
+- handle large ReviewGPT archive listings (#2929)
+- prepare connection keys before member locks
+- preserve pending reconnect at OAuth cleanup boundary
+- remove orphan Next route guards (#2925)
+- resolve public device sync service from source (#2927)
+- refresh assistant command artifacts in built tests (#2922)
+- recover brief artifact PUT service failures
+- preserve durable references and order expiry at the owner
+- support explicit activity check-in device filters
+- commit reconnect classification progress
+- order OAuth consumption behind member locks
+- preserve bounded ECG failure telemetry (#2897)
+- select Family locks before Stripe reconciliation
+- keep Web compilation within its existing heap budget
+- size the cold build typecheck heap for current sources
+- retry terminal Linq message sends once (#2857)
+- expose reminder execution and delivery evidence
+- align Family usage-credit lock order
+- type growth mailbox pages
+- clarify vault ZIP archive preparation
+- recover workout logging from saved reminders (#2837)
+- recover stalled workspace snapshot downloads (#2842)
+- publish restored mailbox continuation ownership
+- start Garmin canary without restored tabs (#2833)
+- preserve retained device wake ownership (#2801)
+- age unhandled mailbox work from acceptance
+- seed the Stripe matrix activation line (#2827)
+- restore deferred Murph tool schema discovery
+- scope Astra runtime catalogs to Max eligibility
+- preserve Telegram completion after OAuth return (#2817)
+- stop dialogs from preselecting controls (#2818)
+- run Linq canary hourly on Luna (#2813)
+- migrate Telegram auth to OAuth (#2816)
+- correlate startup timeout stages (#2812)
+- stabilize managed deploy smoke (#2808)
+- ignore inactive private proof jobs (#2805)
+- bind hosted release admission to production Temporal target (#2797)
+- keep goal cards inside 320px and refresh the goal viewport specs
+- finish device sync in one admission (#2778)
+- accept dynamic Temporal integration run names (#2796)
+- accessibility pass on the goal composer
+- harden the goal composer after review
+- complete group Journal fact imports (#2747)
+- release handled frontier from device retries (#2793)
+- simplify contact page
+- preserve device follow-up wake ownership (#2770)
+- restore Temporal SHA-only reader proof (#2783)
+- account for wearable sync lag in Murph prompts (#2767)
+- prove retired wake ownership
+- expose food overview to WebMCP (#2784)
+- require contiguous retired wake ownership
+- bound food popularity type inference (#2782)
+- verify bounded Temporal legacy state (#2780)
+- recover retained device sync wakes
+- simplify Journal and Patterns chrome (#2777)
+- bootstrap Temporal compatibility controller (#2774)
+- unblock member channel frontiers (#2757)
+- use canonical voice previews (#2761)
+- migrate legacy KMS key versions (#2756)
+- shorten database pool idle timeout (#2748)
+- refresh pitch growth metrics (#2742)
+- make dirty revisions an exact progress frontier (#2737)
+- coalesce terminal Personal Patterns alerts (#2736)
+- admit fresh device data through retained retry (#2723)
+- refresh journal projections
+- distinguish evening glasses
+- preserve factor identities
+- remove empty activity details
+- bound mixed-source evidence grades
+- preserve group input order
+- compare runner bundle growth to base (#2714)
+- resume replies after exact owner release (#2699)
+- persist preflight rejection telemetry
+- serialize mailbox wake ownership (#2710)
+- monitor web-control preflight rejections
+- allow operator task control proxy (#2708)
+- drain recovered group input prefix
+- correlate standby allocation latency (#2707)
+- batch recovered group messages by room
+- preserve daily metric share refresh
+- classify reported metrics as model free
+- keep journal CI startup lightweight
+- preserve daily metric share refresh
+- complete journal CI verification
+- close Journal and Patterns review findings
+- tighten mobile dashboard navigation
+- improve journal calendar navigation
+- make journal mobile-first
+- remove redundant journal today label
+- compact journal mobile header
+- balance sleep detail typography
+- clarify journal event details
+- simplify mobile patterns matrix
+- show newest journal days first
+- align device connection copy
+- polish journal and pattern details
+- clarify personal pattern results
+- simplify pattern comparisons
+- hide empty pattern outcomes
+- simplify personal patterns matrix
+- align local callback verification key
+- parse shared auth state exactly
+- share local auth state with web preview
+- complete Journal loading states
+- render empty journal after vault load
+- classify reported metrics as model free
+- recover early group input notification
+- align mailbox owner selection
+- converge provider cleanup wake ownership (#2693)
+- certify active rollout target (#2694)
+- wait for container receipt transition (#2692)
+- read current container receipt detail (#2691)
+- treat container version as snapshot (#2690)
+- accept provider version advances (#2689)
+- preserve device wake ownership across checkpoints (#2682)
+- preserve unavailable goal auth routing
+- send runtime progress alerts overnight (#2684)
+- refresh CLI skill hash after Incur upgrade
+- isolate hosted goal smoke registry
+- request full CLI smoke envelopes
+- resolve packaged goal catalog root
+- reconcile goal release gates
+- align goal release verification
+- harden public goal release
+- honor full output for early failures
+- preserve safe validation recovery details
+- disable slash-named Vercel preview deploys (#2663)
+- close Incur error boundaries
+- expose degraded knowledge reads (#2625)
+- query connected wearable providers by public source (#2614)
+- preserve typed batch recovery (#2612)
+- restore stable Vercel builds (#2651)
+- reject overlong food label searches locally (#2601)
+- prepare Web Prisma before Cloudflare fanout (#2655)
+- restore release gate bootstrap
+- simplify goal browsing
+- render optional goal lifecycle arguments
+- polish public goal guides
+- smooth typed workout logging (#2595)
+- compact schema discovery indexes (#2599)
+- reject conflicting automation schedule flags (#2596)
+- reject unsupported meal import fields (#2591)
+- reject duplicate memory ids (#2590)
+- use the member-local current clock
+- use the member-local current clock
+- preserve Linq prewarm attribution (#2628)
+- reset Codex at workspace restore (#2617)
+- harden public goal workflows
+- restore hosted integration contracts (#2597)
+- keep goal drafts on live channels
+- normalize goal page endings
+- keep Vercel static generation within memory (#2586)
+- bootstrap fresh worktree tooling (#2555)
+- derive Codex-managed worktree destinations (#2548)
+- stage ignored tracked updates (#2559)
+- preserve Testbox failure evidence (#2534)
+- suppress progress during onboarding (#2577)
+- preserve first-turn wake identity (#2542)
+- allow twenty-second replies (#2580)
+- return wake result to active owner (#2566)
+- exclude production canary from signup reporting (#2539)
+- make concurrent generation collision-safe (#2545)
+- normalize storage capacity probes (#2567)
+- generate CLI surface after workspace build (#2563)
+- archive staged active plans (#2537)
+- surface schema generator failures (#2550)
+- advance iOS runner pin (#2557)
+- expose unchecked package build boundary (#2551)
+- prevent branded food label search timeouts (#2549)
+- restore source CLI help (#2533)
+- bound Junction historical fanout
+- drain mailboxes blocked by expired ask content (#2497)
+- make remaining failures actionable (#2466)
+- anonymize feedback member headings
+- keep runner lifecycle ownership explicit
+- clean stale runner resources (#2501)
+- open execution plans before install (#2500)
+- reconcile image continuation sandbox
+- reuse runner after clean preemption
+- keep live workout result fields typed (#2348)
+- close membership selection review gaps
+- clarify private group capability (#2471)
+- preserve context after image completion
+- align group consult tool contract (#2456)
+- simplify exercise routine card authoring (#2331)
+- preserve recent context on resume
+- preserve resident group tool fallback
+- harden heavy runtime lifecycle
+- simplify video reply recovery
+- shorten iMessage preview labels
+- guard full Prisma formatting (#2454)
+- classify runtime command failures (#2330)
+- correct group handoff routing
+- preserve image origin context in cold history
+- serialize video analysis replies
+- project trusted image origin context
+- retain paid wake retry ownership
+- avoid concurrent group funding deadlock (#2345)
+- make event and document errors recoverable (#2210)
+- normalize package Vitest roots (#2447)
+- simplify group name privacy guidance (#2433)
+- retain image request context
+- bind video result to its request
+- start payment and recovery independently
+- reuse completed video analysis result
+- make core runtime errors recoverable (#2212)
+- make device and route errors recoverable (#2211)
+- make knowledge errors recoverable (#2208)
+- close high-cardinality continuation gaps
+- keep video result replies truthful
+- prepare invite identity before transactions (#2352)
+- make sample import errors recoverable (#2206)
+- make clinical errors recoverable (#2209)
+- remove group cardinality cliffs
+- isolate payment email from post effects
+- retain activation handoff across payment retries
+- hand off activation before payment notification
+- compose current start-card guidance
+- preserve duration for metadata-only actions
+- keep activation wake independent of payment email
+- preserve video analysis request fidelity
+- validate preference-only member actions
+- keep Messages workout plans backward compatible
+- preserve Messages workout targets
+
+### Changed
+- Account for Luna priority processing (#2442)
+- Use known context before scheduled automation questions (#2988)
+- Fix wearable notification dedupe conflicts on retry (#2995)
+- Trace shared Vault CLI phases in hosted usage (#2872)
+- Reduce memory during large dashboard replica writes (#2966)
+- Improve Personal Patterns matching and evidence grades (#2990)
+- Resume approved deliveries alongside queued device work (#2982)
+- Retain images for 90 days and videos for 30 days with follow-up lookup (#2972)
+- expect Brotli after restored-vault idle maintenance
+- close mailbox metadata implementation plan
+- sync friction log (#2978)
+- close ledger compression implementation plan
+- close Brotli reader implementation plan
+- align vault layout proof with Brotli archives
+- compress closed ledger shards with Brotli
+- make checkpoint log independence proof deterministic (#2979)
+- reuse document and meal schema harness (#2975)
+- add compatible Brotli ledger readers
+- explain DOM setup before browser-sensitive imports (#2974)
+- link natural replies to its pull request
+- consolidate hosted mailbox input metadata
+- sync friction log (#2923)
+- Align Training proof with the landed main fix
+- Close Patterns diagnostics review and stabilize Training fixture clock
+- Keep Pattern messages conversational without repeated caveats
+- Improve automatic Journal capture, timing, and icons (#2970)
+- Clarify Personal Patterns expiry and record checkpoint wake diagnostics
+- Link Pattern notification changelog to PR
+- Fix Personal Pattern notification wording and links
+- Fix checkpoint test request liveness in outbound Workers (#2965)
+- Preserve hosted media during reversible canonical writes
+- include result retention index in migration inventory
+- Fix hosted checkpoint test hangs and stale integration fixtures (#2963)
+- Fix retained source-scoped wearable history callbacks (#2950)
+- Upgrade runtime Codex CLI to 0.153.4 (#2898)
+- Reduce browser vault dashboard loading work (#2947)
+- align hosted E2E with unified runner allocation (#2951)
+- Fix clean Vercel builds for clinical retrieval tests (#2949)
+- eliminate redundant source admission reads
+- Keep opening replies on Web and save onboarding identity in the background (#2802)
+- Add durable optional follow-ups to private messages (#2916)
+- Preserve the complete architecture document during reconciliation
+- Simplify hot reply admission and restore detailed timing (#2894)
+- replace Labs mocks with composed page journeys
+- replace consent persistence mocks with PostgreSQL proof
+- prove container workspace restore composition
+- use two assistant-engine coverage workers (#2906)
+- replace mocked retrieval coverage with real vault proof
+- Simplify clinical records imports and recovery (#2918)
+- Unify warm and cold runners in one global fleet (#2887)
+- Diagnose device webhook source readiness failures (#2935)
+- Align service discovery with available authentication (#2886)
+- Right-size mobile experiment images (#2910)
+- Defer public authentication loading (#2909)
+- record prepared connection key proof
+- supply OAuth owner hint in control-plane fixture
+- Diagnose post-checkpoint lease version drift (#2932)
+- Prepare Worker dependencies once for no-bundle E2E suites (#2928)
+- Preserve fixture PATH in real-Codex login shells (#2926)
+- Fix design-proof fixture no-reply identity (#2924)
+- sync friction log (#2718)
+- prepare viewport inputs before readiness (#2719)
+- Clarify Linq request attribution evidence
+- Document cancellation compatibility verification owners
+- Join hosted-local setup after hook timeout (#2720)
+- Keep local cancellation flags aligned with production
+- cover supported activity sources in query readers
+- Align composed nutrition and runner proof with deferred tool contracts
+- close artifact recovery implementation
+- Normalize Frog metadata and refresh build assertion (#2904)
+- link artifact recovery to its pull request
+- close activity provider filter execution plan
+- align E2E inventory with deferred cards
+- Align production typecheck heap proof with current build budget
+- Remove workspace build-file locking (#2899)
+- align migration guard with current typecheck heap
+- link activity check-ins to their source PR
+- keep production build proof aligned with its owner
+- align production migration guard with the build heap
+- correct reconnect archive test count
+- record reconnect recovery and proof
+- align build heap assertion with production policy
+- align build heap assertion with production policy
+- align migration guard with typecheck heap
+- make browser session ciphertext tampering deterministic
+- Recover iMessage typing between progress updates (#2895)
+- reduce resident prompts and defer card schemas (#2892)
+- identify failed live Codex turns accurately (#2888)
+- allow bounded post-verification conflict resolution
+- wait for wizard provider selection before confirming
+- prefer same-session ReviewGPT waiting
+- log retire-worktree partial cleanup
+- Instant-start Linq email-handle signups (#2820)
+- include existing Telegram vault tools in E2E expectation
+- fix hosted-local Buildx plugin discovery (#2890)
+- Serialize hosted member seed environments (#2891)
+- Deliver approved files in private Telegram chats (#2875)
+- bypass Node archive relay during workspace restore (#2881)
+- close reminder inspection verification
+- Read bundled experiment support in longitudinal policy proof
+- Align native compaction regression expectations
+- simplify Linq plans and set review minimum to 4.5 minutes (#2859)
+- Align focused tool projection proof fixtures
+- Close nutrition-context proof with characterized route plans
+- record fix verification and release provenance
+- Bound persistent Webpack cache memory during CI builds
+- separate image and video retention from workspace snapshots
+- trim redundant Linq dispatch assertions
+- refresh planner hashes for ZIP guidance
+- Complete nutrition-card journey proof and release note
+- Close experiment support policy validation
+- Keep experiment setup inline and load support policy on demand
+- bound retention blocker lookup
+- Resolve daily nutrition targets in the canonical meal totals read
+- Close validated idle compaction metering plan
+- simplify experiment edit orchestration (#2864)
+- collapse duplicate card validation (#2855)
+- simplify Junction daily aggregation (#2863)
+- converge Linq webhook group planning (#2860)
+- collapse Codex final-response selection (#2858)
+- consolidate local provider completion journaling
+- collapse repeated Linq delivery callback arguments (#2852)
+- consolidate turn-planning predicates (#2854)
+- consolidate hosted group summary response parsing (#2853)
+- Include WHOOP in existing wearable recovery check-ins (#2850)
+- Record video follow-up verification and PR provenance
+- use metadata-only control reads
+- Speed up Temporal E2E process scheduling and Web compilation (#2861)
+- Add focused workout and memory tool projections
+- close vault ZIP verification plan
+- replace simulated subscription claim races with PostgreSQL proof
+- assert experiment UI outcomes through real components
+- remove narrative and incidental source-shape guards
+- Retain videos for follow-up conversation turns
+- Close missing knowledge recovery implementation plan
+- close background eligibility verification plan
+- Document remaining idle metering verification gates
+- bound growth snapshot database reads
+- load workflow-specific skill references
+- Record idle metering validation and changelog provenance
+- Meter idle compaction with native provider usage
+- reduce container CPU work and guard one-vCPU latency (#2836)
+- close Astra Edge implementation review
+- Document missing wiki recovery outcome and completion proof
+- Handle missing knowledge pages and classify bounded lookup failures
+- remove base reconciliation retry limits
+- Link background usage change to its review
+- Avoid model work for empty background checks
+- cap ReviewGPT at three rounds (#2846)
+- collapse repeated dynamic-tool dispatch mechanics (#2843)
+- unify hosted foreground continuation loop (#2841)
+- collapse device event reconciliation bookkeeping (#2840)
+- record Astra release verification
+- Simplify Junction timeseries identity construction (#2839)
+- collapse repeated mailbox maintenance branches (#2838)
+- close idle mailbox ownership publication plan
+- refine Astra model description
+- Fix native tool-result handling and live journey assertions (#2835)
+- focus PR review on realistic bugs and complexity collapse (#2832)
+- index mailbox progress evidence boundaries
+- simplify Astra artwork to a floating star
+- Add private Apple Health recovery check-ins after stale data (#2829)
+- close mailbox scheduling implementation plan
+- reuse timeseries source admission read (#2834)
+- Allow Temporal conversation wakes to claim standby runners (#2822)
+- use ReviewGPT 0.5.145 with GPT-6 Pro (#2828)
+- plan bounded mailbox scheduling ownership
+- close Astra Max implementation and review evidence
+- simplify developer agent guidance (#2821)
+- Preserve device-sync progress in bounded metadata (#2824)
+- restore Starter billing browser fixture readiness (#2825)
+- persist Astra state in the live selection fixture
+- link Astra changelog to its pull request
+- Add fifty comparison guides for agents, devices, and longevity apps (#2819)
+- Route achievable outcome help through public Goals (#2814)
+- Restore WHOOP OAuth capacity on Connect (#2811)
+- cap ReviewGPT rounds at three
+- extend Linq scenario startup budget (#2806)
+- remove Blacksmith runner paths (#2798)
+- Exclude Linq canary from reply latency alerts (#2803)
+- Retire biweekly product notes automation (#2795)
+- expect percent-encoded sms bodies on the Training page
+- Add messaging health comparison pages (#2794)
+- Upgrade hosted video analysis to Gemini 3.8 Flash (#2789)
+- Fix stopped standby reallocation (#2785)
+- stabilize cleanup readiness
+- isolate ReviewGPT config harness
+- complete retired wake remediation
+- Preserve assistant context across unrelated replies (#2781)
+- Reduce device-sync container idle time (#2741)
+- follow current OpenAPI assertion
+- align public product search defaults
+- align mailbox progress status
+- Add a source-backed comparison library (#2619)
+- cut group reply preparation latency (#2762)
+- tighten goal hero copy, card hover, and guide footer
+- track retired wake review remediation
+- Fix direct email signup welcome retries (#2764)
+- center the goals search and give sources publisher labels
+- rewrite the remaining strength and life-stage guides
+- rewrite cardio, strength, mind, biomarker, and life-stage guides
+- Add Food Label Lab comparison and WebMCP (#2703)
+- record retained sync recovery
+- Preserve exact standby allocation diagnostics (#2766)
+- Choose useful times for vague reminders (#2769)
+- Refine Pattern labels and Journal-backed insights (#2776)
+- Clean up Journal and Personal Patterns presentation (#2745)
+- assert system mailbox lane consumption (#2773)
+- await mailbox consumption (#2771)
+- Fix Telegram replacement and add linked-account removal (#2746)
+- Simplify operator diagnostics to one read-only turn (#2753)
+- close foreground recovery plan (#2758)
+- align foreground completion timeout (#2759)
+- update ReviewGPT to 0.5.143 (#2751)
+- target standby runtime shutdown owner (#2752)
+- close address-book pool timeout plan (#2750)
+- Fix hosted completion recovery and standby handoffs (#2738)
+- Suppress expected hosted latency contention warnings (#2743)
+- parallelize Host Support release verification (#2739)
+- use privacy-safe GitHub CLI attachments (#2740)
+- Protect standby shells for foreground starts (#2712)
+- Fix exact hosted runtime owner-release forwarding (#2730)
+- require approval for Cloudflare rollbacks
+- note clearer journal details
+- guard group journal consent schema
+- hold current checkpoint boundary (#2722)
+- close group reply ordering fix
+- join collapse invocation cleanup (#2715)
+- Compact routine wearable activity results (#2674)
+- sync friction log (#2716)
+- clarify exact committer paths (#2713)
+- coalesce background canonical checkpoints (#2706)
+- Enforce hosted web-control route coverage (#2711)
+- sync friction log (#2696)
+- prove reported metric share refresh
+- Keep untrackable Linq replies retryable (#2645)
+- note ordered background recovery
+- Make onboarding archive proof durable (#2704)
+- log ReviewGPT retrospective friction
+- batch verbose runtime logs (#2697)
+- simplify Journal and Patterns branch
+- rewrite sleep and nutrition goal guides in plain language
+- align interactive preview ports
+- make interactive local preview durable
+- wire Graft into coding agents
+- require consumer-first protocol rollouts
+- reuse current snapshot ref (#2698)
+- note ordered background recovery
+- note grouped rapid replies
+- keep preflight complexity flat
+- note background recovery
+- log retire-worktree partial cleanup
+- simplify goal pages and flatten category directories
+- sync friction log (#2686)
+- update review-gpt to 0.5.142 (#2660)
+- Fix operator diagnostic workspace reads (#2675)
+- type public auth layout mock
+- expose latency failure dimensions (#2687)
+- Split standby container capacity (#2680)
+- align goal setup routing assertion
+- Verify runtime recheck recovery from durable progress (#2676)
+- cover pending cron transfer edge
+- align typed error release assertions
+- sync friction log (#2502)
+- reduce public goal complexity
+- refresh CLI skill hash
+- Keep historical meal closeouts silent (#2670)
+- Route contextual reminders to Terra by default (#2673)
+- Use bounded saved context safely (#2621)
+- Restore shared workout summaries after sync (#2658)
+- document local diagnostics access (#2671)
+- cover Cloudflare dependency patch
+- guard same-owner recheck bursts
+- Update faster wake-up changelog attribution
+- Stop Vercel builds writing unused Webpack cache (#2664)
+- Preserve hosted E2E retries after Cloudflare port races (#2667)
+- advance compatibility controller
+- note command input recovery
+- advance compatibility controller
+- Speed up Cloudflare container readiness probes
+- Fix initial device-sync wake convergence (#2581)
+- Fix checkpoint wake liveness races (#2659)
+- retire legacy private-media URLs (#2608)
+- remove unused gateway projection cache (#2602)
+- Retire persisted screen-inspection handoff compatibility (#2609)
+- Suppress Stripe renewal payment alerts (#2574)
+- remove unreachable prototype residue (#2605)
+- Remove unused assistant vault overview (#2604)
+- remove unused hosted request client (#2606)
+- remove stale PR 1498 workflow (#2607)
+- Make goal ID updates fail closed (#2610)
+- Simplify CLI surface artifact assembly (#2611)
+- Add bounded runtime rechecks to ops maintenance (#2657)
+- remove duplicate terminal logging (#2603)
+- unify provider connection metadata (#2594)
+- add cyclomatic complexity ratchet (#2650)
+- Fix restored mailbox progress convergence (#2646)
+- archive runtime progress remediation plan (#2654)
+- Remove specialist audit requirements from the completion workflow (#2522)
+- align system progress migration baseline
+- advance retained-reader controller (#2649)
+- advance compatibility controller (#2648)
+- Prevent non-progress runtime wake storms (#2600)
+- Refactor assistant route turn planning complexity (#2631)
+- Retire promoted inbox document copies (#2623)
+- simplify dynamic tool dispatch (#2635)
+- simplify Linq webhook planner (#2634)
+- simplify settings page assembly (#2633)
+- simplify usage top-up dialog (#2632)
+- reduce hosted job complexity (#2630)
+- pin current-reader hotfix (#2644)
+- pin bounded readmission worker (#2640)
+- archive deleted runtime quiescence rollout (#2643)
+- Durably retire deleted hosted runtimes (#2637)
+- advance compatibility controller (#2641)
+- stabilize runner deadline cleanup fixture
+- validate packed goal artifacts
+- Split hosted retention into four Vercel cron owners (#2613)
+- expect the resolved prompt instant
+- note local current-time replies
+- Teach Murph to recognize emerging health behaviors (#2626)
+- Correct AI usage accounting and remove duplicate attachment evidence (#2618)
+- align abort lifecycle expectations (#2627)
+- index metric projection (#2598)
+- advance compatibility controller (#2622)
+- advance compatibility controller (#2620)
+- define goal lineage rollout floor
+- linearize JSON serialization (#2593)
+- advance compatibility controller (#2592)
+- Start Linq shell prewarm during message routing (#2584)
+- Add hosted workspace failure telemetry (#2582)
+- advance compatibility controller (#2589)
+- Fix saved workout duration defaults (#2523)
+- Page operators on OpenAI authorization failures (#2570)
+- advance compatibility controller (#2587)
+- advance compatibility controller (#2585)
+- authorize current private controller (#2583)
+- exercise hosted permission profiles (#2543)
+- Fix cold runner rollout convergence (#2575)
+- Reduce assistant memory result size (#2578)
+- upgrade Codex CLI to 0.151.0 (#2558)
+- classify reconciliation failures (#2579)
+- Recover and diagnose Browser Vault timeouts (#2515)
+- fix CLI schema dependency preparation (#2564)
+- Bound CLI artifact generation (#2556)
+- Restore group idle compaction threshold to 50k (#2573)
+- Keep routine onboarding progress silent (#2571)
+- Fix release CLI manifest packaging timeout (#2552)
+- keep sync recovery copy outcome-focused (#2576)
+- own local crypto for group reply proof (#2562)
+- require explicit database reuse (#2535)
+- Prevent malformed automation lookup retries (#2544)
+- Fix runner bundle budget contract after device-sync rollout (#2572)
+- Fix retained device-sync wake starvation (#2568)
+- Classify hosted startup confirmation failures (#2569)
+- Reserve progress updates for meaningful waits (#2553)
+- gate calendar link assertions (#2565)
+- Raise group idle compaction threshold to 100k (#2547)
+- Add stateless calendar links (#2508)
+- Trace hosted container cold-start readiness (#2541)
+- Reduce automation inventory payloads (#2531)
+- document try-it schema (#2540)
+- rotate production iOS canary pin (#2538)
+- Add assistant notification validation telemetry (#2529)
+- close Junction historical fanout
+- correlate Linq canary replies by send time (#2536)
+- Reject unavailable joined-group handoff routes (#2507)
+- prove historical queue rotation
+- remove Codex Live false failures (#2503)
+- repair native iOS canary credential binding (#2527)
+- add production iMessage canary (#2510)
+- note faster wearable history
+- Hot-layer the Codex app-server runtime (#2528)
+- Trace accepted input execution lifecycle (#2461)
+- Require phone or Telegram during onboarding (#2521)
+- Consolidate device sync changelog (#2530)
+- Improve progress latency guidance and diagnostics (#2509)
+- Fix system mailbox import checkpoint handoff (#2526)
+- Compress closed event history during idle checkpoints (#2470)
+- add native canary manual recovery (#2525)
+- Remove duplicate Vercel anomaly email relay (#2520)
+- Surface automatic meal capture on first tracking request (#2505)
+- Fix selected portraits in Settings contact cards (#2517)
+- simplify runner write-fence token (#2474)
+- Simplify assistant response guards (#2476)
+- remove unrelated cloudflare changes
+- Keep Codex process stable across thread config (#2506)
+- Keep Linq routing on one database lock order (#2400)
+- reconcile thin runner with current main
+- Simplify Environment mailbox scheduling (#2448)
+- Fix scheduled exercise reminder guidance (#2504)
+- Alert operators on Vercel usage anomalies (#2489)
+- Keep Stripe Customer calls outside database locks (#2351)
+- Attribute Browser Vault refresh timeouts by stage (#2486)
+- Attribute container-busy retries by stage (#2499)
+- sync friction log (#2490)
+- prove image continuation end to end
+- Retire drained Linq compatibility fields (#2478)
+- Remove duplicate hosted response attachment guard (#2473)
+- Simplify assistant tool boundaries (#2477)
+- Start recurring reminders with the saved cue (#2472)
+- Unblock hosted device catch-up and bound Junction retries (#2334)
+- Throttle native E2E canaries to changed main every six hours (#2469)
+- prohibit unbounded agent file discovery (#2488)
+- install ReviewGPT 0.5.139 (#2480)
+- remove duplicate web handoff harness
+- Retire generated-image upload tombstone (#2475)
+- close group membership selection plan
+- align group parser fixtures with membership IDs
+- Classify pause-tool schema rejections (#2487)
+- Simplify specialist ReviewGPT proof review (#2468)
+- Keep exercise catalog IDs private and attach reviewed media (#2467)
+- update membership-id group tool fixtures
+- sync friction log (#2482)
+- Fix hosted group private handoffs
+- Reference membership selection changelog source
+- Select joined groups by membership ID
+- compact member memory results
+- Continue onboarding after wearable connection deferral (#2457)
+- sync friction log (#2465)
+- Improve appointment memory reuse and browser recovery (#2443)
+- Instrument hosted post-import cold-start latency (#2087)
+- compact rebuildable storage (#2427)
+- skip current runner schema scans (#2462)
+- trace UserRunner activation (#2460)
+- Let members target joined groups by participants (#2385)
+- Complete response card latest-context fix
+- Cover stale response card requests
+- Fix self-authored Linq mailbox acknowledgement
+- align video reply ownership
+- sync friction log (#2449)
+- close group private handoff repair plan
+- Document steered response card recovery
+- align preview fallback contract
+- Fix response cards after live steering
+- ratchet lifecycle bundle total
+- Add food timeout phase telemetry (#2446)
+- record handoff review retrospective
+- Keep Ops App Review provider calls outside transactions (#2382)
+- align event fixtures with recovery contracts
+- align video failure copy
+- close payment notification plan
+- add group handoff changelog
+- fix group private handoff continuity
+- split thin runner boot kernel
+- Remove passkey requirement from account deletion (#2435)
+- align integration fixtures with runtime state (#2445)
+- Repair real-Codex assistant fixtures (#2425)
+- sync friction log (#2431)
+- align live Codex feature flags with hosted runs (#2436)
+- note generated request continuity
+- Fix voice memo evidence admission race (#2413)
+- allow repeated local video calls
+- admit vault cursor migration
+- Speed up Luna first replies (#2437)
+- close group cardinality plan
+- Fix meal-photo enrollment crypto lock boundary (#2365)
+- Fix stuck physical-note recovery (#2343)
+- Fix hosted integration convergence (#2424)
+- Keep minor ReviewGPT concerns non-blocking (#2407)
+- Preserve participant labels in group health updates (#2414)
+- sync friction log (#2423)
+- Enable group video analysis for any participant (#2371)
+- Speed up the first iMessage reply (#2173)
+- sync friction log (#2402)
+- fix assistant video result handling
+- record video analysis review evidence
+- add prewarm lead bucket report
+- prove group contract rotation
+- Route named group handoffs directly
+- Simplify exact handoff replay
+- Document named group routing recovery
+- Fix named group routing beyond list bound
+- record video provider input impact
+- announce detailed video analysis
+- add workout editor changelog
+
 ## [1.3.2] - 2026-08-27
 
 ### Added

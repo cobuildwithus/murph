@@ -381,10 +381,12 @@ describe("hosted local Telegram auto-reply e2e", () => {
       exerciseRoutineResponseCardAvailable: true,
       imessageContactAvailable: true,
       messageTargetingAvailable: true,
+      pendingVaultFilesAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
       responseCardAvailable: true,
       telegramRichContentResponseCardAvailable: true,
+      vaultFileSendAvailable: true,
     });
 
     const reactionRequests = await requireTelegramStub().waitForRequestCount({

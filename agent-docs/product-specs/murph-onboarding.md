@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-08-11
+Last verified: 2026-09-05
 
 ## Product Decision
 
@@ -119,8 +119,12 @@ privacy, authorization, or provider boundaries.
   product truth.
 - Route useful facts to their canonical owner in the same turn they are
   learned. The parent normally saves the smallest truthful fact or raw source
-  before a visible reply. For the dense foundation memo, the accepted current
-  input is the durable raw source and three bounded children own the independent
+  before a visible reply. At the visible minimal-identity answer, one native
+  one-shot child saves supplied name and demographics from the durably accepted
+  input while the root asks the aspiration question. The root retains the
+  early-stall check-in and saves identity itself if spawning is unavailable.
+  Never claim a child save before canonical readback. For the dense foundation
+  memo, the accepted current input is the durable raw source and three bounded children own the independent
   movement/protocol, supplement, and medical/safety persistence families. Use
   the resume snapshot to avoid repeating known facts.
 - Hosted Codex admits root plus three concurrent V2 children. Every child is a
@@ -130,14 +134,27 @@ privacy, authorization, or provider boundaries.
   A spawn proves work started, not that writes completed. Claim saved or
   enriched details only after canonical readback. Do not add a queue or second
   state owner.
-- The onboarding skill owns conversation policy. The system-prompt overlay
-  routes the open lifecycle into that skill, and the managed automation resumes
-  it when a useful continuation exists.
+- The injected onboarding instructions own the visible opening exchanges
+  through the first aspiration question, including identity persistence and
+  the early-stall check-in. No skill or resume read is needed for those proven
+  exchanges. The onboarding skill owns ambiguous/resumed and later-stage
+  conversation policy; the managed automation resumes it when useful.
+- For eligible new direct text-only iMessage conversations, the existing Web
+  Luna path may send at most two replies: the welcome and the bundled identity
+  question. The second requires the immediately preceding confirmed canonical
+  welcome and exactly one earlier opening delivery. Resolve its member through
+  the existing direct identity/home-chat lookup; a thread-container route
+  excludes this private-chat path. Existing delivery rows
+  enforce the cap under the chat lock; there is no stage counter. Supplied
+  identity, a skip, or a concrete request goes directly to the normal runtime.
+  Existing encrypted conversation import carries both sides and suppresses
+  duplicate replies. Container/process warmup retains its existing owner; this
+  flow adds no speculative model turn or preparation mailbox.
 - The skill uses one package-owned progressive-disclosure asset. Its top-level
   `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
   bounded resume check, immediate-need override, relationship promise, exact
-  welcome, and minimal-identity checkpoint. Aspiration/foundation/delegation,
-  persistence/recovery/follow-up, and return/launch/completion each live in one
+  welcome. The injected opening owner holds the minimal-identity checkpoint.
+  Aspiration/foundation/delegation, persistence/recovery/follow-up, and return/launch/completion each live in one
   directly referenced file under the same skill asset. A rule has one owner;
   references do not restate the top-level policy or each other.
 - A fresh greeting or vague first message reads only the compact top-level

@@ -124,6 +124,7 @@ function sanitizeStoredDeviceSyncMetadataValue(value: unknown): DeviceSyncMetada
 
 export function sanitizeStoredDeviceSyncMetadata(
   value: Record<string, unknown> | null | undefined,
+  priorityKeys: readonly string[] = [],
 ): Record<string, DeviceSyncMetadataScalar> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -131,7 +132,12 @@ export function sanitizeStoredDeviceSyncMetadata(
 
   const sanitized: Record<string, DeviceSyncMetadataScalar> = {};
 
-  for (const [rawKey, rawValue] of Object.entries(value)) {
+  const entries = Object.entries(value);
+  if (priorityKeys.length > 0) {
+    const priority = new Set(priorityKeys);
+    entries.sort(([left], [right]) => Number(priority.has(right)) - Number(priority.has(left)));
+  }
+  for (const [rawKey, rawValue] of entries) {
     if (Object.keys(sanitized).length >= DEVICE_SYNC_METADATA_MAX_ENTRIES) {
       break;
     }
@@ -157,27 +163,23 @@ export function sanitizeStoredDeviceSyncMetadata(
 export function mergeStoredDeviceSyncMetadataPatch(
   existing: Record<string, unknown> | null | undefined,
   patch: Record<string, unknown> | null | undefined,
+  priorityKeys: readonly string[] = [],
 ): Record<string, DeviceSyncMetadataScalar> {
   if (!patch) {
-    return sanitizeStoredDeviceSyncMetadata(existing);
+    return sanitizeStoredDeviceSyncMetadata(existing, priorityKeys);
   }
 
-  const sanitizedPatch = sanitizeStoredDeviceSyncMetadata(patch);
-  const sanitizedExisting = sanitizeStoredDeviceSyncMetadata(existing);
-  const merged: Record<string, DeviceSyncMetadataScalar> = {};
+  const sanitizedPatch = sanitizeStoredDeviceSyncMetadata(patch, priorityKeys);
+  const sanitizedExisting = sanitizeStoredDeviceSyncMetadata(existing, priorityKeys);
+  const merged = { ...sanitizedPatch };
 
-  for (const [key, value] of Object.entries(sanitizedPatch)) {
-    merged[key] = value;
-  }
-
+  // The caller owns which progress fields must survive the bounded envelope.
+  // Patch values still win, including an explicit null clearing tombstone.
   for (const [key, value] of Object.entries(sanitizedExisting)) {
-    if (Object.keys(merged).length >= DEVICE_SYNC_METADATA_MAX_ENTRIES) {
-      break;
-    }
-    if (!Object.prototype.hasOwnProperty.call(merged, key)) {
+    if (!Object.hasOwn(merged, key)) {
       merged[key] = value;
     }
   }
 
-  return merged;
+  return sanitizeStoredDeviceSyncMetadata(merged, priorityKeys);
 }

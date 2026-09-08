@@ -107,7 +107,7 @@ const replyMocks = vi.hoisted(() => ({
   prepareAssistantAutoReplyInput: vi.fn(),
   readTelegramAutoReplyMetadataFromAssistantInput: vi.fn(),
   renderAssistantInputAttachmentDescriptorPromptSection: vi.fn(),
-  resolveAssistantSession: vi.fn(),
+  lookupAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
   writeAssistantChatErrorArtifacts: vi.fn(),
 }))
@@ -241,7 +241,7 @@ vi.mock('../src/assistant/store.ts', () => ({
   listAssistantTranscriptEntries: replyMocks.listAssistantTranscriptEntries,
   readAssistantAutomationState: runLoopMocks.readAssistantAutomationState,
   redactAssistantDisplayPath: runLoopMocks.redactAssistantDisplayPath,
-  resolveAssistantSession: replyMocks.resolveAssistantSession,
+  lookupAssistantSession: replyMocks.lookupAssistantSession,
   resolveAssistantStatePaths: runLoopMocks.resolveAssistantStatePaths,
   saveAssistantAutomationState: runLoopMocks.saveAssistantAutomationState,
 }))
@@ -1239,7 +1239,7 @@ beforeEach(() => {
         userMessageContent: null,
       }
     })
-  replyMocks.resolveAssistantSession.mockReset().mockRejectedValue(
+  replyMocks.lookupAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
     }),
@@ -8146,7 +8146,7 @@ describe('assistant auto-reply runtime', () => {
 
   it('skips an assistant echo when the provider timestamp precedes the transcript write', async () => {
     const message = 'How many reps did you get?'
-    replyMocks.resolveAssistantSession.mockResolvedValue({
+    replyMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:00:01.000Z',
@@ -8214,7 +8214,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('skips self-authored image captions whose transcript includes the image-presence marker', async () => {
-    replyMocks.resolveAssistantSession.mockResolvedValue({
+    replyMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:00:01.000Z',
@@ -8285,7 +8285,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('replies to self-authored text that only matches an older transcript entry', async () => {
-    replyMocks.resolveAssistantSession.mockResolvedValue({
+    replyMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:00:04.000Z',
@@ -8357,7 +8357,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('suppresses self-authored echoes from confirmed cross-session outbox history', async () => {
-    replyMocks.resolveAssistantSession.mockResolvedValue({
+    replyMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:00:00.000Z',
@@ -8434,7 +8434,7 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('suppresses Linq self-authored echoes by provider message id after thread materialization', async () => {
-    replyMocks.resolveAssistantSession.mockResolvedValue({
+    replyMocks.lookupAssistantSession.mockResolvedValue({
       created: false,
       session: {
         lastTurnAt: '2026-04-08T00:00:00.000Z',

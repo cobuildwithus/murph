@@ -409,7 +409,49 @@ test("hosted Linq typing allows only one active session per target", async () =>
   });
   expect(restartedHandle).toBeDefined();
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(2);
+  await handle?.stop();
+  expect(stop).toHaveBeenLastCalledWith({ providerStop: false });
+  await expect(typing.startLinqTyping?.({ target: "chat_123" })).resolves.toBeUndefined();
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(2);
   await restartedHandle?.stop();
+});
+
+test("expired Linq typing cleanup cannot stop or release a successor claim", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-07T13:00:00.000Z"));
+  const stop = vi.fn(async () => undefined);
+  mocks.startLinqTypingIndicator.mockResolvedValue({
+    stop,
+  });
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: buildLinqRouteAuthority("chat_123"),
+        service: null,
+        target: "chat_123",
+        threadIsDirect: null,
+      },
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  const oldHandle = await typing.startLinqTyping?.({ target: "chat_123" });
+  vi.setSystemTime(new Date("2026-07-07T13:21:00.000Z"));
+  const newHandle = await typing.startLinqTyping?.({ target: "chat_123" });
+  expect(newHandle).toBeDefined();
+  await oldHandle?.stop();
+  expect(stop).toHaveBeenLastCalledWith({ providerStop: false });
+  await expect(typing.startLinqTyping?.({ target: "chat_123" })).resolves.toBeUndefined();
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(2);
+  await newHandle?.stop();
 });
 
 test("hosted Linq typing suppresses restarts after a max-length session", async () => {
@@ -449,6 +491,9 @@ test("hosted Linq typing suppresses restarts after a max-length session", async 
     target: "chat_123",
   })).resolves.toBeUndefined();
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(1);
+
+  vi.setSystemTime(new Date("2026-07-07T12:14:59.000Z"));
+  await handle?.stop(); // Repeated cleanup must not extend the original cooldown.
 
   vi.setSystemTime(new Date("2026-07-07T12:15:02.000Z"));
   const restartedHandle = await typing.startLinqTyping?.({

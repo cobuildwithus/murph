@@ -75,6 +75,20 @@ describe("container release receipt", () => {
   });
 
   describe("Wrangler action evidence", () => {
+    it("records an explicitly skipped application rollout as unchanged", () => {
+      expect(parseWranglerContainerActions([
+        "╭ EDIT worker-active",
+        "Container configuration diff",
+        "Skipping application rollout",
+        "Modified application worker-smoke",
+        "no changes worker-standby",
+      ].join("\n"), expectedContainers)).toEqual([
+        { ...expectedContainers[0], action: "unchanged" },
+        { ...expectedContainers[1], action: "modified" },
+        { ...expectedContainers[2], action: "unchanged" },
+      ]);
+    });
+
     it("strips terminal controls and returns exactly one sorted action per expected app", () => {
       const output = [
         "\u001B[32m╰ Created application worker-smoke (Application ID: raw-provider-id)\u001B[0m",
@@ -124,6 +138,11 @@ describe("container release receipt", () => {
       expect(parseWranglerWorkerVersionId(
         "Uploaded hosted-worker\n\u001B[32mCurrent Version ID: version-123\u001B[0m\n",
       )).toBe("version-123");
+    });
+
+    it("reads the pinned Worker-only upload receipt", () => {
+      expect(parseWranglerWorkerVersionId("Uploaded hosted-worker\nWorker Version ID: version-uploaded\n")).toBe("version-uploaded");
+      expect(() => parseWranglerWorkerVersionId("Worker Version ID: uploaded\nCurrent Version ID: another\n")).toThrow("exactly one");
     });
 
     it.each([

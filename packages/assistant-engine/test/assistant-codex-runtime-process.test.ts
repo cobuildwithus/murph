@@ -1,4 +1,5 @@
 import {
+  cliTimingLaunchArgs,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MockChildProcess,
   asRecord,
@@ -26,6 +27,8 @@ import {
 } from "./assistant-codex-runtime.harness.ts";
 
 import { tmpdir } from 'node:os'
+import { CLI_TIMING_EVENT_METHOD, emptyCliTiming } from '@murphai/runtime-state/cli-timing'
+import * as cliTimingTransport from '../src/assistant-codex/cli-timing.ts'
 import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
@@ -49,7 +52,62 @@ import {
   executeCodexAssistantTurnAttemptFromInput,
 } from '../src/assistant/codex-runtime.ts'
 
-describe('assistant codex runtime', () => {it('coalesces process-only preinitialization and keeps the first foreground turn cold-scoped', async () => {
+describe('assistant codex runtime', () => {
+  it.each(['empty exit', 'native RPC error'] as const)(
+    'preserves %s evidence without diagnostic-only provider activity', async (failure) => {
+      const workingDirectory = await createTempDir('assistant-codex-cli-timing-startup-work-')
+      const codexHome = await createTempDir('assistant-codex-cli-timing-startup-home-')
+      const diagnostic = { method: CLI_TIMING_EVENT_METHOD,
+        params: { turnId: null, timing: emptyCliTiming() } }
+      // Make a completed diagnostic deterministic, even when loopback bind is
+      // unavailable. Real sockets are exercised by cli-timing-transport.test.ts.
+      // The real receiver closes its window once. Catch and finally may both
+      // finish cleanup, but only the first close can return a diagnostic.
+      const finishTiming = vi.fn((): unknown | null => null).mockReturnValueOnce(diagnostic)
+      const receiver = vi.spyOn(cliTimingTransport, 'createCodexCliTimingReceiver').mockReturnValue({
+        launchArgs: [], begin: () => finishTiming, close: () => {},
+      })
+      const nativeEvents: unknown[] = []
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            if (failure === 'empty exit') {
+              // Process exit with NO stdout/RPC notification is the empty case.
+              child.emit('exit', 1, null)
+              child.emit('close', 1, null)
+            } else {
+              const event = { id: initialize.id,
+                error: { code: -32603, message: 'synthetic initialization failure' } }
+              nativeEvents.push(event)
+              child.stdout.write(jsonLine(event))
+            }
+          })()
+        })
+        return child
+      })
+      try {
+        const result = await executeCodexAssistantTurnAttempt({
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli', codexHome, approvalPolicy: 'never', sandbox: 'workspace-write',
+          }),
+          workingDirectory, env: { PATH: '/custom/bin' },
+          dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+          systemPrompt: 'Synthetic startup test.', userPrompt: 'Synthetic startup test.',
+        })
+        expect(result.ok).toBe(false)
+        if (result.ok) throw new Error('Expected the synthetic startup to fail')
+        expect(finishTiming).toHaveReturnedWith(diagnostic)
+        expect(finishTiming).toHaveReturnedWith(null)
+        expect(result.rawEvents).toEqual(failure === 'empty exit' ? [] : [...nativeEvents, diagnostic])
+        expect(result.metadata).toMatchObject({ executedToolCount: 0, providerActionCount: 0 })
+        if (failure === 'empty exit') expect(result.usage).toBeUndefined()
+      } finally { receiver.mockRestore() }
+    },
+  )
+
+  it('coalesces process-only preinitialization and keeps the first foreground turn cold-scoped', async () => {
     const workingDirectory = await createTempDir('assistant-codex-preinitialize-work-')
     const codexHome = await createTempDir('assistant-codex-preinitialize-home-')
     const children: MockChildProcess[] = []
@@ -943,7 +1001,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
       const child = new MockChildProcess()
       spawnedChildren.push(child)
 
-      expect(args).toEqual(['app-server'])
+      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         cwd: tmpdir(),
         env: {
@@ -2360,7 +2418,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     },
   )
 
-  it('compacts current-shape group usage at the 50k boundary and preserves attribution', async () => {
+  it.each([false, true])('compacts group usage at the boundary with measured evidence=%s', async (measured) => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -2428,11 +2486,24 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
-          writeContextCompactionStarted({
-            child,
-            itemId: 'context-compact-provider-usage',
-            threadId,
-          })
+          const rawUsage = { inputTokens: 100, cachedInputTokens: 50, cacheWriteInputTokens: 10,
+            outputTokens: 20, reasoningOutputTokens: 5, totalTokens: 120 }
+          const raw = { method: 'rawResponse/completed', params: {
+            threadId, turnId: 'turn_idle_compact', responseId: 'response_compact_1', usage: rawUsage,
+          } }
+          // Before-start and unrelated completions must never enter this operation.
+          child.stdout.write(jsonLine(raw))
+          child.stdout.write(jsonLine({ method: 'item/started', params: {
+            threadId, turnId: 'turn_idle_compact',
+            item: { id: 'context-compact-provider-usage', type: 'contextCompaction' },
+          } }))
+          child.stdout.write(jsonLine({ ...raw, params: { ...raw.params, threadId: 'child_fixture' } }))
+          child.stdout.write(jsonLine({ ...raw, params: { ...raw.params, turnId: 'old_compact' } }))
+          if (measured) {
+            child.stdout.write(jsonLine(raw))
+            child.stdout.write(jsonLine(raw))
+            child.stdout.write(jsonLine({ ...raw, params: { ...raw.params, responseId: 'response_compact_2' } }))
+          }
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2521,12 +2592,11 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
       kind: 'compacted',
       threadContextTokensBefore: 50_000,
       threadId,
-      usage: {
-        cachedInputTokens: null,
-        inputTokens: 50_000,
-        outputTokens: null,
-        source: 'estimated',
-        totalTokens: 50_000,
+      usage: measured ? {
+        cachedInputTokens: 100, inputTokens: 200, outputTokens: 40, source: 'measured', totalTokens: 240,
+        responses: [expect.objectContaining({ responseId: 'response_compact_1' }), expect.objectContaining({ responseId: 'response_compact_2' })],
+      } : {
+        cachedInputTokens: null, inputTokens: 50_000, outputTokens: null, source: 'estimated', totalTokens: 50_000,
       },
     })
     expect(

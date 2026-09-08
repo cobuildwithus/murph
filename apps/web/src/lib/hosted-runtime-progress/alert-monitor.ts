@@ -409,11 +409,11 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         lane_boundary.lane,
         lane_boundary.durable_high_water_seq,
         lane_boundary.effective_consumed_seq,
+        pending_head.lane_seq AS head_lane_seq,
         pending_head.ai_usage_denied_at AS head_usage_denied_at,
         pending_head.created_at AS head_created_at,
         pending_head.id AS head_item_id,
         pending_head.kind AS head_kind,
-        pending_head.lane_seq AS head_lane_seq,
         pending_head.pending_count
       FROM lane_boundary
       JOIN LATERAL (
@@ -444,6 +444,26 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     workspace_evidence AS (
       SELECT
         lagging_lane.*,
+        CASE
+          WHEN jsonb_typeof(
+            workspace.redacted_status_json -> 'hostedMailboxSystemImportedSeq'
+          ) = 'string'
+            AND (
+              workspace.redacted_status_json ->> 'hostedMailboxSystemImportedSeq'
+            ) ~ '^(0|[1-9][0-9]{0,18})$'
+            AND (
+              length(
+                workspace.redacted_status_json ->> 'hostedMailboxSystemImportedSeq'
+              ) < 19
+              OR (
+                workspace.redacted_status_json ->> 'hostedMailboxSystemImportedSeq'
+              ) <= '9223372036854775807'
+            )
+            THEN (
+              workspace.redacted_status_json ->> 'hostedMailboxSystemImportedSeq'
+            )::bigint
+          ELSE NULL
+        END AS workspace_system_imported_seq,
         workspace.checkpointed_at AS workspace_checkpointed_at,
         workspace.next_default_processing_wake_at
           AS workspace_next_default_processing_wake_at,
@@ -452,32 +472,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         workspace.next_wake_at AS workspace_next_wake_at,
         workspace.next_wake_reason AS workspace_next_wake_reason,
         workspace.system_mailbox_progress_generation
-          AS workspace_system_mailbox_progress_generation,
-        CASE
-          WHEN jsonb_typeof(
-            workspace.redacted_status_json
-              -> 'hostedMailboxSystemImportedSeq'
-          ) = 'string'
-            AND (
-              workspace.redacted_status_json
-                ->> 'hostedMailboxSystemImportedSeq'
-            ) ~ '^(0|[1-9][0-9]{0,18})$'
-            AND (
-              length(
-                workspace.redacted_status_json
-                  ->> 'hostedMailboxSystemImportedSeq'
-              ) < 19
-              OR (
-                workspace.redacted_status_json
-                  ->> 'hostedMailboxSystemImportedSeq'
-              ) <= '9223372036854775807'
-            )
-            THEN (
-              workspace.redacted_status_json
-                ->> 'hostedMailboxSystemImportedSeq'
-            )::bigint
-          ELSE NULL
-        END AS workspace_system_imported_seq
+          AS workspace_system_mailbox_progress_generation
       FROM lagging_lane
       LEFT JOIN hosted_workspace AS workspace
         ON workspace.user_id = lagging_lane.user_id
@@ -490,32 +485,8 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         COALESCE(
           evidence.has_pre_denial_evidence,
           FALSE
-        ) AS has_pre_denial_evidence,
-        first_unimported_system.created_at
-          AS first_unimported_system_created_at
+        ) AS has_pre_denial_evidence
       FROM workspace_evidence
-      LEFT JOIN LATERAL (
-        SELECT mailbox_item.created_at
-        FROM hosted_mailbox_item AS mailbox_item
-        WHERE mailbox_item.user_id = workspace_evidence.user_id
-          AND mailbox_item.lane = 'system'
-          AND mailbox_item.lane_seq
-            > workspace_evidence.workspace_system_imported_seq
-          AND mailbox_item.created_at > ${input.retainedAfter}
-          AND (
-            mailbox_item.expires_at IS NULL
-            OR mailbox_item.expires_at > ${input.now}
-          )
-        ORDER BY mailbox_item.lane_seq ASC
-        LIMIT 1
-      ) AS first_unimported_system ON (
-        workspace_evidence.lane = 'system'
-        AND workspace_evidence.head_kind = 'device-sync.wake'
-        AND workspace_evidence.workspace_system_imported_seq
-          >= workspace_evidence.head_lane_seq
-        AND workspace_evidence.workspace_system_imported_seq
-          < workspace_evidence.durable_high_water_seq
-      )
       LEFT JOIN hosted_ingress_latency_trace AS trace
         ON trace.user_id = workspace_evidence.user_id
         AND trace.mailbox_item_id = workspace_evidence.head_item_id
@@ -565,27 +536,6 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         progress_evidence.workspace_system_mailbox_progress_generation,
         progress_evidence.workspace_system_imported_seq,
         CASE
-          WHEN progress_evidence.lane = 'system'
-            AND progress_evidence.head_kind = 'device-sync.wake'
-            AND progress_evidence.workspace_system_imported_seq
-              >= progress_evidence.head_lane_seq
-            AND progress_evidence.workspace_system_imported_seq
-              <= progress_evidence.durable_high_water_seq
-            AND progress_evidence.workspace_next_wake_at IS NOT NULL
-            THEN CASE
-              WHEN progress_evidence.first_unimported_system_created_at IS NULL
-                THEN GREATEST(
-                  progress_evidence.head_created_at,
-                  progress_evidence.workspace_next_wake_at
-                )
-              ELSE LEAST(
-                GREATEST(
-                  progress_evidence.head_created_at,
-                  progress_evidence.workspace_next_wake_at
-                ),
-                progress_evidence.first_unimported_system_created_at
-              )
-            END
           WHEN progress_evidence.lane = 'conversation'
             AND progress_evidence.head_usage_denied_at IS NOT NULL
             AND progress_evidence.head_usage_denied_at
@@ -756,7 +706,7 @@ function summarizeHostedRuntimeSystemDiagnostics(
   }
 
   const importedSeq = row.workspaceSystemImportedSeq;
-  if (importedSeq === null) {
+  if (importedSeq === null || importedSeq > row.durableHighWaterSeq) {
     diagnostics.unknownImportLaneCount += 1;
     return;
   }
@@ -764,16 +714,13 @@ function summarizeHostedRuntimeSystemDiagnostics(
     diagnostics.unimportedHeadLaneCount += 1;
     return;
   }
-  if (importedSeq >= row.durableHighWaterSeq) {
+  if (importedSeq === row.durableHighWaterSeq) {
     diagnostics.fullyImportedLaneCount += 1;
   } else {
     diagnostics.partiallyImportedLaneCount += 1;
   }
 
-  const importedBound = importedSeq < row.durableHighWaterSeq
-    ? importedSeq
-    : row.durableHighWaterSeq;
-  const importedUnhandledCount = importedBound - row.effectiveConsumedSeq;
+  const importedUnhandledCount = importedSeq - row.effectiveConsumedSeq;
   if (importedUnhandledCount > 0n) {
     diagnostics.importedUnhandledItemCount = addBoundedCount(
       diagnostics.importedUnhandledItemCount,

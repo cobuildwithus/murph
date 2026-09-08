@@ -124,7 +124,7 @@ describe('assistant vault-file send', () => {
     expect(approvalPort.request).toHaveBeenCalledTimes(1)
   })
 
-  it('parks one durable file delivery before returning a pending approval', async () => {
+  it.each(['linq', 'telegram'])('parks one durable %s file delivery before returning a pending approval', async (channel) => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-send-',
     )
@@ -147,8 +147,8 @@ describe('assistant vault-file send', () => {
         kind: 'thread' as const,
         target: 'chat_123',
       },
-      channel: 'linq',
-      deliveryTransportIdempotent: true,
+      channel,
+      deliveryTransportIdempotent: channel === 'linq',
       identityId: 'member_123',
       ref: 'documents/report.pdf',
       replyToMessageId: 'original_message_123',
@@ -182,6 +182,7 @@ describe('assistant vault-file send', () => {
       nextAttemptAt: '2026-06-24T12:05:00.000Z',
       status: 'awaiting_approval',
     })
+    expect(approvalPort.request.mock.calls[0]?.[0].presentation.body).toContain(channel === 'telegram' ? 'Telegram' : 'iMessage')
     expect(first).toMatchObject({
       approvalUrl: 'https://murph.test/approve/haa_test',
       filename: 'report.pdf',
@@ -529,7 +530,7 @@ describe('assistant vault-file send', () => {
     expect((await stat(filePath)).mode & 0o777).toBe(0o666)
   })
 
-  it('adopts the exact assistant-owned runtime delivery for initial prep and persisted retries', async () => {
+  it.each(['linq', 'telegram'])('adopts the exact assistant-owned %s delivery for initial prep and persisted retries', async (channel) => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-runtime-delivery-',
     )
@@ -553,7 +554,7 @@ describe('assistant vault-file send', () => {
         kind: 'thread',
         target: 'chat-runtime-delivery',
       },
-      channel: 'linq',
+      channel,
       identityId: 'identity-runtime-delivery',
       ref,
       sessionId: 'session-runtime-delivery',
