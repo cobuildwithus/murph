@@ -7,7 +7,12 @@
     "priority": 3,
     "title": "See the days behind a pattern",
     "summary": "Pattern details now show the saved comparison dates in a compact calendar. Select a day to see which group it belongs to.",
-    "relevanceTags": ["patterns", "usability"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "patterns",
+      "usability"
+    ],
+    "sourcePullRequests": [
+      3069
+    ]
   }
 }
