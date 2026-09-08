@@ -1164,7 +1164,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("retires older active offers only after a replacement binding is created", async () => {
+  it("retires only same-scope active offers after a replacement binding is created", async () => {
     const tx = buildTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
@@ -1189,6 +1189,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       where: {
         groupId: "group_1",
         messageLookupKey: { not: expect.stringMatching(/^hbidx:linq-message:/u) },
+        projectionKindsJson: { equals: [SLEEP_SCOPE] },
         revokedAt: null,
       },
     });
@@ -1277,7 +1278,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
-  it("revokes a broader active offer before posting a narrower replacement", async () => {
+  it("preserves an unrelated or broader active offer when posting one exact scope", async () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = createPrismaStub({
@@ -1306,10 +1307,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       kind: "post",
       offerGeneration: OFFER_GENERATION_A,
     });
-    expect(updateMany).toHaveBeenCalledWith({
-      data: { revokedAt: now },
-      where: { groupId: "group_1", revokedAt: null },
-    });
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("fails closed when a stored active offer scope is not canonicalizable", async () => {
@@ -2415,6 +2413,32 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         },
       }),
     }));
+  });
+
+  it("extends requested settings for a missing scope without retiring earlier consent", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: true,
+      grantedProjectionKinds: ["profile-name.v0", "sleep-times.v0", "activity-days.v0"],
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["vo2-max-days.v0"],
+    });
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      additiveOnly: true,
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      requestedVaultShareProjectionScopes: [SLEEP_DURATION_SCOPE],
+      tx,
+    });
+    expect(result.group.requestedVaultShareProjectionKinds).toEqual(
+      expect.arrayContaining(["vo2-max-days.v0", "sleep-duration-days.v0"]),
+    );
+    expect(result.group.requestedVaultShareProjectionKinds).toHaveLength(2);
+    expect(tx.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionScope: SLEEP_DURATION_SCOPE }),
+    );
   });
 
   it("replaces an existing requested policy with the explicitly requested scopes", async () => {

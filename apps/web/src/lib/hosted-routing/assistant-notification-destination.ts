@@ -480,6 +480,26 @@ async function resolveHostedThreadContainerNotificationDestination(input: {
     prisma: input.prisma,
   });
 
+  return buildHostedThreadNotificationDestination({
+    containerMemberId: input.containerMemberId,
+    deliveryRoute,
+  });
+}
+
+/** Pure route projection. Callers must establish current thread authority first. */
+export function buildHostedThreadNotificationDestination(input: {
+  containerMemberId: string;
+  deliveryRoute: HostedThreadDeliveryRouteV1;
+}): HostedAssistantNotificationDestination {
+  const { deliveryRoute } = input;
+  const externalThreadRouteAuthority: HostedExecutionExternalThreadRouteAuthority = {
+    ...(deliveryRoute.channel === "linq"
+      ? { accountLookupKey: deliveryRoute.accountLookupKey }
+      : {}),
+    channel: deliveryRoute.channel,
+    containerMemberId: input.containerMemberId,
+    threadId: deliveryRoute.threadId,
+  };
   const identifierSecret = deliveryRoute.channel === "linq"
     ? deliveryRoute.accountLookupKey
     : deliveryRoute.threadId;

@@ -340,6 +340,9 @@ import {
   handleHostedGroupJoinOfferReaction,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
+  createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  prepareHostedGroupJoinOfferPostTx,
+  recordHostedGroupJoinOfferTx,
   leaveHostedGroupMemberTx,
   readHostedGroupJoinOfferTargetTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -389,6 +392,7 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   hostedVaultShareProjectionKindToScope,
 } from "@murphai/hosted-execution/vault-share";
+import { readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
@@ -1605,6 +1609,99 @@ describe.skipIf(!runPostgresProof)(
         ]);
         providerMocks.createHostedLinqChat.mockReset();
         await cleanupOpenerRaceFixture(openerFirst);
+      }
+    });
+
+    it("adds only missing duration consent beside existing grants and another live offer", async () => {
+      const fixture = await createReactionAdmissionFixture();
+      const prisma = fixture.reactionPrisma;
+      const now = new Date("2026-07-28T15:59:00.000Z");
+      const priorScopes = ["profile-name.v0", "sleep-times.v0", "activity-days.v0", "device-sync-status.v0"] as const;
+      const duration = [{ projectionKind: "sleep-duration-days.v0" }] as const;
+      try {
+        await prisma.hostedMember.update({ where: { id: fixture.participantMemberId }, data: { billingStatus: "active" } });
+        await prisma.hostedThreadRoute.updateMany({
+          where: { containerMemberId: fixture.runtimeMemberId },
+          data: { accountLookupKey: fixture.linePhoneLookupKey },
+        });
+        await prisma.hostedGroupMember.createMany({ data: [
+          { id: `membership_${randomUUID()}`, groupId: fixture.groupId, memberId: fixture.ownerMemberId, role: "owner", joinedAt: now },
+          { id: `membership_${randomUUID()}`, groupId: fixture.groupId, memberId: fixture.participantMemberId, joinedAt: now },
+        ] });
+        await prisma.hostedVaultShare.createMany({ data: priorScopes.map(projectionKind => ({
+          id: `share_${randomUUID()}`, grantorMemberId: fixture.participantMemberId,
+          destinationMemberId: fixture.runtimeMemberId, projectionKind,
+          projectionScopeKey: buildHostedVaultShareProjectionScopeKey({ projectionKind }),
+          projectionScopeJson: { projectionKind }, grantedAt: now,
+        })) });
+        // Establish an unrelated immutable offer using the actual store owners.
+        await prisma.$transaction(tx => createHostedGroupJoinLinkForOwnedThreadContainerTx({
+          actorMemberId: fixture.ownerMemberId, containerMemberId: fixture.runtimeMemberId,
+          requestedVaultShareProjectionScopes: [{ projectionKind: "vo2-max-days.v0" }], now, tx,
+        }));
+        const prior = await prisma.$transaction(tx => prepareHostedGroupJoinOfferPostTx({
+          groupId: fixture.groupId, projectionScopes: [{ projectionKind: "vo2-max-days.v0" }], now, tx,
+        }));
+        if (prior.kind !== "post") throw new Error("Expected initial consent offer.");
+        await prisma.$transaction(tx => recordHostedGroupJoinOfferTx({
+          expectedOfferGeneration: prior.offerGeneration, groupId: fixture.groupId,
+          message: { channel: "linq", messageId: `prior_${randomUUID()}` },
+          postedAt: now, projectionScopes: [{ projectionKind: "vo2-max-days.v0" }], tx,
+        }));
+        const preserved = await prisma.hostedVaultShare.findMany({
+          where: { grantorMemberId: fixture.participantMemberId, destinationMemberId: fixture.runtimeMemberId },
+          orderBy: { projectionKind: "asc" },
+        });
+        await prisma.$transaction(tx => createHostedGroupJoinLinkForOwnedThreadContainerTx({
+          additiveOnly: true, actorMemberId: fixture.ownerMemberId, containerMemberId: fixture.runtimeMemberId,
+          requestedVaultShareProjectionScopes: duration, now, tx,
+        }));
+        const prepared = await prisma.$transaction(tx => prepareHostedGroupJoinOfferPostTx({
+          groupId: fixture.groupId, projectionScopes: duration, replaceActiveOffer: true, now, tx,
+        }));
+        expect(prepared).toMatchObject({ kind: "post", offerGeneration: prior.offerGeneration });
+        if (prepared.kind !== "post") throw new Error("Expected missing-scope consent offer.");
+        // Bind a fresh provider message. The old fixture offer is already revoked.
+        fixture.offerMessageId = `duration_${randomUUID()}`;
+        await prisma.$transaction(tx => recordHostedGroupJoinOfferTx({
+          expectedOfferGeneration: prepared.offerGeneration, groupId: fixture.groupId,
+          message: { channel: "linq", messageId: fixture.offerMessageId },
+          postedAt: now, projectionScopes: duration, replaceActiveOffersAt: now, tx,
+        }));
+        expect(await prisma.hostedVaultShare.findMany({
+          where: { grantorMemberId: fixture.participantMemberId, destinationMemberId: fixture.runtimeMemberId },
+          orderBy: { projectionKind: "asc" },
+        })).toEqual(preserved);
+        expect(await prisma.hostedGroupJoinOffer.count({ where: { groupId: fixture.groupId, revokedAt: null } })).toBe(2);
+        const event = buildReactionAdmissionEvent({ eventId: `consent_${randomUUID()}`, eventType: "reaction.added", fixture });
+        await ingestReactionAdmissionEvent({ event, fixture });
+        expect(await handleHostedGroupJoinOfferReaction({ event, prisma })).toMatchObject({ status: "accepted" });
+        const shares = await prisma.hostedVaultShare.findMany({
+          where: { grantorMemberId: fixture.participantMemberId, destinationMemberId: fixture.runtimeMemberId },
+          orderBy: { projectionKind: "asc" },
+        });
+        expect(shares.filter(share => share.projectionKind !== "sleep-duration-days.v0")).toEqual(preserved);
+        expect(shares.find(share => share.projectionKind === "sleep-duration-days.v0")).toMatchObject({ status: "granted", revokedAt: null });
+        expect(shares.some(share => share.projectionKind === "vo2-max-days.v0")).toBe(false);
+        const notifications = await prisma.hostedMailboxItem.findMany({
+          where: { userId: fixture.runtimeMemberId, kind: "assistant.notification.requested" },
+          select: { dedupeKey: true }, take: 5,
+        });
+        expect(notifications).toHaveLength(1);
+        const wake = await readHostedMailboxWakeByDedupeKey({
+          dedupeKey: notifications[0]!.dedupeKey, prisma, userId: fixture.runtimeMemberId,
+        });
+        expect(wake).toMatchObject({ notification: {
+          externalThreadRouteAuthority: { containerMemberId: fixture.runtimeMemberId },
+          responsePolicy: { kind: "require_send_exact_text", text: "Your reaction enabled sleep duration sharing. Your other sharing is unchanged." },
+        } });
+        await handleHostedGroupJoinOfferReaction({ event, prisma });
+        expect(await prisma.hostedMailboxItem.count({
+          where: { userId: fixture.runtimeMemberId, kind: "assistant.notification.requested" },
+        })).toBe(1);
+        expect(await prisma.hostedGroupMember.count({ where: { groupId: fixture.groupId } })).toBe(2);
+      } finally {
+        await cleanupReactionAdmissionFixture(fixture);
       }
     });
 
