@@ -1,6 +1,6 @@
 # Journal
 
-Last verified: 2026-09-06
+Last verified: 2026-09-08
 
 ## Product boundary
 
@@ -22,6 +22,17 @@ bounded comparisons.
 Clear facts remain eligible when the member asks for advice. Missing time or
 intensity does not block a save. Hypothetical questions are not events. An
 explicit no-retention request prevents capture.
+
+A member's speculative explanation is not a separate Journal fact. Save the
+reported observation without that speculation. When asked whether a fact was
+saved, Murph checks the relevant canonical records. It acknowledges and repairs
+a missed eligible capture without inventing an explicit-logging requirement.
+
+Canonical persistence and current page visibility are separate facts. Murph
+does not diagnose a filter, stale page, or sync failure without evidence, invent
+filter controls, or claim an unverified refresh. It can explain that opening
+Journal requests updated data and that the member can select the relevant date.
+It never creates legacy Journal days or day links to make an event appear.
 
 Journal titles and notes use English. Chat replies use the member's language.
 Titles name the event without relative-day words or dates. Notes add detail

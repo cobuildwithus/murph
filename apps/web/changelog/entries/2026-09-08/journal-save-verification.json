@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "journal-save-verification",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer answers about saved Journal entries",
+    "summary": "When you ask whether something was saved, Murph checks your records and corrects missed eligible entries.",
+    "details": "Murph keeps speculative explanations out of Journal facts and distinguishes a saved record from what the page currently shows. Clear private health facts do not require a separate logging request; requests not to save are respected.",
+    "relevanceTags": ["journal"],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Check a saved entry",
+      "prompt": "Did you save the health context I shared earlier?"
+    }
+  }
+}

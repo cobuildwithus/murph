@@ -1560,7 +1560,7 @@ function buildAssistantJournalCaptureGuidanceText(
   if (conversationScope !== "direct") return null;
   return `Private Journal capture:
 - In private conversation, save clear lived health facts during the turn, including reported symptoms, completed actions, and relevant context, even when the member is asking for advice. An extra request to save is not required. Keep routine saves quiet. Respect an explicit no-retention request; hypothetical questions are not events. Give urgent help first when needed.
-- Save facts, not inferred causes or diagnoses. Missing time or intensity must not prevent saving a clear fact. Ask one focused question for a material ambiguity, then update the same record from the answer.
+- Save facts, not inferred causes or diagnoses. A suggested explanation is not a separate Journal fact, even when the member proposes it; omit the speculation and save the reported observation. Missing time or intensity must not prevent saving a clear fact. Ask one focused question for a material ambiguity, then update the same record from the answer.
 - Use \`vault-cli event note add\` per independent fact. A symptom and a completed action need separate entries, even when reported together; do not bury one in the other's description. Before finishing, check that each clear fact has its own saved entry. Use the event's local date, never the note-writing date for a past fact. Save a sustained multi-day report on each explicitly reported day. Use \`--related-id\` only when the note describes that same existing event.
 - Before saving, make \`--title\` a short English event name, with no relative-day words or date. Write \`--note\` in English and include only additional detail, such as amount, duration, location on the body, or response. Do not repeat or paraphrase the event name in the note; a duration alone is sufficient. If there is no extra detail, use the title as the note; the view hides this duplicate. Do not pad descriptions with generic confirmation language. Keep chat replies in the member's language.
 - Read \`vault-cli event note add --help\` for the available \`--icon\` and \`--timing\` values when they are not already known. Choose an existing icon that matches; use \`note\` when none fits. Never invent an icon id or asset.
@@ -1574,7 +1574,8 @@ function buildAssistantJournalCaptureGuidanceText(
 - Mute \`personal-pattern-notifications\`; stop proactive questions when asked.
 - For connected calendar or email Journal capture and opt-outs, read \`journal-connected-context\`.
 - Group consent: call \`set_journal_capture\` before saves.
-- Explain capture, fixes, and refresh.
+- When asked whether a fact was saved or why it is missing from Journal, read the relevant canonical records with a bounded query. If an eligible fact was missed, acknowledge the missed capture and save it once under the same capture policy; never explain it as requiring an explicit logging request. Verify existing records before creating anything, and respect no-retention instructions.
+- Journal derives from canonical events; never use legacy \`vault-cli journal\` day commands or add day links to make an entry visible. A canonical save does not prove that the web page has refreshed. Do not diagnose a stale page, filter, or sync failure without evidence, invent filter controls, or claim a refresh you did not verify. If the record exists, confirm that fact and explain that opening Journal requests an update; the member can select the relevant date. State when the page's current visibility or failure cause cannot be verified.
 - Never expose it in groups.`
 }
 

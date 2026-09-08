@@ -13472,6 +13472,136 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
   }, 720_000)
 })
 
+describeRealCodex('real Codex private Journal capture recovery e2e', () => {
+  it('saves a reported symptom without its guessed cause and verifies an empty-page complaint without duplicating it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const input: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
+          currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        excludeResumeTurns: true, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      }
+      const first = await executeRealCodexAppServerTurn({
+        ...input,
+        prompt: 'My left wrist has felt stiff since I woke up this morning. Maybe it is the weather, but that is only a guess. Keep this in mind when we talk about my routines; I do not need advice right now.',
+      })
+      const initial = await readVaultRawTolerant(workingDirectory)
+      const initialFacts = initial.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      process.stdout.write(`[journal-capture-recovery] ${JSON.stringify({ phase: 'capture', reply: first.finalMessage, facts: initialFacts.length })}\n`)
+      const beforeReadback = await readFile(commandLogPath, 'utf8').catch(() => '')
+      const second = await executeRealCodexAppServerTurn({
+        ...input, resumeSessionId: first.sessionId,
+        prompt: 'Did you actually save that? I cannot see it on my Journal page. Is that because of a filter or a sync bug?',
+      })
+      const after = await readVaultRawTolerant(workingDirectory)
+      const facts = after.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      const readbackCommands = (await readFile(commandLogPath, 'utf8').catch(() => '')).slice(beforeReadback.length)
+      process.stdout.write(`[journal-capture-recovery] ${JSON.stringify({ phase: 'verify', reply: second.finalMessage, facts: facts.length })}\n`)
+      expect(initialFacts).toHaveLength(1)
+      expect(facts).toHaveLength(1)
+      expect(facts[0]?.entityId).toBe(initialFacts[0]?.entityId)
+      expect(JSON.stringify(initialFacts[0])).toMatch(/wrist|stiff/iu)
+      expect(JSON.stringify(initialFacts[0])).not.toMatch(/weather/iu)
+      const view = buildJournalView(after, [], { asOf: '2026-05-18' })
+      expect(view.days.find((day) => day.date === '2026-05-18')?.events
+        .flatMap((event) => event.records).some((record) => record.id === facts[0]?.entityId)).toBe(true)
+      expect(readbackCommands).toMatch(/(?:event (?:list|show)|(?:^|\n)(?:list|show|timeline|search)\b|batch)/u)
+      expect(second.finalMessage).toMatch(/saved|recorded|entry|note/iu)
+      expect(second.finalMessage).toMatch(/cannot|can.t|unable|don.t know|haven.t|could|may|might|not sure/iu)
+      expect(second.finalMessage).not.toMatch(/(?:only|always).{0,45}(?:explicit|ask.{0,15}(?:log|save))|(?:refreshed|fixed).{0,25}(?:page|sync|filter)/iu)
+      expect(readbackCommands).not.toMatch(/(?:^|\n)journal\b/u)
+      expect(after.entities.filter((entity) => entity.kind === 'journal_day')).toHaveLength(0)
+      expect(second.finalMessage).not.toMatch(/(?:check|change|clear|reset|turn on|enable|select).{0,35}filters?|includes? all.day Journal notes|(?:linked|linking).{0,25}Journal day/iu)
+      expect(second.finalMessage.length).toBeLessThan(1000)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex private Journal capture recovery boundaries e2e', () => {
+  it.each(['missed', 'launch-failure', 'opt-out'] as const)('handles %s without inventing policy or duplicating facts', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-boundary-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const before = await readVaultRawTolerant(workingDirectory)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      if (scenario === 'launch-failure') {
+        await expect(execFileAsync(path.join(binDirectory, 'vault-cli'), [
+          'event', 'note', 'add', '--title', 'Ankle stiffness', '--note', 'Right ankle; since waking.',
+          '--note-type', 'journal-outcome', '--occurred-at', '2026-05-18', '--timing', 'all_day',
+        ], { cwd: path.join(workingDirectory, 'retired-workspace') })).rejects.toMatchObject({ code: 'ENOENT' })
+        expect((await readVaultRawTolerant(workingDirectory)).events).toHaveLength(0)
+      }
+      const prompts = {
+        missed: 'Earlier today I told you my right ankle felt stiff on waking. You said ordinary conversation never gets saved unless I ask to log it. Is that actually your policy? Please check whether you saved it.',
+        'launch-failure': 'Please save that my right ankle has been stiff since waking today. The previous save attempt failed before the command started because its working directory did not exist. Nothing was saved. Finish the save here and check it.',
+        'opt-out': 'Do not save or remember anything from this message: my right ankle has felt stiff since waking today. This is just a private passing conversation, not something I want retained. Please acknowledge without giving advice.',
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
+          currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: prompts[scenario], reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const after = await readVaultRawTolerant(workingDirectory)
+      const facts = after.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      const commands = (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+      const writes = commands.filter((command) => /^event (?:note|symptom) add\b/u.test(command)
+        && !/--help|--schema/u.test(command))
+      process.stdout.write(`[journal-capture-boundary] ${JSON.stringify({ scenario, reply: result.finalMessage, facts: facts.length, writes: writes.length })}\n`)
+      if (scenario === 'opt-out') {
+        expect(after.entities).toEqual(before.entities)
+        expect(writes).toHaveLength(0)
+        expect(result.finalMessage).toMatch(/won.t|will not|not (?:save|retain|record)|without (?:saving|recording)/iu)
+      } else {
+        expect(facts).toHaveLength(1)
+        expect(writes).toHaveLength(1)
+        expect(JSON.stringify(facts[0])).toMatch(/ankle/iu)
+        expect(result.finalMessage).toMatch(/saved|recorded|logged|added/iu)
+        expect(result.finalMessage).not.toMatch(/(?:would you like|want me|shall I|should I).{0,30}(?:save|log|record)/iu)
+        expect(after.journalEntries).toHaveLength(0)
+      }
+      expect(result.finalMessage.length).toBeLessThan(1000)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 240_000)
+})
+
 describeRealCodex('real Codex private Journal note quality e2e', () => {
   it('automatically saves English facts with honest timing and corrects the same canonical note', async () => {
     const config = await resolveRealCodexE2eConfig()
