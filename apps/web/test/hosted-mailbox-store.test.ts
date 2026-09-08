@@ -139,7 +139,7 @@ describe("readHostedMailboxLiveItemById", () => {
 });
 
 describe("hasHostedMailboxAutomationEngagementSince", () => {
-  it("derives engagement from bounded accepted capture or Telegram metadata", async () => {
+  it("derives engagement from bounded accepted capture, Telegram, or email metadata", async () => {
     const findFirst = vi.fn().mockResolvedValue({ id: "mailbox-meal-photo" });
     const since = new Date("2026-03-29T00:00:00.000Z");
 
@@ -162,7 +162,10 @@ describe("hasHostedMailboxAutomationEngagementSince", () => {
         OR: [
           { kind: "meal-photo.captured", lane: "system" },
           {
-            dedupeKey: { startsWith: "telegram:update:" },
+            OR: [
+              { dedupeKey: { startsWith: "telegram:update:" } },
+              { dedupeKey: { startsWith: "email:" } },
+            ],
             kind: "conversation.message",
             lane: "conversation",
           },

@@ -18,7 +18,7 @@ if (runPostgresProof) {
 }
 
 describe.skipIf(!runPostgresProof)("hosted mailbox automation engagement", () => {
-  it("counts accepted Telegram activity without treating other mailbox work as engagement", async () => {
+  it("counts accepted Telegram and email activity without treating other mailbox work as engagement", async () => {
     const prisma = new PrismaClient({
       adapter: new PrismaPg(
         { connectionString: databaseUrl, max: 1 },
@@ -51,6 +51,16 @@ describe.skipIf(!runPostgresProof)("hosted mailbox automation engagement", () =>
              'telegram:update:103', '2030-04-02 11:59:59.999', NULL, NULL),
             ('email', 'member-email', 'conversation.message', 'conversation',
              'email:104', '2030-04-29 12:00:00', NULL, NULL),
+            ('email-boundary', 'member-email-boundary', 'conversation.message', 'conversation',
+             'email:108', '2030-04-02 12:00:00', '2030-04-02 12:01:00', '2030-04-20 12:00:00'),
+            ('email-old', 'member-email-old', 'conversation.message', 'conversation',
+             'email:109', '2030-04-02 11:59:59.999', NULL, NULL),
+            ('email-system', 'member-email-system', 'runtime.maintenance-requested', 'system',
+             'email:110', '2030-04-29 12:00:00', NULL, NULL),
+            ('email-wrong-lane', 'member-email-wrong-lane', 'conversation.message', 'system',
+             'email:111', '2030-04-29 12:00:00', NULL, NULL),
+            ('unknown', 'member-unknown', 'conversation.message', 'conversation',
+             'unknown:112', '2030-04-29 12:00:00', NULL, NULL),
             ('system', 'member-system', 'runtime.maintenance-requested', 'system',
              'telegram:update:105', '2030-04-29 12:00:00', NULL, NULL),
             ('wrong-lane', 'member-wrong-lane', 'conversation.message', 'system',
@@ -62,7 +72,12 @@ describe.skipIf(!runPostgresProof)("hosted mailbox automation engagement", () =>
           ["member-telegram", true],
           ["member-boundary", true],
           ["member-old", false],
-          ["member-email", false],
+          ["member-email", true],
+          ["member-email-boundary", true],
+          ["member-email-old", false],
+          ["member-email-system", false],
+          ["member-email-wrong-lane", false],
+          ["member-unknown", false],
           ["member-system", false],
           ["member-wrong-lane", false],
           ["member-capture", true],

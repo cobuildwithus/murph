@@ -1767,7 +1767,7 @@ describe("hosted orchestration reconciliation facts", () => {
   });
 
   it.each(["allowed", "denied"] as const)(
-    "uses recent Telegram engagement with a dormant Linq route and %s usage",
+    "uses recent Telegram or email engagement with a dormant Linq route and %s usage",
     async (usageStatus) => {
       mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
         nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",

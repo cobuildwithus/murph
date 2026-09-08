@@ -1980,7 +1980,10 @@ export async function hasHostedMailboxAutomationEngagementSince(input: {
       OR: [
         { kind: "meal-photo.captured", lane: "system" },
         {
-          dedupeKey: { startsWith: "telegram:update:" },
+          OR: [
+            { dedupeKey: { startsWith: "telegram:update:" } },
+            { dedupeKey: { startsWith: "email:" } },
+          ],
           kind: "conversation.message",
           lane: "conversation",
         },
