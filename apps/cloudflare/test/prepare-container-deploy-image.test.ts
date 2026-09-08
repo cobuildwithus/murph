@@ -91,6 +91,37 @@ describe("container image publication before Worker activation", () => {
     expect(mocks.push).not.toHaveBeenCalled();
   });
 
+  it.each(["primary", "next"] as const)("builds a full release after Worker-only retention of a legacy %s image", async (bank) => {
+    const classes = ["RunnerContainer", "NextRunnerContainer", "DeploySmokeRunnerContainer", "StandbyRunnerContainer"];
+    const rendered = { ...config,
+      vars: { HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "b".repeat(64), HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "c".repeat(64) },
+      containers: classes.map((class_name) => ({ ...config.containers[0], class_name, instance_type: "standard-1", ssh: { enabled: false }, rollout_active_grace_period: 300 })),
+    };
+    await writeFile(configPath, JSON.stringify(rendered));
+    const active = { bank, id: `${bank}-legacy-retained`, bundleFingerprint: "d".repeat(64), sourceFingerprint: "e".repeat(64) };
+    const currentVersion = { resources: { bindings: [
+      { type: "plain_text", name: "HOSTED_EXECUTION_RUNNER_DEPLOYMENT", text: JSON.stringify({ active, candidate: null, previous: null }) },
+      ...classes.map((class_name) => ({ type: "durable_object_namespace", class_name, namespace_id: `namespace-${class_name}` })),
+    ] } };
+    const oldImage = "registry.example.test/runner:legacy-tag";
+    const listApplications = vi.fn(async (name: string) => [{ id: name, name, max_instances: 1, configuration: { image: oldImage } }]);
+    const releaseSha = "1".repeat(40);
+    const preparedPath = await prepareHostedContainerDeployImage({ accountId, configPath, release: { currentVersion, releaseSha, listApplications } });
+    expect(mocks.build).toHaveBeenCalledOnce();
+    expect(mocks.push).toHaveBeenCalledOnce();
+    expect(listApplications).not.toHaveBeenCalled(); // Legacy provenance cannot authorize image reuse.
+    const staged = await stageHostedRunnerRelease({ configPath: preparedPath, currentVersionId: "worker-retained", currentVersion, releaseSha, listApplications });
+    expect(staged.deployment.active).toEqual(active);
+    expect(staged.deployment.candidate?.bank).toBe(bank === "primary" ? "next" : "primary");
+    expect(staged.deployment.candidate?.releaseSha).toBe(releaseSha);
+    expect(staged.workerOnly).toBe(false);
+    const servingClass = bank === "primary" ? "RunnerContainer" : "NextRunnerContainer";
+    expect(staged.applications.map((entry) => entry.className)).not.toContain(servingClass);
+    const stagedConfig = JSON.parse(await readFile(staged.configPath, "utf8"));
+    expect(stagedConfig.containers.find((entry: { class_name: string }) => entry.class_name === servingClass).image).toBe(oldImage);
+    expect(staged.applications.every((entry) => entry.specification.configuration.image.endsWith(`@${digest}`))).toBe(true);
+  });
+
   it("resumes the admitted image across a real manifest rebuild with different timestamps", async () => {
     const releaseSha = "1".repeat(40);
     const bundleDir = await mkdtemp(path.join(directory, "bundle-"));

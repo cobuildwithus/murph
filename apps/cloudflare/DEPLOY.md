@@ -58,6 +58,10 @@ The legacy staging pointer predates immutable admission receipts. Its inactive
 application is reconciled through the existing drain/admission path, including
 when a native create committed but its response or subsequent Worker publication
 was lost. Its image is never reused as a verified artifact without provenance.
+A Worker-only release may retain a legacy active record with a mutable image tag.
+The reuse reader applies its legacy-provenance check to whichever release it
+selects, candidate or active, before inspecting the image. Such records require
+a normal immutable image build; they never authorize reuse of a legacy tag.
 No deployment-convergence restart retry is added to message processing.
 
 For a compatible Worker coordination change, the protected workflow may explicitly

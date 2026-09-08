@@ -34,3 +34,11 @@ The actual rejection reason is unavailable in the existing logs. Correct diagnos
 Eight diagnostic regressions failed before the correction; the initial 55 provider, staging and deployment tests then passed. Cloudflare typecheck and complexity guard passed (no hotspots). Added exact-message privacy assertions and bounded-code coverage before the final focused replay. Request shapes, capacity, no-retry behavior, and admission-before-activation are preserved. Parent review found no additional state or activation-path changes.
 
 Pending: final focused replay, exact-head CI, ReviewGPT and protected production evidence. Production success requires signed smoke and exact release convergence.
+
+## Protected follow-up evidence
+
+The diagnostic correction merged in PR #3041 with 56 tests, typecheck, all required CI and a validated full ReviewGPT PASS. The protected full release then failed earlier in image reuse: a Worker-only release record retains legacy active provenance and a mutable image tag, but the reuse reader checks only the legacy candidate before validating the selected active image as immutable. No new Worker activation occurred.
+
+The smallest correction applies the existing legacy-provenance guard to the selected candidate-or-active release. It must build normally for legacy retained releases in either bank, preserve the serving image and namespace, and retain exact immutable reuse for admitted releases. The original native POST rejection still requires a subsequent protected attempt after this earlier failure is resolved.
+
+The retained-primary regression reproduced the exact production stack before correction. Both bank-direction scenarios pass after correction, including fresh publication, candidate staging, unchanged serving image and serving exclusion. All 65 focused image/provider/staging/CLI tests, Cloudflare typecheck, whitespace and complexity checks pass. Parent review confirms the correction reuses the existing provenance guard and adds no state or capacity change.
