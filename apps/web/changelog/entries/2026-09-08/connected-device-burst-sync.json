@@ -9,6 +9,6 @@
     "summary": "Connected-device updates that arrive together are less likely to need another delivery attempt.",
     "details": "Updates remain protected by the same connection and health-data permission checks.",
     "relevanceTags": ["wearables", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3057]
   }
 }
