@@ -2822,8 +2822,19 @@ explicit lifecycle events, not high-cardinality freshness hints.
 The machine-local job store projects its earliest queued-job continuation
 through the runtime-owned workspace `nextWakeAt` while the runner is warm. The
 hosted provider scheduler runs only for the account mapped by a connection
-mailbox wake; a retained job wake and a generic runtime timer cannot admit
-provider cadence. Only that connection mailbox wake may fetch its exact
+mailbox wake, including its retained job continuation. Bare webhook, dirty-remainder,
+and completion-fence wakes with no jobs still skip scheduling, and a generic
+runtime timer cannot admit provider cadence. The canonical scheduler checks the
+account cadence and active job dedupe keys after exact wake jobs are restored.
+A retained owner wakes at the earlier of its actual job retry and a future
+provider cadence; job retry times and attempts remain unchanged. A past cadence
+left by a failed scheduler never becomes an immediate continuation timer.
+A due plain scheduled hint for the same connection epoch can admit a future
+owner, just as a webhook hint can. Admission does not consume the scheduled
+obligation: existing compaction still requires a strictly advanced carried
+cadence. When a pass cannot progress, already-due eligible schedule hints share
+the owner retry backoff so they cannot repeatedly readmit it.
+Only that connection mailbox wake may fetch its exact
 Web-owned dirty row or claim its account's local jobs; a generic runtime timer
 does neither. The connection-specific encrypted system-mailbox item remains
 pending while that account has queued or running work. Before checkpoint

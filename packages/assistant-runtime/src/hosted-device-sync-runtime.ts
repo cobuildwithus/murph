@@ -1034,15 +1034,15 @@ export function resolveHostedDeviceSyncSchedulerAccountId(input: {
   if (
     !localAccountId
     || input.wake.kind !== "device-sync.wake"
-    || input.wake.reason === "webhook_hint"
   ) {
     return null;
   }
   const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
   if (
-    wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
-    || wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON
-    || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
+    normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0
+    && (wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+      || wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON
+      || input.wake.reason === "webhook_hint")
   ) {
     return null;
   }
@@ -1097,7 +1097,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   }
   if (retryAt) {
     return {
-      retryAt,
+      retryAt: resolveHostedDeviceSyncRetainedWakeAt(account.nextReconcileAt, retryAt),
       wake: {
         ...input.wake,
         hint: {
@@ -1152,6 +1152,15 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
       },
     },
   };
+}
+
+function resolveHostedDeviceSyncRetainedWakeAt(cadenceAt: string | null, retryAt: string): string {
+  // A failed scheduler leaves a past cadence. Keep its retry bounded instead
+  // of creating a due-now loop; a future cadence can share the existing owner.
+  return cadenceAt && Date.parse(cadenceAt) > Date.now()
+    && Date.parse(cadenceAt) < Date.parse(retryAt)
+    ? cadenceAt
+    : retryAt;
 }
 
 function resolveHostedDeviceSyncWakeJobDedupeKey(input: {

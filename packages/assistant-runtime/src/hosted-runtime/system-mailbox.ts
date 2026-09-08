@@ -50,9 +50,11 @@ import type {
 import {
   findNextHostedSystemMailboxQueueItem,
   isHostedGroupContextHandoffSystemMailboxItem,
+  isHostedPlainDeviceSyncWakeHint,
+  isHostedRetainedDeviceScheduledAdmission,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedSystemMailboxModelFreeFrontier,
-  projectHostedSystemMailboxRetainedDeviceWebhookAdmission,
+  projectHostedSystemMailboxRetainedDeviceWakeAdmission,
   projectHostedSystemMailboxWakeOwnerFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
@@ -334,7 +336,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
     input.vaultRoot,
     (state) => {
       const admissionState =
-        projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+        projectHostedSystemMailboxRetainedDeviceWakeAdmission({
           now: startedAt,
           state,
         });
@@ -798,21 +800,6 @@ function collapseHostedRetainedDeviceSyncWakeHints(input: {
     // Preserve its exact jobs and epoch.
     return false;
   });
-}
-
-function isHostedPlainDeviceSyncWakeHint(item: HostedSystemMailboxPendingItem): boolean {
-  const wake = item.wake;
-  return item.routeAction === "run-device-sync-wake"
-    && item.status === "pending"
-    && item.attemptCount === 0
-    && item.postCheckpointRecord === null
-    && item.deviceSyncContinuationOwner !== true
-    && wake.kind === "device-sync.wake"
-    && (wake.reason === "webhook_hint" || wake.reason === "reconcile_due")
-    && (wake.hint?.reason == null || wake.hint.reason === "webhook_dirty_transition")
-    && (wake.hint?.jobs?.length ?? 0) === 0
-    && wake.hint?.scopes === undefined
-    && wake.hint?.revokeWarning == null;
 }
 
 function collapseConsecutiveHostedBrowserVaultRefreshItems(input: {
@@ -1313,7 +1300,8 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
           || item.routeAction !== "run-device-sync-wake"
           || item.wake.kind !== "device-sync.wake"
           || item.wake.connectionId !== connectionId
-          || item.wake.reason !== "webhook_hint"
+          || (item.wake.reason !== "webhook_hint"
+            && !isHostedRetainedDeviceScheduledAdmission(input.item, item, admittedAt))
           || !systemMailboxItemIsDue(item, admittedAt)
         ) {
           return item;
