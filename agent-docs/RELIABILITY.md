@@ -2076,9 +2076,28 @@ Last verified: 2026-09-04
   plus one truncation probe before runtime-access and usage-denial exclusions;
   exclusion-heavy populations therefore set `scanTruncated` instead of causing
   an unbounded scan. Its persisted state and email contain aggregate
-  runtime/lane counts, pending counts, timings, and invalid/truncated evidence
-  only; they never contain member, mailbox, phone, message, trace, or exception
-  identifiers. The progress and latency incidents rearm independently, so one
+  runtime/lane counts, pending counts, timings, invalid/truncated evidence, and
+  system-lane diagnostics only. Those diagnostics classify device-sync heads,
+  full/partial/head-unimported/unknown workspace import coverage,
+  imported-but-unhandled item counts, and assistant/device-sync/other wake
+  ownership. An imported sequence above durable high water is unknown and
+  contributes no imported-but-unhandled count; equality is full coverage.
+  They never contain member, mailbox, phone, message, trace, or exception
+  identifiers. The existing terminal runtime-invocation log records
+  the public runner release SHA, result status, selected wake, and derived
+  system imported/handled/first-pending sequences, including returns that
+  require no checkpoint. That return reuses the current system-mailbox state
+  for wake selection and progress, plus this processing mode's existing import
+  watermarks; it adds no checkpoint or diagnostic I/O. When an item holds the
+  system frontier, classifier evidence is a one-code array: `wake_not_device_sync`
+  for other work, `continuation_projection_invalid` when the authoritative
+  device-continuation projection fails validation, or `continuation_owner_missing`
+  for a device item left outside a valid projection. No pending blocker means
+  null evidence. This diagnostic consumes the existing ownership projection;
+  retry times, job hints, status, and post-checkpoint records are not a second
+  continuation predicate. The projection's binding validation, cardinality,
+  continuation sequences, and handled frontier remain authoritative. The
+  progress and latency incidents rearm independently, so one
   continuous anomaly cannot hide the first alert for the other. A continuing
   progress incident also becomes eligible for one fresh aggregate reminder six
   hours after its prior successful email plus stable bounded jitter. The

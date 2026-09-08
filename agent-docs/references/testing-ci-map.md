@@ -770,10 +770,20 @@ gate unset and makes no paid request.
   access and inactive, stale, removed, suspended, or consent-revoked
   exclusions. It also proves usage-denial suppression and restart chronology
   across staging, provider, delivery, and mailbox-consumption evidence, plus
-  imported device retries aging from their canonical earliest workspace wake
-  while unimported heads and suffixes, overdue retries, malformed frontiers,
-  and non-device system heads remain alertable, plus the 20,000
-  eligible-row cap after exclusions. The hosted-local
+  system heads aging from mailbox creation independently of imported frontiers,
+  fresh suffixes, checkpoints, or workspace wakes. An imported sequence above
+  durable high water remains unknown with no derived unhandled count; equality
+  retains full import coverage. Focused unit coverage also
+  proves aggregate device-head, import-coverage, imported-but-unhandled, and
+  wake-owner diagnostics remain identifier-free. The assistant-runtime
+  entrypoint suite proves the existing terminal invocation event carries the
+  public runner release, selected wake, result status, and derived numeric
+  system-mailbox frontiers, including local projection deferral with no
+  checkpoint and an unchanged wake. Mailbox-state coverage composes first-pending
+  evidence with explicit continuation ownership, status transitions, legacy
+  promotion, and fail-closed cardinality/binding checks; job hints do not decide
+  the diagnostic. The PostgreSQL proof retains the 20,000 raw-candidate cap
+  before exclusions plus one truncation probe. The hosted-local
   foreground-priority leg drives this monitor through authenticated cron HTTP
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, short-window active-incident coalescing,
