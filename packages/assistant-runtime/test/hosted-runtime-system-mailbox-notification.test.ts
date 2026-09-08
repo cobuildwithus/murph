@@ -4394,7 +4394,60 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("reproduces a due cadence blocked by a renewing historical continuation", async () => {
+  it.each(["due", "epoch", "future", "manual", "unbound"])(
+    "admits a queued schedule through the same future cadence owner (%s)", async (boundary) => {
+      const workspace = await createHostedRuntimeWorkspace("murph-scheduled-admission-");
+      const expectedConnectedAt = "2026-04-01T00:00:00.000Z";
+      const wake = buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_synthetic_cadence_admission", eventId: "device-sync.wake:cadence-owner",
+        expectedConnectedAt, occurredAt: FIXED_NOW, provider: "junction",
+        reason: "reconcile_due", userId: "member_123",
+        hint: { nextReconcileAt: FIXED_NOW, jobs: [{
+          availableAt: "2026-04-28T00:00:00.000Z", dedupeKey: "waiting-history", kind: "resource",
+        }] },
+      });
+      const scheduled = buildHostedExecutionDeviceSyncWake({
+        ...wake, eventId: "device-sync.wake:cadence-successor", hint: { nextReconcileAt: FIXED_NOW },
+      });
+      if (boundary === "epoch") scheduled.expectedConnectedAt = "2026-04-02T00:00:00.000Z";
+      if (boundary === "future") scheduled.hint = { nextReconcileAt: "2026-04-29T00:00:00.000Z" };
+      if (boundary === "manual") scheduled.hint = { reason: "manual_reconcile", nextReconcileAt: FIXED_NOW };
+      if (boundary === "unbound") delete wake.expectedConnectedAt;
+      try {
+        for (const [index, entry] of [wake, scheduled].entries()) {
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncItem({ dedupeKey: entry.eventId,
+              id: `mailbox_synthetic_cadence_${index}`, laneSeq: String(index + 1) }),
+            vaultRoot: workspace.vaultRoot, wake: entry,
+          });
+        }
+        await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+          pending: state.pending.map((item, index) => index === 0 ? {
+            ...item, deviceSyncContinuationOwner: true, attemptCount: 1,
+            // The new owner's cadence timer precedes the actual history retry.
+            nextAttemptAt: "2026-04-27T06:00:00.000Z",
+          } : item),
+        }));
+        const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["run-device-sync-wake"], now: () => FIXED_NOW,
+          runtime: createRuntime({}), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+          retainProcessedItemUntilRecorded: true,
+        });
+        if (boundary === "due") {
+          assert.equal(prepared?.status, "processed");
+          assert.equal(prepared.itemId, "mailbox_synthetic_cadence_0");
+        } else {
+          assert.equal(prepared, null);
+        }
+        // Admission alone is never proof that the equal schedule executed.
+        assert.equal((await readHostedSystemMailboxState(workspace.vaultRoot)).pending.length, 2);
+      } finally {
+        await workspace.cleanup();
+      }
+    },
+  );
+
+  it.each([false, true])("keeps cadence progress and failed-scheduler backoff on one retained owner (advanced: %s)", async (advanced) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_synthetic_renewing_history";
     const expectedConnectedAt = "2026-04-01T00:00:00.000Z";
@@ -4432,12 +4485,13 @@ describe("hosted system mailbox notification execution context", () => {
           : item),
       }));
       for (let day = 0; day < 3; day += 1) {
-        const admittedAt = retryAt;
+        const admittedAt = day === 0 ? cadenceAt : retryAt;
         retryAt = new Date(Date.parse(admittedAt) + 86_400_000).toISOString();
         retainedWake = {
           ...retainedWake,
           hint: {
             ...retainedWake.hint,
+            ...(advanced ? { nextReconcileAt: retryAt } : {}),
             jobs: [{ availableAt: retryAt, dedupeKey: "synthetic-history",
               kind: "resource", payload: { resource: "weight" }, priority: 30 }],
           },
@@ -4466,7 +4520,9 @@ describe("hosted system mailbox notification execution context", () => {
         expect(resolveHostedSystemMailboxProgress({
           importedSeq: "2", now: admittedAt, state: checkpoint,
         })).toMatchObject({
-          deviceSyncContinuationSeqs: ["1"], firstPendingSeq: "2", handledThroughSeq: "1",
+          deviceSyncContinuationSeqs: ["1"],
+          firstPendingSeq: advanced && day > 0 ? null : "2",
+          handledThroughSeq: advanced && day > 0 ? "2" : "1",
         });
         expect(await prepareHostedSystemMailboxItemForCheckpoint({
           allowedRouteActions: ["run-device-sync-wake"], executionContext: null,
