@@ -9,6 +9,11 @@ receipt owner with one attempt timestamp and a blinded original identity.
 It reuses current route/access and egress policy, retrieves the original
 provider message transiently, and resends only that failed message. It creates
 no assistant turn, outbox owner, scheduler, or durable message-body copy.
+Receipt ingestion and acceptance serialize on transient, hashed message locks
+before delivery mutations, so their transactions cannot miss each other's
+committed identity. Legacy receipts recheck promoted child ownership under the
+parent lock. Existing Web diagnostics explain recovery decisions without
+retaining provider content.
 `agent-docs/RELIABILITY.md` specifies the supported content, ordering, limits,
 and conservative behavior after an ambiguous retry.
 

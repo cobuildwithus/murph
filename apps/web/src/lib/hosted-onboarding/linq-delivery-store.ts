@@ -5,6 +5,7 @@ import {
 } from "../hosted-routing/linq-chat-ownership-lock";
 import { LINQ_API_DEFAULT_TIMEOUT_MS } from "../linq/api";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
+import { lockHostedLinqMessageReceiptsTx } from "./linq-message-receipt-lock";
 import {
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
@@ -1538,6 +1539,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   };
 
   return await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
+    await lockHostedLinqMessageReceiptsTx({ messageIds: providerMessageIds, prisma });
     let acceptedAdvanced = false;
     let failedAdvanced = false;
     const existing = await prisma.hostedLinqDelivery.findUnique({
@@ -2187,9 +2189,20 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     await lockHostedMemberRow(input.prisma, deliveryOnboardingLink.memberId);
   }
 
+  // A terminal retry can promote a legacy parent-only delivery to a message
+  // owner after our first lookup. Recheck under the same lock as promotion.
+  await lockHostedLinqDeliveryRow(input.prisma, delivery.id);
+  const promotedMessageReceipt = await applyHostedLinqDeliveryMessageReceiptTx(input);
+  if (promotedMessageReceipt) return promotedMessageReceipt;
+
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       id: delivery.id,
+      messageLookupKey: {
+        in: input.event.messageLookupKeyReadCandidates.length > 0
+          ? input.event.messageLookupKeyReadCandidates
+          : [input.event.messageLookupKey],
+      },
       OR: buildReceiptOrderingWhere(input.event),
     },
     data: buildReceiptUpdate(input.event),
@@ -2638,6 +2651,7 @@ export async function recordHostedLinqTerminalRetryAcceptedTx(input: {
   phoneNumberLookupKey: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
+  await lockHostedLinqMessageReceiptsTx({ messageIds: [input.messageId], prisma: input.prisma });
   await lockHostedLinqDeliveryRow(input.prisma, input.deliveryId);
   const messageLookupKey = requireHostedLinqMessageLookupKey(input.messageId);
   const messageLookupKeyCandidates =

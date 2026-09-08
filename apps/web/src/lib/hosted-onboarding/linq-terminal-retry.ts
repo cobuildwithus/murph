@@ -18,6 +18,9 @@ import {
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
 import { sha256Hex } from "../primitives";
+import { isHostedOnboardingError } from "./errors";
+import { LinqApiTimeoutError } from "../linq/api";
+import { logHostedOnboardingDiagnostic, logHostedOnboardingWarning, toHostedOnboardingLogIdSuffix } from "./logging";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 
 // Recovery cannot extend the provider's optional 24-hour content lifetime.
@@ -36,11 +39,23 @@ export async function retryHostedLinqTerminalSendForEvent(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
 }): Promise<void> {
-  if (input.event.eventType !== "message.failed" || !isHostedLinqTerminalSendFailure(input.event)) return;
+  if (input.event.eventType !== "message.failed") return;
+  if (!isHostedLinqTerminalSendFailure(input.event)) {
+    try {
+      logHostedOnboardingDiagnostic("hosted-onboarding.linq.terminal-retry", {
+        trigger: "failure_webhook", stage: "candidate", outcome: "skipped",
+        reason: "failure_not_retryable", attemptClaimed: false,
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(input.event.eventId),
+      });
+    } catch { /* Diagnostics do not grant or block a retry. */ }
+    return;
+  }
   await retryHostedLinqTerminalSend({
     chatId: input.event.linqChatId,
     messageId: input.event.linqMessageId,
     prisma: input.prisma,
+    trigger: "failure_webhook",
+    eventId: input.event.eventId,
   });
 }
 
@@ -90,17 +105,18 @@ async function readRetryCandidate(input: {
 }) {
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
     where: {
-      source: "hosted_runtime_linq_delivery",
-      status: "failed",
       linqChatLookupKey: { in: input.chatKeys },
-      acceptedAt: { gte: new Date(input.now.getTime() - RETRY_MAX_AGE_MS) },
       OR: [
         { messageLookupKey: { in: input.messageKeys } },
-        { messages: { some: { messageLookupKey: { in: input.messageKeys } } } },
+        { messages: { some: { OR: [
+          { messageLookupKey: { in: input.messageKeys } },
+          { terminalRetryOriginalMessageLookupKey: { in: input.messageKeys } },
+        ] } } },
       ],
     },
     select: {
       id: true,
+      source: true,
       acceptedAt: true,
       messageLookupKey: true,
       messageIdSuffix: true,
@@ -120,37 +136,46 @@ async function readRetryCandidate(input: {
           status: true,
           failureCode: true,
           failureReason: true,
+          terminalRetryOriginalMessageLookupKey: true,
           terminalRetryAttemptedAt: true,
         },
         take: 11,
       },
     },
   });
-  if (
-    !delivery?.phoneNumberLookupKey
-    || !delivery.acceptedAt
-    || delivery.threadIsDirect === null
-    || delivery.messages.length > 10
-  ) return null;
-  const message = delivery.messages.find((item) =>
-    input.messageKeys.includes(item.messageLookupKey));
-  if (delivery.messages.length && !message) return null;
+  if (!delivery) return { candidate: null, reason: "delivery_missing" } as const;
+  if (delivery.source !== "hosted_runtime_linq_delivery") {
+    return { candidate: null, reason: "delivery_not_runtime_owned" } as const;
+  }
+  if (delivery.messages.some((item) =>
+    item.terminalRetryOriginalMessageLookupKey
+    && input.messageKeys.includes(item.terminalRetryOriginalMessageLookupKey)
+  )) return { candidate: null, reason: "original_already_replaced" } as const;
+  if (delivery.status !== "failed") return { candidate: null, reason: "delivery_not_failed" } as const;
+  if (!delivery.phoneNumberLookupKey || !delivery.acceptedAt || delivery.threadIsDirect === null) {
+    return { candidate: null, reason: "delivery_authority_incomplete" } as const;
+  }
+  if (delivery.acceptedAt.getTime() < input.now.getTime() - RETRY_MAX_AGE_MS) {
+    return { candidate: null, reason: "delivery_expired" } as const;
+  }
+  if (delivery.messages.length > 10) return { candidate: null, reason: "delivery_message_limit" } as const;
+  const message = delivery.messages.find((item) => input.messageKeys.includes(item.messageLookupKey));
+  if (delivery.messages.length && !message) return { candidate: null, reason: "message_not_owned" } as const;
   const failed = message ?? delivery;
-  if (
-    failed.status !== "failed"
-    || !isHostedLinqTerminalSendFailure(failed)
-    || message?.terminalRetryAttemptedAt
-  ) return null;
-  return { delivery, message };
+  if (message?.terminalRetryAttemptedAt) return { candidate: null, reason: "attempt_already_consumed" } as const;
+  if (failed.status !== "failed" || !isHostedLinqTerminalSendFailure(failed)) {
+    return { candidate: null, reason: "failure_not_retryable" } as const;
+  }
+  return { candidate: { delivery, message }, reason: null } as const;
 }
 
-async function assertRetryRouteAndPolicy(input: {
+async function readRetryPolicyBlock(input: {
   chatId: string;
   chatKeys: string[];
   lineKey: string;
   threadIsDirect: boolean;
   prisma: RetryClient;
-}): Promise<boolean> {
+}): Promise<string | null> {
   const group = await readHostedThreadRouteByThreadIdentity({
     channel: "linq", threadId: input.chatId, prisma: input.prisma,
   });
@@ -161,12 +186,12 @@ async function assertRetryRouteAndPolicy(input: {
   const memberId = group?.containerMemberId ?? direct?.memberId;
   const lineKey = group?.accountLookupKey ?? direct?.linqRecipientPhoneLookupKey;
   if (!memberId || lineKey !== input.lineKey || Boolean(direct) !== input.threadIsDirect) {
-    return false;
+    return "route_mismatch";
   }
   const access = await readHostedRuntimeAiAccessDecision({
     memberId, prisma: input.prisma,
   });
-  if (!access.allowed) return false;
+  if (!access.allowed) return access.reason;
   const line = await input.prisma.hostedLinqLine.findUnique({
     where: { phoneNumberLookupKey: input.lineKey },
     select: {
@@ -174,34 +199,35 @@ async function assertRetryRouteAndPolicy(input: {
       providerReputationStatus: true, providerServiceStatus: true,
     },
   });
-  if (!line?.configuredAt) return false;
+  if (!line?.configuredAt) return "line_not_configured";
   const chat = await input.prisma.hostedLinqChatHealth.findFirst({
     where: { linqChatLookupKey: { in: input.chatKeys } },
     select: { providerStatus: true, phoneNumberLookupKey: true },
   });
-  if (chat?.phoneNumberLookupKey && chat.phoneNumberLookupKey !== input.lineKey) return false;
-  return evaluateHostedLinqEgressPolicy({
+  if (chat?.phoneNumberLookupKey && chat.phoneNumberLookupKey !== input.lineKey) return "chat_line_mismatch";
+  const policy = evaluateHostedLinqEgressPolicy({
     chatHealthStatus: chat?.providerStatus,
     lineDeliveryHealthStatus: line.healthStatus,
     lineEgressPolicy: line.egressPolicy,
     lineReputationStatus: line.providerReputationStatus,
     lineServiceStatus: line.providerServiceStatus,
     newConversation: false,
-  }).kind === "allow";
+  });
+  return policy.kind === "allow" ? null : policy.code;
 }
 
-function isMatchingFailedOutbound(
+function readFailedOutboundMismatch(
   original: Message,
   input: { messageId: string; chatId: string; lineKey: string },
-): boolean {
-  return original.id === input.messageId
-    && original.chat_id === input.chatId
-    && original.is_from_me === true
-    && original.delivery_status === "failed"
-    && original.service === "iMessage"
-    && createHostedPhoneLookupKeyReadCandidates(
-      original.from_handle?.handle ?? original.from,
-    ).includes(input.lineKey);
+): string | null {
+  if (original.id !== input.messageId) return "provider_message_mismatch";
+  if (original.chat_id !== input.chatId) return "provider_chat_mismatch";
+  if (original.is_from_me !== true) return "provider_direction_mismatch";
+  if (original.delivery_status !== "failed") return "provider_status_not_failed";
+  if (original.service !== "iMessage") return "provider_service_not_imessage";
+  return createHostedPhoneLookupKeyReadCandidates(
+    original.from_handle?.handle ?? original.from,
+  ).includes(input.lineKey) ? null : "provider_sender_mismatch";
 }
 
 /**
@@ -209,11 +235,69 @@ function isMatchingFailedOutbound(
  * arrival order can strand a known terminal failure. The existing message row
  * owns the one-attempt fence, including duplicate/concurrent webhook delivery.
  */
+type RetryStage = "candidate" | "policy" | "retrieve" | "content" | "claim" | "send" | "record";
+type RetryDiagnostic = {
+  stage: RetryStage;
+  outcome: "skipped" | "accepted" | "error";
+  reason: string;
+  attemptClaimed: boolean;
+  trigger: "failure_webhook" | "acceptance_callback";
+  messageRef: string | null;
+  eventIdSuffix: string | null;
+  providerStatus?: number;
+  errorKind?: "timeout" | "provider_http" | "database" | "unexpected";
+};
+
 export async function retryHostedLinqTerminalSend(input: {
   chatId: string | null;
   messageId: string | null;
   prisma: PrismaClient;
+  trigger?: RetryDiagnostic["trigger"];
+  eventId?: string;
 }): Promise<void> {
+  const startedAt = Date.now();
+  const diagnostic: RetryDiagnostic = {
+    stage: "candidate", outcome: "skipped", reason: "missing_provider_identity",
+    attemptClaimed: false, trigger: input.trigger ?? "acceptance_callback",
+    eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+    messageRef: input.messageId ? sha256Hex(input.messageId).slice(0, 16) : null,
+  };
+  try {
+    await runTerminalRetry(input, diagnostic);
+  } catch (error) {
+    diagnostic.outcome = "error";
+    if (diagnostic.reason !== "replacement_identity_invalid") {
+      diagnostic.reason = diagnostic.stage === "send" ? "send_outcome_unknown" : "operation_failed";
+    }
+    diagnostic.errorKind = error instanceof Prisma.PrismaClientKnownRequestError ? "database" : "unexpected";
+    if (isHostedOnboardingError(error)) {
+      if (error.cause instanceof LinqApiTimeoutError) diagnostic.errorKind = "timeout";
+      const status = error.details?.status;
+      if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) {
+        diagnostic.providerStatus = status;
+        diagnostic.errorKind = "provider_http";
+      }
+    }
+    throw error;
+  } finally {
+    // Successful acceptance checks are ordinary, high-volume bookkeeping.
+    // A failed-event trigger always leaves an explanation, even without a row.
+    if (!(diagnostic.trigger === "acceptance_callback"
+      && ["delivery_missing", "delivery_not_failed"].includes(diagnostic.reason))) {
+      try {
+        const log = diagnostic.outcome === "accepted"
+          ? logHostedOnboardingDiagnostic : logHostedOnboardingWarning;
+        log("hosted-onboarding.linq.terminal-retry", { ...diagnostic, elapsedMs: Math.max(0, Date.now() - startedAt) });
+      } catch { /* Optional diagnostics must never change delivery ownership. */ }
+    }
+  }
+}
+
+async function runTerminalRetry(input: {
+  chatId: string | null;
+  messageId: string | null;
+  prisma: PrismaClient;
+}, diagnostic: RetryDiagnostic): Promise<void> {
   if (!input.chatId || !input.messageId) return;
   const { chatId, messageId, prisma } = input;
   const keys = {
@@ -221,31 +305,44 @@ export async function retryHostedLinqTerminalSend(input: {
     messageKeys: createHostedLinqMessageLookupKeyReadCandidates(messageId),
     now: new Date(),
   };
-  const candidate = await readRetryCandidate({ ...keys, prisma });
-  if (!candidate) return;
-  const { delivery } = candidate;
-  const lineKey = delivery.phoneNumberLookupKey;
-  const threadIsDirect = delivery.threadIsDirect;
-  if (!lineKey || threadIsDirect === null) return;
+  const result = await readRetryCandidate({ ...keys, prisma });
+  if (!result.candidate) { diagnostic.reason = result.reason; return; }
+  const { delivery } = result.candidate;
+  const lineKey = delivery.phoneNumberLookupKey!;
+  const threadIsDirect = delivery.threadIsDirect!;
   const policyInput = { chatId, chatKeys: keys.chatKeys, lineKey, threadIsDirect };
-  if (!await assertRetryRouteAndPolicy({ ...policyInput, prisma })) return;
+  diagnostic.stage = "policy";
+  const policyReason = await readRetryPolicyBlock({ ...policyInput, prisma });
+  if (policyReason) { diagnostic.reason = policyReason; return; }
 
+  diagnostic.stage = "retrieve";
   const original = await readHostedLinqFailedMessage(messageId);
-  if (!isMatchingFailedOutbound(original, { messageId, chatId, lineKey })) return;
-  const messageRowId = candidate.message?.id
+  const mismatch = readFailedOutboundMismatch(original, { messageId, chatId, lineKey });
+  if (mismatch) { diagnostic.reason = mismatch; return; }
+  const messageRowId = result.candidate.message?.id
     ?? `hlm_terminal_${sha256Hex(delivery.id)}`;
-  const body = buildHostedLinqTerminalRetryMessage(
-    original, `terminal-retry:${messageRowId}`,
-  );
-  if (!body) return;
+  diagnostic.stage = "content";
+  const body = buildHostedLinqTerminalRetryMessage(original, `terminal-retry:${messageRowId}`);
+  if (!body) {
+    diagnostic.reason = !original.parts?.length ? "content_missing"
+      : original.parts.length > 100 ? "content_part_limit"
+      : original.parts.some((part) => part.type === "imessage_app") ? "app_card_not_reconstructible"
+      : original.parts.some((part) => part.type === "media" && part.mime_type?.startsWith("audio/")) ? "audio_not_reconstructible"
+      : "content_not_reconstructible";
+    return;
+  }
 
+  diagnostic.stage = "claim";
   const claimed = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw(Prisma.sql`
       SELECT id FROM hosted_linq_delivery WHERE id = ${delivery.id} FOR UPDATE
     `);
-    const current = await readRetryCandidate({ ...keys, now: new Date(), prisma: tx });
-    if (!current || current.delivery.id !== delivery.id) return false;
-    if (!await assertRetryRouteAndPolicy({ ...policyInput, prisma: tx })) return false;
+    const currentResult = await readRetryCandidate({ ...keys, now: new Date(), prisma: tx });
+    const current = currentResult.candidate;
+    if (!current) { diagnostic.reason = currentResult.reason; return false; }
+    if (current.delivery.id !== delivery.id) { diagnostic.reason = "delivery_changed"; return false; }
+    const reason = await readRetryPolicyBlock({ ...policyInput, prisma: tx });
+    if (reason) { diagnostic.reason = reason; return false; }
     if (!current.message) {
       await tx.hostedLinqDeliveryMessage.create({
         data: {
@@ -267,22 +364,25 @@ export async function retryHostedLinqTerminalSend(input: {
       where: { id: messageRowId, terminalRetryAttemptedAt: null },
       data: { terminalRetryAttemptedAt: new Date() },
     });
+    if (claim.count !== 1) diagnostic.reason = "claim_lost";
     return claim.count === 1;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   if (!claimed) return;
+  diagnostic.attemptClaimed = true;
 
-  // A transport-ambiguous response consumes this attempt too. Never open a
-  // second retry or release the fence after dispatch may have reached Linq.
+  // Ambiguous dispatch consumes the attempt; never release this fence.
+  diagnostic.stage = "send";
   const accepted = await resendHostedLinqMessage({ chatId, message: body });
   if (accepted.chatId !== chatId || !accepted.messageId || accepted.messageId === messageId) {
+    diagnostic.stage = "record";
+    diagnostic.reason = "replacement_identity_invalid";
     throw new Error("Linq terminal retry response omitted the expected identity.");
   }
+  diagnostic.stage = "record";
   await prisma.$transaction((tx) => recordHostedLinqTerminalRetryAcceptedTx({
-    acceptedAt: new Date(),
-    deliveryId: delivery.id,
-    messageRowId,
-    messageId: accepted.messageId!,
-    phoneNumberLookupKey: lineKey,
-    prisma: tx,
+    acceptedAt: new Date(), deliveryId: delivery.id, messageRowId,
+    messageId: accepted.messageId!, phoneNumberLookupKey: lineKey, prisma: tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  diagnostic.outcome = "accepted";
+  diagnostic.reason = "replacement_accepted_delivery_unconfirmed";
 }
