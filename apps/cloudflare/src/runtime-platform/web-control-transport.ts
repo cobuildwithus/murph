@@ -1,3 +1,4 @@
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER } from "@murphai/device-syncd/hosted-runtime";
 import { emitHostedExecutionStructuredLog, type HostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
@@ -420,7 +421,11 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     userId: input.boundUserId,
   });
 
+  const snapshotBodyMetrics = input.route.operation === "device_sync_runtime_snapshot"
+    ? { bytesRead: 0 }
+    : undefined;
   const readResponseText = () => readHostedWebControlPlaneResponseText({
+    bodyMetrics: snapshotBodyMetrics,
     description: input.description,
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
@@ -471,39 +476,116 @@ async function fetchHostedWebControlPlaneJsonAttempt(
   }
 
   const text = await readResponseText();
-  if (!text.trim()) {
-    return null;
+  return decodeHostedWebControlPlaneResponseJson({
+    input,
+    requestLogDetails,
+    requestStartedAt,
+    response,
+    snapshotBodyMetrics,
+    text,
+  });
+}
+
+function decodeHostedWebControlPlaneResponseJson({
+  input,
+  requestLogDetails,
+  requestStartedAt,
+  response,
+  snapshotBodyMetrics,
+  text,
+}: {
+  input: HostedWebControlPlaneJsonRequest;
+  requestLogDetails: HostedExecutionStructuredLogDetails;
+  requestStartedAt: number;
+  response: Response;
+  snapshotBodyMetrics: { bytesRead: number } | undefined;
+  text: string;
+}): unknown {
+  const empty = !text.trim();
+  let payload: unknown = null;
+  if (!empty) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runtime.control-plane",
+        details: {
+          ...requestLogDetails,
+          durationMs: Date.now() - requestStartedAt,
+          ...buildHostedRuntimeSafeErrorMetadata(error, {
+            includeSafeErrorText: false,
+          }),
+          responseStatus: response.status,
+          ...(snapshotBodyMetrics
+            ? describeHostedSnapshotResponseBody(response.headers, snapshotBodyMetrics.bytesRead, "invalid_json")
+            : { responseBodyBytes: new TextEncoder().encode(text).byteLength }),
+        },
+        level: "warn",
+        message: "Hosted runtime control-plane response returned invalid JSON.",
+        phase: "runtime.starting",
+        userId: input.boundUserId,
+      });
+      if (input.sensitiveResponseBody) {
+        throw new HostedWebControlPlaneSensitiveResponseInvalidJsonError(
+          input.description,
+        );
+      }
+      throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
+    }
   }
 
-  try {
-    return JSON.parse(text);
-  } catch (error) {
+  if (snapshotBodyMetrics && !readHostedWebControlPlaneRecord(payload)) {
+    // Observe only; the existing snapshot parser still owns rejection and error identity.
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.control-plane",
       details: {
         ...requestLogDetails,
         durationMs: Date.now() - requestStartedAt,
-        ...buildHostedRuntimeSafeErrorMetadata(error, {
-          includeSafeErrorText: false,
-        }),
-        responseBodyBytes: new TextEncoder().encode(text).byteLength,
         responseStatus: response.status,
+        ...describeHostedSnapshotResponseBody(
+          response.headers,
+          snapshotBodyMetrics.bytesRead,
+          empty ? "empty" : payload === null ? "null" : Array.isArray(payload) ? "array" : "scalar",
+        ),
       },
       level: "warn",
-      message: "Hosted runtime control-plane response returned invalid JSON.",
+      message: "Hosted runtime device-sync snapshot response returned invalid top-level shape.",
       phase: "runtime.starting",
       userId: input.boundUserId,
     });
-    if (input.sensitiveResponseBody) {
-      throw new HostedWebControlPlaneSensitiveResponseInvalidJsonError(
-        input.description,
-      );
-    }
-    throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
+  return payload;
+}
+
+// Never return raw header values, body text, or parser messages from this boundary.
+function describeHostedSnapshotResponseBody(
+  headers: Headers,
+  responseBodyBytes: number,
+  responseBodyShape: "empty" | "invalid_json" | "null" | "array" | "scalar",
+): HostedExecutionStructuredLogDetails {
+  const marker = headers.get(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER);
+  const expectedBytes = marker !== null && /^(?:0|[1-9]\d{0,15})$/u.test(marker)
+    && Number.isSafeInteger(Number(marker))
+    ? Number(marker)
+    : null;
+  const mime = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  return {
+    responseBodyBytes,
+    responseBodyShape,
+    responseMimeCategory: mime === undefined ? "missing"
+      : mime === "application/json" || (mime.startsWith("application/") && mime.endsWith("+json")) ? "json"
+      : mime === "text/html" ? "html"
+      : mime === "text/plain" ? "text"
+      : "other",
+    responseByteCountComparison: marker === null ? "missing"
+      : expectedBytes === null ? "invalid"
+      : expectedBytes === responseBodyBytes ? "match" : "mismatch",
+    ...(expectedBytes === null ? {} : { responseExpectedBodyBytes: expectedBytes }),
+  };
 }
 
 export async function readHostedWebControlPlaneResponseText(input: {
+  bodyMetrics?: { bytesRead: number };
   description: string;
   maxBytes: number | undefined;
   response: Response;
@@ -511,6 +593,9 @@ export async function readHostedWebControlPlaneResponseText(input: {
   timeoutMs: number;
 }): Promise<string> {
   const maxBytes = input.maxBytes;
+  if (input.bodyMetrics) {
+    input.bodyMetrics.bytesRead = 0;
+  }
   if (maxBytes !== undefined) {
     const contentLengthText =
       input.response.headers.get("content-length")?.trim() ?? "";
@@ -557,6 +642,9 @@ export async function readHostedWebControlPlaneResponseText(input: {
     text += decoder.decode(chunk, { stream: true });
   }
   text += decoder.decode();
+  if (input.bodyMetrics) {
+    input.bodyMetrics.bytesRead = totalBytes;
+  }
   return text;
 }
 
