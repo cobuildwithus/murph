@@ -79,7 +79,7 @@ mailbox frontier in existing privacy-safe runtime logs.
 
 ## State
 
-Status: active
+Status: completed
 Updated: 2026-09-08
 
 ## Authorized takeover
@@ -127,3 +127,4 @@ Updated: 2026-09-08
   diagnostic helpers are below the threshold and reuse existing owners.
 - Internal-only diagnostic change: no member-facing UX or changelog item.
   No provider input, scheduling policy, schema, new query, or durable owner.
+Completed: 2026-09-08
