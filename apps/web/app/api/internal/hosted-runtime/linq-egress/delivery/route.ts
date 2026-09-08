@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { lockHostedLinqMessageReceiptsTx } from "@/src/lib/hosted-onboarding/linq-message-receipt-lock";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -162,6 +163,7 @@ export const POST = withJsonError(async (request: Request) => {
           throwHostedSignupWelcomeDeliveryAuthorityInvalid();
         }
 
+        await lockHostedLinqMessageReceiptsTx({ messageIds: providerMessageIds, prisma: tx });
         await materializeHostedSignupWelcomeHomeRouteTx({
           directRecipientPhoneNumber,
           fromPhoneNumber,

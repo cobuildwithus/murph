@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { redactHostedRuntimeDiagnosticText } from "@murphai/hosted-execution";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 import { runnerApplicationMatches, type RunnerApplicationSpecification } from "./runner-release-application.ts";
 
@@ -27,7 +28,11 @@ export function createRunnerReleaseProvider(input: {
     try { value = await response.json(); }
     catch { throw unavailable(`${operation}: HTTP ${response.status}; invalid JSON response.`); }
     if (!response.ok || !isObjectRecord(value) || value.success !== true) {
-      throw unavailable(`${operation}: HTTP ${response.status}; codes=${providerErrorCodes(value)}.`);
+      const requestBody = isObjectRecord(body) ? body : {};
+      const configuration = isObjectRecord(requestBody.configuration) ? requestBody.configuration : {};
+      const privateValues = [input.apiToken, input.accountId, requestBody.name, configuration.image]
+        .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+      throw unavailable(`${operation}: HTTP ${response.status}; errors=${providerErrorSummary(value, privateValues)}.`);
     }
     return value;
   };
@@ -120,17 +125,17 @@ export function createRunnerReleaseProvider(input: {
   };
 }
 
-// Containers puts its symbolic native error in the v4 envelope's message field.
-// Keep only bounded codes; provider prose/details may contain request identifiers.
-function providerErrorCodes(value: unknown): string {
+// Preserve bounded explanations at the provider boundary, never raw response details.
+function providerErrorSummary(value: unknown, privateValues: readonly string[]): string {
   if (!isObjectRecord(value) || !Array.isArray(value.errors)) return "unavailable";
-  const codes: string[] = [];
-  for (const error of value.errors.slice(0, 5)) {
-    if (!isObjectRecord(error)) continue;
-    if (typeof error.code === "number" && Number.isSafeInteger(error.code)) codes.push(String(error.code));
-    if (typeof error.message === "string" && /^[A-Z][A-Z0-9_]{0,79}$/u.test(error.message)) codes.push(error.message);
-  }
-  return codes.join(",") || "unavailable";
+  return JSON.stringify(value.errors.slice(0, 5).filter(isObjectRecord).map((error) => {
+    let message = typeof error.message === "string" ? error.message : "unavailable";
+    for (const privateValue of privateValues) message = message.split(privateValue).join("<redacted>");
+    message = redactHostedRuntimeDiagnosticText(message)
+      .replace(/\b(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\b/giu, "<redacted-resource>")
+      .replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, 320);
+    return { code: typeof error.code === "number" && Number.isSafeInteger(error.code) ? error.code : null, message };
+  }));
 }
 
 function unavailable(detail?: string): Error {

@@ -750,6 +750,8 @@ export class JunctionClient {
         endpointKind: "junction_user_refresh",
         queryParameterNames: timeout === null ? [] : ["timeout"],
         signal: input.signal ?? null,
+        // The client must outlive Junction's server-side refresh wait.
+        timeoutMs: Math.max(this.requestTimeoutMs, ((timeout ?? 10) + 5) * 1_000),
       },
       (clientOptions, requestOptions) => {
         const request: RefreshUserRequest = { userId: input.userId };
@@ -1065,10 +1067,17 @@ export class JunctionClient {
           throw normalizeProviderAbortError(providerError, options.signal);
         }
         if (
-          requestAbort.signal.aborted
-          && isProviderTimeoutError(providerError, requestAbort.signal)
+          isJunctionSdkTimeoutError(error)
+          || isProviderTimeoutError(providerError, requestAbort.signal)
         ) {
-          break;
+          throw deviceSyncError({
+            code: "JUNCTION_API_REQUEST_TIMEOUT",
+            message: `Junction API request timed out for ${options.endpointKind}.`,
+            retryable: method === "GET",
+            httpStatus: 504,
+            details: requestDiagnostics,
+            cause: providerError,
+          });
         }
 
         if (observedOptionalNotFound) {
@@ -1136,11 +1145,7 @@ export class JunctionClient {
           if (!providerError.retryable || attempt >= attempts) {
             throw providerError;
           }
-        } else if (
-          attempt >= attempts
-          || isJunctionSdkTimeoutError(error)
-          || isProviderTimeoutError(providerError, requestAbort.signal)
-        ) {
+        } else if (attempt >= attempts) {
           break;
         }
 
