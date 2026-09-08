@@ -1,6 +1,6 @@
 # Hosted Group Join Confirmation
 
-Last verified: 2026-07-23
+Last verified: 2026-09-08
 Status: Implemented
 
 ## User behavior
@@ -17,7 +17,16 @@ This applies to both supported join paths:
 
 The confirmation is created only when the shared join transaction creates a
 new `HostedGroupMember`. A repeated reaction, retried request, or existing
-member's sharing edit does not create another confirmation.
+member's sharing edit does not create another private join confirmation.
+
+For an existing member accepting a new Linq sharing offer, the grant transaction
+also queues one short confirmation in that group. It names only the scopes on
+the reacted-to message, preserves other sharing, and makes no claim that a
+health value has already arrived. Its membership-and-offer identity deduplicates
+provider replays. Delivery uses the existing exact-text notification consumer
+and the current group route authority; no private-chat handoff is required.
+Legacy routes without a sender-account binding keep accepting consent without
+queuing an unrouteable confirmation.
 
 ## Locked boundaries
 

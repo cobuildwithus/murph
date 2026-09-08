@@ -10,6 +10,18 @@ Code-mode fixtures omit deferred response, exercise-routine, and Telegram rich
 content cards from resident descriptions while requiring discovery. Both plain
 and namespaced code-mode wrappers retain an exact resident-tool inventory check.
 
+Payload webhook preparation contention is covered by
+`device-sync-webhook-preparation-contention-postgres.test.ts` with an isolated
+loopback `murph_test*` database and `MURPH_TEST_POSTGRES_CONCURRENCY=1` through
+`pnpm --dir apps/web test:prepared -- test/<file>`. It exercises the actual
+webhook retry owner, a deterministic sibling write during every preparation,
+and twelve simultaneously prepared payloads with decrypt/readback. Prepared
+root authentication and no extra KMS calls are covered in
+`hosted-crypto-domain-root-store.test.ts`; `device-sync-dirty-payload-rebinding.test.ts`
+proves rebinding does not recompress or decompress. Dirty-store, hosted-wake,
+agent-route, and webhook-batch tests cover acknowledgement/authority rejection,
+bounded diagnostic reasons, recovery, and private-data exclusion.
+
 Linq email identity remediation is covered by the focused
 `hosted-onboarding-linq-email-authority.test.ts` and
 `hosted-onboarding-linq-email-crypto.test.ts` suites, plus linked-account,
@@ -770,10 +782,20 @@ gate unset and makes no paid request.
   access and inactive, stale, removed, suspended, or consent-revoked
   exclusions. It also proves usage-denial suppression and restart chronology
   across staging, provider, delivery, and mailbox-consumption evidence, plus
-  imported device retries aging from their canonical earliest workspace wake
-  while unimported heads and suffixes, overdue retries, malformed frontiers,
-  and non-device system heads remain alertable, plus the 20,000
-  eligible-row cap after exclusions. The hosted-local
+  system heads aging from mailbox creation independently of imported frontiers,
+  fresh suffixes, checkpoints, or workspace wakes. An imported sequence above
+  durable high water remains unknown with no derived unhandled count; equality
+  retains full import coverage. Focused unit coverage also
+  proves aggregate device-head, import-coverage, imported-but-unhandled, and
+  wake-owner diagnostics remain identifier-free. The assistant-runtime
+  entrypoint suite proves the existing terminal invocation event carries the
+  public runner release, selected wake, result status, and derived numeric
+  system-mailbox frontiers, including local projection deferral with no
+  checkpoint and an unchanged wake. Mailbox-state coverage composes first-pending
+  evidence with explicit continuation ownership, status transitions, legacy
+  promotion, and fail-closed cardinality/binding checks; job hints do not decide
+  the diagnostic. The PostgreSQL proof retains the 20,000 raw-candidate cap
+  before exclusions plus one truncation probe. The hosted-local
   foreground-priority leg drives this monitor through authenticated cron HTTP
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, short-window active-incident coalescing,

@@ -26,12 +26,12 @@ import {
   sha256Hex,
   toIsoTimestamp,
 } from "../shared";
-import { HostedDomainRootPreparationMismatchError } from "../../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { toNullablePrismaJsonValue } from "./prisma-json";
 import {
   openHostedDeviceSyncDirtyPayloadJson,
   prepareHostedDeviceSyncDirtyPayloadCrypto,
+  rebindHostedDeviceSyncDirtyPayloadRevision,
   revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx,
   sealHostedDeviceSyncDirtyPayloadJson,
   sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto,
@@ -125,7 +125,11 @@ export function hasHostedDeviceSyncDirtyResourcePayload(
 export class HostedDeviceSyncDirtyPreparationMismatchError extends Error {
   readonly code = "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH";
 
-  constructor() {
+  constructor(readonly reason:
+    | "dirty_marker_missing"
+    | "dirty_marker_changed"
+    | "dirty_acknowledgement_changed"
+    | "dirty_owner_changed" = "dirty_marker_changed") {
     super("Hosted device-sync dirty preparation is stale.");
     this.name = "HostedDeviceSyncDirtyPreparationMismatchError";
   }
@@ -582,25 +586,18 @@ export class PrismaHostedDirtyConnectionStore {
       },
     });
     if (input.preparedPayloadCrypto) {
-      try {
-        await revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx({
-          prepared: input.preparedPayloadCrypto,
-          tx: prisma,
-        });
-      } catch (error) {
-        if (error instanceof HostedDomainRootPreparationMismatchError) {
-          throw new HostedDeviceSyncDirtyPreparationMismatchError();
-        }
-        throw error;
-      }
+      await revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx({
+        prepared: input.preparedPayloadCrypto,
+        tx: prisma,
+      });
     }
-    if (input.expectedPreparationSnapshot?.exists === true) {
+    if (input.expectedPreparationSnapshot && existing) {
       const locked = await lockDirtyConnectionForCompanionReceipt({
         connectionId: input.connectionId,
         tx: prisma,
       });
       if (!locked) {
-        throw new HostedDeviceSyncDirtyPreparationMismatchError();
+        throw new HostedDeviceSyncDirtyPreparationMismatchError("dirty_marker_missing");
       }
       existing = await prisma.deviceSyncDirtyConnection.findUnique({
         where: {
@@ -608,19 +605,10 @@ export class PrismaHostedDirtyConnectionStore {
         },
       });
     }
-    if (
-      input.expectedPreparationSnapshot
-      && !dirtyConnectionMatchesPreparationSnapshot(
-        existing,
-        input.expectedPreparationSnapshot,
-      )
-    ) {
-      throw new HostedDeviceSyncDirtyPreparationMismatchError();
-    }
+    let preparedDirtyPayloadRows = await resolvePreparedDirtyPayloadRowsForSnapshot(existing, input);
     const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
       (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
     );
-    let preparedDirtyPayloadRows = input.precomputedPayloadRows;
     if (
       input.resourceBatch.payloadResources.length > 0
       && !preparedDirtyPayloadRows
@@ -638,7 +626,7 @@ export class PrismaHostedDirtyConnectionStore {
     if (
       hasCompanionNightResource
       && existing
-      && input.expectedPreparationSnapshot?.exists !== true
+      && !input.expectedPreparationSnapshot
     ) {
       // Companion replay receipts reference the parent connection. Lock the
       // dirty marker first so account deletion and ingress retain one lock
@@ -1448,6 +1436,91 @@ function dirtyConnectionMatchesPreparationSnapshot(
     && existing.provider === snapshot.provider
     && existing.updatedAt.toISOString() === snapshot.updatedAt
     && existing.userId === snapshot.userId;
+}
+
+function canRebasePreparedDirtyIngress(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+  snapshot: DirtyConnectionPreparationSnapshot,
+  input: {
+    provider: string;
+    userId: string;
+  },
+): boolean {
+  // Only sibling ingress may move the snapshot. An acknowledgement, deletion,
+  // owner change, or clean marker still needs the ordinary full replan so its
+  // mailbox and connection admission are prepared against current authority.
+  return existing !== null
+    && existing.userId === input.userId
+    && existing.provider === input.provider
+    && existing.dirtyRevision > existing.processedRevision
+    && (snapshot.exists
+      ? existing.userId === snapshot.userId
+        && existing.provider === snapshot.provider
+        && existing.processedRevision === snapshot.processedRevision
+        && existing.dirtyRevision > snapshot.dirtyRevision
+      : existing.processedRevision === 0n);
+}
+
+async function rebindPreparedDirtyPayloadRows(input: {
+  crypto: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  nextDirtyRevision: bigint;
+  prepared: PreparedDirtyPayloadRows;
+}): Promise<PreparedDirtyPayloadRows> {
+  const rows: PreparedDirtyPayloadRow[] = [];
+  // Payload ids identify these exact prepared resources, independently of the
+  // marker's eventual commit revision. Preserve them inside the compressed
+  // envelope and bind both the stored row and its AAD to the new revision.
+  for (const row of input.prepared.rows) {
+    rows.push({
+      ...row,
+      dirtyRevision: input.nextDirtyRevision,
+      resourceEncrypted: await rebindHostedDeviceSyncDirtyPayloadRevision({
+        ...row,
+        nextDirtyRevision: input.nextDirtyRevision,
+        payloadId: row.id,
+        prepared: input.crypto,
+        value: row.resourceEncrypted,
+      }),
+    });
+  }
+  return { ...input.prepared, dirtyRevision: input.nextDirtyRevision, rows };
+}
+
+async function resolvePreparedDirtyPayloadRowsForSnapshot(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+  input: {
+    expectedPreparationSnapshot?: DirtyConnectionPreparationSnapshot;
+    preparedPayloadCrypto?: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+    precomputedPayloadRows?: PreparedDirtyPayloadRows;
+    provider: string;
+    userId: string;
+  },
+): Promise<PreparedDirtyPayloadRows | undefined> {
+  const snapshot = input.expectedPreparationSnapshot;
+  if (!snapshot || dirtyConnectionMatchesPreparationSnapshot(existing, snapshot)) {
+    return input.precomputedPayloadRows;
+  }
+  if (!input.precomputedPayloadRows || !input.preparedPayloadCrypto
+    || !canRebasePreparedDirtyIngress(existing, snapshot, input)) {
+    throw new HostedDeviceSyncDirtyPreparationMismatchError(
+      !existing ? "dirty_marker_missing"
+        : existing.userId !== input.userId || existing.provider !== input.provider
+          ? "dirty_owner_changed"
+          : snapshot.exists && existing.processedRevision !== snapshot.processedRevision
+            ? "dirty_acknowledgement_changed"
+            : "dirty_marker_changed",
+    );
+  }
+  const rebound = await rebindPreparedDirtyPayloadRows({
+    nextDirtyRevision: resolveDirtyPayloadRevision(existing),
+    prepared: input.precomputedPayloadRows,
+    crypto: input.preparedPayloadCrypto,
+  });
+  console.info("Hosted device-sync prepared payload revision rebound.", {
+    eventCode: "device_sync.prepared_payload_rebound",
+    payloadCount: rebound.rows.length,
+  });
+  return rebound;
 }
 
 function requirePreparedDirtyConnectionUpsert(

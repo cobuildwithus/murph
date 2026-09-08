@@ -2229,7 +2229,9 @@ describe('assistant system prompt cache stability', () => {
     // Luna journeys cover clean saved instructions and retained user controls.
     // Journal recovery adds 1,456 characters for verified saves, honest page
     // visibility, and workspace-safe launch recovery; focused Terra proof owns it.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(72_194)
+    // Private group-consent recovery adds 609 characters; focused Terra journeys
+    // verify the actionable next step and prevent ineffective context handoffs.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(72_803)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

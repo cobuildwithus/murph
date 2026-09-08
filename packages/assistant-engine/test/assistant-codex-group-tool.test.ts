@@ -263,9 +263,9 @@ describe("murph.group dynamic tool", () => {
       .toContain("immediately preceding read_chat_name result");
     expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty("messageTemplate");
     expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("every selectable permission by default");
+      .toContain("Omitting projectionScopes requests every selectable permission");
     expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("exact narrower set requested");
+      .toContain("supply only the exact permissions requested by the person");
     expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
     expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)

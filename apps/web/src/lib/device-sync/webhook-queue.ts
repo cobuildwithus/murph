@@ -34,20 +34,19 @@ export function prepareHostedDeviceWebhookQueueTransport(input: {
   provider: string;
   rawBody: Uint8Array;
   source?: Readonly<Record<string, string | undefined>>;
-}): { enabled: boolean } {
+}): { enabled: boolean; reason: "provider_not_enabled" | "body_too_large" | "queue_enabled" } {
   const providerEnabled = readHostedDeviceWebhookQueueProviders(input.source).has(
     input.provider.toLowerCase(),
   );
   if (!providerEnabled) {
-    return { enabled: false };
+    return { enabled: false, reason: "provider_not_enabled" };
   }
   // Decide synchronous oversize fallback before provider verification. Once a
   // verified event is prepared for Queue, an enqueue failure never falls
   // through to synchronous admission; the signature/parser never runs twice.
-  return {
-    enabled:
-      input.rawBody.byteLength <= HOSTED_DEVICE_WEBHOOK_QUEUE_MAX_RAW_BODY_BYTES,
-  };
+  return input.rawBody.byteLength <= HOSTED_DEVICE_WEBHOOK_QUEUE_MAX_RAW_BODY_BYTES
+    ? { enabled: true, reason: "queue_enabled" }
+    : { enabled: false, reason: "body_too_large" };
 }
 
 export async function enqueueHostedDeviceWebhook(input: {

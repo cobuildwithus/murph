@@ -370,7 +370,7 @@ describe('assistant Codex turn planning', () => {
     )).toMatchInlineSnapshot(`
       {
         "direct": "fa348cdd04d77d2fbbd12b5474ce1178cd65f14997355041586e8e789cec9bb5",
-        "group": "dd4131c56826ea77db148ba46f82629bb59d33b9493e3653e765ad3d0ee6c1e9",
+        "group": "054070d3529e0550288c4393ac6bc943e8179587bc4977b2dbfc6e03d40c2918",
         "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
         "scheduledEmail": "beed2995741b16a8429e1ed14d8e1edd1a53b3eb5ef451ab809475358e64209e",

@@ -4,6 +4,10 @@ Last verified: 2026-09-05
 
 ## Purpose
 
+Prepared device-webhook revision rebinding and content-free transport/replan
+diagnostics are owned by `agent-docs/RELIABILITY.md`; local PostgreSQL burst and
+cryptographic-binding proof is indexed in `agent-docs/references/testing-ci-map.md`.
+
 Personal Patterns expiry and checkpoint wake diagnostics are specified in
 `agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
 
@@ -15,6 +19,10 @@ are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 Device-sync metadata priority within the existing bounded envelope is specified
 by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
 reason in hosted failure events; Junction's progress keys remain provider-owned.
+
+Runtime progress diagnostics (aggregate alerts and code-only first-pending
+evidence) are specified in
+[`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
@@ -50,7 +58,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, companion upload buffering with scoped hydration key reuse, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-07 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, companion upload buffering with scoped hydration key reuse, accepted-mailbox progress evidence, and metadata-only snapshot response diagnostics. | Runtime reliability policy | High | 2026-09-08 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, hosted media receipt recovery and atomic retirement, and escalation rules. | Security policy | High | 2026-09-05 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |

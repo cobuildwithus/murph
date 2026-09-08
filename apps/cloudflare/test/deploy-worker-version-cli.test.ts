@@ -148,7 +148,40 @@ describe("runDeployWorkerVersionCli", () => {
     expect(receiptMocks.waitForCloudflareContainerReleaseEntries).toHaveBeenCalledOnce();
   });
 
-  it.each(["quota rejection", "pending distribution"])("keeps the Worker untouched during native %s", async (failure) => {
+  it("uploads container metadata before admission without switching traffic", async () => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+    }));
+    let containerEnabled = false;
+    wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async () => {
+      containerEnabled = true;
+      return { stdout: "deploy", stderr: "" };
+    });
+    releaseMocks.admitApplication.mockImplementation(async () => {
+      if (!containerEnabled) throw new Error("DURABLE_OBJECT_NOT_CONTAINER_ENABLED");
+      expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
+      return "created";
+    });
+    await syntheticDeployment();
+    const activationIndex = wranglerMocks.runWranglerLogged.mock.calls.findIndex(([args]) => args[0] === "versions");
+    expect(releaseMocks.assertApplicationReady.mock.invocationCallOrder[0]).toBeLessThan(wranglerMocks.runWranglerLogged.mock.invocationCallOrder[activationIndex]!);
+  });
+
+  it.each(["upload failure", "serving version changed"])("stops before native mutation after %s", async (failure) => {
+    wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async () => {
+      if (failure === "upload failure") throw new Error(failure);
+      wranglerMocks.runWranglerJson.mockResolvedValue(JSON.stringify({ versions: [{ percentage: 100, version_id: "unexpected-version" }] }));
+      return { stdout: "deploy", stderr: "" };
+    });
+    await expect(syntheticDeployment()).rejects.toThrow();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.assertApplicationReady).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
+    expect(releaseMocks.runSmokeHostedDeploy).not.toHaveBeenCalled();
+  });
+
+  it.each(["quota rejection", "pending distribution"])("keeps serving traffic unchanged during native %s", async (failure) => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
       applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
@@ -158,11 +191,12 @@ describe("runDeployWorkerVersionCli", () => {
     operation.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
     const pending = syntheticDeployment().catch((error: unknown) => error);
     await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce());
-    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
     expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
     reject(new Error(failure));
     expect(await pending).toEqual(new Error(failure));
-    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
   });
 
   it.each(["immediate", "worker-only"] as const)("rolls dedicated smoke without member drain admission in %s mode", async (mode) => {
@@ -176,7 +210,8 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.assertDrained).not.toHaveBeenCalled();
     expect(releaseMocks.admitApplication).toHaveBeenCalledWith(smoke);
     expect(releaseMocks.assertApplicationReady).toHaveBeenCalledOnce();
-    expect(releaseMocks.assertApplicationReady.mock.invocationCallOrder[0]).toBeLessThan(wranglerMocks.runWranglerLoggedCaptured.mock.invocationCallOrder[0]!);
+    const activationIndex = wranglerMocks.runWranglerLogged.mock.calls.findIndex(([args]) => args[0] === "versions");
+    expect(releaseMocks.assertApplicationReady.mock.invocationCallOrder[0]).toBeLessThan(wranglerMocks.runWranglerLogged.mock.invocationCallOrder[activationIndex]!);
     expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
   });
 
@@ -189,7 +224,8 @@ describe("runDeployWorkerVersionCli", () => {
     await expect(syntheticDeployment()).rejects.toThrow("member drain endpoint unavailable");
     expect(releaseMocks.assertDrained).toHaveBeenCalledWith("member-app");
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
-    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
   });
 
   it("publishes an unchanged execution release once, with no container mutation", async () => {

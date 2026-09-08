@@ -332,6 +332,7 @@ describe("hosted runtime system mailbox state", () => {
       },
     })).toEqual({
       deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: "4",
       handledThroughSeq: "3",
     });
@@ -377,6 +378,7 @@ describe("hosted runtime system mailbox state", () => {
       },
     })).toEqual({
       deviceSyncContinuationSeqs: owners,
+      firstPendingClassifierFailures: ["continuation_owner_missing"],
       firstPendingSeq: blocker,
       handledThroughSeq: handled,
     });
@@ -406,6 +408,7 @@ describe("hosted runtime system mailbox state", () => {
         state: { pending: [pendingBlocker, item] },
       })).toEqual({
         deviceSyncContinuationSeqs: [owner],
+        firstPendingClassifierFailures: ["continuation_owner_missing"],
         firstPendingSeq: blocker,
         handledThroughSeq: handled,
       });
@@ -434,8 +437,27 @@ describe("hosted runtime system mailbox state", () => {
         state,
       })).toEqual({
         deviceSyncContinuationSeqs: ["4"],
+        firstPendingClassifierFailures: null,
         firstPendingSeq: null,
         handledThroughSeq: "4",
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          ...legacyRetained,
+          nextAttemptAt: "2026-04-28T00:01:00.000Z",
+        }],
+      }));
+      const mismatchedLegacyState = await readHostedSystemMailboxState(vaultRoot);
+      expect(mismatchedLegacyState.pending[0]?.deviceSyncContinuationOwner).toBeUndefined();
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "4",
+        state: mismatchedLegacyState,
+      })).toEqual({
+        deviceSyncContinuationSeqs: [],
+        firstPendingClassifierFailures: ["continuation_owner_missing"],
+        firstPendingSeq: "4",
+        handledThroughSeq: "3",
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -460,6 +482,7 @@ describe("hosted runtime system mailbox state", () => {
       state: { pending: [...boundedRetained].reverse() },
     })).toEqual({
       deviceSyncContinuationSeqs: boundedRetained.map((item) => item.mailboxLaneSeq!),
+      firstPendingClassifierFailures: null,
       firstPendingSeq: null,
       handledThroughSeq: importedSeq,
     });
@@ -475,6 +498,7 @@ describe("hosted runtime system mailbox state", () => {
       state: { pending: [...boundedRetained, overflow] },
     })).toEqual({
       deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_projection_invalid"],
       firstPendingSeq: "1",
       handledThroughSeq: "0",
     });
@@ -491,6 +515,7 @@ describe("hosted runtime system mailbox state", () => {
       state: { pending: [boundedRetained[0]!, duplicateConnection] },
     })).toEqual({
       deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_projection_invalid"],
       firstPendingSeq: "1",
       handledThroughSeq: "0",
     });
@@ -506,8 +531,42 @@ describe("hosted runtime system mailbox state", () => {
       state: { pending: [notImportedOwner] },
     })).toEqual({
       deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_projection_invalid"],
       firstPendingSeq: "2",
       handledThroughSeq: "1",
+    });
+  });
+
+  it("derives first-pending diagnostics from ownership, not retry hints", () => {
+    const retained = buildRetainedDeviceSyncMailboxItem({
+      itemId: "retained_device_retry",
+      mailboxLaneSeq: "4",
+      retryAt: "2026-04-28T00:00:00.000Z",
+    });
+    // The wake's job schedule no longer matches, but the explicit owner remains.
+    const mismatchedRetry = {
+      ...retained,
+      nextAttemptAt: "2026-04-28T00:01:00.000Z",
+    };
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      state: { pending: [mismatchedRetry] },
+    })).toEqual({
+      deviceSyncContinuationSeqs: ["4"],
+      firstPendingClassifierFailures: null,
+      firstPendingSeq: null,
+      handledThroughSeq: "9",
+    });
+
+    const { deviceSyncContinuationOwner: _owner, ...unownedRetry } = mismatchedRetry;
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      state: { pending: [unownedRetry] },
+    })).toEqual({
+      deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["continuation_owner_missing"],
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
     });
   });
 
@@ -531,6 +590,7 @@ describe("hosted runtime system mailbox state", () => {
       },
     })).toEqual({
       deviceSyncContinuationSeqs: [],
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: null,
       handledThroughSeq: "0",
     });

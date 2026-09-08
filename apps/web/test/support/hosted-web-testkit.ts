@@ -89,6 +89,15 @@ import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 
+// Cross-app snapshot diagnostics exercise the actual route, including callback auth.
+export async function postHostedDeviceSyncSnapshotForTest(request: Request): Promise<Response> {
+  const routeModuleSpecifier = new URL(
+    "../../app/api/internal/device-sync/runtime/snapshot/route.ts", import.meta.url,
+  ).href;
+  const { POST } = await import(routeModuleSpecifier);
+  return POST(request);
+}
+
 // The same pre-parse body limit as usage ingestion, without callback auth or DB
 // effects. Keep cross-app contract tests on this existing public testkit seam.
 export async function readHostedUsageRecordRequestForTest(
