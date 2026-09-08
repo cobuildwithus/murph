@@ -8,6 +8,14 @@ Last verified: 2026-09-04
   reason `Message send failed` may resend each failed provider message once.
   The existing delivery-message row owns the permanent attempt timestamp and
   original lookup key; a parent delivery lock serializes competing claims.
+  Terminal receipt ingestion and runtime acceptance first serialize their
+  transactions by a stable hashed provider-message identity. Replacement
+  acceptance uses the same lock before the parent lock. Acceptance takes at
+  most ten message locks in sorted order; signup-welcome callbacks take them
+  before route/member materialization. This prevents concurrent transactions
+  from each missing the other's uncommitted receipt or accepted identity.
+  Legacy parent-only receipt writes take the parent lock, recheck promoted
+  message ownership and fence the active key before mutating the parent.
   Acceptance replaces the existing active message key (and matching parent
   scalar key), preserving the established receipt-reader contract. Receipt
   updates recheck that active key after acquiring the parent lock.
@@ -32,7 +40,17 @@ Last verified: 2026-09-04
   accepted runtime handoff. An unavailable provider response or interrupted
   post-dispatch recording may leave failure evidence unresolved; the consumed
   claim deliberately prevents a further resend.
-  The post-response acceptance check performs one exact failed-delivery lookup
+  Web structured logs use `hosted-onboarding.linq.terminal-retry` for every
+  failed-event evaluation and exceptional acceptance reconciliation. They
+  report the trigger, stage, finite outcome/reason, elapsed time, event suffix,
+  message correlation digest and whether this evaluation consumed the permanent
+  claim.
+  Provider failures expose only bounded HTTP status and a closed error class;
+  bodies, attachment URLs, sender/chat identities and provider prose stay out.
+  Normal successful acceptance checks stay quiet. An accepted replacement is
+  explicitly delivery-unconfirmed; canonical delivery/message receipts prove
+  recovery. Logging failure cannot change the send or release its claim.
+  The post-response acceptance check performs one exact delivery lookup
   per provider ID (at most ten, sequentially), with no provider work on normal
   success. Recovery reads at most eleven child rows to reject an oversized
   delivery, reuses bounded canonical access reads, and opens at most one

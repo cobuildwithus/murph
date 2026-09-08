@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "more-reliable-imessage-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable iMessage recovery",
+    "summary": "Murph handles overlapping delivery updates more reliably when an iMessage needs a retry.",
+    "details": "A failure arriving while a send is being recorded can now trigger the existing one-time retry. Older updates also preserve the status of the replacement message. Recovery keeps the same conversation, content and messaging restrictions.",
+    "relevanceTags": ["imessage", "reliability"],
+    "sourcePullRequests": [3044]
+  }
+}
