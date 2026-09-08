@@ -9177,6 +9177,10 @@ test("device sync scheduler immediately repairs legacy Junction coverage progres
             return createJsonResponse({ data: [] });
           }
 
+          if (new URL(url).pathname === "/v2/introspect/historical_pull") {
+            return createJsonResponse({ data: [] });
+          }
+
           throw new Error(`Unexpected Junction request during metadata retry priority test: ${url}`);
         },
       }),
