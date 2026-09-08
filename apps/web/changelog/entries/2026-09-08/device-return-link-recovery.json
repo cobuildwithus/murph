@@ -9,6 +9,6 @@
     "summary": "Old device return links now show your current connections with calm guidance instead of a connection-failed warning.",
     "details": "If a device still needs setup, start from its card on Connect. Existing connections keep their current status.",
     "relevanceTags": ["device-sync"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3056]
   }
 }
