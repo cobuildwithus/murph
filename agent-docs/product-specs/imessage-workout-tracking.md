@@ -11,6 +11,17 @@ A private member can run a strength workout from the Murph conversation:
 
 The experience borrows the useful workout-tracker loop—plan, log sets, correct, finish—without introducing a second workout product or data store.
 
+## Routine access and readiness
+
+Workout planning, saved-routine review, and logging stay in conversation. The
+Training web preview is not ready for member use and must not be recommended or
+linked by the assistant, including from historical product announcements.
+A proposed routine is an unsaved draft. An explicit save request uses the
+canonical workout-format owner and exact readback before a saved confirmation.
+Saved-routine retrieval displays the verified template in chat; missing or
+unreadable records receive an honest state explanation. Saving a template alone
+never starts a session, logs performance, or creates reminders.
+
 ## Authority boundary
 
 - A saved workout format owns planned exercises, stable exercise identity, planned sets, and target values.
