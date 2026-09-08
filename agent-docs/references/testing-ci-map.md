@@ -4,6 +4,16 @@ Last verified: 2026-09-05
 
 ## Current Repo Checks
 
+Vault-share replacement deadline proof lives in `projection-store.test.ts` and
+`vault-share-deliver-route.test.ts`. With an isolated migrated loopback
+`DATABASE_URL` and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
+`pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-vault-share-projection-deadline-postgres.test.ts --no-coverage`.
+The composed PostgreSQL cases block the real source-workspace row lock, expire
+or cancel the delivery, verify that no snapshot or version was written, then
+retry and decrypt the successfully published snapshot. Only encryption and
+the deadline clock use synthetic test controls; access checks, locks,
+transactions, and snapshot persistence use their production owners.
+
 `apps/cloudflare/test/hosted-local-e2e-support.test.ts` proves the shared hosted
 E2E tool-advertisement assertion across structured and code-mode requests.
 Code-mode fixtures omit deferred response, exercise-routine, and Telegram rich

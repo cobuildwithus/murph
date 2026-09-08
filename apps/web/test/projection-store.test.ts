@@ -518,6 +518,60 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  it.each(["transaction admission", "member locks", "workspace lock"] as const)(
+    "does not replace a snapshot when the deadline expires during %s",
+    async (delayedBoundary) => {
+      createSnapshotTestCodec();
+      const now = vi.spyOn(Date, "now").mockReturnValue(10_000);
+      const { prisma, transaction, queryRaw, updateMany } = createPrisma();
+      const expire = () => now.mockReturnValue(15_000);
+      if (delayedBoundary === "transaction admission") {
+        const admit = transaction.getMockImplementation()!;
+        transaction.mockImplementation(async (callback) => {
+          expire();
+          return admit(callback);
+        });
+      } else if (delayedBoundary === "member locks") {
+        mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockImplementationOnce(
+          async () => { expire(); },
+        );
+      } else {
+        queryRaw.mockImplementationOnce(async () => {
+          expire();
+          return [{ version: BigInt(SOURCE_WORKSPACE_VERSION) }];
+        });
+      }
+
+      await expect(replaceHostedVaultShareProjectionSnapshot({
+        deadlineAtEpochMs: 15_000,
+        prisma,
+        records: [RECORD],
+        share: SHARE,
+        sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+      })).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not replace a snapshot when cancellation arrives during the workspace lock", async () => {
+    createSnapshotTestCodec();
+    const controller = new AbortController();
+    const { prisma, queryRaw, updateMany } = createPrisma();
+    queryRaw.mockImplementationOnce(async () => {
+      controller.abort(new DOMException("Synthetic cancellation.", "AbortError"));
+      return [{ version: BigInt(SOURCE_WORKSPACE_VERSION) }];
+    });
+
+    await expect(replaceHostedVaultShareProjectionSnapshot({
+      prisma,
+      records: [RECORD],
+      share: SHARE,
+      signal: controller.signal,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
   it("replaces only an exact null snapshot during first materialization", async () => {
     createSnapshotTestCodec();
     const { prisma, updateMany } = createPrisma();

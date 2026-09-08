@@ -4,6 +4,20 @@ Last verified: 2026-09-04
 
 ## Current Guardrails
 
+- Linq `providerCreatedAt` / `lastReceiptAt` order terminal events; they are not
+  delivery latency. `message.delivered` uses valid `data.delivered_at` (or legacy
+  `data.message.delivered_at`), falling back to the event timestamp. The parser
+  persists that normalized timestamp in existing sanitized event metadata.
+  An exact active message's `deliveredAt` only refines earlier, even for stale
+  events, without repeating terminal side effects. Child timing survives a later
+  failure, but a multipart parent completes only when all required children are
+  delivered, at the latest of their first-delivery times. Replacement acceptance
+  clears the replaced child's timing; original receipts cannot cross that key
+  boundary. Acceptance catches up latest status and minimum delivery evidence
+  separately: one exact-key SQL aggregate and at most one conditional timing
+  write per message (at most ten, sequentially), within the existing database-only
+  transaction. No historical repair or provider request is added.
+
 - Runtime-owned Linq iMessages with code `4001` and the exact terminal
   reason `Message send failed` may resend each failed provider message once.
   The existing delivery-message row owns the permanent attempt timestamp and

@@ -90,8 +90,11 @@ releases. Land the public selector before enabling its private workflow input.
 A bound, still-warm previous session retains its exact namespace, member, claim,
 and write fence through promotion. Fresh member allocation selects only the
 active release. Previous inventory cannot prepare, bind new members, or restart
-cold processes. Before reusing its namespace, CI requires native drain evidence;
-unknown state leaves the active release serving. Native rollout admission uses
+cold processes. Before reusing its namespace, CI requires native drain evidence
+from every page of the Containers dashboard instance endpoint used by Wrangler. Only an empty
+or entirely stopped native instance list proves drain; historical Durable Object
+identities are not occupancy. Unknown state, failed pages, invalid continuation
+tokens, and bounded-inspection exhaustion leave the active release serving. Native rollout admission uses
 the configured capacity without automatically reducing a serving ceiling.
 Account quota and overlap capacity must be verified against the actual account.
 
