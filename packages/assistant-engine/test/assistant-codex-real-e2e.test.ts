@@ -93,6 +93,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { upsertKnowledgePage } from '../src/knowledge/service.ts'
 import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
+import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
 
 import {
   buildAssistantRealCodexRunEnv,
@@ -11764,6 +11765,122 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 })
 
 describeRealCodex('real Codex generated-music fallback e2e', () => {
+  it('shared schema: honors the canonical song limit in a subscription Terra code-only journey', async () => {
+    const config = await resolveRealCodexE2eConfig({
+      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription', MURPH_REAL_CODEX_MODEL: 'gpt-5.6-terra' },
+    })
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-shared-schema-song-'))
+    const isolatedHomePaths: string[] = []
+    const generations: unknown[] = []
+    const forbiddenEffects: string[] = []
+    const forbidEffect = (effect: string): never => {
+      forbiddenEffects.push(effect)
+      throw new Error(`Unexpected synthetic song effect: ${effect}`)
+    }
+    const maximum = MURPH_GENERATE_SONG_TOOL.inputSchema.properties.durationSeconds.maximum
+    try {
+      const home = await materializeRealCodexHostedPermissionHome(config)
+      isolatedHomePaths.push(...home.temporaryPaths)
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand, directory: home.codexHome, toolMode: 'code_mode_only',
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null,
+        assistantHostedAutomationAvailable: false,
+        assistantHostedGroupToolSurface: 'none',
+        assistantProgressUpdatesAvailable: false,
+        assistantStyleSettingsAvailable: false,
+        channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'direct',
+        currentLocalDate: '2026-09-08',
+        currentInstant: '2026-09-08T12:00:00.000Z',
+        currentTimeZone: 'America/New_York',
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      const before = await snapshotRealCodexCanonicalVault(workingDirectory)
+      const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand, codexHome: home.codexHome,
+        configOverrides: [
+          'features.apps=false', 'features.browser_use=false', 'features.enable_mcp_apps=false',
+          'features.multi_agent=false', 'features.multi_agent_v2=false', 'features.plugins=false',
+          'features.shell_tool=false', 'features.standalone_web_search=false',
+          'features.tool_suggest=false', 'features.web_search_request=false',
+          'memories.generate_memories=false', 'memories.use_memories=false', 'web_search="disabled"',
+        ],
+        developerInstructions: [
+          layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt,
+          // The production song owner explicitly supports an isolated complete
+          // owning flow instead of a skill read. No numeric limits are supplied
+          // here: the model must obtain them from its actual tool contract.
+          'Isolated synthetic song flow: the current user authorizes one original instrumental. The only permitted business operation is generate_song; metadata discovery and its code-mode transport are allowed. No other effect, shell/filesystem command, external network call, or persistence is permitted. Follow its canonical input contract, attach only on success, and state the actual duration. This is the complete owning-flow song contract; do not attempt a skill read.',
+        ].join('\n\n'),
+        dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+        excludeResumeTurns: true,
+        fetchImpl: async () => forbidEffect('fetch'),
+        publicInternetFetch: async () => forbidEffect('public-fetch'),
+        groupConversation: false,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          sendVaultFile: async () => forbidEffect('send-vault-file'),
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: [layers.dynamicTurnContextPrompt,
+          `Make one original bright instrumental lasting ${maximum + 60} seconds. If the tool cannot make it that long, make its maximum supported duration instead. Attach the result and state the actual duration as a number of seconds; acknowledge any shortening.`,
+        ].join('\n\n'),
+        reasoningEffort: 'low', sandbox: 'read-only', vaultRoot: workingDirectory, workingDirectory,
+        voiceMemoRuntime: {
+          elevenLabs: { apiKeyAvailable: true, modelId: 'eleven_multilingual_v2', voiceId: 'voice_synthetic' },
+          kind: 'linq',
+          generateAndUpload: async (input) => {
+            generations.push(input.generation)
+            return { attachmentId: 'attachment_synthetic_contract_song', filename: 'synthetic-contract-song.mp3' }
+          },
+        },
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const attempts = readDynamicToolAttempts(result.jsonEvents)
+      const completedDynamicActions = actions.filter((action) => action.kind === 'dynamic')
+      process.stdout.write(`[shared-schema-song-journey] ${JSON.stringify({
+        model: config.model, toolMode: 'code-only', attempts: attempts.length,
+        completedDynamicActionCount: completedDynamicActions.length,
+        completedDynamicActions: completedDynamicActions.slice(0, 4).map(({ tool, success }) => ({ tool, success })),
+        generations: generations.length, attachments: result.responseMedia.length,
+        reply: result.finalMessage,
+      })}\n`)
+      expect(attempts).toHaveLength(1)
+      expect(attempts[0]).toMatchObject({ tool: 'generate_song', argumentsValue: { durationSeconds: maximum, instrumental: true } })
+      expect(actions.filter((action) => action.kind === 'dynamic')).toEqual([
+        expect.objectContaining({ tool: 'generate_song', success: true }),
+      ])
+      expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+      expect(generations).toEqual([expect.objectContaining({ durationMs: maximum * 1_000, forceInstrumental: true, kind: 'elevenlabs_music' })])
+      expect(result.responseMedia).toEqual([{
+        filename: 'synthetic-contract-song.mp3', kind: 'voice_memo', transcript: null,
+        transport: { attachmentId: 'attachment_synthetic_contract_song', kind: 'linq_attachment' },
+      }])
+      expect(result.finalMessage).toMatch(new RegExp(`\\b${maximum}\\s*(?:seconds?|s)\\b`, 'iu'))
+      expect(result.finalMessage).toMatch(/short|limit|maximum|instead|cap/iu)
+      assertNoSongAttachmentFailure(result.finalMessage)
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(forbiddenEffects).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...isolatedHomePaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it(
     'honors an explicit request without turning unrelated context into provider input',
     async () => {

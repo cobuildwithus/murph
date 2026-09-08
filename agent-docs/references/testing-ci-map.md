@@ -497,6 +497,108 @@ only after a canonical condition read. The focused real-Codex companion repeats
 the member journey with synthetic health data and requires one condition read,
 one successful direct automation call, and one exact record reference.
 
+### Codex tool input contracts and CLI upgrades
+
+`packages/assistant-engine/test/assistant-codex-tool-input-contract.test.ts` is a
+default-on, credential-free regression gate under the existing package
+`test/**/*.test.ts` inclusion and normal package/PR CI. It starts the REAL pinned
+App Server against the loopback Responses stub, not a serializer substitute.
+Eager native declarations, deferred native search results, and forced code-only
+`ALL_TOOLS` metadata are compared against complete original canonical schemas.
+The automatically collected catalog includes exported registrations and actual
+resolver variants (boolean capability gates and direct/group progress modes),
+including follow-up, maintenance memory, group configuration/challenge/progress
+and both shared-read variants. Route alternatives sharing an identity run in
+separate batches; admission is never broadened to make a test pass.
+
+The fixture covers small documents and documents above the current compaction
+threshold, reference scopes/definitions, nested arrays/objects, compositions and
+conditionals, bounds, patterns/formats, enum/const/default/nullability, required
+fields, additional properties and descriptions. Negative checks corrupt ACTUAL
+captured documents, not idealized hand-authored provider output. Generated
+metadata is read in bounded, contiguous chunks with exact identity, total-length
+and completion checks before full-document equality. The test does not require
+native keywords to remain missing: upstream preservation improvements are valid.
+The extracted `test/support/codex-scripted-provider.ts` owns only the existing
+local fake provider and isolated fixture setup; production still owns process,
+thread, native routing, validation and effects.
+
+Run from the repository root with the workspace's supported Node/pnpm and
+installed pinned dependencies (the existing catalog helper also requires `jq`):
+
+```sh
+pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage \
+  test/assistant-codex-tool-input-contract.test.ts \
+  test/assistant-codex-scripted-runtime.test.ts \
+  test/assistant-codex-turn-planning.test.ts test/codex-thread-instructions.test.ts \
+  test/assistant-codex-runtime-config.test.ts test/assistant-codex-runtime-tools.test.ts \
+  test/assistant-codex-runtime-process.test.ts test/assistant-codex-runtime-recovery.test.ts
+pnpm --dir packages/assistant-engine typecheck
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage \
+  apps/cloudflare/test/codex-openai-egress-conformance.test.ts \
+  apps/cloudflare/test/container-image-contract.test.ts
+```
+
+The planner characterization retains its pre-adapter identity projection only
+for the existing broad snapshot; it separately asserts the new fingerprint
+against actual `thread/start` declarations with an independent hash oracle.
+Direct/group rollout cases use real pre-fix fingerprints, not arbitrary bad
+hashes, and prove one bootstrap followed by normal resume for both current and
+legacy route identity. Do not update unrelated snapshots to hide contract drift.
+
+For complete first-request payload measurements, run this opt-in local-only
+experiment after deterministic proof:
+
+```sh
+MURPH_MEASURE_SHARED_SCHEMA_INPUT=1 pnpm --dir packages/assistant-engine exec vitest run \
+  --config vitest.config.ts --no-coverage test/assistant-codex-scripted-runtime.test.ts \
+  -t 'shared schema: complete first provider input'
+```
+
+All four private/group × native/code-only pairs use production prompt builders,
+the same canonical route tools, and the current PR3059 card recovery paragraph.
+Only the baseline uses a test-local adapter ablation; both phases run actual
+Codex conversion. Logs include complete raw wire UTF-8 byte counts/digests,
+complete decoded-request counts/digests (only `prompt_cache_key` excluded),
+registered/eager/deferred counts, registration JSON bytes and observed deltas.
+The equality projection normalizes only enumerated transport identities and
+compares all remaining content after removing exactly the derived suffixes.
+Deferred contracts must not become resident. No exact Terra tokenizer is
+configured: token values remain null, and scripted usage is not tokenization.
+No zero-delta or full-duplication-is-free assertion is permitted.
+
+Retain the existing four card journeys, then run only the focused non-card
+companion through the authenticated local Terra subscription, with fake effects:
+
+```sh
+pnpm test:assistant:live -- --test 'compact-table debug: .*nine separate items.*native'
+pnpm test:assistant:live -- --test 'compact-table debug: .*nine separate items.*code-only'
+pnpm test:assistant:live -- --test 'compact-table debug: .*concise comparison.*native'
+pnpm test:assistant:live -- --test 'compact-table debug: .*concise comparison.*code-only'
+pnpm test:assistant:live -- --test 'shared schema: honors the canonical song limit'
+```
+
+The song journey uses production prompt layers and a complete isolated owning
+flow (the song owner permits this instead of a skill read). No numeric tool
+limit is inserted into that flow: the model must read its contract, shorten an
+explicitly authorized over-limit request, generate once, and truthfully state
+the actual duration. The fake generator returns one synthetic attachment; all
+other effects are forbidden, canonical/write-operation snapshots are unchanged,
+and the full synthetic reply is printed for parent `Ready`/`Hold` review. CI
+leaves the live gate unset. Protocol tests also inject invalid song bounds and
+prove zero generation before one valid correction, in native and code-only modes.
+
+**Version-update contract:** keep package/workspace pins, the runner-image pin,
+and existing egress/source/runner parity owners authoritative. Every Codex bump
+must pass this default-on runtime matrix and the existing parity suites, then
+record the focused capture deltas and review any changed exposure/metadata.
+Do not bless missing keywords, reduce the canonical oracle, update snapshots
+blindly, switch the stable pin to alpha, add a production bypass, or replace the
+real binary with a fake. This change adds no alternate-binary mechanism; use the
+existing pin/update workflow for separately authorized prerelease evaluation.
+Execution results and payload numbers must be recorded by the parent at the
+candidate head; the implementation patch itself is not passing runtime evidence.
+
 Assistant-behavior changes use
 `pnpm test:assistant:live -- --test "<unique test-name pattern>"` after their
 deterministic prompt/tool/effect proof. The guarded runner selects only

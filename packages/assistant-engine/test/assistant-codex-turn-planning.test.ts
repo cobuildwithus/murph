@@ -4,6 +4,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
+import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { fingerprintThreadDeclarations } from './support/codex-contract-fingerprint-oracle.ts'
+
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   defaultAssistantVoiceOptionId,
@@ -334,36 +338,61 @@ describe('assistant Codex turn planning', () => {
     }
     const digestPlan = (
       plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
-    ) => createHash('sha256').update(JSON.stringify({
-      assistantCliContract: plan.assistantCliContract,
-      assistantContractFingerprint: plan.assistantContractFingerprint,
-      assistantPreferredElevenLabsVoiceId:
-        plan.assistantPreferredElevenLabsVoiceId,
-      cliEnv: plan.cliEnv,
-      codexContinuation: plan.codexContinuation,
-      conversationHistoryMessages: plan.conversationHistoryMessages,
-      developerInstructions: plan.developerInstructions,
-      diagnosticsPolicy: plan.diagnosticsPolicy,
-      dynamicTools: plan.dynamicTools,
-      environments: plan.environments,
-      onboardingGuidanceInjected: plan.onboardingGuidanceInjected,
-      planningDiagnostics: {
-        dynamicToolCount: plan.planningDiagnostics.dynamicToolCount,
-        messageTargetDynamicToolsAvailable:
-          plan.planningDiagnostics.messageTargetDynamicToolsAvailable,
-        messageTargetingAvailable:
-          plan.planningDiagnostics.messageTargetingAvailable,
-        shouldPrepareBootstrapContext:
-          plan.planningDiagnostics.shouldPrepareBootstrapContext,
-      },
-      promptCacheMetadata: plan.promptCacheMetadata,
-      resume: plan.resume,
-      sessionContext: plan.sessionContext,
-      systemPrompt: plan.systemPrompt,
-      turnContextPrompt: plan.turnContextPrompt,
-      voiceMemoDeliveryChannel: plan.voiceMemoDeliveryChannel,
-      workingDirectory: plan.workingDirectory,
-    })).digest('hex')
+    ) => {
+      const start = buildCodexThreadStartParams({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        developerInstructions: plan.developerInstructions,
+        dynamicTools: plan.dynamicTools,
+        prompt: 'Characterization only',
+        workingDirectory: '/synthetic-characterization',
+      })
+      // Check the new identity against the ACTUAL thread/start declarations,
+      // independently of the fingerprint implementation. The broad planner
+      // snapshot below retains its pre-adapter identity projection so no
+      // unrelated planner output is rebaselined or exempted by this migration.
+      expect(plan.assistantContractFingerprint).toBe(fingerprintThreadDeclarations({
+        baseInstructions: start.baseInstructions as string,
+        developerInstructions: start.developerInstructions as string | null,
+        dynamicTools: start.dynamicTools,
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }))
+      return createHash('sha256').update(JSON.stringify({
+        assistantCliContract: plan.assistantCliContract,
+        assistantContractFingerprint: fingerprintThreadDeclarations({
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          developerInstructions: plan.developerInstructions,
+          dynamicTools: plan.dynamicTools,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+        }),
+        assistantPreferredElevenLabsVoiceId:
+          plan.assistantPreferredElevenLabsVoiceId,
+        cliEnv: plan.cliEnv,
+        codexContinuation: plan.codexContinuation,
+        conversationHistoryMessages: plan.conversationHistoryMessages,
+        developerInstructions: plan.developerInstructions,
+        diagnosticsPolicy: plan.diagnosticsPolicy,
+        dynamicTools: plan.dynamicTools,
+        environments: plan.environments,
+        onboardingGuidanceInjected: plan.onboardingGuidanceInjected,
+        planningDiagnostics: {
+          dynamicToolCount: plan.planningDiagnostics.dynamicToolCount,
+          messageTargetDynamicToolsAvailable:
+            plan.planningDiagnostics.messageTargetDynamicToolsAvailable,
+          messageTargetingAvailable:
+            plan.planningDiagnostics.messageTargetingAvailable,
+          shouldPrepareBootstrapContext:
+            plan.planningDiagnostics.shouldPrepareBootstrapContext,
+        },
+        promptCacheMetadata: plan.promptCacheMetadata,
+        resume: plan.resume,
+        sessionContext: plan.sessionContext,
+        systemPrompt: plan.systemPrompt,
+        turnContextPrompt: plan.turnContextPrompt,
+        voiceMemoDeliveryChannel: plan.voiceMemoDeliveryChannel,
+        workingDirectory: plan.workingDirectory,
+      })).digest('hex')
+    }
 
     expect(Object.fromEntries(
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
@@ -2890,11 +2919,13 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([
-    { label: 'direct', threadIsDirect: true },
-    { label: 'group', threadIsDirect: false },
+    { label: 'direct', threadIsDirect: true, legacyRoute: false },
+    { label: 'group', threadIsDirect: false, legacyRoute: false },
+    { label: 'direct-legacy-route', threadIsDirect: true, legacyRoute: true },
+    { label: 'group-legacy-route', threadIsDirect: false, legacyRoute: true },
   ] as const)(
-    'rotates an eligible pre-existing $label group-tool thread once with bounded history',
-    async ({ label, threadIsDirect }) => {
+    'rotates a real pre-supplement $label contract once with bounded history',
+    async ({ label, threadIsDirect, legacyRoute }) => {
       planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
         'bootstrap contract',
       )
@@ -2905,7 +2936,7 @@ describe('assistant Codex turn planning', () => {
       const vault = await mkdtemp(
         path.join(os.tmpdir(), `assistant-group-contract-rotation-${label}-`),
       )
-      const route = createRoute()
+      const route = createRoute({ threadCompatibilityFingerprint: 'compatible-route-test' })
       const threadId = `thread-contract-rotation-${label}`
       const hostedToolContext: AssistantHostedToolContext = {
         ...createHostedToolContext(),
@@ -2951,18 +2982,34 @@ describe('assistant Codex turn planning', () => {
           { kind: 'user', text: 'Keep the earlier constraint in mind.' },
           { kind: 'assistant', text: 'I will preserve that constraint.' },
         ])
+        const fresh = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({ turnCount: 2 }),
+        })
+        const oldRouteFingerprint = legacyRoute
+          ? route.routeFingerprint ?? route.routeId
+          : route.threadCompatibilityFingerprint!
+        const preFixFingerprint = fingerprintThreadDeclarations({
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          developerInstructions: fresh.developerInstructions,
+          dynamicTools: fresh.dynamicTools,
+          routeFingerprint: oldRouteFingerprint,
+        })
+        expect(preFixFingerprint).not.toBe(fresh.assistantContractFingerprint)
         const firstPostDeployPlan = await resolveAssistantRouteTurnPlan({
           ...common,
           session: createSession({
             resumeState: {
-              assistantContractFingerprint: '0'.repeat(64),
+              assistantContractFingerprint: preFixFingerprint,
               routeFingerprint: route.routeFingerprint ?? route.routeId,
+              ...(!legacyRoute ? { threadCompatibilityFingerprint: route.threadCompatibilityFingerprint } : {}),
               threadId: `provider-thread-before-${label}`,
             },
             turnCount: 2,
           }),
         })
 
+        expect(firstPostDeployPlan.assistantContractFingerprint).toBe(fresh.assistantContractFingerprint)
         expect(firstPostDeployPlan.resume).toBeNull()
         expect(firstPostDeployPlan.dynamicTools).toContainEqual(
           expect.objectContaining({ name: 'group_consult', namespace: 'murph' }),

@@ -1,7 +1,6 @@
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createServer, type Server, type ServerResponse } from 'node:http'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -38,6 +37,26 @@ import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+
+import * as codexToolInputContract from '../src/assistant-codex/tool-input-contract.ts'
+import type { AssistantProviderDynamicTool } from '../src/assistant/providers/types.ts'
+import {
+  assertModelVisibleToolContract,
+  CONTRACT_CAPTURE_DONE,
+  queueCodeMetadataCapture,
+  readProviderNativeTools,
+  readVisibleCanonicalSchema,
+} from './support/codex-tool-contract-proof.ts'
+import {
+  delay,
+  prepareScriptedTurnScenario as prepareSharedScriptedTurnScenario,
+  readRecord,
+  readString,
+  SCRIPTED_MODEL,
+  startScriptedResponsesStub,
+  type ScriptedResponse,
+  type ScriptedStub,
+} from './support/codex-scripted-provider.ts'
 
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -126,9 +145,6 @@ import {
 // events, stale ids, poisoning) stays in the assistant-codex-runtime-*.test.ts
 // behavior files where a scriptable fake child process is the right tool.
 
-const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
-const SCRIPTED_MODEL = 'gpt-5.6-terra'
-const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const WORKOUT_CSV_ATTEMPT_RELATIVE_PATH =
   '.runtime/tmp/workout-csv-import/attempt-scripted'
@@ -285,48 +301,6 @@ async function prepareGroupChallengeVault(
   return vaultRoot
 }
 
-interface ScriptedResponseRoute {
-  beforeRespond?: () => Promise<void>
-  completionLabel?: string
-  delayMs?: number
-  requestExcludes?: readonly string[]
-  requestIncludes?: readonly string[]
-  usageInputTokens?: number
-}
-
-type ScriptedResponse = ScriptedResponseRoute & (
-  | { text: string }
-  | {
-      commentaryAndFunctionCall: {
-        commentary: string
-        functionCall: {
-          arguments: Record<string, unknown>
-          name: string
-          namespace?: string
-        }
-      }
-    }
-  | {
-      customToolCall: {
-        input: string
-        name: string
-      }
-    }
-  | {
-      toolSearchCall: {
-        limit?: number
-        query: string
-      }
-    }
-  | {
-      functionCall: {
-        arguments: Record<string, unknown>
-        name: string
-        namespace?: string
-      }
-    }
-)
-
 function waitForDeferredExecResponses(): ScriptedResponse[] {
   return ['1', '2', '3'].flatMap((cellId) =>
     Array.from({ length: 4 }, () => ({
@@ -340,46 +314,6 @@ function waitForDeferredExecResponses(): ScriptedResponse[] {
       requestIncludes: [`Script running with cell ID ${cellId}`],
     })))
 }
-
-interface ScriptedStub {
-  baseUrl: string
-  captureProviderRequestDiagnostics(options?: { completeInput?: boolean }): void
-  close(): Promise<void>
-  completedResponseLabelsSinceBaseline(): string[]
-  markRequestBaseline(): void
-  queue(...responses: readonly ScriptedResponse[]): void
-  resetQueue(): void
-  requestCountSinceBaseline(): number
-  requestSummariesSinceBaseline(): ScriptedProviderRequestSummary[]
-}
-
-interface ScriptedProviderRequestSummary {
-  completeProviderInput?: { json: string; excludedTransportFields: string[] }
-  customToolCallOutputs?: string[]
-  functionCallOutputs?: string[]
-  imageWidths?: number[]
-  model: string | null
-  providerRequestDiagnostics?: {
-    bytes: number
-    includesAllTools: boolean
-    includesExecCommand: boolean
-    includesAutomation: boolean
-    includesGroup: boolean
-    includesPhysicalNoteRecovery: boolean
-    includesReadShared: boolean
-    includesResponseCardCompactTableShape: boolean
-    includesResponseCardNutritionV2Shape: boolean
-    includesGroupEmail: boolean
-    includesToolSearch: boolean
-  }
-  serviceTier: string | null
-  toolSearchOutputTools?: unknown[]
-}
-
-const codexCommand = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../node_modules/.bin/codex',
-)
 
 let stub: ScriptedStub | null = null
 const temporaryPaths: string[] = []
@@ -3716,32 +3650,18 @@ text(result.output);
       const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand,
         directory: scenario.turnInput.codexHome,
+        ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
       })
-      if (toolMode === 'code-only') {
-        const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
-        if (!catalog || !Array.isArray(catalog.models)) {
-          throw new Error('Expected the bundled synthetic-test model catalog.')
-        }
-        for (const candidate of catalog.models) {
-          const model = readRecord(candidate)
-          if (model) model.tool_mode = 'code_mode_only'
-        }
-        await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
-      }
       scenario.stub.captureProviderRequestDiagnostics()
-      scenario.stub.queue(
-        toolMode === 'native'
-          ? { toolSearchCall: { query: 'murph attach_response_card compact_table', limit: 1 } }
-          : { customToolCall: {
-              name: 'exec',
-              input: `
-const tool = ALL_TOOLS.find(({ name }) => name === "murph__attach_response_card");
-if (!tool) throw new Error("Deferred response-card metadata missing");
-text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool.description + "\\nSYNTHETIC_TABLE_METADATA_END");
-`,
-            } },
-        { text: 'SYNTHETIC_TABLE_DECLARATION_CAPTURED' },
-      )
+      const codeMetadata = toolMode === 'code-only'
+        ? queueCodeMetadataCapture(scenario.stub, [MURPH_ATTACH_RESPONSE_CARD_TOOL])
+        : null
+      if (toolMode === 'native') {
+        scenario.stub.queue(
+          { toolSearchCall: { query: 'murph attach_response_card compact_table', limit: 1 } },
+          { text: CONTRACT_CAPTURE_DONE },
+        )
+      }
       const result = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
@@ -3753,8 +3673,9 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
         prompt: 'Inspect the available response-card contract without attaching a card.',
       })
       const summaries = scenario.stub.requestSummariesSinceBaseline()
-      expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
-      expect(result.finalMessage).toBe('SYNTHETIC_TABLE_DECLARATION_CAPTURED')
+      if (toolMode === 'native') expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+      else expect(scenario.stub.requestCountSinceBaseline()).toBeGreaterThan(1)
+      expect(result.finalMessage).toBe(CONTRACT_CAPTURE_DONE)
       expect(result.responseCard).toBeNull()
       expect(result.runtimeIssueInputs).toEqual([])
       expect(result.jsonEvents.filter((event) =>
@@ -3814,23 +3735,16 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
           descriptionLength: providerText.length,
         }
       } else {
-        const output = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
-        const captured = /SYNTHETIC_TABLE_METADATA_LENGTH=(\d+)\n([\s\S]*?)\nSYNTHETIC_TABLE_METADATA_END/u.exec(output)
-        expect(captured !== null, 'complete, untruncated provider-visible metadata').toBe(true)
-        providerText = captured?.[2] ?? ''
-        expect(providerText.length).toBe(Number(captured?.[1]))
-        expect(providerText.includes('exec tool declaration:')).toBe(true)
-        const declaration = providerText.split('exec tool declaration:').slice(1).join('exec tool declaration:')
-        providerSchemaText = declaration
-        const declarationComplete = [
-          'murph__attach_response_card', 'compact_table', 'rowHeader', 'columns', 'rows', 'values',
-        ].every((field) => declaration.includes(field))
-        expect(declarationComplete).toBe(true)
+        expect(codeMetadata).toHaveLength(1)
+        const observed = codeMetadata![0]!
+        assertModelVisibleToolContract(MURPH_ATTACH_RESPONSE_CARD_TOOL, observed)
+        providerText = observed.description
+        providerSchemaText = JSON.stringify(readVisibleCanonicalSchema(providerText))
         providerEvidence = {
-          source: 'provider input.custom_tool_call_output: ALL_TOOLS.description',
+          source: 'provider input.custom_tool_call_output: complete ALL_TOOLS.description',
           metadataLength: providerText.length,
-          declarationLength: declaration.length,
-          declarationComplete,
+          canonicalSchemaLength: providerSchemaText.length,
+          canonicalSchemaSha256: createHash('sha256').update(providerSchemaText).digest('hex'),
         }
       }
       // Scope the proof to this tool's generic-table guidance, not unrelated
@@ -3865,7 +3779,7 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
   // Equality projection for this opt-in measurement only. These exact paths
   // differed in all four pinned-App-Server fixture pairs; never scrub metadata
   // wholesale or alter the raw capture used for byte counts and digests.
-  function normalizeCompactTableFirstInputForEquality(json: string): {
+  function normalizeSharedSchemaFirstInputForEquality(json: string): {
     json: string
     normalizedFields: string[]
   } {
@@ -3874,7 +3788,7 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
     const metadata = readRecord(body?.client_metadata)
     const encodedTurnMetadata = metadata?.['x-codex-turn-metadata']
     if (!body || !Array.isArray(input) || !metadata || typeof encodedTurnMetadata !== 'string') {
-      throw new Error('Unexpected compact-table first-input metadata shape.')
+      throw new Error('Unexpected shared-schema first-input metadata shape.')
     }
     const turnMetadataPath = 'client_metadata["x-codex-turn-metadata"]'
     let turnMetadata: Record<string, unknown> | null
@@ -3915,7 +3829,7 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
     }
   }
 
-  it('compact-table fix: first-input identity normalization preserves meaningful differences', () => {
+  it('shared schema: first-input identity normalization preserves meaningful differences', () => {
     const fixture = (identity: string) => ({
       instructions: 'SYNTHETIC complete comparison.',
       input: Array.from({ length: 8 }, (_, index) => ({
@@ -3941,8 +3855,8 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
     const candidate = JSON.stringify(fixture('b'))
     expect(Buffer.byteLength(candidate)).toBe(Buffer.byteLength(baseline))
     expect(candidate === baseline).toBe(false)
-    const normalized = normalizeCompactTableFirstInputForEquality(baseline)
-    expect(normalizeCompactTableFirstInputForEquality(candidate)).toEqual(normalized)
+    const normalized = normalizeSharedSchemaFirstInputForEquality(baseline)
+    expect(normalizeSharedSchemaFirstInputForEquality(candidate)).toEqual(normalized)
     const changes: Array<(body: ReturnType<typeof fixture>) => void> = [
       (body) => { body.instructions += ' Changed.' },
       (body) => { body.tools[0]!.parameters.type = 'string' },
@@ -3959,37 +3873,29 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
     for (const change of changes) {
       const body = fixture('b')
       change(body)
-      expect(normalizeCompactTableFirstInputForEquality(JSON.stringify(body)).json === normalized.json).toBe(false)
+      expect(normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body)).json === normalized.json).toBe(false)
     }
     for (const invalidMetadata of ['not-json', '[]', '{}']) {
       const body = fixture('b')
       body.client_metadata['x-codex-turn-metadata'] = invalidMetadata
-      expect(() => normalizeCompactTableFirstInputForEquality(JSON.stringify(body))).toThrow()
+      expect(() => normalizeSharedSchemaFirstInputForEquality(JSON.stringify(body))).toThrow()
     }
   })
 
-  // Optional, synthetic, free measurement. Each pair uses fresh App Server
-  // threads with the SAME home/workspace, production prompt layers and full
-  // route tool array. Only the private description differs; no converter fake.
-  it.skipIf(process.env.MURPH_MEASURE_COMPACT_TABLE_INPUT !== '1').each([
+  // Optional, synthetic, free measurement against the supplied PR3059 baseline.
+  // Both phases retain its card recovery paragraph and identical canonical tools.
+  // The test-only ablation removes ONLY the shared adapter, not Codex conversion.
+  // There is deliberately no production bypass, flag, alternative CLI, or proxy.
+  it.skipIf(process.env.MURPH_MEASURE_SHARED_SCHEMA_INPUT !== '1').each([
     { scope: 'direct', toolMode: 'native' },
     { scope: 'direct', toolMode: 'code-only' },
     { scope: 'group', toolMode: 'native' },
     { scope: 'group', toolMode: 'code-only' },
-  ] as const)('compact-table fix: complete first provider input ($scope, $toolMode)', {
+  ] as const)('shared schema: complete first provider input ($scope, $toolMode)', {
     timeout: TURN_TIMEOUT_MS * 2,
   }, async ({ scope, toolMode }) => {
-    const candidateDescription = MURPH_ATTACH_RESPONSE_CARD_TOOL.description
-    const addedGuidance = /For generic compact_table only \([^)]*\): .*?Never claim attachment without success\. /u.exec(candidateDescription)?.[0]
-    if (!addedGuidance) throw new Error('Expected the candidate generic-table paragraph.')
-    const baselineDescription = candidateDescription.replace(addedGuidance, '')
-    // Bind the ablation to the exact pre-fix owner, not a reduced description.
-    // This optional before/after experiment is tied to this fix packet.
-    expect(createHash('sha256').update(baselineDescription).digest('hex')).toBe(
-      '625446f7e99ab9079baf18e12e8c29b44402cf1f1f557569c54a5bdc6ccbda18',
-    )
     const groupConversation = scope === 'group'
-    const tools = resolveMurphDynamicTools({
+    const tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
       allowFinishWithoutReply: true,
       assistantConfigurationAvailable: !groupConversation,
       automationAvailable: true,
@@ -4001,13 +3907,12 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
       progressUpdatesAvailable: false,
       responseCardsAvailable: !groupConversation,
     })
-    const baselineTools = tools.map((tool) => tool === MURPH_ATTACH_RESPONSE_CARD_TOOL
-      ? { ...tool, description: baselineDescription }
-      : tool)
     expect(tools.includes(MURPH_ATTACH_RESPONSE_CARD_TOOL)).toBe(!groupConversation)
-    if (groupConversation) {
-      expect(tools.includes(MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL)).toBe(true)
-      expect(baselineTools).toEqual(tools)
+    if (groupConversation) expect(tools.includes(MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL)).toBe(true)
+    const supplementedTools = tools.map(codexToolInputContract.withCodexToolInputContract)
+    const registrationBytes = {
+      baseline: Buffer.byteLength(JSON.stringify(tools)),
+      candidate: Buffer.byteLength(JSON.stringify(supplementedTools)),
     }
     const layers = buildAssistantSystemPromptLayers({
       assistantCliContract: null,
@@ -4036,39 +3941,41 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
     const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
+      ...(toolMode === 'code-only' ? { toolMode: 'code_mode_only' } : {}),
     })
-    if (toolMode === 'code-only') {
-      const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
-      if (!catalog || !Array.isArray(catalog.models)) throw new Error('Expected the bundled model catalog.')
-      for (const candidate of catalog.models) {
-        const model = readRecord(candidate)
-        if (model) model.tool_mode = 'code_mode_only'
-      }
-      await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
-    }
     const captures = []
-    for (const [phase, dynamicTools] of [['baseline', baselineTools], ['candidate', tools]] as const) {
+    for (const phase of ['baseline', 'candidate'] as const) {
       await stopWarmCodexAppServer()
       scenario.stub.markRequestBaseline()
       scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
       scenario.stub.queue({ text: 'SYNTHETIC_FIRST_INPUT_CAPTURED' })
-      const result = await executeCodexAppServerTurn({
-        ...scenario.turnInput,
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        developerInstructions,
-        dynamicTools,
-        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
-        excludeResumeTurns: true,
-        groupConversation,
-        prompt,
-      })
+      const ablation = phase === 'baseline'
+        ? vi.spyOn(codexToolInputContract, 'withCodexToolInputContract').mockImplementation((tool) => tool)
+        : null
+      let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
+      try {
+        result = await executeCodexAppServerTurn({
+          ...scenario.turnInput,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          developerInstructions,
+          dynamicTools: tools,
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+          excludeResumeTurns: true,
+          groupConversation,
+          prompt,
+        })
+      } finally {
+        ablation?.mockRestore()
+      }
       expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
       expect(result.finalMessage).toBe('SYNTHETIC_FIRST_INPUT_CAPTURED')
       expect(result.responseCard).toBeNull()
       expect(result.runtimeIssueInputs).toEqual([])
       expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
-      const capture = scenario.stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
-      if (!capture) throw new Error('Missing complete first provider input.')
+      const summary = scenario.stub.requestSummariesSinceBaseline()[0]
+      const capture = summary?.completeProviderInput
+      const wire = summary?.providerRequestDiagnostics
+      if (!capture || !wire) throw new Error('Missing complete first provider input and raw wire diagnostics.')
       // Inspect actual input, not only the supplied thread/start parameters.
       for (const text of [MURPH_CODEX_BASE_INSTRUCTIONS, developerInstructions, prompt]) {
         expect(capture.json.includes(JSON.stringify(text.trim()).slice(1, -1))).toBe(true)
@@ -4091,21 +3998,44 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
       if (visibleTools.length === 0) {
         throw new Error('Expected the complete provider tool array.')
       }
-      expect(capture.json.includes(addedGuidance)).toBe(false)
+      const visibleMurphTools = readProviderNativeTools(capture.json).filter((tool) => tool.namespace === 'murph')
+      const eagerTools = toolMode === 'native' ? tools.filter((tool) => tool.deferLoading !== true) : []
+      expect(visibleMurphTools.map((tool) => tool.name).sort()).toEqual(eagerTools.map((tool) => tool.name).sort())
+      if (phase === 'candidate') {
+        for (const tool of eagerTools) {
+          const observed = visibleMurphTools.find((candidate) => candidate.name === tool.name)
+          if (!observed) throw new Error(`Missing eager ${tool.name} on provider wire.`)
+          assertModelVisibleToolContract(tool, observed)
+        }
+      } else {
+        expect(capture.json).not.toContain('MURPH_INPUT_SCHEMA_JSON:')
+      }
       captures.push({
         ...capture,
         phase,
+        wireUtf8Bytes: wire.bytes,
+        wireSha256: wire.sha256,
+        visibleMurphToolCount: visibleMurphTools.length,
         bytes: Buffer.byteLength(capture.json, 'utf8'),
         sha256: createHash('sha256').update(capture.json).digest('hex'),
-        equalityInput: normalizeCompactTableFirstInputForEquality(capture.json),
+        equalityInput: normalizeSharedSchemaFirstInputForEquality(capture.json),
       })
     }
     const [baseline, candidate] = captures
     if (!baseline || !candidate) throw new Error('Expected both complete first-input captures.')
     // Print counts/digests only, including on mismatch; never dump full prompts,
     // instructions, tool descriptions, workspace paths, or transport identities.
-    process.stdout.write(`[compact-table-first-input] ${JSON.stringify({
-      scope, toolMode, model: SCRIPTED_MODEL, toolCount: tools.length,
+    process.stdout.write(`[shared-schema-first-input] ${JSON.stringify({
+      scope, toolMode, model: SCRIPTED_MODEL,
+      registeredToolCount: tools.length,
+      registeredDeferredCount: tools.filter((tool) => tool.deferLoading === true).length,
+      firstRequestVisibleMurphToolCount: candidate.visibleMurphToolCount,
+      registrationJsonUtf8Bytes: { ...registrationBytes, delta: registrationBytes.candidate - registrationBytes.baseline },
+      completeWire: {
+        baseline: { utf8Bytes: baseline.wireUtf8Bytes, sha256: baseline.wireSha256 },
+        candidate: { utf8Bytes: candidate.wireUtf8Bytes, sha256: candidate.wireSha256 },
+        utf8ByteDelta: candidate.wireUtf8Bytes - baseline.wireUtf8Bytes,
+      },
       raw: {
         method: 'Complete decoded provider request, recursively sorted JSON keys; only top-level prompt_cache_key omitted. All other identities/timestamps retained.',
         baseline: { utf8Bytes: baseline.bytes, sha256: baseline.sha256 },
@@ -4124,65 +4054,41 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
       targetTokenizer: { countBaseline: null, countCandidate: null, delta: null, reason: 'No exact Terra tokenizer is configured for this measurement; synthetic provider usage is not tokenization.' },
     })}\n`)
     expect(candidate.excludedTransportFields).toEqual(baseline.excludedTransportFields)
-    expect(candidate.bytes - baseline.bytes).toBe(0)
-    expect(candidate.equalityInput.json === baseline.equalityInput.json, 'complete first input equality apart from the listed identities/timestamp').toBe(true)
+    // Remove only the exact added suffixes, after validating actual native
+    // descriptions above. Preserve all other request fields and meaningful text.
+    let withoutSupplements = candidate.equalityInput.json
+    for (let index = 0; index < tools.length; index += 1) {
+      const suffix = supplementedTools[index]!.description.slice(tools[index]!.description.length)
+      withoutSupplements = withoutSupplements.replaceAll(JSON.stringify(suffix).slice(1, -1), '')
+    }
+    expect(withoutSupplements, 'whole first request differs only by derived supplements and listed transport identities').toBe(baseline.equalityInput.json)
+    expect(registrationBytes.candidate).toBeGreaterThan(registrationBytes.baseline)
   })
 
-  it('documents why pinned Codex code-only metadata cannot replace native automation schema search', {
+  it('preserves the complete automation contract in actual code-only generated metadata', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
     const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
+      toolMode: 'code_mode_only',
     })
-    const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
-    if (!catalog || !Array.isArray(catalog.models)) {
-      throw new Error('Expected a test model catalog.')
-    }
-    for (const candidate of catalog.models) {
-      const model = readRecord(candidate)
-      if (model) model.tool_mode = 'code_mode_only'
-    }
-    await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
     scenario.stub.captureProviderRequestDiagnostics()
-    scenario.stub.queue(
-      { customToolCall: {
-        name: 'exec',
-        input: `
-const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
-if (!tool) throw new Error("Deferred automation metadata missing");
-text(tool.description.split("exec tool declaration:")[1]);
-`,
-      } },
-      { text: 'CODE_ONLY_SCHEMA_CHARACTERIZED' },
-    )
+    const captured = queueCodeMetadataCapture(scenario.stub, [MURPH_AUTOMATION_TOOL])
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
       dynamicTools: [MURPH_AUTOMATION_TOOL],
-      env: {
-        ...scenario.turnInput.env,
-        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
-      },
-      prompt: 'Inspect the automation declaration without calling automation.',
+      env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+      prompt: 'Inspect the automation contract without calling automation.',
     })
-    const summaries = scenario.stub.requestSummariesSinceBaseline()
-    expect(result.finalMessage).toBe('CODE_ONLY_SCHEMA_CHARACTERIZED')
-    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+    expect(result.finalMessage).toBe(CONTRACT_CAPTURE_DONE)
+    expect(captured).toHaveLength(1)
+    assertModelVisibleToolContract(MURPH_AUTOMATION_TOOL, captured[0]!)
+    expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
+    expect(scenario.stub.requestSummariesSinceBaseline()[0]?.providerRequestDiagnostics).toMatchObject({
       includesAutomation: false,
       includesToolSearch: false,
-    })
-    const declaration = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
-    expect(declaration).toContain('murph__automation')
-    expect(declaration).toContain('contextReferences?: unknown')
-    expect(declaration).not.toContain('entityKind')
-    expect(declaration).not.toContain('entityId')
-    // The schema itself retains the shared fields; Codex 0.151's TypeScript
-    // renderer follows oneOf branches without combining sibling properties.
-    const properties = readRecord(MURPH_AUTOMATION_TOOL.inputSchema.properties)
-    expect(properties?.contextReferences).toMatchObject({
-      items: { required: ['entityKind', 'entityId'] },
-      type: 'array',
     })
   })
 
@@ -10623,106 +10529,11 @@ function buildScriptedHostedSystemPrompt(
 }
 
 async function prepareScriptedTurnScenario(
-  options: {
-    additionalTomlLines?: readonly string[]
-    model?: string
-    modelProvider?: string
-    multiAgentV2?: boolean
-  } = {},
-): Promise<{
-  stub: ScriptedStub
-  turnInput: {
-    codexCommand: string
-    codexHome: string
-    env: NodeJS.ProcessEnv
-    model: string
-    modelProvider: string
-    reasoningEffort: string
-    sandbox: 'workspace-write'
-    workingDirectory: string
-  }
-}> {
-  const scriptedStub = await requireScriptedStub()
-  scriptedStub.markRequestBaseline()
-  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
-  const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-codex-scripted-home-'))
-  temporaryPaths.push(codexHome)
-  const workingDirectory = await mkdtemp(
-    path.join(tmpdir(), 'murph-codex-scripted-workspace-'),
+  options: Parameters<typeof prepareSharedScriptedTurnScenario>[2] = {},
+) {
+  return await prepareSharedScriptedTurnScenario(
+    await requireScriptedStub(), temporaryPaths, options,
   )
-  temporaryPaths.push(workingDirectory)
-  await writeFile(
-    path.join(codexHome, 'config.toml'),
-    buildScriptedCodexConfigToml(scriptedStub.baseUrl, {
-      ...options,
-      modelProvider,
-    }),
-    {
-      encoding: 'utf8',
-      mode: 0o600,
-    },
-  )
-
-  return {
-    stub: scriptedStub,
-    turnInput: {
-      codexCommand,
-      codexHome,
-      env: {
-        [SCRIPTED_STUB_KEY_ENV]: 'scripted-local-key',
-        HOME: process.env.HOME,
-        PATH: process.env.PATH,
-        TMPDIR: process.env.TMPDIR,
-      },
-      model: options.model ?? SCRIPTED_MODEL,
-      modelProvider,
-      reasoningEffort: 'low',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    },
-  }
-}
-
-function buildScriptedCodexConfigToml(
-  baseUrl: string,
-  options: {
-    additionalTomlLines?: readonly string[]
-    modelProvider?: string
-    multiAgentV2?: boolean
-  } = {},
-): string {
-  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
-  return [
-    `model = "${SCRIPTED_MODEL}"`,
-    `model_provider = "${modelProvider}"`,
-    'model_reasoning_effort = "low"',
-    'approval_policy = "never"',
-    'sandbox_mode = "workspace-write"',
-    'check_for_update_on_startup = false',
-    '',
-    '[history]',
-    'persistence = "none"',
-    '',
-    `[model_providers."${modelProvider}"]`,
-    'name = "Local scripted stub"',
-    `base_url = "${baseUrl}"`,
-    `env_key = "${SCRIPTED_STUB_KEY_ENV}"`,
-    'wire_api = "responses"',
-    'requires_openai_auth = false',
-    'request_max_retries = 4',
-    'stream_max_retries = 5',
-    '',
-    ...(options.multiAgentV2
-      ? [
-          '[features.multi_agent_v2]',
-          'enabled = true',
-          'expose_spawn_agent_model_overrides = true',
-          'max_concurrent_threads_per_session = 4',
-          '',
-        ]
-      : []),
-    ...(options.additionalTomlLines ?? []),
-  ].join('\n')
 }
 
 function createDeterministicPng(width: number, height: number): Buffer {
@@ -10759,427 +10570,4 @@ function createPngChunk(type: string, data: Buffer): Buffer {
   data.copy(chunk, 8)
   chunk.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), data.length + 8)
   return chunk
-}
-
-async function startScriptedResponsesStub(): Promise<ScriptedStub> {
-  const queuedResponses: ScriptedResponse[] = []
-  const requestSummaries: ScriptedProviderRequestSummary[] = []
-  const completedResponseLabels: string[] = []
-  let responseSequence = 0
-  let responsesRequestCount = 0
-  let requestBaseline = 0
-  let requestSummaryBaseline = 0
-  let providerRequestDiagnosticsEnabled = false
-  let completeProviderInputEnabled = false
-
-  const server: Server = createServer(async (request, response) => {
-    if (request.method !== 'POST' || request.url !== '/v1/responses') {
-      response.statusCode = 404
-      response.end(JSON.stringify({ error: `unhandled ${request.method} ${request.url}` }))
-      return
-    }
-
-    let requestBody = ''
-    for await (const chunk of request) {
-      requestBody += typeof chunk === 'string'
-        ? chunk
-        : Buffer.from(chunk).toString('utf8')
-    }
-    responsesRequestCount += 1
-    requestSummaries.push(readScriptedProviderRequestSummary(
-      requestBody,
-      providerRequestDiagnosticsEnabled,
-      completeProviderInputEnabled,
-    ))
-    const scriptedResponseIndex = queuedResponses.findIndex((candidate) =>
-      scriptedResponseMatchesRequest(candidate, requestBody)
-    )
-    const scripted = scriptedResponseIndex >= 0
-      ? queuedResponses.splice(scriptedResponseIndex, 1)[0]
-      : undefined
-    if (!scripted) {
-      response.statusCode = 500
-      response.end(JSON.stringify({
-        error: 'scripted responses stub received a request without a queued response',
-      }))
-      return
-    }
-
-    await scripted.beforeRespond?.()
-
-    if (scripted.delayMs) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, scripted.delayMs)
-      })
-    }
-
-    responseSequence += 1
-    const responseId = `resp_scripted_${responseSequence}`
-    const outputItems = 'commentaryAndFunctionCall' in scripted
-      ? [
-          {
-            content: [
-              {
-                annotations: [],
-                text: scripted.commentaryAndFunctionCall.commentary,
-                type: 'output_text',
-              },
-            ],
-            id: `msg_${responseId}_commentary`,
-            phase: 'commentary',
-            role: 'assistant',
-            status: 'completed',
-            type: 'message',
-          },
-          {
-            arguments: JSON.stringify(
-              scripted.commentaryAndFunctionCall.functionCall.arguments,
-            ),
-            call_id: `call_${responseId}_group_email`,
-            id: `fcall_${responseId}_group_email`,
-            name: scripted.commentaryAndFunctionCall.functionCall.name,
-            ...(scripted.commentaryAndFunctionCall.functionCall.namespace
-              ? {
-                  namespace:
-                    scripted.commentaryAndFunctionCall.functionCall.namespace,
-                }
-              : {}),
-            status: 'completed',
-            type: 'function_call',
-          },
-        ]
-      : [
-          'toolSearchCall' in scripted
-            ? {
-                arguments: {
-                  query: scripted.toolSearchCall.query,
-                  ...(scripted.toolSearchCall.limit === undefined
-                    ? {}
-                    : { limit: scripted.toolSearchCall.limit }),
-                },
-                call_id: `call_${responseId}`,
-                execution: 'client',
-                id: `tsearch_${responseId}`,
-                status: 'completed',
-                type: 'tool_search_call',
-              }
-            : 'customToolCall' in scripted
-              ? {
-                  call_id: `call_${responseId}`,
-                  id: `ctcall_${responseId}`,
-                  input: scripted.customToolCall.input,
-                  name: scripted.customToolCall.name,
-                  status: 'completed',
-                  type: 'custom_tool_call',
-                }
-              : 'functionCall' in scripted
-                ? {
-                    arguments: JSON.stringify(scripted.functionCall.arguments),
-                    call_id: `call_${responseId}`,
-                    id: `fcall_${responseId}`,
-                    name: scripted.functionCall.name,
-                    ...(scripted.functionCall.namespace
-                      ? { namespace: scripted.functionCall.namespace }
-                      : {}),
-                    status: 'completed',
-                    type: 'function_call',
-                  }
-                : {
-                    content: [
-                      {
-                        annotations: [],
-                        text: scripted.text,
-                        type: 'output_text',
-                      },
-                    ],
-                    id: `msg_${responseId}`,
-                    role: 'assistant',
-                    status: 'completed',
-                    type: 'message',
-                  },
-        ]
-    writeScriptedSseResponse({
-      outputItems,
-      response,
-      responseId,
-      usageInputTokens: scripted.usageInputTokens,
-    })
-    if (scripted.completionLabel) {
-      completedResponseLabels.push(scripted.completionLabel)
-    }
-  })
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => resolve())
-  })
-  const address = server.address()
-  if (!address || typeof address === 'string') {
-    throw new Error('Expected the scripted responses stub to bind a TCP port.')
-  }
-
-  return {
-    baseUrl: `http://127.0.0.1:${address.port}/v1`,
-    captureProviderRequestDiagnostics: (options) => {
-      providerRequestDiagnosticsEnabled = true
-      completeProviderInputEnabled = options?.completeInput === true
-    },
-    close: async () => {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve())
-        server.closeAllConnections()
-      })
-    },
-    completedResponseLabelsSinceBaseline: () => [...completedResponseLabels],
-    markRequestBaseline: () => {
-      completedResponseLabels.splice(0)
-      providerRequestDiagnosticsEnabled = false
-      completeProviderInputEnabled = false
-      requestBaseline = responsesRequestCount
-      requestSummaryBaseline = requestSummaries.length
-    },
-    queue: (...responses) => {
-      queuedResponses.push(...responses)
-    },
-    resetQueue: () => {
-      queuedResponses.splice(0)
-    },
-    requestCountSinceBaseline: () => responsesRequestCount - requestBaseline,
-    requestSummariesSinceBaseline: () =>
-      requestSummaries.slice(requestSummaryBaseline),
-  }
-}
-
-function scriptedResponseMatchesRequest(
-  response: ScriptedResponse,
-  requestBody: string,
-): boolean {
-  return (response.requestIncludes ?? []).every((value) =>
-    requestBody.includes(value)
-  ) && (response.requestExcludes ?? []).every((value) =>
-    !requestBody.includes(value)
-  )
-}
-
-function readScriptedProviderRequestSummary(
-  requestBody: string,
-  includeDiagnostics: boolean,
-  includeCompleteInput = false,
-): ScriptedProviderRequestSummary {
-  const body = readRecord(JSON.parse(requestBody))
-  const customToolCallOutputs = Array.isArray(body?.input)
-    ? body.input
-      .map(readRecord)
-      .filter((item) => item?.type === 'custom_tool_call_output')
-      .map((item) => readProviderToolOutputText(item?.output))
-      .filter((output): output is string => output !== null)
-    : []
-  const functionCallOutputs = Array.isArray(body?.input)
-    ? body.input
-      .map(readRecord)
-      .filter((item) => item?.type === 'function_call_output')
-      .map((item) => readString(item?.output))
-      .filter((output): output is string => output !== null)
-    : []
-  const toolSearchOutputTools = Array.isArray(body?.input)
-    ? body.input
-      .map(readRecord)
-      .filter((item) => item?.type === 'tool_search_output')
-      .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
-    : []
-  const imageWidths = Array.isArray(body?.input)
-    ? body.input.flatMap((inputItem) => {
-        const content = readRecord(inputItem)?.content
-        if (!Array.isArray(content)) {
-          return []
-        }
-        return content
-          .map(readRecord)
-          .filter((item) => item?.type === 'input_image')
-          .map((item) => readString(item?.image_url))
-          .filter((imageUrl): imageUrl is string => imageUrl !== null)
-          .map(readPngDataUrlWidth)
-          .filter((width): width is number => width !== null)
-      })
-    : []
-  const directTools = Array.isArray(body?.tools)
-    ? body.tools.map(readRecord)
-    : []
-  const additionalTools = Array.isArray(body?.input)
-    ? body.input
-      .map(readRecord)
-      .filter((item) => item?.type === 'additional_tools')
-      .flatMap((item) =>
-        Array.isArray(item?.tools) ? item.tools.map(readRecord) : []
-      )
-    : []
-  const tools = [...directTools, ...additionalTools]
-  // Opt-in local fake-provider measurement only. Keep ALL request fields and
-  // values except the new thread's transport cache identity. Canonicalize JSON
-  // object order, not array order or model-visible text. No request is printed.
-  let completeProviderInput: ScriptedProviderRequestSummary['completeProviderInput']
-  if (includeCompleteInput && body) {
-    const { prompt_cache_key: _cacheIdentity, ...completeInput } = body
-    completeProviderInput = {
-      json: JSON.stringify(completeInput, (_key, value: unknown) => {
-        const record = readRecord(value)
-        return record
-          ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
-          : value
-      }),
-      excludedTransportFields: Object.hasOwn(body, 'prompt_cache_key') ? ['prompt_cache_key'] : [],
-    }
-  }
-  return {
-    ...(completeProviderInput ? { completeProviderInput } : {}),
-    ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
-    ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
-    ...(imageWidths.length > 0 ? { imageWidths } : {}),
-    model: readString(body?.model),
-    ...(includeDiagnostics
-      ? {
-          providerRequestDiagnostics: {
-            bytes: Buffer.byteLength(requestBody),
-            includesAllTools: requestBody.includes('ALL_TOOLS'),
-            includesExecCommand: requestBody.includes('exec_command'),
-            includesAutomation: requestBody.includes('"name":"automation"'),
-            includesGroup: requestBody.includes('"name":"group"'),
-            includesPhysicalNoteRecovery:
-              requestBody.includes('"name":"resolve_physical_note"'),
-            includesReadShared: requestBody.includes('read_shared'),
-            includesResponseCardCompactTableShape: [
-              'compact_table',
-              'columns',
-              'rowHeader',
-              'rows',
-              'values',
-              'tracking',
-              'snapshotAt',
-            ].every((field) => requestBody.includes(field)),
-            includesResponseCardNutritionV2Shape: [
-              'daily_nutrition',
-              'fiberGrams',
-              'goals',
-              'status',
-              'target',
-              'totals',
-            ].every((field) => requestBody.includes(field)),
-            includesGroupEmail: requestBody.includes('send_email'),
-            includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
-          },
-        }
-      : {}),
-    serviceTier: readString(body?.service_tier),
-    ...(toolSearchOutputTools.length > 0 ? { toolSearchOutputTools } : {}),
-  }
-}
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null
-  }
-
-  return value as Record<string, unknown>
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null
-}
-
-function readPngDataUrlWidth(value: string): number | null {
-  const match = /^data:image\/png;base64,(.+)$/su.exec(value)
-  if (!match?.[1]) {
-    return null
-  }
-  const image = Buffer.from(match[1], 'base64')
-  return image.length >= 24 && image.subarray(12, 16).toString('ascii') === 'IHDR'
-    ? image.readUInt32BE(16)
-    : null
-}
-
-function readProviderToolOutputText(value: unknown): string | null {
-  if (typeof value === 'string') {
-    return value
-  }
-  if (!Array.isArray(value)) {
-    return null
-  }
-
-  const textItems = value
-    .map(readRecord)
-    .map((item) => readString(item?.text))
-    .filter((text): text is string => text !== null)
-  return textItems.length > 0 ? textItems.join('\n') : null
-}
-
-function writeScriptedSseResponse(input: {
-  outputItems: readonly Record<string, unknown>[]
-  response: ServerResponse
-  responseId: string
-  usageInputTokens?: number
-}): void {
-  const inputTokens = input.usageInputTokens ?? 12
-  const usage = {
-    input_tokens: inputTokens,
-    input_tokens_details: { cached_tokens: 0 },
-    output_tokens: 7,
-    output_tokens_details: { reasoning_tokens: 0 },
-    total_tokens: inputTokens + 7,
-  }
-  const completedResponse = {
-    created_at: Math.floor(Date.now() / 1000),
-    id: input.responseId,
-    model: SCRIPTED_MODEL,
-    output: input.outputItems,
-    status: 'completed',
-    usage,
-  }
-
-  input.response.statusCode = 200
-  input.response.setHeader('cache-control', 'no-cache')
-  input.response.setHeader('content-type', 'text/event-stream; charset=utf-8')
-  writeScriptedSseEvent(input.response, 'response.created', {
-    response: {
-      ...completedResponse,
-      output: [],
-      status: 'in_progress',
-    },
-    type: 'response.created',
-  })
-  for (const [outputIndex, outputItem] of input.outputItems.entries()) {
-    writeScriptedSseEvent(input.response, 'response.output_item.added', {
-      item: {
-        ...outputItem,
-        status: 'in_progress',
-      },
-      output_index: outputIndex,
-      type: 'response.output_item.added',
-    })
-    writeScriptedSseEvent(input.response, 'response.output_item.done', {
-      item: outputItem,
-      output_index: outputIndex,
-      type: 'response.output_item.done',
-    })
-  }
-  writeScriptedSseEvent(input.response, 'response.completed', {
-    response: completedResponse,
-    type: 'response.completed',
-  })
-  input.response.write('data: [DONE]\n\n')
-  input.response.end()
-}
-
-function writeScriptedSseEvent(
-  response: ServerResponse,
-  event: string,
-  payload: Record<string, unknown>,
-): void {
-  response.write(`event: ${event}\n`)
-  response.write(`data: ${JSON.stringify(payload)}\n\n`)
-}
-
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, milliseconds)
-  })
 }

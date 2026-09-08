@@ -1,3 +1,4 @@
+import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import {
   MURPH_DYNAMIC_TOOLS,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
@@ -165,7 +166,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS,
+            dynamicTools: MURPH_DYNAMIC_TOOLS.map(withCodexToolInputContract),
           })
           child.stdout.write(
             jsonLine({
@@ -956,7 +957,7 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
           })
           child.stdout.write(
             jsonLine({

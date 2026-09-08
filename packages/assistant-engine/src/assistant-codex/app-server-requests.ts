@@ -13,6 +13,7 @@ import type {
   CodexAppServerPreparedImageInput,
 } from './images.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
+import { withCodexToolInputContract } from './tool-input-contract.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 
@@ -109,7 +110,7 @@ export function buildCodexThreadContextParams(input: {
     developerInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
-    dynamicTools: input.input.dynamicTools,
+    dynamicTools: input.input.dynamicTools.map(withCodexToolInputContract),
     ephemeral: input.input.ephemeral ?? undefined,
     environments: input.input.environments
       ? input.input.environments.map((environment) => ({ ...environment }))

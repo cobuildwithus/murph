@@ -9,6 +9,7 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
   codexCommand: string
   directory: string
   astraAllowed?: boolean
+  toolMode?: 'code_mode_only'
 }): Promise<string> {
   const { stdout } = await execFileAsync(input.codexCommand, ['debug', 'models', '--bundled'], {
     encoding: 'utf8',
@@ -19,7 +20,10 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
   const standardFilter = /&& jq '([^']+)' \/tmp\/murph-codex-model-catalog\.openai-flex\.json/u.exec(dockerfile)?.[1]
   if (!patchFilter || !standardFilter) throw new Error('Image catalog filters are missing.')
   const catalogJson = execFileSync('jq', [
-    input.astraAllowed ? patchFilter : `${patchFilter} | ${standardFilter}`,
+    [
+      input.astraAllowed ? patchFilter : `${patchFilter} | ${standardFilter}`,
+      ...(input.toolMode ? ['.models |= map(.tool_mode = "code_mode_only")'] : []),
+    ].join(' | '),
   ], { input: stdout, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
   const modelCatalogJson = path.join(input.directory, 'codex-model-catalog.openai-flex.json')
   await writeFile(modelCatalogJson, catalogJson, { encoding: 'utf8', mode: 0o600 })

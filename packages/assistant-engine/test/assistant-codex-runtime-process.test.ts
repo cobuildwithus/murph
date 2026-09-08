@@ -1,3 +1,4 @@
+import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import {
   cliTimingLaunchArgs,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
@@ -93,7 +94,7 @@ describe('assistant codex runtime', () => {
             provider: 'codex-cli', codexHome, approvalPolicy: 'never', sandbox: 'workspace-write',
           }),
           workingDirectory, env: { PATH: '/custom/bin' },
-          dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+          dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
           systemPrompt: 'Synthetic startup test.', userPrompt: 'Synthetic startup test.',
         })
         expect(result.ok).toBe(false)

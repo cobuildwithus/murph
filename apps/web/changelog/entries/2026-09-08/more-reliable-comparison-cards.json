@@ -5,8 +5,8 @@
     "id": "more-reliable-comparison-cards",
     "kind": "improvement",
     "priority": 2,
-    "title": "More reliable comparison cards",
-    "summary": "Murph makes comparison cards more reliably and uses a complete text answer when the details do not fit.",
+    "title": "More reliable replies and comparisons",
+    "summary": "Murph is better at avoiding errors when carrying out your requests and uses a complete text answer when a comparison does not fit in a card.",
     "relevanceTags": [
       "conversations"
     ],

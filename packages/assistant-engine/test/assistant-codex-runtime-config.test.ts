@@ -1,3 +1,4 @@
+import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import {
   cliTimingLaunchArgs,
   MURPH_DYNAMIC_TOOLS,
@@ -203,7 +204,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       experimentalRawEvents: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
@@ -244,7 +245,7 @@ describe('assistant codex runtime', () => {
         ...baseInput,
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
     })
     expect(
       buildCodexThreadStartParams({
@@ -257,7 +258,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS.map(withCodexToolInputContract),
     })
     expect(
       buildCodexThreadStartParams({
@@ -266,7 +267,7 @@ describe('assistant codex runtime', () => {
         hostedToolContext: createHostedToolContext(),
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS.map(withCodexToolInputContract),
     })
     expect(
       buildCodexThreadStartParams({
@@ -280,7 +281,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER.map(withCodexToolInputContract),
     })
 
     expect(
@@ -435,7 +436,7 @@ describe('assistant codex runtime', () => {
       },
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       ephemeral: true,
       experimentalRawEvents: true,
       model: 'gpt-5',
@@ -597,7 +598,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
-              dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+              dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
               experimentalRawEvents: true,
               model,
               modelProvider,
