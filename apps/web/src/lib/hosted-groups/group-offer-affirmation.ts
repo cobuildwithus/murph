@@ -16,7 +16,7 @@ import {
   signalHostedGroupJoinConfirmationRuntimeBestEffort,
 } from "./group-join-confirmation";
 import { acceptHostedGroupDisclosurePermissionReactionTx } from "./group-disclosure-store";
-import { acceptHostedGroupJoinOfferTx } from "./group-store";
+import { acceptHostedGroupJoinOfferTx, type HostedGroupJoinOfferAcceptanceTxResult } from "./group-store";
 import type { HostedGroupOfferChannel } from "./offer-message-binding";
 
 export type HostedGroupOfferAffirmationSkipReason =
@@ -65,7 +65,10 @@ export async function acceptHostedGroupOfferAffirmation(input: {
    * Lets a provider adapter record terminal handling atomically with the grant
    * it owns. Linq uses this for exact provider-event replay protection.
    */
-  onAcceptedTx?: (tx: Prisma.TransactionClient) => Promise<void>;
+  onAcceptedTx?: (
+    tx: Prisma.TransactionClient,
+    acceptedJoin?: HostedGroupJoinOfferAcceptanceTxResult,
+  ) => Promise<void>;
   channel: HostedGroupOfferChannel;
   kinds: readonly HostedGroupOfferAffirmationKind[];
   memberId: string;
@@ -140,7 +143,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
         tx,
       });
       await input.assertActorStillBound?.(tx);
-      await input.onAcceptedTx?.(tx);
+      await input.onAcceptedTx?.(tx, accepted);
       return accepted;
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {

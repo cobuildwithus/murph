@@ -261,6 +261,7 @@ export async function ensureHostedGroupStructureForThreadContainerTx(input: {
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
+  additiveOnly?: boolean;
   containerMemberId: string;
   displayName?: string | null;
   kind?: HostedGroupKind | string | null;
@@ -303,9 +304,10 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
         select: { id: true },
       });
     }
-    await replaceHostedGroupRequestedProjectionsTx(input.tx, {
+    await updateHostedGroupRequestedProjectionsTx(input.tx, {
       groupId: ensured.groupId,
       now: input.now,
+      additiveOnly: input.additiveOnly,
       requestedVaultShareProjectionScopes: requested,
     });
   }
@@ -1597,6 +1599,7 @@ export async function createOrReadHostedGroupJoinLinkTx(input: {
 
 export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
+  additiveOnly?: boolean;
   actorMemberId: string;
   containerMemberId: string;
   displayName?: string | null;
@@ -1630,6 +1633,7 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
 
   const group = await ensureHostedGroupForThreadContainerTx({
     containerMemberId: input.containerMemberId,
+    additiveOnly: input.additiveOnly,
     displayName: input.displayName ?? null,
     kind: input.kind ?? null,
     now: input.now,
@@ -1856,10 +1860,10 @@ export async function recordHostedGroupJoinOfferTx(input: {
   const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
   if (
     policy.offerGeneration !== input.expectedOfferGeneration
-    || !hostedGroupProjectionScopeSetsEqual(
-      policy.requestedVaultShareProjectionScopes,
-      projectionScopes,
-    )
+    || !projectionScopes.every((scope) => policy.requestedVaultShareProjectionScopes.some(
+      (requested) => buildHostedVaultShareProjectionScopeKey(requested)
+        === buildHostedVaultShareProjectionScopeKey(scope),
+    ))
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_STALE",
@@ -1908,6 +1912,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
       where: {
         groupId: input.groupId,
         messageLookupKey: { not: messageLookupKey },
+        projectionKindsJson: { equals: toHostedGroupJoinOfferProjectionScopesJson(projectionScopes) },
         revokedAt: null,
       },
       data: { revokedAt: input.replaceActiveOffersAt },
@@ -1951,10 +1956,10 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
   if (
     !policy.offerGeneration
-    || !hostedGroupProjectionScopeSetsEqual(
-      policy.requestedVaultShareProjectionScopes,
-      projectionScopes,
-    )
+    || !projectionScopes.every((scope) => policy.requestedVaultShareProjectionScopes.some(
+      (requested) => buildHostedVaultShareProjectionScopeKey(requested)
+        === buildHostedVaultShareProjectionScopeKey(scope),
+    ))
   ) {
     return { kind: "unavailable" };
   }
@@ -1978,7 +1983,7 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   if (offers.length > HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX) {
     return { kind: "unavailable" };
   }
-  let allActiveOffersMatch = offers.length > 0;
+  let matchingActiveOffer = false;
   for (const offer of offers) {
     const storedScopes = parseHostedGroupJoinOfferProjectionScopes(
       offer.projectionKindsJson,
@@ -1986,19 +1991,12 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
     if (!storedScopes) {
       return { kind: "unavailable" };
     }
-    if (!hostedGroupProjectionScopeSetsEqual(storedScopes, projectionScopes)) {
-      allActiveOffersMatch = false;
+    if (hostedGroupProjectionScopeSetsEqual(storedScopes, projectionScopes)) {
+      matchingActiveOffer = true;
     }
   }
-  if (allActiveOffersMatch) {
+  if (matchingActiveOffer) {
     return { kind: "active_offer" };
-  }
-
-  if (offers.length > 0) {
-    await revokeHostedGroupJoinOffersTx(input.tx, {
-      groupId: input.groupId,
-      now: input.now,
-    });
   }
 
   return {
@@ -2643,10 +2641,11 @@ async function ensureHostedGroupOwnerMembershipTx(
   });
 }
 
-async function replaceHostedGroupRequestedProjectionsTx(
+async function updateHostedGroupRequestedProjectionsTx(
   tx: Prisma.TransactionClient,
   input: {
     groupId: string;
+    additiveOnly?: boolean;
     now: Date;
     requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   },
@@ -2677,8 +2676,10 @@ async function replaceHostedGroupRequestedProjectionsTx(
     await assertHostedGroupRuntimeDestinationTx(tx, group.runtimeMemberId);
   }
   const replacement = mergeHostedGroupJoinPolicy({
-    existing: null,
-    offerGeneration: generateHostedGroupJoinOfferGeneration(),
+    existing: input.additiveOnly ? group.joinPolicyJson : null,
+    offerGeneration: input.additiveOnly && existing.offerGeneration
+      ? existing.offerGeneration
+      : generateHostedGroupJoinOfferGeneration(),
     requestedVaultShareProjectionScopes: requested,
   });
   await tx.hostedGroup.update({
@@ -2687,10 +2688,12 @@ async function replaceHostedGroupRequestedProjectionsTx(
       joinPolicyJson: toHostedGroupJoinPolicyJson(replacement),
     },
   });
-  await revokeHostedGroupJoinOffersTx(tx, {
-    groupId: input.groupId,
-    now: input.now,
-  });
+  if (!input.additiveOnly) {
+    await revokeHostedGroupJoinOffersTx(tx, {
+      groupId: input.groupId,
+      now: input.now,
+    });
+  }
 }
 
 function toHostedGroupJoinPolicyJson(policy: ReturnType<typeof mergeHostedGroupJoinPolicy>): Prisma.InputJsonValue {

@@ -54,6 +54,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import type { HostedRuntimeGroupSummary, HostedRuntimeGroupToolRequest } from '@murphai/hosted-execution/runtime-control'
 import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -7899,6 +7900,146 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(['direct', 'repost', 'unavailable', 'explain', 'already_granted', 'private'] as const)(
+    'group permission recovery handles %s with existing grants and a different prior offer',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-permission-recovery-e2e-'))
+      const messageRef = `ain_${'c'.repeat(32)}`
+      const groupRequests: HostedRuntimeGroupToolRequest[] = []
+      const durationScope = { projectionKind: 'sleep-duration-days.v0' as const }
+      const sharedRequests: unknown[] = []
+      const granted = ['profile-name.v0', 'sleep-times.v0', 'activity-days.v0', 'device-sync-status.v0', ...(scenario === 'already_granted' ? ['sleep-duration-days.v0' as const] : [])] as const
+      const group: HostedRuntimeGroupSummary = {
+        displayName: 'Weekend walkers',
+        id: 'group_synthetic_permissions', kind: 'friends', memberCount: 2,
+        members: [{
+          memberId: 'member_synthetic_speaker', handle: 'participant-a', role: 'member',
+          grantedVaultShareProjectionKinds: [...granted],
+          grantedVaultShareProjectionScopes: granted.map(projectionKind => ({ projectionKind })),
+        }, {
+          memberId: 'member_synthetic_owner', handle: 'participant-b', role: 'owner',
+          grantedVaultShareProjectionKinds: ['profile-name.v0'],
+          grantedVaultShareProjectionScopes: [{ projectionKind: 'profile-name.v0' }],
+        }],
+        requestedVaultShareProjectionKinds: ['vo2-max-days.v0' as const],
+        requestedVaultShareProjectionScopes: [{ projectionKind: 'vo2-max-days.v0' as const }],
+        status: 'active',
+      }
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: scenario === 'private' ? buildDirectConversationDeveloperInstructions() : buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL, ...(scenario === 'private' ? [MURPH_GROUP_CONSULT_TOOL] : [MURPH_GROUP_DATA_TOOL]), MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          excludeResumeTurns: true, groupConversation: scenario !== 'private',
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef], conversationId: 'conversation-permission-recovery',
+              conversationScope: scenario === 'private' ? 'direct' : 'group', inboundMailboxItemIds: ['mailbox-permission-recovery'],
+              originSessionId: 'session-permission-recovery', recipientKey: 'recipient-permission-recovery',
+            }),
+            groupTool: { request: async request => {
+              groupRequests.push(request)
+              if (request.action === 'list_memberships') return {
+                action: 'list_memberships', result: {
+                  disclosureGrants: [], nextCursor: null, status: 'ok', truncated: false,
+                  memberships: [{
+                    membershipId: 'membership_synthetic', displayName: group.displayName,
+                    kind: 'friends', memberCount: 2, role: 'member',
+                    availability: { status: 'available' }, permissionsUrl: null, sponsorshipUrl: null,
+                    grantedVaultShareProjectionScopes: granted.map(projectionKind => ({ projectionKind })),
+                    requestedVaultShareProjectionScopes: [{ projectionKind: 'vo2-max-days.v0' }],
+                  }],
+                },
+              }
+              if (request.action === 'read_current') return {
+                action: 'read_current', result: { group, status: 'ok' },
+              }
+              if (request.action === 'post_join_offer') return scenario === 'unavailable'
+                ? { action: 'post_join_offer', result: { group: null, status: 'unavailable', unavailableReason: 'send_failed' } }
+                : { action: 'post_join_offer', result: {
+                    group, joinUrl: 'https://example.test/groups/join/synthetic',
+                    offeredAt: '2026-08-26T18:00:00.000Z', offerState: 'posted', status: 'sent',
+                  } }
+              throw new Error(`Unexpected group request: ${request.action}`)
+            } },
+            groupSharedReader: { request: async request => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
+                members: [{
+                  memberId: 'member_synthetic_speaker', participantId: 'participant-a',
+                  currentTurnHandles: ['participant-a'], displayName: null,
+                  projections: [{ projectionScope: durationScope, projectionScopeKey: 'sleep-duration-days.v0',
+                    grantStatus: 'granted', dataStatus: 'missing', records: [],
+                  }],
+                }],
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
+            vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Existing group context: participant-a is the member asking. The last native offer concerned VO2 max.',
+            scenario === 'repost' ? 'Earlier Murph offer: I can show a fresh permission prompt for total sleep duration.' : '',
+            `Message ref: ${messageRef}`, 'Sender: participant-a', 'Current member message:',
+            scenario === 'private' ? 'Please add sleep-duration sharing for Weekend walkers from this private chat.'
+              : scenario === 'repost' ? 'Please put that new permission prompt here.'
+              : scenario === 'explain' ? 'Explain which sleep permission I already have and which is needed for total sleep.'
+              : 'Add my total sleep duration to this group’s sharing.',
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        process.stdout.write(`[group-permission-recovery-e2e] ${JSON.stringify({ scenario, groupRequests, sharedRequests, reply: result.finalMessage })}\n`)
+        if (scenario !== 'private') expect(groupRequests[0]?.action).toBe('read_current')
+        const offers = groupRequests.filter(request => request.action === 'post_join_offer')
+        expect(offers).toHaveLength(['explain', 'already_granted', 'private'].includes(scenario) ? 0 : 1)
+        if (['direct', 'repost', 'unavailable'].includes(scenario)) expect(offers[0]).toMatchObject({
+          joinOffer: { projectionScopes: [durationScope] }, repostOriginAssistantInputId: messageRef,
+        })
+        expect(groupRequests.every(request => (scenario === 'private' ? ['list_memberships'] : ['read_current', 'post_join_offer']).includes(request.action))).toBe(true)
+        expect(sharedRequests).toHaveLength(scenario === 'already_granted' ? 1 : 0)
+        expect(result.finalMessage).not.toMatch(/scope.change|repost_scope|projection|VO.?2|Garmin|Apple Health/i)
+        if (scenario !== 'private') expect(result.finalMessage).not.toMatch(/private (?:chat|conversation)/i)
+        if (scenario === 'private') {
+          expect(result.finalMessage).toMatch(/group chat|in (?:the|that) group/i)
+          expect(result.finalMessage).not.toMatch(/\b(?:sent|posted|handed|passed|enabled|updated)\b|https?:|right now|temporar|only.*(?:there|group)/i)
+        }
+        if (scenario === 'already_granted') {
+          expect(result.finalMessage).toMatch(/already|enabled|permission|sharing is on/i)
+          expect(result.finalMessage).toMatch(/no |missing|not .*available|not .*arrived|don.t.*(?:data|record)|haven.t/i)
+          expect(result.finalMessage).not.toMatch(/like|heart|grant .*permission|reconnect|you haven.t granted/i)
+        }
+        if (scenario === 'direct' || scenario === 'repost') expect(result.finalMessage.trim()).toBe('')
+        if (scenario === 'unavailable') {
+          expect(result.finalMessage).toMatch(/couldn.t|can.t|unable|failed|could not/i)
+          expect(result.finalMessage).toMatch(/retry|try again/i)
+          expect(result.finalMessage).not.toMatch(/https?:|sharing is (?:on|enabled)|successfully|has been enabled/i)
+        }
+        if (scenario === 'explain') {
+          expect(result.finalMessage).toMatch(/sleep timing|start and end/i)
+          expect(result.finalMessage).toMatch(/duration|total sleep/i)
+          expect(result.finalMessage).toMatch(/already|granted|enabled|have|sharing/i)
+          expect(result.finalMessage).toMatch(/separate|not|need|missing/i)
+        }
+        expect(result.finalMessage.split(/\s+/u).length).toBeLessThan(130)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    480_000,
+  )
+
   it(
     'binds a requested native access repost to the current group message',
     async () => {
@@ -7925,7 +8066,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedGroupStatusDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL, MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -7947,6 +8088,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             groupTool: {
               request: async (request) => {
                 groupRequests.push(request)
+                if (request.action === 'read_current') return {
+                  action: 'read_current', result: { status: 'ok', group: {
+                    displayName: null, id: 'group_synthetic_repost', kind: 'friends',
+                    memberCount: 1, members: [], status: 'active',
+                    requestedVaultShareProjectionKinds: [], requestedVaultShareProjectionScopes: [],
+                  } },
+                }
                 return {
                   action: 'post_join_offer',
                   result: {
@@ -8006,8 +8154,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             message_ref: messageRef,
           },
         })
-        expect(groupRequests).toHaveLength(1)
-        expect(groupRequests[0]).toMatchObject({
+        expect(groupRequests).toHaveLength(2)
+        expect(groupRequests[0]).toMatchObject({ action: 'read_current' })
+        expect(groupRequests[1]).toMatchObject({
           action: 'post_join_offer',
           repostOriginAssistantInputId: messageRef,
         })

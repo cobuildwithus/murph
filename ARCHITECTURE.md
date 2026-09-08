@@ -179,15 +179,22 @@ sent. Missing additive rollout evidence is handled but never recency-eligible.
 An explicit native offer is suppressed only by a covering active offer, never
 by the scopes already granted by current members, because access may be
 intended for a provider-room participant who has not joined the hosted group
-yet. A room's explicit request to repost the native offer is the narrow
-exception: the model supplies that current accepted Message ref, Assistant
-Engine verifies it against current group input, and Web incorporates the exact
-accepted-input identity into provider idempotency. Web resends the locked
-current join-policy snapshot; reposting never defaults or replaces its scopes.
-Replay of that request converges on one provider message; a later request can
-post one replacement.
-Older active offers are revoked only after the replacement message is durably
-bound, so a failed send does not destroy the existing recovery path.
+yet. A room's explicit request to enable a permission or repost its native
+offer supplies the current accepted Message ref. Assistant Engine verifies it
+against current group input, and Web incorporates that identity and the exact
+requested scopes into provider idempotency. Explicit scopes create a fresh
+immutable consent message even when an earlier offer disclosed different scopes;
+omitting scopes reuses the locked current join policy. Native offers add their
+scopes to the requested policy without changing grants or retiring unrelated
+offers. Replay converges on one provider message; a later request can post one
+replacement. Only same-scope older offers are retired after the replacement is
+durably bound, so a failed send preserves the existing recovery path. Explicit
+join-link policy replacement retains its separate generation fence.
+An existing member's accepted Linq reaction also queues one exact-text group
+confirmation in the grant transaction. Its membership-and-offer key deduplicates
+replays; the normal notification consumer owns delivery and route revalidation.
+This confirms permission, not health-data availability, and leaves first-join
+private confirmations unchanged.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only

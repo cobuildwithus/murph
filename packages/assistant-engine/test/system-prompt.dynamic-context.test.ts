@@ -29,6 +29,27 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('keeps exact-scope consent recovery and truthful delivery guidance resident', () => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'group',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
+    })
+    expect(prompt).toContain('read_current, then offer_access once with only those exact projectionScopes and the current accepted message_ref')
+    expect(prompt).toContain('Do not ask permission to show the consent prompt')
+    expect(prompt).toContain('Sleep timing, sleep duration, and device connection status are separate permissions')
+    expect(prompt).toContain('do not add a companion reply or link')
+    expect(prompt).toContain('do not claim the health value is available until read_shared proves it')
+    expect(prompt).not.toContain('Private group-sharing recovery:')
+    const direct = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'direct',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
+    }).prompt
+    expect(direct).toContain('Private group-sharing recovery:')
+    expect(direct).toContain('lead with the next step: ask the member to send that request in the named group chat')
+    expect(direct).toContain('a group_consult handoff only posts context and cannot perform this change')
+    expect(direct).not.toContain('Group sharing recovery in the current group chat:')
+  })
+
   it('keeps static late-result and research policy resident while changing only current turn facts', () => {
     const ordinary = buildAssistantSystemPromptLayers({
       ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,

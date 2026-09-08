@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
   appendHostedLinqGroupReactionMailboxTx: vi.fn(),
+  appendHostedMailboxEnvelopeTx: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
   enqueueHostedGroupJoinOutreachTx: vi.fn(),
   revokeHostedGroupJoinOutreachForRemovedReactionTx: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
@@ -85,6 +87,11 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context", ()
     mocks.signalHostedLinqGroupReactionMailbox,
 }));
 
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
@@ -118,6 +125,11 @@ let restoreKeyring: (() => void) | null = null;
 describe("handleHostedGroupJoinOfferReaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { id: "mailbox_sharing_confirmation", kind: "assistant.notification.requested", lane: "system", laneSeq: "18" },
+    });
     mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValue({
       kind: "not_pending",
     });
@@ -268,6 +280,62 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+  });
+
+  it("confirms an existing member's saved duration grant in the same room exactly once", async () => {
+    const accepted = {
+      ...await mocks.acceptHostedGroupJoinOfferTx(),
+      alreadyMember: true,
+      joinConfirmationSignal: undefined,
+      selectedVaultShareProjectionKinds: ["sleep-duration-days.v0"],
+      selectedVaultShareProjectionScopes: [{ projectionKind: "sleep-duration-days.v0" }],
+    };
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(accepted);
+    const event = parseReactionEvent({ reactionType: "love" });
+    const prisma = createPrismaStub();
+    await expect(handleHostedGroupJoinOfferReaction({ event, prisma }))
+      .resolves.toMatchObject({ status: "accepted" });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      tx: expect.anything(),
+      envelope: expect.objectContaining({
+        kind: "assistant.notification.requested",
+        notification: expect.objectContaining({
+          deliveryDispatchMode: "queue-only",
+          externalThreadRouteAuthority: expect.objectContaining({ containerMemberId: "hbm_runtime" }),
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: "Your reaction enabled sleep duration sharing. Your other sharing is unchanged.",
+          },
+        }),
+      }),
+    });
+    expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).not.toHaveBeenCalled();
+    const appendOrder = mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]!;
+    expect(appendOrder).toBeGreaterThan(mocks.acceptHostedGroupJoinOfferTx.mock.invocationCallOrder.at(-1)!);
+    expect(appendOrder).toBeLessThan(mocks.markHostedLinqGroupJoinOfferHandledTx.mock.invocationCallOrder[0]!);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      id: "mailbox_sharing_confirmation", kind: "assistant.notification.requested", lane: "system", laneSeq: "18",
+    });
+    await handleHostedGroupJoinOfferReaction({ event, prisma });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedLinqGroupReactionMailbox).toHaveBeenLastCalledWith(expect.objectContaining({
+      append: expect.objectContaining({ item: expect.objectContaining({ id: "mailbox_sharing_confirmation" }) }),
+    }));
+  });
+
+  it("keeps consent acceptance usable on a legacy route without confirmation delivery authority", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue({
+      ...await mocks.acceptHostedGroupJoinOfferTx(), alreadyMember: true,
+      joinConfirmationSignal: undefined,
+      selectedVaultShareProjectionScopes: [{ projectionKind: "sleep-duration-days.v0" }],
+    });
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({ containerMemberId: "hbm_runtime" });
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "love" }), prisma: createPrismaStub(),
+    })).resolves.toMatchObject({ status: "accepted" });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledOnce();
   });
 
   it.each([
