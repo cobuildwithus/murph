@@ -10,6 +10,7 @@ import {
   createMailboxItem,
   createMailboxPort,
   createPlatform,
+  createVaultSnapshotBundle,
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
@@ -26,6 +27,7 @@ import {
   waitForFakeTimerScheduled,
   waitUntil,
   withRealTimeout,
+  writeMailboxImportStateFile,
   writeSyntheticAssistantAutoReplyTerminalEvidence,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
@@ -103,7 +105,8 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedExecutionLayeredSnapshotRef } from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
-import { writeHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
+import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { createEmptyHostedMailboxImportState, writeHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -124,6 +127,131 @@ import {
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
+  test("checkpoints a stale delivery projection so pending device work can resume", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-stale-delivery-"));
+    const resumedVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-delivery-resume-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const staleWakeAt = "2026-04-01T00:00:00.000Z";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: createMailboxItem({
+          id: "mailbox_stale_delivery_device",
+          kind: "device-sync.wake",
+          lane: "system",
+          laneSeq: "1",
+        }),
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/stale-delivery-before.bundle.json",
+        vaultRoot,
+      });
+      artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: { idleCheckpointDelayMs: 1, processingMode: "default" },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          vaultRoot,
+          platform: createPlatform({
+            artifactBytesByHash,
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests, events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                nextWakeAt: staleWakeAt,
+                nextWakeReason: "assistant_delivery",
+                nextDefaultProcessingWakeAt: staleWakeAt,
+                nextDefaultProcessingWakeReason: "assistant_delivery",
+                systemMailboxProgressGeneration: "1",
+              }),
+            }),
+          }),
+          async importItem() {
+            throw new Error("Device work is already imported.");
+          },
+          async runAssistantPhase(input) {
+            return await runHostedWorkspaceAssistantPhase({ ...input, now: () => TEST_NOW });
+          },
+          async createCheckpointSnapshot() {
+            const snapshot = await createVaultSnapshotBundle({
+              key: "users/bundles/member-synthetic/stale-delivery-after.bundle.json",
+              vaultRoot,
+            });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
+          },
+        },
+      );
+      assert.ok(checkpointRequests.length > 0, "Stale delivery must be corrected durably before the next attempt.");
+      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeReason, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0, "The default owner must hand off device work.");
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 1);
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      const checkpoint = checkpointRequests.at(-1)!;
+      const nextVersion = String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n);
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: { idleCheckpointDelayMs: 1, processingMode: "system_mailbox", workspaceVersion: nextVersion },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          vaultRoot: resumedVaultRoot,
+          platform: createPlatform({
+            artifactBytesByHash,
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests, events,
+              workspace: createWorkspaceState({
+                nextWakeAt: checkpoint.nextWakeAt ?? null,
+                nextWakeReason: checkpoint.nextWakeReason ?? null,
+                nextDefaultProcessingWakeAt: checkpoint.nextDefaultProcessingWakeAt,
+                nextDefaultProcessingWakeReason: checkpoint.nextDefaultProcessingWakeReason,
+                systemMailboxProgressGeneration: checkpoint.systemMailboxProgressGeneration,
+                redactedStatus: checkpoint.redactedStatus ?? null,
+                snapshotRef: checkpoint.snapshotRef,
+                version: nextVersion,
+              }),
+            }),
+          }),
+          async importItem() {
+            throw new Error("Device work is already imported.");
+          },
+          async runAssistantPhase(input) {
+            return await runHostedWorkspaceAssistantPhase({ ...input, now: () => TEST_NOW });
+          },
+          async createCheckpointSnapshot() {
+            return { snapshotRef: (await createVaultSnapshotBundle({
+              key: "users/bundles/member-synthetic/stale-delivery-drained.bundle.json",
+              vaultRoot: resumedVaultRoot,
+            })).snapshotRef };
+          },
+        },
+      );
+      assert.ok(deviceSyncPort.fetchSnapshotCalls > 0, "The next owner must reach device sync.");
+      assert.equal((await readHostedSystemMailboxState(resumedVaultRoot)).pending.length, 0);
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(resumedVaultRoot);
+    }
+  });
   test("persists a disproved default wake without claiming assistant progress", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-empty-default-wake-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
