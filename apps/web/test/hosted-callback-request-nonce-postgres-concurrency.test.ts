@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   PrismaHostedCallbackRequestNonceStore,
@@ -110,6 +110,129 @@ async function waitUntilBackendIsBlockedBy(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted callback nonce PostgreSQL concurrency",
   () => {
+    it("maps an actual adapter nonce violation to replay rejection", async () => {
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const nonceHash = `nonce_adapter_${randomUUID()}`;
+      const input = {
+        nonceHash,
+        userId: "member_nonce_adapter",
+        method: "POST",
+        path: "/api/internal/hosted-runtime/log",
+        search: "",
+        now: "2026-09-08T00:00:00.000Z",
+        expiresAt: "9999-12-31T23:59:59.999Z",
+      };
+      const store = new PrismaHostedCallbackRequestNonceStore(client);
+      try {
+        await expect(store.consumeHostedCallbackRequestNonce(input)).resolves.toBe(true);
+        // Obtain the real adapter error without relying on a probabilistic race.
+        const failure = await client.$queryRaw`
+          INSERT INTO hosted_web_internal_request_nonce
+            (nonce_hash, user_id, method, path, expires_at)
+          VALUES (${nonceHash}, 'member_nonce_adapter', 'POST', '/synthetic',
+            timestamp '9999-12-31')
+        `.then(() => { throw new Error("Expected a nonce uniqueness violation."); },
+          (error: unknown) => error);
+        expect(failure).toMatchObject({
+          code: "P2010",
+          meta: { driverAdapterError: { cause: {
+            originalCode: "23505",
+            constraint: { fields: ["nonce_hash"] },
+          } } },
+        });
+        const query = vi.spyOn(client, "$queryRaw").mockRejectedValueOnce(failure);
+        try {
+          await expect(store.consumeHostedCallbackRequestNonce(input)).resolves.toBe(false);
+          expect(query).toHaveBeenCalledTimes(1);
+        } finally {
+          query.mockRestore();
+        }
+        await expect(store.consumeHostedCallbackRequestNonce({
+          ...input, nonceHash: `${nonceHash}_fresh`,
+        })).resolves.toBe(true);
+      } finally {
+        try {
+          await client.hostedWebInternalRequestNonce.deleteMany({
+            where: { nonceHash: { in: [nonceHash, `${nonceHash}_fresh`] } },
+          });
+        } finally {
+          await client.$disconnect();
+        }
+      }
+    });
+
+    it("preserves fresh and duplicate admission while a primary key rebuild is active", async () => {
+      const schema = `nonce_reindex_${randomUUID().replaceAll("-", "")}`;
+      const admin = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const scopedUrl = new URL(databaseUrl);
+      scopedUrl.searchParams.set("options", `-c search_path=${schema} -c statement_timeout=10000`);
+      const reader = createPrismaClient({ databaseUrl: scopedUrl.toString(), poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl: scopedUrl.toString(), poolMax: 1 });
+      const rebuilder = createPrismaClient({ databaseUrl: scopedUrl.toString(), poolMax: 1 });
+      const clients = [admin, reader, writer, rebuilder];
+      const snapshotReady = createDeferred();
+      const releaseSnapshot = createDeferred();
+      let snapshot: Promise<void> | null = null;
+      let rebuild: Promise<number> | null = null;
+      try {
+        await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
+        await admin.$executeRawUnsafe(`CREATE TABLE "${schema}".hosted_web_internal_request_nonce
+          (LIKE public.hosted_web_internal_request_nonce INCLUDING ALL)`);
+        snapshot = reader.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT count(*) FROM hosted_web_internal_request_nonce`;
+          snapshotReady.resolve();
+          await releaseSnapshot.promise;
+        }, { ...transactionOptions, isolationLevel: "RepeatableRead" });
+        await withDeadline(Promise.race([snapshotReady.promise, snapshot]), 5_000);
+        rebuild = rebuilder.$executeRawUnsafe(`REINDEX INDEX CONCURRENTLY
+          "${schema}".hosted_web_internal_request_nonce_pkey`);
+        // Attach a rejection observer while the phase barrier is polled.
+        void rebuild.catch(() => undefined);
+        const deadline = Date.now() + 5_000;
+        let waitingForSnapshot = false;
+        while (Date.now() < deadline && !waitingForSnapshot) {
+          const rows = await admin.$queryRaw<Array<{ phase: string }>>`
+            SELECT phase FROM pg_stat_progress_create_index
+            WHERE relid = ${`${schema}.hosted_web_internal_request_nonce`}::regclass
+          `;
+          waitingForSnapshot = rows[0]?.phase === "waiting for old snapshots";
+          if (!waitingForSnapshot) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        }
+        expect(waitingForSnapshot).toBe(true);
+        const store = new PrismaHostedCallbackRequestNonceStore(writer);
+        const input = {
+          nonceHash: "nonce_during_reindex",
+          userId: "member_during_reindex",
+          method: "POST",
+          path: "/api/internal/hosted-runtime/log",
+          search: "",
+          now: "2026-09-08T00:00:00.000Z",
+          expiresAt: "9999-12-31T23:59:59.999Z",
+        };
+        await expect(store.consumeHostedCallbackRequestNonce(input)).resolves.toBe(true);
+        await expect(store.consumeHostedCallbackRequestNonce(input)).resolves.toBe(false);
+        releaseSnapshot.resolve();
+        await withDeadline(Promise.all([snapshot, rebuild]), 5_000);
+        const indexes = await admin.$queryRaw<Array<{ valid: boolean; ready: boolean }>>`
+          SELECT indisvalid AS valid, indisready AS ready FROM pg_index
+          WHERE indrelid = ${`${schema}.hosted_web_internal_request_nonce`}::regclass
+        `;
+        expect(indexes).toHaveLength(3);
+        expect(indexes.every((index) => index.valid && index.ready)).toBe(true);
+        await expect(store.consumeHostedCallbackRequestNonce(input)).resolves.toBe(false);
+      } finally {
+        releaseSnapshot.resolve();
+        await Promise.allSettled([snapshot, rebuild].filter((pending) => pending !== null));
+        try {
+          await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        } finally {
+          await disconnectAll(clients);
+        }
+      }
+    }, 30_000);
+
     it("admits exactly one simultaneous insert of the same nonce", async () => {
       const fixtureId = randomUUID();
       const nonceHash = `nonce_same_${fixtureId}`;

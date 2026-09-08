@@ -9,6 +9,11 @@ receipt owner with one attempt timestamp and a blinded original identity.
 It reuses current route/access and egress policy, retrieves the original
 provider message transiently, and resends only that failed message. It creates
 no assistant turn, outbox owner, scheduler, or durable message-body copy.
+Receipt ingestion and acceptance serialize on transient, hashed message locks
+before delivery mutations, so their transactions cannot miss each other's
+committed identity. Legacy receipts recheck promoted child ownership under the
+parent lock. Existing Web diagnostics explain recovery decisions without
+retaining provider content.
 `agent-docs/RELIABILITY.md` specifies the supported content, ordering, limits,
 and conservative behavior after an ambiguous retry.
 
@@ -179,15 +184,22 @@ sent. Missing additive rollout evidence is handled but never recency-eligible.
 An explicit native offer is suppressed only by a covering active offer, never
 by the scopes already granted by current members, because access may be
 intended for a provider-room participant who has not joined the hosted group
-yet. A room's explicit request to repost the native offer is the narrow
-exception: the model supplies that current accepted Message ref, Assistant
-Engine verifies it against current group input, and Web incorporates the exact
-accepted-input identity into provider idempotency. Web resends the locked
-current join-policy snapshot; reposting never defaults or replaces its scopes.
-Replay of that request converges on one provider message; a later request can
-post one replacement.
-Older active offers are revoked only after the replacement message is durably
-bound, so a failed send does not destroy the existing recovery path.
+yet. A room's explicit request to enable a permission or repost its native
+offer supplies the current accepted Message ref. Assistant Engine verifies it
+against current group input, and Web incorporates that identity and the exact
+requested scopes into provider idempotency. Explicit scopes create a fresh
+immutable consent message even when an earlier offer disclosed different scopes;
+omitting scopes reuses the locked current join policy. Native offers add their
+scopes to the requested policy without changing grants or retiring unrelated
+offers. Replay converges on one provider message; a later request can post one
+replacement. Only same-scope older offers are retired after the replacement is
+durably bound, so a failed send preserves the existing recovery path. Explicit
+join-link policy replacement retains its separate generation fence.
+An existing member's accepted Linq reaction also queues one exact-text group
+confirmation in the grant transaction. Its membership-and-offer key deduplicates
+replays; the normal notification consumer owns delivery and route revalidation.
+This confirms permission, not health-data availability, and leaves first-join
+private confirmations unchanged.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
@@ -2094,7 +2106,7 @@ application code.
 ## Trust Boundaries
 
 - Web owns four authenticated, staggered hourly Vercel retention routes instead of one cross-domain sweep: nonce retention at minute 5, ordinary primary-database retention at minute 20, external account/computer provider cleanup at minute 35, and runtime-signal plus diagnostic-log maintenance at minute 50. Only the nonce route has an 800-second duration; the other three are capped at 300 seconds. No route invokes another owner, so a Kernel/browser, account-provider, runtime-signal, or diagnostic-database failure cannot prevent callback nonce catch-up.
-- Every verified Cloudflare-to-Web execution callback consumes one SHA-256 nonce row with a single primary-Postgres insert. The `nonce_hash` primary key is the replay linearization point: one concurrent exact nonce wins and every exact-nonce conflict replay loses. The insert uses the database clock to refuse a delayed first admission after the callback's inclusive expiry boundary while retaining that row as a replay tombstone. The callback path owns no expiry sweep, transaction callback, or application-visible lock orchestration. The dedicated nonce-retention route finishes the small browser-assertion nonce lane before selecting strictly expired callback nonce rows in `expires_at`, `nonce_hash` order, locking at most 5,000 candidates per statement with PostgreSQL `FOR UPDATE SKIP LOCKED`, and deleting those exact rows in the same statement. Callback nonces alone use a 100-times-higher max-batch ceiling to drain sustained control-plane volume; browser assertion nonces and all ordinary retention categories keep the shared four-batch ceiling. A caught-up hour stops after the first short batch. Account deletion independently retains its per-member nonce delete.
+- Every verified Cloudflare-to-Web execution callback consumes one SHA-256 nonce row with a single primary-Postgres insert. The `nonce_hash` primary key is the replay linearization point: one concurrent exact nonce wins and every exact-nonce conflict replay loses. A raw-query uniqueness failure from the PostgreSQL adapter is also a replay rejection only when its SQLSTATE is `23505` and its constraint fields are exactly `nonce_hash`; this covers concurrent unique-index rebuilding without retries, additional statements, or swallowing unrelated database failures. The insert uses the database clock to refuse a delayed first admission after the callback's inclusive expiry boundary while retaining that row as a replay tombstone. The callback path owns no expiry sweep, transaction callback, or application-visible lock orchestration. The dedicated nonce-retention route finishes the small browser-assertion nonce lane before selecting strictly expired callback nonce rows in `expires_at`, `nonce_hash` order, locking at most 5,000 candidates per statement with PostgreSQL `FOR UPDATE SKIP LOCKED`, and deleting those exact rows in the same statement. Callback nonces alone use a 100-times-higher max-batch ceiling to drain sustained control-plane volume; browser assertion nonces and all ordinary retention categories keep the shared four-batch ceiling. A caught-up hour stops after the first short batch. Account deletion independently retains its per-member nonce delete.
 - Short-lived hosted control-plane creation is likewise cleanup-free. Connected-app intents, unbound sensitive-action challenges, device-connect intents, device OAuth sessions, Clinical Records connect intents, and Clinical Records OAuth sessions are created or consumed only through their exact owner rows; an exact expired read or consume fails closed. A member-bound device OAuth consumer reads only an owner hint before its transaction, then locks the member before the exact state row and revalidates the owner; credential replacement and account deletion use the same member-before-state order. An unowned device state and a Clinical Records OAuth consumer lock only their exact state row before classification. If retention removes an expired unconsumed device state before the callback obtains its row lock, the locked reread fails missing rather than fabricating replay or provider authority. Public expiry is not terminal ownership: consumed device OAuth claims remain with exact callback finalization and recovery, while consumed Clinical OAuth claims remain until no incomplete linked connect intent exists. Started connected-app, device-connect, and Clinical Records intents retain their exact completion row for one bounded 30-minute continuation grace. The ordinary control-plane retention route serially claims only owner-dead expired rows from each expiry-indexed table in expiry-and-primary-key order, under a smaller control-artifact batch and max-batch ceiling, with PostgreSQL `FOR UPDATE SKIP LOCKED`. The unbound sensitive-action lane uses a partial expiry-and-token index so durable approval history cannot enlarge its transient claim scan. Overlapping retention runs skip already-claimed mailbox, Linq diagnostic, session, and transient-control rows instead of waiting or repeating work. Approval-backed sensitive-action rows stay outside this transient cleanup because their approval lifecycle remains authoritative.
 - Canonical vault storage is file-native under the vault root.
 - Human-facing truth lives in Markdown documents such as `CORE.md`, journal pages, and experiment pages.

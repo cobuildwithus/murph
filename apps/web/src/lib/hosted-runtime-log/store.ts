@@ -129,6 +129,22 @@ export async function recordHostedRuntimeLogs(input: {
       return 0;
     }
 
+    if (entries.some((entry) => entry.eventCode === "device-sync.companion_diagnostic")) {
+      // Native telemetry is untrusted and optional. Serialize its fixed cap
+      // with append using the existing subject lock; no rate-limit table.
+      if (entries.length !== 1) return 0;
+      const recent = await client.query<{ count: number }>(`
+        SELECT count(*)::int AS count FROM (
+          SELECT 1 FROM hosted_runtime_log
+          WHERE subject_key = $1
+            AND at >= statement_timestamp() - interval '1 minute'
+            AND event_code = 'device-sync.companion_diagnostic'
+          LIMIT 12
+        ) recent
+      `, [subjectKey]);
+      if ((recent.rows[0]?.count ?? 0) >= 12) return 0;
+    }
+
     const { text, values } = buildHostedRuntimeLogInsert({ entries, subjectKey });
     const inserted = await client.query<Record<string, never>>(text, values);
     return inserted.rowCount ?? 0;
@@ -137,6 +153,8 @@ export async function recordHostedRuntimeLogs(input: {
 
 export async function listHostedRuntimeLogs(input: {
   database?: HostedRuntimeLogSqlDatabase;
+  eventCode?: HostedRuntimeLogEventCode;
+  from?: Date;
   limit?: number;
   userId: string;
 }): Promise<HostedRuntimeLogRecord[]> {
@@ -144,6 +162,17 @@ export async function listHostedRuntimeLogs(input: {
   const limit = normalizeHostedRuntimeLogLimit(input.limit ?? 20);
   const userId = requireHostedRuntimeLogUserId(input.userId);
   const subjectKey = hostedRuntimeLogSubjectKey(userId);
+  const filters: string[] = [];
+  const values: unknown[] = [subjectKey, limit];
+  if (input.eventCode) {
+    values.push(input.eventCode);
+    filters.push(`AND event_code = $${values.length}`);
+  }
+  if (input.from) {
+    if (!Number.isFinite(input.from.getTime())) throw new TypeError("Invalid runtime log window.");
+    values.push(input.from);
+    filters.push(`AND at >= $${values.length}`);
+  }
   const result = await database.query<HostedRuntimeLogRow>(`
     SELECT
       id,
@@ -165,9 +194,10 @@ export async function listHostedRuntimeLogs(input: {
       created_at AS "createdAt"
     FROM ${HOSTED_RUNTIME_LOG_TABLE}
     WHERE subject_key = $1
+    ${filters.join("\n")}
     ORDER BY at DESC, id DESC
     LIMIT $2
-  `, [subjectKey, limit]);
+  `, values);
 
   return result.rows.map((row) => projectHostedRuntimeLogRow(row, userId));
 }

@@ -3665,6 +3665,7 @@ describe("hosted system mailbox notification execution context", () => {
         state: await readHostedSystemMailboxState(workspace.vaultRoot),
       })).toEqual({
         deviceSyncContinuationSeqs: ["1"],
+        firstPendingClassifierFailures: ["continuation_owner_missing"],
         firstPendingSeq: "9",
         handledThroughSeq: "8",
       });
@@ -3688,6 +3689,7 @@ describe("hosted system mailbox notification execution context", () => {
         state: await readHostedSystemMailboxState(workspace.vaultRoot),
       })).toEqual({
         deviceSyncContinuationSeqs: ["1"],
+        firstPendingClassifierFailures: ["continuation_owner_missing"],
         firstPendingSeq: "9",
         handledThroughSeq: "8",
       });
@@ -3712,6 +3714,7 @@ describe("hosted system mailbox notification execution context", () => {
         state: completedState,
       })).toEqual({
         deviceSyncContinuationSeqs: [],
+        firstPendingClassifierFailures: ["continuation_owner_missing"],
         firstPendingSeq: "9",
         handledThroughSeq: "8",
       });
@@ -4365,7 +4368,7 @@ describe("hosted system mailbox notification execution context", () => {
         nextAttemptAt: expectedRetryAt, wake: retainedWake,
       })]);
       expect(resolveHostedSystemMailboxProgress({ importedSeq: "4", now: admittedAt, state: restored }))
-        .toEqual({ deviceSyncContinuationSeqs: ["1"], firstPendingSeq: null, handledThroughSeq: "4" });
+        .toEqual({ deviceSyncContinuationSeqs: ["1"], firstPendingClassifierFailures: null, firstPendingSeq: null, handledThroughSeq: "4" });
       expect(await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["run-device-sync-wake"], executionContext: null,
         now: () => admittedAt, retainProcessedItemUntilRecorded: true,

@@ -2273,7 +2273,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
       ? JUNCTION_COMPANION_HRV_SOURCE_PROVIDER
       : input.resource.sourceProviderSlug,
   );
-  const result = await runWithHostedDeviceSyncPreparedWriteReplan(async () => {
+  const result = await runWithHostedDeviceSyncPreparedWriteReplan("companion", async () => {
     const authority = await input.store.withHealthDataAdmissionLock(
       input.userId,
       input.connectionId,
@@ -2355,7 +2355,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
             return { wakeMailboxItemId: null };
           }
           if (!preparedMailbox) {
-            throw createHostedDeviceSyncDirtyPreparationMismatchError();
+            throw createHostedDeviceSyncDirtyPreparationMismatchError("wake_preparation_missing");
           }
 
           const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
@@ -2819,7 +2819,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
       || input.eventType === "provider.connection.updated"
     );
   try {
-    result = await runWithHostedDeviceSyncPreparedWriteReplan(async (attempt) => {
+    result = await runWithHostedDeviceSyncPreparedWriteReplan("webhook", async (attempt) => {
       const hasPayloadResources = input.dirtyResources.some(
         hasHostedDeviceSyncDirtyResourcePayload,
       );
@@ -2983,7 +2983,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
                   !== initialAdmission.status.hasNonTerminalLegacyFitbitSource
               )
             ) {
-              throw createHostedDeviceSyncDirtyPreparationMismatchError();
+              throw createHostedDeviceSyncDirtyPreparationMismatchError("admission_classification_changed");
             }
 
             const wakeMailboxItemIds: string[] = [];
@@ -2996,7 +2996,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
                 || !finalAdmission.currentConnectionRecord
                 || !finalAdmission.currentSource
               ) {
-                throw createHostedDeviceSyncDirtyPreparationMismatchError();
+                throw createHostedDeviceSyncDirtyPreparationMismatchError("source_preparation_missing");
               }
               const sourceMailboxAppend = await commitHostedDeviceSyncConnectionEstablishedTx({
                 account: sourceConnectionAccount,
@@ -3118,7 +3118,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
               && !sourceEstablishmentOwnsWebhookHandoff
             ) {
               if (!preparedMailbox) {
-                throw createHostedDeviceSyncDirtyPreparationMismatchError();
+                throw createHostedDeviceSyncDirtyPreparationMismatchError("wake_preparation_missing");
               }
               const wake = buildHostedDeviceSyncWake({
                 connectionId: input.connectionId,
@@ -3739,12 +3739,16 @@ const HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH_CODE =
 const HOSTED_DEVICE_SYNC_PREPARATION_STALE_CODE =
   "HOSTED_DEVICE_SYNC_PREPARATION_STALE";
 
-function createHostedDeviceSyncDirtyPreparationMismatchError(): Error & {
+function createHostedDeviceSyncDirtyPreparationMismatchError(
+  reason: "admission_authority_changed" | "admission_classification_changed"
+    | "source_preparation_missing" | "wake_preparation_missing" = "admission_authority_changed",
+): Error & {
   code: typeof HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH_CODE;
+  reason: string;
 } {
   return Object.assign(
     new Error("Hosted device-sync dirty preparation is stale."),
-    { code: HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH_CODE } as const,
+    { code: HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH_CODE, reason } as const,
   );
 }
 
@@ -3759,6 +3763,7 @@ function isHostedWebhookAdmissionAuthorityDriftError(error: unknown): boolean {
 }
 
 async function runWithHostedDeviceSyncPreparedWriteReplan<T>(
+  operationKind: "webhook" | "companion",
   operation: (attempt: number) => Promise<T>,
 ): Promise<T> {
   for (
@@ -3768,13 +3773,29 @@ async function runWithHostedDeviceSyncPreparedWriteReplan<T>(
   ) {
     try {
       const attemptOperation = () => operation(attempt);
-      return await (attempt === 0
+      const result = await (attempt === 0
         ? runWithHostedDomainRootUnwrapCache(attemptOperation)
         : runWithFreshHostedDomainRootUnwrapCache(attemptOperation));
+      if (attempt > 0) {
+        console.info("Hosted device-sync prepared write recovered.", {
+          eventCode: "device_sync.prepared_write_recovered",
+          operation: operationKind,
+          attempts: attempt + 1,
+        });
+      }
+      return result;
     } catch (error) {
       if (!isHostedDeviceSyncPreparedWriteReplanError(error)) {
         throw error;
       }
+      console.warn("Hosted device-sync prepared write changed before commit.", {
+        eventCode: "device_sync.prepared_write_drift",
+        operation: operationKind,
+        attempt: attempt + 1,
+        maxAttempts: HOSTED_DEVICE_SYNC_PREPARED_WRITE_ATTEMPTS,
+        exhausted: attempt === HOSTED_DEVICE_SYNC_PREPARED_WRITE_ATTEMPTS - 1,
+        reason: readHostedDeviceSyncPreparedWriteDriftReason(error),
+      });
       if (attempt === HOSTED_DEVICE_SYNC_PREPARED_WRITE_ATTEMPTS - 1) {
         if (isDeviceSyncError(error)) {
           throw error;
@@ -3790,6 +3811,24 @@ async function runWithHostedDeviceSyncPreparedWriteReplan<T>(
   }
 
   throw new Error("Hosted device-sync prepared-write replan loop exhausted unexpectedly.");
+}
+
+function readHostedDeviceSyncPreparedWriteDriftReason(error: unknown): string {
+  if (error instanceof HostedDomainRootPreparationMismatchError) {
+    return "domain_root_changed";
+  }
+  if (error && typeof error === "object") {
+    if ("code" in error && error.code === HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE) {
+      return "dirty_state_contention";
+    }
+    if ("reason" in error && typeof error.reason === "string"
+      && ["dirty_marker_missing", "dirty_marker_changed", "dirty_acknowledgement_changed",
+        "dirty_owner_changed", "admission_authority_changed", "admission_classification_changed",
+        "source_preparation_missing", "wake_preparation_missing"].includes(error.reason)) {
+      return error.reason;
+    }
+  }
+  return "admission_or_wake_changed";
 }
 
 function isHostedDeviceSyncPreparedWriteReplanError(error: unknown): boolean {

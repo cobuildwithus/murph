@@ -1119,7 +1119,7 @@ export interface HostedRuntimeGroupDisclosureGrantListEntry
   groupLabel: string | null;
 }
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
-  "Sounds good. Like or heart this message to share {{share_scope}} with the group, or use {{join_url}} to customize what you share.";
+  "Like or heart this message to share {{share_scope}} with this group.\nYour other sharing stays the same. Manage sharing at {{join_url}} anytime.";
 
 export interface HostedRuntimeGroupMemberSummary {
   disclosureGrants?: HostedRuntimeGroupDisclosureGrantSummary[];
@@ -3698,7 +3698,9 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "assistant.computer_tool_failed",
   "assistant.onboarding_followup_reconciled",
   "assistant.pass_finished",
+  "device-sync.callback_rejected",
   "device-sync.dense_raw_retention",
+  "device-sync.companion_diagnostic",
   "device-sync.dirty_ack_persistence_failed",
   "device-sync.fitbit_migration_cutover_failed",
   "device-sync.import_completed",

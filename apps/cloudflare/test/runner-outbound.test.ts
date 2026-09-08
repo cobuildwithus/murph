@@ -4,6 +4,8 @@ import { gzipSync } from "node:zlib";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER } from "@murphai/device-syncd/hosted-runtime";
+
 const hostedExecutionMocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
 }));
@@ -1838,6 +1840,7 @@ describe("handleRunnerOutboundRequest", () => {
       new Response(JSON.stringify({ ok: true }), {
         headers: {
           "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER]: "11",
         },
         status: 200,
       })
@@ -1872,6 +1875,9 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER)).toBe("11");
+    expect(response.bodyUsed).toBe(false);
+    await expect(response.text()).resolves.toBe('{"ok":true}');
     expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",

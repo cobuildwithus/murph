@@ -1509,7 +1509,7 @@ test("Junction yieldable reconcile times out provider inventory once before the 
     );
 
     await vi.advanceTimersByTimeAsync(8_000);
-    await assert.rejects(execution, { code: "JUNCTION_API_REQUEST_FAILED" });
+    await assert.rejects(execution, { code: "JUNCTION_API_REQUEST_TIMEOUT", retryable: true });
     assert.equal(inventoryAttempts, 1);
     assert.equal(summaryAttempts, 0);
   } finally {

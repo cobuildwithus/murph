@@ -6155,7 +6155,20 @@ test("ConnectPage keeps unverified callback query text out of the support draft"
   assert.match(body, /Reference: unknown$/);
 });
 
-test("ConnectPage explains a callback that lost its initiating browser", async () => {
+test.each([false, true])("ConnectPage shows neutral review guidance without changing connected=%s", async (connected) => {
+  vi.stubEnv("OURA_CLIENT_ID", "oura-client-id");
+  vi.stubEnv("OURA_CLIENT_SECRET", "oura-client-secret");
+  if (connected) {
+    mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+      generatedAt: "2026-05-01T00:00:00.000Z",
+      ok: true,
+      sources: [{
+        connectionId: "dsc_junction_oura", provider: "junction", state: "active",
+        upstreamSources: [{ providerLabel: "Oura", resourceCount: 1,
+          sourceProviderSlug: "oura", status: "connected" }],
+      }],
+    });
+  }
   const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -6172,10 +6185,18 @@ test("ConnectPage explains a callback that lost its initiating browser", async (
 
   assert.match(
     markup,
-    /That return link did not match the browser you started in/,
+    /Check your connections/,
   );
-  assert.match(markup, /nothing was connected/);
-  assert.match(markup, /Email support/);
+  assert.match(markup, /Your current connections are shown below/);
+  assert.match(markup, /If a device still needs connecting, start from its card/);
+  assert.match(markup, /role="status"/);
+  if (connected) {
+    assert.match(markup, /data-connection-state="connected"/);
+    assert.doesNotMatch(markup, /aria-label="Connect Oura"/);
+  } else {
+    assert.match(markup, /aria-label="Connect Oura"/);
+  }
+  assert.doesNotMatch(markup, /Unable to finish connection|nothing was connected|Email support|Go to home/);
 });
 
 test("ConnectPage offers sign-in recovery when the callback arrived signed out", async () => {
@@ -6224,7 +6245,7 @@ test("ConnectPage omits sign-in recovery when the member is already signed in", 
   );
 
   assert.doesNotMatch(markup, />Log in</u);
-  assert.match(markup, /Email support/);
+  assert.doesNotMatch(markup, /Email support/);
 });
 
 test("ConnectPage keeps successful callbacks free of failure recovery actions", async () => {

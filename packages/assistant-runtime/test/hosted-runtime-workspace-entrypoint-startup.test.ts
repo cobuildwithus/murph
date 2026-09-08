@@ -170,6 +170,10 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
+          runtimeIssueProvenance: {
+            releaseSha: "0123456789abcdef0123456789abcdef01234567",
+            runtimeName: "synthetic-runtime",
+          },
           async runAssistantPhase() {
             throw new Error("An empty system-mailbox invocation must not run the assistant.");
           },
@@ -193,7 +197,17 @@ describe("hosted workspace runtime entrypoint", () => {
           entry.attemptId === attemptId
           && entry.eventCode === "runtime.invocation_finished"
         ).map((entry) => entry.redactedJson),
-        [{ processingMode: "system_mailbox" }],
+        [{
+          hostedMailboxSystemFirstPendingClassifierFailures: null,
+          hostedMailboxSystemFirstPendingSeq: null,
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemImportedSeq: "0",
+          invocationStatus: "idle",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          processingMode: "system_mailbox",
+          runtimeReleaseSha: "0123456789abcdef0123456789abcdef01234567",
+        }],
       );
     } finally {
       await drainHostedRuntimeLogWritesBestEffort();
@@ -2871,13 +2885,15 @@ describe("hosted workspace runtime entrypoint", () => {
       await drainHostedRuntimeLogWritesBestEffort();
 
       assert.equal(result.status, "idle");
-      assert.deepEqual(
-        logRequests.flatMap((request) => request.entries).filter((entry) =>
+      const terminalEntries = logRequests.flatMap((request) => request.entries)
+        .filter((entry) =>
           entry.attemptId === attemptId
           && entry.eventCode === "runtime.invocation_finished"
-        ).map((entry) => entry.redactedJson),
-        [{ processingMode: "default" }],
-      );
+        );
+      assert.equal(terminalEntries.length, 1);
+      assert.equal(terminalEntries[0]?.redactedJson?.invocationStatus, "idle");
+      assert.equal(terminalEntries[0]?.redactedJson?.processingMode, "default");
+      assert.equal(terminalEntries[0]?.redactedJson?.runtimeReleaseSha, null);
     } finally {
       await drainHostedRuntimeLogWritesBestEffort();
       await removeTempRoot(vaultRoot);
