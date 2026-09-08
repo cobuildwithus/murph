@@ -1,6 +1,6 @@
 # Recover device sync behind stale delivery wakes
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -67,3 +67,13 @@ are separate investigations; this task does not claim their recovery.
   runs; assistant-runtime typecheck passes. Changelog rendering: 9 tests pass.
 - PR #3048 opened as draft. Parent candidate review complete; final ReviewGPT
   and exact-head CI remain pending before completion.
+- Final ReviewGPT round 1 passed at `3f2da00c8f36`; response identity and
+  actual `gpt-6-pro` model were verified against capture metadata. No accepted
+  findings or implementation changes remain. Parent final review agrees.
+- Exact-base docs drift passes after indexing the updated runtime contract.
+  Merge-tree comparison with current main is clean. Required final-head CI
+  and any production rollout verification remain tracked by PR #3048.
+- Product replay disposition: Ready. The observed scheduling failure is
+  reproduced and corrected; the initial event leaving an obsolete projection
+  and live backlog drainage are not established by these local tests.
+Completed: 2026-09-08
