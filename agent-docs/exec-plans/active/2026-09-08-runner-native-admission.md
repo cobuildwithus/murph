@@ -42,3 +42,9 @@ The diagnostic correction merged in PR #3041 with 56 tests, typecheck, all requi
 The smallest correction applies the existing legacy-provenance guard to the selected candidate-or-active release. It must build normally for legacy retained releases in either bank, preserve the serving image and namespace, and retain exact immutable reuse for admitted releases. The original native POST rejection still requires a subsequent protected attempt after this earlier failure is resolved.
 
 The retained-primary regression reproduced the exact production stack before correction. Both bank-direction scenarios pass after correction, including fresh publication, candidate staging, unchanged serving image and serving exclusion. All 65 focused image/provider/staging/CLI tests, Cloudflare typecheck, whitespace and complexity checks pass. Parent review confirms the correction reuses the existing provenance guard and adds no state or capacity change.
+
+## Native rejection evidence
+
+PR #3043 merged with 65 focused tests, green CI and validated ReviewGPT PASS. The next protected attempt passed legacy preparation and reached native application creation, which rejected with HTTP 400 and numeric code 1607. The numeric code has no verified published Containers meaning. The codes-only diagnostic formatter still suppresses the actual explanation, so extend it to bounded messages through the existing public runtime redactor, remove known request credentials/identifiers, and exclude raw response details. No quota or capacity diagnosis is claimed without that evidence.
+
+The bounded-message correction passes all 66 focused provider/image/staging/CLI tests, Cloudflare typecheck, whitespace and complexity checks. Parent review confirms the existing public redactor is reused, successful provider acceptance and request counts are unchanged, and only projected code/message fields are emitted.
