@@ -55,10 +55,11 @@ assistant behavior change is intended.
   interrupted native PATCH/rollout reconciliation, stable execution identity,
   candidate resumption, and Worker-only promotion. Final verification remains open.
 - Read-only native quota diagnostics merged after review, exact-head CI, and
-  local acceptance. Protected production preflight confirmed that account CPU
-  and memory limits cannot admit the declared full release overlap. Native
-  creation has independently failed admission. No serving ceiling was reduced;
-  an external quota increase remains required before production activation.
+  local acceptance. The declared full overlap exceeds the reported account CPU
+  and memory ceilings, and native creation independently failed admission.
+  These observations do not establish the provider's quota accounting formula
+  or prove that safe releases require more quota. No serving ceiling was reduced;
+  the fixed-capacity follow-up below supersedes quota escalation.
 - Final ReviewGPT identified a rebuilt-image retry dead end. Accepted and corrected
   in the existing artifact-preparation owner: verify requested public commit,
   fingerprints, execution configuration, and native namespace before reusing the
@@ -96,3 +97,31 @@ assistant behavior change is intended.
 - Obtain the requested architecture consultation under this constraint before
   choosing implementation changes. Distinguish fixing image-mismatch backoff
   from an unsupported guarantee of zero latency under every capacity condition.
+
+## Release preparation
+
+- The single-application architecture consultation completed against the merged
+  correction. It identified an unresolved native contract for retiring old
+  prefetched images without restarting live work. A PATCH-only implementation
+  with two approved artifacts could block later releases indefinitely; do not
+  ship that incomplete lifecycle or add a new capacity allocator to this fix.
+- The reviewed runtime correction is already merged in PR 3037. PR 3036 also
+  merged a separate bounded warm-handoff improvement. Both are included in the
+  current integration base; no new runtime behavior is authored in this follow-up.
+- Existing PR 3039 and private PR 119 own explicit Worker-only deployment. They
+  preserve serving image identities and capacity and update only the Worker and
+  existing smoke target. Keep their completion ownership separate. This mode
+  can deliver compatible coordination fixes; it does not deliver new member
+  runner images or resolve the capacity limit for later image replacement.
+- Extend the actual container-readiness regression with a Worker-only case:
+  the Worker advertises newly built fingerprints, the selected release retains
+  the previous image, and the existing warm process passes one health check
+  without a native start or destroy. Keep the original mismatch reproduction
+  and staged/promoted image cases intact.
+- Verification: 404 focused container, fleet-lifecycle, identity and standby
+  tests passed after integrating the current main changes. Cloudflare typecheck
+  passed. The new proof adds no production code, dependency or persisted state.
+- Release readiness remains Hold until the owned release path has merged,
+  protected deployment succeeds, and live Worker/image receipts are verified.
+  Worker-only mode must not change quotas, roll back production, or replace
+  member runner images.

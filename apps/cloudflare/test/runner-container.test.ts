@@ -2008,17 +2008,21 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalled();
   });
 
-  it.each(["preparing", "promoted"])("keeps both exact images usable without replacement while %s", async (phase) => {
+  it.each(["preparing", "promoted", "worker-only"])("keeps exact retained images usable without replacement during %s", async (phase) => {
     const previous = { bank: "primary", id: "primary-previous", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
     const candidate = { bank: "next", id: "next-candidate", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
     const deployment = phase === "preparing"
       ? { active: previous, candidate, previous: null }
-      : { active: candidate, candidate: null, previous };
+      : phase === "worker-only"
+        ? { active: previous, candidate: null, previous: null }
+        : { active: candidate, candidate: null, previous };
     for (const [containerClass, release] of [[RunnerContainer, previous], [NextRunnerContainer, candidate]] as const) {
+      if (phase === "worker-only" && release === candidate) continue;
+      const retainedWarmProcess = phase !== "preparing" && release === previous;
       const { container, destroy, startAndWaitForPorts, containerFetch } = createContainerDouble({
         containerClass,
-        initialStatus: phase === "promoted" && release === previous ? "running" : "stopped",
-        platformRunning: phase === "promoted" && release === previous ? true : undefined,
+        initialStatus: retainedWarmProcess ? "running" : "stopped",
+        platformRunning: retainedWarmProcess ? true : undefined,
         env: {
           CF_VERSION_METADATA: { id: "worker-new" },
           HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment),
@@ -2032,7 +2036,7 @@ describe("RunnerContainer", () => {
       });
       await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" }))
         .resolves.toMatchObject({ kind: "ready" });
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(phase === "promoted" && release === previous ? 0 : 1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(retainedWarmProcess ? 0 : 1);
       expect(containerFetch).toHaveBeenCalledOnce();
       expect(destroy).not.toHaveBeenCalled();
     }
