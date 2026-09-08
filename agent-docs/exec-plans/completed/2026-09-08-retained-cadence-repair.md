@@ -1,6 +1,6 @@
 # Repair scheduled cadence behind retained device history
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -77,8 +77,28 @@ review found no lost-job, duplicate-owner, epoch or foreground regression.
 Product UX replay: Ready for implementation; live rollout remains unverified.
 
 Changelog rendering: 10 focused tests passed.
-Pending: exact-head CI and ReviewGPT. The full runner rollout and live attribution remain separate from
-this PR and remain subject to the capacity blocker above.
+The initial exact-head CI caught two existing full-workspace assertions that
+expected a retained wake to skip provider scheduling. Updated that test to
+verify early reconciliation, cold-restore compaction, unchanged history retry,
+completion publication after history drains, and no provider calls on the next
+idle admission. All three scenarios and assistant-runtime typecheck passed.
+Every other initial CI check passed. Final exact-head CI remains a merge gate.
+
+ReviewGPT Round 1 passed on `9e25a2e6d200de54c047e795e068685fb111c657`.
+The full-snapshot audit covered all changed files and the scheduler, job,
+mailbox, checkpoint, source epoch and foreground owners. Exact-turn capture
+matched the committed prompt; tool evidence verified requested and actual
+`gpt-6-pro`, with response hash
+`0ebaa203072c9b071516044285600901a0ab91e0c01d3ee4f6431421547f4ec2`.
+The response completed after more than 15 minutes, exceeding the 270-second
+minimum. The parent accepts the substantive source audit: no qualifying
+findings. The final change is isolated regression proof and explanatory plan
+closure, exempt from another substantive model round. The exact owned review
+target was cleaned up. PR: https://github.com/cobuildwithus/murph/pull/3074.
+
+The code implementation and review are complete. The full runner rollout and
+live attribution remain separate from this PR and remain subject to the
+capacity blocker above; this plan does not declare the live incident resolved.
 
 ## Deployment
 
@@ -90,3 +110,4 @@ but reverting behavior would restore scheduler starvation until upgraded again.
 No backward migration or data rewrite is required. Post-deploy proof must check
 runner image convergence, scheduled frontier advancement, preserved retained
 history, and absence of immediate zero-progress cycling.
+Completed: 2026-09-08
