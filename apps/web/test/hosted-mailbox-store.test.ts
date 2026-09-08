@@ -29,7 +29,7 @@ import {
   fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedRuntimeMailboxProjection,
   hasPendingHostedEnvironmentVoiceMailboxItemTx,
-  hasHostedMailboxMealPhotoCaptureSince,
+  hasHostedMailboxAutomationEngagementSince,
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -138,12 +138,12 @@ describe("readHostedMailboxLiveItemById", () => {
   });
 });
 
-describe("hasHostedMailboxMealPhotoCaptureSince", () => {
-  it("derives recent capture engagement from the accepted mailbox row", async () => {
+describe("hasHostedMailboxAutomationEngagementSince", () => {
+  it("derives engagement from bounded accepted capture or Telegram metadata", async () => {
     const findFirst = vi.fn().mockResolvedValue({ id: "mailbox-meal-photo" });
     const since = new Date("2026-03-29T00:00:00.000Z");
 
-    await expect(hasHostedMailboxMealPhotoCaptureSince({
+    await expect(hasHostedMailboxAutomationEngagementSince({
       prisma: {
         hostedMailboxItem: { findFirst },
       } as never,
@@ -159,8 +159,14 @@ describe("hasHostedMailboxMealPhotoCaptureSince", () => {
         createdAt: {
           gte: since,
         },
-        kind: "meal-photo.captured",
-        lane: "system",
+        OR: [
+          { kind: "meal-photo.captured", lane: "system" },
+          {
+            dedupeKey: { startsWith: "telegram:update:" },
+            kind: "conversation.message",
+            lane: "conversation",
+          },
+        ],
         userId: "member-meal-photo",
       },
     });

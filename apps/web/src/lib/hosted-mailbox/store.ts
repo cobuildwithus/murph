@@ -1960,13 +1960,15 @@ export async function readHostedMailboxLatestPendingConversationItem(input: {
   return row ? projectHostedMailboxItem(row) : null;
 }
 
-export async function hasHostedMailboxMealPhotoCaptureSince(input: {
+export async function hasHostedMailboxAutomationEngagementSince(input: {
   prisma?: HostedMailboxStoreClient;
   since: Date;
   userId: string;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  // Accepted ingress metadata outlives message content: structural retention
+  // covers the engagement window even after a conversation is consumed.
   const row = await prisma.hostedMailboxItem.findFirst({
     select: {
       id: true,
@@ -1975,8 +1977,14 @@ export async function hasHostedMailboxMealPhotoCaptureSince(input: {
       createdAt: {
         gte: input.since,
       },
-      kind: "meal-photo.captured",
-      lane: "system",
+      OR: [
+        { kind: "meal-photo.captured", lane: "system" },
+        {
+          dedupeKey: { startsWith: "telegram:update:" },
+          kind: "conversation.message",
+          lane: "conversation",
+        },
+      ],
       userId,
     },
   });
