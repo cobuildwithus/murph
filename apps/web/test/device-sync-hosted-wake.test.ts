@@ -8184,6 +8184,8 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("performs one full fresh-cache replan after the real mailbox root preparation drifts", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const preparationCaches: unknown[] = [];
     mocks.prepareDirtyConnectionUpsert.mockImplementation(async (input) => {
       preparationCaches.push(getHostedDomainRootUnwrapCache());
@@ -8217,9 +8219,17 @@ describe("hosted device-sync wakes", () => {
     expect(preparationCaches[1]).not.toBe(preparationCaches[0]);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("Hosted device-sync prepared write changed before commit.", {
+      eventCode: "device_sync.prepared_write_drift", operation: "webhook",
+      attempt: 1, maxAttempts: 2, exhausted: false, reason: "domain_root_changed",
+    });
+    expect(info).toHaveBeenCalledWith("Hosted device-sync prepared write recovered.", {
+      eventCode: "device_sync.prepared_write_recovered", operation: "webhook", attempts: 2,
+    });
   });
 
   it("returns a retryable error when the real mailbox root preparation drifts twice", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.appendHostedMailboxEnvelopeTx
       .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError())
       .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError());
@@ -8243,6 +8253,39 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("Hosted device-sync prepared write changed before commit.", {
+      eventCode: "device_sync.prepared_write_drift", operation: "webhook",
+      attempt: 2, maxAttempts: 2, exhausted: true, reason: "domain_root_changed",
+    });
+  });
+
+  it.each([
+    ["dirty_marker_missing", "dirty_marker_missing"],
+    ["dirty_marker_changed", "dirty_marker_changed"],
+    ["dirty_acknowledgement_changed", "dirty_acknowledgement_changed"],
+    ["dirty_owner_changed", "dirty_owner_changed"],
+    ["synthetic-private-reason", "admission_or_wake_changed"],
+  ])("logs bounded preparation reason %s without private exception details", async (reason, expectedReason) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failure = Object.assign(new Error("synthetic-private-exception"), {
+      code: "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH", reason,
+    });
+    mocks.upsertDirtyConnectionWithPreparedPlanTx
+      .mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(new Request(
+      "https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({ event: "sleep.updated" }),
+        headers: { "content-type": "application/json" }, method: "POST",
+      },
+    ));
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "HOSTED_DEVICE_SYNC_PREPARATION_STALE", httpStatus: 503,
+    });
+    expect(warn).toHaveBeenCalledWith("Hosted device-sync prepared write changed before commit.", {
+      eventCode: "device_sync.prepared_write_drift", operation: "webhook",
+      attempt: 2, maxAttempts: 2, exhausted: true, reason: expectedReason,
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("synthetic-private");
   });
 
   it("keeps webhook acceptance retryable when dirty wake mailbox dedupe conflicts", async () => {

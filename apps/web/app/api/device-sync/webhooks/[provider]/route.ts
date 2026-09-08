@@ -42,6 +42,15 @@ export const POST = withJsonError(async (
     provider,
     rawBody,
   });
+  // Vercel groups this content-free decision with the same invocation's
+  // completion/error and prepared-write diagnostics. Never log the raw provider
+  // path, request headers, provider/account/trace identity, or body contents.
+  console.info("Hosted device webhook transport selected.", {
+    eventCode: "device_webhook.transport_selected",
+    transport: queueTransport.enabled ? "queue" : "synchronous",
+    reason: queueTransport.reason,
+    rawBodyBytes: rawBody.byteLength,
+  });
   if (queueTransport.enabled) {
     const preparedWebhook = await publicIngress.prepareWebhookForDurableEnqueue(
       provider,

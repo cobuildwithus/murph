@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "connected-device-burst-sync",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable device updates during busy syncs",
+    "summary": "Connected-device updates that arrive together are less likely to need another delivery attempt.",
+    "details": "Updates remain protected by the same connection and health-data permission checks.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": []
+  }
+}
