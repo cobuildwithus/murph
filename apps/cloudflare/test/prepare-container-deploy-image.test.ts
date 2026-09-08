@@ -223,7 +223,7 @@ describe("container image publication before Worker activation", () => {
       }
       const id = pathname.split("/").at(-1)!;
       if (method === "PATCH") native.set(id, { ...native.get(id), ...body });
-      const result = pathname.endsWith("/deployments") ? [] : native.get(id) ?? { id: "synthetic-rollout" };
+      const result = pathname.endsWith("/instances") ? { instances: [] } : native.get(id) ?? { id: "synthetic-rollout" };
       return Response.json({ success: true, result });
     } });
     const prepare = async () => stageHostedRunnerRelease({
@@ -246,7 +246,7 @@ describe("container image publication before Worker activation", () => {
     await provider.admitApplication(retryApplication);
     await provider.assertApplicationReady({ ...retryApplication, listApplications });
     expect(calls.filter((entry) => entry === "POST applications")).toHaveLength(1);
-    expect(calls.slice(-4)).toEqual([`GET deployments`, `GET ${application.name}`, `PATCH ${application.name}`, "POST rollouts"]);
+    expect(calls.slice(-4)).toEqual([`GET instances`, `GET ${application.name}`, `PATCH ${application.name}`, "POST rollouts"]);
     expect(JSON.stringify(native.get(`${config.name}-runnercontainer`))).toBe(servingBefore);
     expect(currentVersion.resources.bindings[0]).toMatchObject({ text: JSON.stringify(legacy) });
   });
