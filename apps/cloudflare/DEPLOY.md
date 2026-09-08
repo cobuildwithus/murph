@@ -27,6 +27,10 @@ its inactive native application and dedicated smoke application through the
 Cloudflare Containers API. Quota admission and native rollout convergence must
 complete before uploading or activating any Worker version. The serving and
 retained legacy applications are excluded from native mutations.
+Native provider failures report the operation, HTTP status, numeric API codes,
+and bounded symbolic native codes. Raw provider prose, response details and
+request identifiers remain private. Inspect this evidence before retrying or
+changing capacity; transport and malformed-response failures stay distinct.
 Member applications require drain evidence before namespace reuse. The dedicated
 smoke application carries no member invocation, so it proceeds directly through
 native rollout and readiness checks without member drain admission.
