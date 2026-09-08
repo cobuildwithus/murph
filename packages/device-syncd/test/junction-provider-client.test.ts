@@ -316,7 +316,7 @@ test("Junction client treats request timeouts as terminal aborts", async () => {
     () => client.listUserProviders("junction-user-1"),
     (error) => {
       assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
       assert.equal(error.cause instanceof DOMException, true);
       assert.equal((error.cause as DOMException).name, "TimeoutError");
       return true;
@@ -350,7 +350,7 @@ test("Junction client wraps generic abort errors caused by request timeouts", as
     () => client.listUserProviders("junction-user-1"),
     (error) => {
       assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
       assert.equal(error.cause instanceof DOMException, true);
       assert.equal((error.cause as DOMException).name, "AbortError");
       return true;
@@ -456,7 +456,7 @@ test("Junction client does not misclassify request timeouts as late caller abort
     }),
     (error) => {
       assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
       assert.notEqual(error.cause, abortError);
       assert.equal(error.cause instanceof DOMException, true);
       assert.equal((error.cause as DOMException).name, "AbortError");
@@ -1522,4 +1522,54 @@ test("Junction createLinkToken honors configured allowed Link hosts", async () =
     () => createClient([]),
     /Junction allowedLinkHosts must include at least one host/u,
   );
+});
+
+
+test("Junction refresh outlives the server wait and reports timeout without replay", async () => {
+  vi.useFakeTimers();
+  let requests = 0;
+  let delayMs = 16_000;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (_input, init) => {
+      requests += 1;
+      const signal = init?.signal;
+      assert.ok(signal);
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(createJsonResponse({
+          success: true,
+          user_id: "synthetic-user",
+          refreshed_sources: ["oura/sleep"],
+          failed_sources: [],
+          in_progress_sources: [],
+        })), delayMs);
+        signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        }, { once: true });
+      });
+    },
+  });
+  try {
+    const success = client.refreshUserData({ userId: "synthetic-user", timeoutSeconds: 30 });
+    await vi.advanceTimersByTimeAsync(16_000);
+    await assert.doesNotReject(success);
+    delayMs = 40_000;
+    const failure = assert.rejects(
+      client.refreshUserData({ userId: "synthetic-user", timeoutSeconds: 30 }),
+      (error) => {
+        assert.ok(error instanceof DeviceSyncError);
+        assert.equal(error.code, "JUNCTION_API_REQUEST_TIMEOUT");
+        assert.equal(error.retryable, false);
+        return true;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(35_000);
+    await failure;
+    assert.equal(requests, 2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

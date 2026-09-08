@@ -1372,6 +1372,26 @@ Last verified: 2026-09-04
   session-start or completion elapsed milliseconds; a phase timeout is recorded
   only for a deadline-bound request/decode phase. These diagnostics do not
   increase the handoff deadline or add another checkpoint retry owner.
+- Successful authorized Web device-sync runtime snapshot responses serialize
+  once and carry the optional `x-murph-device-sync-snapshot-bytes` diagnostic:
+  the UTF-8 byte count of that serialized JSON, before transport encoding. The
+  existing status, JSON MIME type, no-store policy, signed callback admission,
+  body limits and payload are unchanged; errors and unrelated routes omit it.
+  At the runtime control-plane decoder, snapshot invalid-JSON warnings also
+  contain actual streamed body bytes (before text decoding), a finite MIME
+  category (`json`, `html`, `text`, `other`, `missing`), body shape
+  (`invalid_json`, `empty`, `null`, `array`, `scalar`) and byte-count comparison
+  (`match`, `mismatch`, `missing`, `invalid`). Empty/nonobject snapshots emit
+  one bounded shape warning before the unchanged required-object parser
+  rejects them. Only canonical nonnegative safe-integer markers yield a
+  numeric expected count; raw headers, body text, parser messages, content
+  hashes and new identifiers are never logged. Existing log retention and
+  cardinality caps apply. The marker never gates acceptance, auth or retries:
+  old readers ignore it, new readers accept its absence, and either deployment
+  order or rollback is safe. A mismatch establishes a length discrepancy
+  against the claimed producer count, not the corrupting hop. A match does not
+  prove identical content, rule out equal-length corruption or authenticate a
+  spoofed marker. No new retry or successful-body logging is introduced.
 - Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
   failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
   existing device-sync job owner, which requeues with its normal bounded backoff.
@@ -2090,9 +2110,28 @@ Last verified: 2026-09-04
   plus one truncation probe before runtime-access and usage-denial exclusions;
   exclusion-heavy populations therefore set `scanTruncated` instead of causing
   an unbounded scan. Its persisted state and email contain aggregate
-  runtime/lane counts, pending counts, timings, and invalid/truncated evidence
-  only; they never contain member, mailbox, phone, message, trace, or exception
-  identifiers. The progress and latency incidents rearm independently, so one
+  runtime/lane counts, pending counts, timings, invalid/truncated evidence, and
+  system-lane diagnostics only. Those diagnostics classify device-sync heads,
+  full/partial/head-unimported/unknown workspace import coverage,
+  imported-but-unhandled item counts, and assistant/device-sync/other wake
+  ownership. An imported sequence above durable high water is unknown and
+  contributes no imported-but-unhandled count; equality is full coverage.
+  They never contain member, mailbox, phone, message, trace, or exception
+  identifiers. The existing terminal runtime-invocation log records
+  the public runner release SHA, result status, selected wake, and derived
+  system imported/handled/first-pending sequences, including returns that
+  require no checkpoint. That return reuses the current system-mailbox state
+  for wake selection and progress, plus this processing mode's existing import
+  watermarks; it adds no checkpoint or diagnostic I/O. When an item holds the
+  system frontier, classifier evidence is a one-code array: `wake_not_device_sync`
+  for other work, `continuation_projection_invalid` when the authoritative
+  device-continuation projection fails validation, or `continuation_owner_missing`
+  for a device item left outside a valid projection. No pending blocker means
+  null evidence. This diagnostic consumes the existing ownership projection;
+  retry times, job hints, status, and post-checkpoint records are not a second
+  continuation predicate. The projection's binding validation, cardinality,
+  continuation sequences, and handled frontier remain authoritative. The
+  progress and latency incidents rearm independently, so one
   continuous anomaly cannot hide the first alert for the other. A continuing
   progress incident also becomes eligible for one fresh aggregate reminder six
   hours after its prior successful email plus stable bounded jitter. The

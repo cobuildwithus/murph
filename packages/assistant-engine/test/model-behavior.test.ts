@@ -664,7 +664,7 @@ describe('assistant execution prompt contract', () => {
     )
     expect(directPrompt).toContain('exactly once')
     expect(directPrompt).toContain('stop proactive questions when asked')
-    expect(directPrompt).toContain('Explain capture, fixes, and refresh')
+    expect(directPrompt).toContain('read the relevant canonical records with a bounded query')
     expect(directPrompt).toContain(
       'tell users to ask Murph; never claim web controls',
     )
@@ -2216,7 +2216,9 @@ describe('assistant system prompt cache stability', () => {
     // event names in descriptions. Keep the explicit rules within this cap.
     // Automation control-copy authoring adds 227 characters; reviewed Terra and
     // Luna journeys cover clean saved instructions and retained user controls.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(70_738)
+    // Journal recovery adds 1,456 characters for verified saves, honest page
+    // visibility, and workspace-safe launch recovery; focused Terra proof owns it.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(72_194)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

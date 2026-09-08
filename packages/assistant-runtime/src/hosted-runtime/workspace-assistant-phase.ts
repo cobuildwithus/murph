@@ -4951,7 +4951,10 @@ function shouldPreflightHostedDefaultProcessingWake(
     return false;
   }
   const wakeReason = workspace.nextDefaultProcessingWakeReason ?? null;
-  if (wakeReason !== HOSTED_ASSISTANT_WAKE_REASON) {
+  if (
+    wakeReason !== HOSTED_ASSISTANT_WAKE_REASON
+    && wakeReason !== HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+  ) {
     return false;
   }
 
@@ -4965,6 +4968,16 @@ async function resolveHostedDefaultProcessingWakeState(input: {
   readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
 }): Promise<HostedAssistantCronWakeState> {
   const nowMs = resolveHostedAssistantPhaseNowMs(input.phaseInput);
+  const outboxWake = createHostedRuntimeWakeCandidate(
+    await resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date(nowMs),
+      vaultRoot: input.phaseInput.restored.vaultRoot,
+    }),
+    HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  );
+  if (hostedRuntimeWakeCandidateIsDue(outboxWake, nowMs)) {
+    return createUnavailableHostedAssistantCronWakeState();
+  }
   const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
     now: () => new Date(nowMs).toISOString(),
     vaultRoot: input.phaseInput.restored.vaultRoot,

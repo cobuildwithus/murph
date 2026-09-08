@@ -1468,9 +1468,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     }
   });
 
-  it.each([null, "2026-04-28T00:00:00.000Z"])(
-    "checkpoints a disproved default wake with next cron wake %s",
-    async (nextRunAt) => {
+  it.each(["assistant", "assistant_delivery"].flatMap((reason) =>
+    [null, "2026-04-28T00:00:00.000Z"].map((nextRunAt) => ({ reason, nextRunAt })),
+  ))(
+    "checkpoints a disproved $reason wake with next cron wake $nextRunAt",
+    async ({ reason, nextRunAt }) => {
       mocks.getAssistantCronStatus.mockResolvedValue({
         dueJobs: 0, enabledJobs: nextRunAt ? 1 : 0, nextRunAt, runningJobs: 0,
         totalJobs: nextRunAt ? 1 : 0,
@@ -1483,9 +1485,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         now: () => "2026-04-27T00:00:00.000Z",
         workspace: createDueAssistantWorkspace({
           nextDefaultProcessingWakeAt: staleWakeAt,
-          nextDefaultProcessingWakeReason: "assistant",
+          nextDefaultProcessingWakeReason: reason,
           nextWakeAt: staleWakeAt,
-          nextWakeReason: "assistant",
+          nextWakeReason: reason,
           systemMailboxProgressGeneration: "1",
         }),
       }));
@@ -1511,9 +1513,44 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     },
   );
 
-  it(
-    "hands a model-free device frontier off after disproving a stale default projection",
-    async () => {
+  it.each(["2026-04-26T23:59:00.000Z", "2026-04-28T00:00:00.000Z"])(
+    "preserves authoritative outbox work at %s behind an overdue delivery projection",
+    async (outboxWakeAt) => {
+      mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(outboxWakeAt);
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [], conversationImportedCount: 0, importedCount: 0,
+        now: () => "2026-04-27T00:00:00.000Z",
+        workspace: createDueAssistantWorkspace({
+          nextDefaultProcessingWakeAt: "2026-04-26T23:59:00.000Z",
+          nextDefaultProcessingWakeReason: "assistant_delivery",
+          nextWakeAt: "2026-04-26T23:59:00.000Z",
+          nextWakeReason: "assistant_delivery",
+          systemMailboxProgressGeneration: "1",
+        }),
+      }));
+      expect(result.nextWakeAt).toBe(outboxWakeAt);
+      expect(result.nextWakeReason).toBe("assistant_delivery");
+    },
+  );
+
+  it("does not disprove a delivery projection when the outbox cannot be read", async () => {
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockRejectedValue(new Error("Synthetic outbox unavailable"));
+    await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [], conversationImportedCount: 0, importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextDefaultProcessingWakeAt: "2026-04-26T23:59:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant_delivery",
+        nextWakeAt: "2026-04-26T23:59:00.000Z",
+        nextWakeReason: "assistant_delivery",
+        systemMailboxProgressGeneration: "1",
+      }),
+    }))).rejects.toThrow("Synthetic outbox unavailable");
+  });
+
+  it.each(["assistant", "assistant_delivery"])(
+    "hands a model-free device frontier off after disproving a stale %s projection",
+    async (reason) => {
       const now = "2026-04-27T00:00:00.000Z";
       const staleDefaultWakeAt = "2026-04-26T23:59:00.000Z";
       const parentRoot = await mkdtemp(
@@ -1569,7 +1606,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
           vaultRoot,
           workspace: createDueAssistantWorkspace({
             nextDefaultProcessingWakeAt: staleDefaultWakeAt,
-            nextDefaultProcessingWakeReason: "assistant",
+            nextDefaultProcessingWakeReason: reason,
             nextWakeAt: staleDefaultWakeAt,
             nextWakeReason: "device-sync.reconcile",
             systemMailboxProgressGeneration: "1",
