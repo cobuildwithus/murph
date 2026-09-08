@@ -2135,13 +2135,12 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   if (ownedMessageReceipt) {
     return ownedMessageReceipt;
   }
+  const messageLookupKeys = input.event.messageLookupKeyReadCandidates.length > 0
+    ? input.event.messageLookupKeyReadCandidates
+    : [input.event.messageLookupKey];
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
     where: {
-      messageLookupKey: {
-        in: input.event.messageLookupKeyReadCandidates.length > 0
-          ? input.event.messageLookupKeyReadCandidates
-          : [input.event.messageLookupKey],
-      },
+      messageLookupKey: { in: messageLookupKeys },
     },
     select: {
       failureCode: true,
@@ -2191,24 +2190,32 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
 
   // A terminal retry can promote a legacy parent-only delivery to a message
   // owner after our first lookup. Recheck under the same lock as promotion.
-  await lockHostedLinqDeliveryRow(input.prisma, delivery.id);
+  const previousStatus = await lockHostedLinqDeliveryRow(input.prisma, delivery.id);
   const promotedMessageReceipt = await applyHostedLinqDeliveryMessageReceiptTx(input);
   if (promotedMessageReceipt) return promotedMessageReceipt;
 
+  if (input.event.deliveryStatus === "delivered") {
+    const deliveredAt = input.event.providerDeliveredAt ?? input.event.providerCreatedAt;
+    await input.prisma.hostedLinqDelivery.updateMany({
+      where: {
+        id: delivery.id,
+        messageLookupKey: { in: messageLookupKeys },
+        OR: [{ deliveredAt: null }, { deliveredAt: { gt: deliveredAt } }],
+      },
+      data: { deliveredAt },
+    });
+  }
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       id: delivery.id,
-      messageLookupKey: {
-        in: input.event.messageLookupKeyReadCandidates.length > 0
-          ? input.event.messageLookupKeyReadCandidates
-          : [input.event.messageLookupKey],
-      },
+      messageLookupKey: { in: messageLookupKeys },
       OR: buildReceiptOrderingWhere(input.event),
     },
     data: buildReceiptUpdate(input.event),
   });
   const advanced = updated.count === 1;
   const onboardingLink = !advanced
+    || (input.event.deliveryStatus === "delivered" && previousStatus === "delivered")
     ? null
     : input.event.deliveryStatus === "failed"
       ? await resolveHostedLinqFailedDeliveryReopenTx({
@@ -2219,19 +2226,18 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
           sourceRef: delivery.sourceRef,
           template: delivery.template,
         })
-      : resolveHostedLinqReopenOnboardingLink(delivery);
+      : deliveryOnboardingLink;
   return {
     advanced,
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-    reopenOnboardingLink: advanced && input.event.deliveryStatus === "failed"
+    reopenOnboardingLink: input.event.deliveryStatus === "failed"
       ? onboardingLink
       : null,
     // The symmetric signal: a delivered receipt that wins ordering after a
     // reopen re-marks the member/day because that delivery remains live truth.
     restoreOnboardingLink:
-      advanced
-      && input.event.deliveryStatus === "delivered"
+      input.event.deliveryStatus === "delivered"
       && onboardingLink
         ? {
             ...onboardingLink,
@@ -2312,6 +2318,19 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
   }
   await lockHostedLinqDeliveryRow(input.prisma, delivery.id);
   const receipt = buildHostedLinqDeliveryReceiptData(input.event);
+  const deliveredAt = receipt.deliveryStatus === "delivered"
+    ? input.event.providerDeliveredAt ?? receipt.providerCreatedAt
+    : null;
+  const refined = deliveredAt
+    ? await messageClient.updateMany({
+        where: {
+          id: message.id,
+          messageLookupKey: { in: messageLookupKeys },
+          OR: [{ deliveredAt: null }, { deliveredAt: { gt: deliveredAt } }],
+        },
+        data: { deliveredAt },
+      })
+    : { count: 0 };
   const updated = await input.prisma.hostedLinqDeliveryMessage.updateMany({
     where: {
       id: message.id,
@@ -2320,7 +2339,7 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
     },
     data: buildHostedLinqDeliveryMessageReceiptUpdate(receipt),
   });
-  if (updated.count !== 1) {
+  if (updated.count !== 1 && refined.count !== 1) {
     return {
       advanced: false,
       deliveryId: delivery.id,
@@ -2333,7 +2352,7 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
     deliveryId: delivery.id,
     prisma: input.prisma,
   });
-  const terminalOnboardingLink = aggregate.terminalStatusChanged
+  const terminalOnboardingLink = updated.count === 1 && aggregate.terminalStatusChanged
     ? aggregate.status === "failed"
       ? await resolveHostedLinqFailedDeliveryReopenTx({
           groupJoinOutreachId: delivery.groupJoinOutreachId,
@@ -2346,7 +2365,7 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
       : resolveHostedLinqReopenOnboardingLink(delivery)
     : null;
   return {
-    advanced: true,
+    advanced: updated.count === 1,
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
     reopenOnboardingLink:
@@ -2466,7 +2485,6 @@ function buildReceiptUpdateFromData(
   if (receipt.deliveryStatus === "delivered") {
     return {
       ...base,
-      deliveredAt: receipt.providerCreatedAt,
       status: "delivered",
     };
   }
@@ -2478,6 +2496,25 @@ function buildReceiptUpdateFromData(
     failureReason: receipt.failureReason,
     status: "failed",
   };
+}
+
+async function readFirstHostedLinqDeliveryAtTx(input: {
+  messageLookupKeys: readonly string[];
+  prisma: HostedLinqDeliveryClient;
+}): Promise<Date | null> {
+  // The parser writes only normalized ISO timestamps in this metadata leaf.
+  // Legacy receipts lack it. Aggregate exact-message evidence in SQL so the
+  // latest-status window cannot discard the first delivery or load payloads.
+  const [row] = await input.prisma.$queryRaw<Array<{ deliveredAt: Date | null }>>(Prisma.sql`
+    SELECT MIN(COALESCE(
+      (payload_sanitized_json->>'delivered_at')::timestamp,
+      provider_created_at
+    )) AS "deliveredAt"
+    FROM hosted_linq_provider_event
+    WHERE message_lookup_key IN (${Prisma.join([...input.messageLookupKeys])})
+      AND delivery_status = 'delivered'
+  `);
+  return row?.deliveredAt ?? null;
 }
 
 async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
@@ -2545,9 +2582,24 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
     };
   }
 
+  const deliveredAt = await readFirstHostedLinqDeliveryAtTx({
+    messageLookupKeys,
+    prisma: input.prisma,
+  });
+  if (deliveredAt) {
+    await input.prisma.hostedLinqDelivery.updateMany({
+      where: {
+        idempotencyKey: input.idempotencyKey,
+        messageLookupKey: { in: messageLookupKeys },
+        OR: [{ deliveredAt: null }, { deliveredAt: { gt: deliveredAt } }],
+      },
+      data: { deliveredAt },
+    });
+  }
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       idempotencyKey: input.idempotencyKey,
+      messageLookupKey: { in: messageLookupKeys },
       OR: buildReceiptOrderingWhere(receipt),
     },
     data: buildReceiptUpdateFromData(receipt),
@@ -2568,6 +2620,7 @@ async function applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx(input: {
 }> {
   const receipts: HostedLinqDeliveryReceiptData[] = [];
   let advanced = false;
+  let timingRefined = false;
   for (const messageId of input.messageIds) {
     const messageLookupKeys =
       createHostedLinqMessageLookupKeyReadCandidates(messageId);
@@ -2610,9 +2663,25 @@ async function applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx(input: {
     if (!message) {
       continue;
     }
+    const deliveredAt = await readFirstHostedLinqDeliveryAtTx({
+      messageLookupKeys,
+      prisma: input.prisma,
+    });
+    if (deliveredAt) {
+      const refined = await input.prisma.hostedLinqDeliveryMessage.updateMany({
+        where: {
+          id: message.id,
+          messageLookupKey: { in: messageLookupKeys },
+          OR: [{ deliveredAt: null }, { deliveredAt: { gt: deliveredAt } }],
+        },
+        data: { deliveredAt },
+      });
+      timingRefined = refined.count === 1 || timingRefined;
+    }
     const updated = await input.prisma.hostedLinqDeliveryMessage.updateMany({
       where: {
         id: message.id,
+        messageLookupKey: { in: messageLookupKeys },
         OR: buildHostedLinqDeliveryMessageReceiptOrderingWhere(receipt),
       },
       data: buildHostedLinqDeliveryMessageReceiptUpdate(receipt),
@@ -2620,7 +2689,7 @@ async function applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx(input: {
     advanced = updated.count === 1 || advanced;
   }
 
-  if (!advanced) {
+  if (!advanced && !timingRefined) {
     return {
       advanced: false,
       receipt: null,
@@ -2636,8 +2705,8 @@ async function applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx(input: {
       ? receipts.filter((receipt) => receipt.deliveryStatus === "delivered")
       : [];
   return {
-    advanced: true,
-    receipt: aggregate.terminalStatusChanged
+    advanced,
+    receipt: advanced && aggregate.terminalStatusChanged
       ? selectLatestHostedLinqReceiptData(terminalReceipts)
       : null,
   };
@@ -2877,7 +2946,6 @@ function buildHostedLinqDeliveryMessageReceiptUpdate(
   return receipt.deliveryStatus === "delivered"
     ? {
         ...base,
-        deliveredAt: receipt.providerCreatedAt,
         failedAt: null,
         failureCode: null,
         failureReason: null,
@@ -2885,7 +2953,6 @@ function buildHostedLinqDeliveryMessageReceiptUpdate(
       }
     : {
         ...base,
-        deliveredAt: null,
         failedAt: receipt.providerCreatedAt,
         failureCode: receipt.failureCode,
         failureReason: receipt.failureReason,
@@ -3646,13 +3713,14 @@ function requireHostedLinqMessageLookupKey(messageId: string): string {
 async function lockHostedLinqDeliveryRow(
   prisma: HostedLinqDeliveryClient,
   deliveryId: string,
-): Promise<void> {
-  await prisma.$queryRaw`
-    select 1
+): Promise<string | null> {
+  const [row] = await prisma.$queryRaw<Array<{ status: string }>>`
+    select "status"
     from "hosted_linq_delivery"
     where "id" = ${deliveryId}
     for update
   `;
+  return row?.status ?? null;
 }
 
 async function runHostedLinqDeliveryStoreTransaction<T>(
