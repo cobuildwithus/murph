@@ -5,6 +5,7 @@ import type {
   PersonalPatternReport,
 } from "@murphai/query/browser-overview";
 
+import { PatternEvidenceCalendar } from "@/src/components/overview/pattern-evidence-calendar";
 import { PersonalPatternsSection } from "@/src/components/overview/personal-patterns-section";
 
 const POPULATED_REPORT: PersonalPatternReport = {
@@ -430,7 +431,12 @@ export function PersonalPatternsStudy() {
 }
 
 export function PersonalPatternsComponentStudy() {
-  return <PersonalPatternsSection report={POPULATED_REPORT} />;
+  return <>
+    <PersonalPatternsSection report={POPULATED_REPORT} />
+    <div id="pattern-comparison-calendar" className="mt-8 max-w-sm" inert>
+      <PatternEvidenceCalendar defaultOpen report={POPULATED_REPORT} cell={POPULATED_REPORT.cells[0]} factorLabel="Running" />
+    </div>
+  </>;
 }
 
 function cell(
@@ -458,15 +464,15 @@ function cell(
       : { classification: null, grade: null };
   return {
     ...evidence,
-    comparisonBasis: "unobserved_baseline" as const,
-    comparisonDates: ["2026-04-05", "2026-05-03"],
+    comparisonBasis: factorId === "sauna" ? "confirmed_absence" as const : "unobserved_baseline" as const,
+    comparisonDates: factorId === "custom-tag" ? undefined : ["2026-04-09", "2026-05-03", "2026-06-07", "2026-06-28", "2026-07-12", "2026-07-26"],
     comparisonDays: exposedDays,
     comparisonMean,
     delta: exposedMean - comparisonMean,
     deltaPercent,
     direction,
     exposedDays,
-    exposedDates: ["2026-04-12", "2026-08-02"],
+    exposedDates: factorId === "custom-tag" ? undefined : ["2026-04-12", "2026-05-10", "2026-05-24", "2026-06-14", "2026-07-05", "2026-07-19", "2026-08-02"],
     exposedMean,
     factorId,
     firstExposedDate: "2026-04-12",

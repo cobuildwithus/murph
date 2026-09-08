@@ -1,6 +1,6 @@
 # Restore actionable native runner admission failures
 
-Status: active
+Status: active — awaiting external account capacity
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -56,3 +56,15 @@ PR #3050 merged with 66 focused tests, 32 passing checks and validated ReviewGPT
 Reorder the existing version upload before native admission while keeping activation after admission and readiness. Revalidate serving authority after upload. Preserve the existing namespaces, migration history, native application specifications, drain, smoke, promotion and receipt gates. No new bootstrap state, API owner, dependency or capacity change. The bounded ordering fixture reproduces the provider rejection before this change; protected production still owns proof that the namespace accepts admission after metadata publication.
 
 The revised deployment sequence passes all 69 focused provider/image/staging/CLI tests, Cloudflare typecheck, whitespace and complexity checks (maximum 8 to 9; no hotspots). Parent review confirms upload and activation reuse the existing commands, with no extra successful-path uploads and no activation on native admission, readiness, drain or authority failure.
+
+## Confirmed quota blocker and handoff
+
+PR #3062 merged with 69 focused tests, Cloudflare typecheck, all 32 applicable CI checks and validated ReviewGPT PASS. The valid review included the exact Wrangler lockfile, local patch and bounded effective upload/deploy source; the first incomplete dependency packet was INVALID and did not count.
+
+The protected release on public commit `a6d32e94ca8171a293b9212a6ebb4bc3fb2b5cc1` passed all fresh pre-deployment gates. Metadata upload completed without activation. Native creation no longer returned the namespace-enablement rejection, but first returned a generic HTTP 500. One retry of the failed production job, retaining the same resolved public and private commits and passing gate evidence, returned HTTP 403/code 1604: the requested inactive application exceeds the account vCPU quota. Both attempts stopped before Worker activation. The device-sync runner optimization remains unshipped.
+
+The configured production overlap is two 648-instance member banks, 100 retained legacy instances and one smoke instance. At 2 vCPUs, 6,144 MiB memory and 6,000 MB disk per instance, this footprint requires at least 2,794 vCPUs, 8,583,168 MiB memory and 8,382,000 MB disk. Other applications in the account require additional headroom. The account's exact custom limits have not been read; the provider's vCPU rejection is authoritative. Do not present Cloudflare's published default limits as measured account limits.
+
+Prepare an external quota request for 3,000 vCPUs and 9 TiB memory, with existing disk quota checked against the overlap footprint and other account applications. This preserves the configured serving ceiling. The request has not been sent: contacting Cloudflare requires explicit user authorization. The existing deployment owner keeps serving ceilings fixed rather than automatically reducing them after quota rejection. No running member container, native serving application, namespace or traffic selector was changed to work around this failure.
+
+After account capacity is available, resume the protected full release against a verified public/private revision, retain the admission and signed-smoke gates, and require exact release convergence. This plan remains active because shipment is still blocked on external account capacity.

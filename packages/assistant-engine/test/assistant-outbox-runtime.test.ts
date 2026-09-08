@@ -1,10 +1,13 @@
 import {
   access,
+  chmod,
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
+  symlink,
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
@@ -84,7 +87,11 @@ import {
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
-import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import {
+  findAssistantOutboxIntentByDedupeIdentity,
+  listAssistantOutboxIntentsForPrivateCompletionRoute,
+  pruneAssistantTerminalOutboxIntents,
+} from '../src/assistant/outbox/store.ts'
 import { createAssistantAutoReplyHistoryReader } from '../src/assistant/automation/reply.ts'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
@@ -254,6 +261,96 @@ afterEach(async () => {
 })
 
 describe('assistant outbox runtime', () => {
+  it('prepares only outbox and projection state for empty foreground reads and projection recovery', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('assistant-outbox-private-path-')
+    tempRoots.push(parentRoot)
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const projectionPath = path.join(paths.stateDirectory, 'outbox-dedupe.sqlite')
+
+    await expect(readAssistantOutboxIntent(vaultRoot, 'outbox_missing')).resolves.toBeNull()
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
+    await expect(findAssistantOutboxIntentByDedupeIdentity({
+      dedupeKey: 'missing-key',
+      skipLegacyMediaFallback: true,
+      vault: vaultRoot,
+    })).resolves.toBeNull()
+    expect((await stat(projectionPath)).mode & 0o777).toBe(0o600)
+
+    await rm(projectionPath)
+    await chmod(paths.outboxDirectory, 0o755)
+    await chmod(paths.stateDirectory, 0o755)
+    await expect(listAssistantOutboxIntentsForAutoReplyRoute({
+      channel: 'telegram',
+      deliveryTarget: 'empty-route',
+      vault: vaultRoot,
+    })).resolves.toEqual([])
+    expect((await stat(paths.outboxDirectory)).mode & 0o777).toBe(0o700)
+    expect((await stat(paths.stateDirectory)).mode & 0o777).toBe(0o700)
+
+    await rm(projectionPath)
+    await expect(listAssistantOutboxIntentsForPrivateCompletionRoute({
+      actorId: null,
+      bindingDeliveryKind: 'explicit',
+      bindingDeliveryTarget: 'empty-route',
+      channel: 'telegram',
+      identityId: null,
+      threadId: null,
+      vault: vaultRoot,
+    })).resolves.toEqual([])
+    expect((await stat(projectionPath)).mode & 0o777).toBe(0o600)
+    expect((await readdir(paths.assistantStateRoot)).sort()).toEqual(['outbox', 'state'])
+    expect(await readdir(paths.outboxDirectory)).toEqual([])
+
+    const malformedPath = path.join(paths.outboxDirectory, 'outbox_malformed.json')
+    await writeFile(malformedPath, '{invalid-json', { mode: 0o600 })
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
+    await expect(access(malformedPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(paths.outboxQuarantineDirectory)).toHaveLength(1)
+    expect((await stat(paths.outboxQuarantineDirectory)).mode & 0o777).toBe(0o700)
+  })
+
+  it.each(['outboxDirectory', 'stateDirectory'] as const)(
+    'rejects a symlinked %s before foreground reads touch its target',
+    async (directoryKey) => {
+      const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-symlink-')
+      const intent = await createIntent(vaultRoot, { explicitTarget: 'symlink-route' })
+      const targetDirectory = path.join(vaultRoot, 'external-state')
+      await rename(paths[directoryKey], targetDirectory)
+      await chmod(targetDirectory, 0o755)
+      await symlink(targetDirectory, paths[directoryKey])
+      const targetPath = path.join(
+        targetDirectory,
+        directoryKey === 'outboxDirectory' ? `${intent.intentId}.json` : 'outbox-dedupe.sqlite',
+      )
+      const original = await readFile(targetPath)
+      const originalEntries = await readdir(targetDirectory)
+
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId)).rejects.toThrow('symlinks')
+      await expect(listAssistantOutboxIntentsLocal(vaultRoot)).rejects.toThrow('symlinks')
+      await expect(findAssistantOutboxIntentByDedupeIdentity({
+        dedupeKey: intent.dedupeKey,
+        vault: vaultRoot,
+      })).rejects.toThrow('symlinks')
+      await expect(listAssistantOutboxIntentsForAutoReplyRoute({
+        channel: 'telegram',
+        deliveryTarget: 'symlink-route',
+        vault: vaultRoot,
+      })).rejects.toThrow('symlinks')
+      await expect(listAssistantOutboxIntentsForPrivateCompletionRoute({
+        actorId: null,
+        bindingDeliveryKind: 'explicit',
+        bindingDeliveryTarget: 'symlink-route',
+        channel: 'telegram',
+        identityId: null,
+        threadId: null,
+        vault: vaultRoot,
+      })).rejects.toThrow('symlinks')
+      expect(await readFile(targetPath)).toEqual(original)
+      expect(await readdir(targetDirectory)).toEqual(originalEntries)
+      expect((await stat(targetDirectory)).mode & 0o777).toBe(0o755)
+    },
+  )
+
   it('persists the exact scheduled occurrence with a canonical outbox intent', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-scheduled-occurrence-',
@@ -745,6 +842,138 @@ describe('assistant outbox runtime', () => {
     },
     120_000,
   )
+
+  it('reads projected route intents with bounded concurrency and preserves chronological order', async () => {
+    const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-route-concurrency-')
+    const routeTarget = 'route-concurrency'
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      explicitTarget: routeTarget,
+    })
+    const intents: AssistantOutboxIntent[] = []
+    for (let index = 0; index < 9; index += 1) {
+      const at = new Date(Date.UTC(2026, 3, 8, 0, 0, index)).toISOString()
+      intents.push(await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        createdAt: at,
+        delivery: createDelivery({ sentAt: at, target: routeTarget, targetKind: 'explicit' }),
+        intentId: `outbox_route_concurrency_${index}`,
+        sentAt: at,
+        status: 'sent',
+        updatedAt: at,
+      }))
+    }
+    const intentPaths = new Set(intents.map((intent) =>
+      path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+    ))
+    const pendingReads = new Map<string, () => void>()
+    const startedPaths: string[] = []
+    const completedPaths: string[] = []
+    let activeReads = 0
+    let maximumReads = 0
+    let deferReads = true
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async () => {
+      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+      return {
+        ...actual,
+        async readFile(...args: Parameters<typeof actual.readFile>) {
+          const filePath = String(args[0])
+          if (!intentPaths.has(filePath)) return await actual.readFile(...args)
+          activeReads += 1
+          maximumReads = Math.max(maximumReads, activeReads)
+          startedPaths.push(filePath)
+          try {
+            if (deferReads) {
+              await new Promise<void>((resolve) => pendingReads.set(filePath, resolve))
+              pendingReads.delete(filePath)
+            }
+            const raw = await actual.readFile(...args)
+            completedPaths.push(filePath)
+            return raw
+          } finally {
+            activeReads -= 1
+          }
+        },
+      }
+    })
+    const store = await import('../src/assistant/outbox/store.ts')
+    const reading = store.listAssistantOutboxIntentsForAutoReplyRoute({
+      actorId: seeded.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: seeded.identityId,
+      threadId: seeded.threadId,
+      vault: vaultRoot,
+    })
+    try {
+      await vi.waitFor(() => expect(pendingReads.size).toBe(4))
+      const firstBatch = [...pendingReads]
+      for (const [, release] of firstBatch.slice(1).reverse()) release()
+      await vi.waitFor(() => expect(completedPaths).toHaveLength(3))
+      expect(startedPaths).toHaveLength(4)
+      expect(completedPaths).not.toContain(firstBatch[0]![0])
+      deferReads = false
+      firstBatch[0]![1]()
+      const result = await reading
+      expect(result.map((intent) => intent.intentId)).toEqual(intents.map((intent) => intent.intentId))
+      expect(maximumReads).toBe(4)
+      expect(activeReads).toBe(0)
+    } finally {
+      deferReads = false
+      for (const release of pendingReads.values()) release()
+      await reading.catch(() => undefined)
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('removes missing and corrupt projected route entries while preserving valid canonical intents', async () => {
+    const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-route-stale-files-')
+    const routeTarget = 'route-stale-files'
+    const seeded = await createIntent(vaultRoot, { channel: 'telegram', explicitTarget: routeTarget })
+    const intents: AssistantOutboxIntent[] = []
+    for (let index = 0; index < 4; index += 1) {
+      const at = new Date(Date.UTC(2026, 3, 8, 0, 0, index)).toISOString()
+      intents.push(await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        createdAt: at,
+        delivery: createDelivery({ sentAt: at, target: routeTarget, targetKind: 'explicit' }),
+        intentId: `outbox_route_stale_${index}`,
+        sentAt: at,
+        status: 'sent',
+        updatedAt: at,
+      }))
+    }
+    const intentPath = (index: number) => path.join(paths.outboxDirectory, `${intents[index]!.intentId}.json`)
+    const retainedRaw = await Promise.all([0, 3].map((index) => readFile(intentPath(index), 'utf8')))
+    await rm(intentPath(1))
+    await writeFile(intentPath(2), '{invalid-json', 'utf8')
+    const query = {
+      actorId: seeded.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: seeded.identityId,
+      threadId: seeded.threadId,
+      vault: vaultRoot,
+    }
+    await expect(listAssistantOutboxIntentsForAutoReplyRoute(query)).resolves.toEqual([intents[0], intents[3]])
+    expect(await Promise.all([0, 3].map((index) => readFile(intentPath(index), 'utf8')))).toEqual(retainedRaw)
+    await expect(access(intentPath(2))).rejects.toMatchObject({ code: 'ENOENT' })
+    const quarantined = await readdir(paths.outboxQuarantineDirectory)
+    expect(quarantined.filter((name) => name.startsWith(`${intents[2]!.intentId}.`))).toHaveLength(1)
+    const database = openSqliteRuntimeDatabase(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), { readOnly: true })
+    try {
+      expect(database.prepare(`
+        SELECT intent_id FROM assistant_outbox_foreground_tags
+        WHERE intent_id IN (?, ?)
+      `).all(intents[1]!.intentId, intents[2]!.intentId)).toEqual([])
+    } finally {
+      database.close()
+    }
+    await expect(listAssistantOutboxIntentsForAutoReplyRoute(query)).resolves.toEqual([intents[0], intents[3]])
+    expect(await readdir(paths.outboxQuarantineDirectory)).toEqual(quarantined)
+  })
 
   it('bounds auto-reply route context while preserving an older exact provider anchor', async () => {
     const { vaultRoot } = await createAssistantVault(

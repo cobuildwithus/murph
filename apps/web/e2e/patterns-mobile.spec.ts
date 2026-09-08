@@ -68,6 +68,16 @@ test("pattern cards show available comparisons on phones and retain result detai
   await expect(drawer).toContainText("42.7 ms");
   await expect(drawer.locator("dt")).toHaveText(["After running · 9 days", "Other · 9 days"]);
   await expect(drawer).toContainText("Data from");
+  await drawer.locator("summary").filter({ hasText: "Days compared" }).tap();
+  const dates = drawer.getByRole("group", { name: "Comparison dates" });
+  await expect(dates).toBeVisible();
+  await expect(dates.getByRole("button")).toHaveCount(120);
+  await expect(drawer).toContainText("Some dates unavailable");
+  await expect(drawer).toContainText("No running record doesn't mean no running.");
+  await dates.getByRole("button", { name: "May 10, 2026 · Running", exact: true }).tap();
+  await expect(drawer.getByRole("status")).toHaveText("May 10, 2026 · Running");
+  await expect(drawer).not.toContainText("Tap a day");
+
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
     return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;
@@ -83,6 +93,10 @@ test("pattern cards show available comparisons on phones and retain result detai
   await sleepQuality.tap();
   await expect(drawer.getByRole("region", { name: "Sleep score", exact: true })).toBeVisible();
   await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true })).toBeVisible();
+  const score = drawer.getByRole("region", { name: "Sleep score", exact: true });
+  await score.locator("summary").click();
+  await expect(score.getByRole("group", { name: "Comparison dates" })).toBeVisible();
+
   await expect(drawer.getByRole("region", { name: "Sleep score", exact: true }).locator("dt")).toHaveText(["After running · 8 days", "Other · 8 days"]);
   await expect(drawer.getByRole("region", { name: "Sleep efficiency", exact: true }).locator("dt")).toHaveText(["After running · 7 days", "Other · 7 days"]);
   await expect.poll(async () => {
@@ -94,6 +108,16 @@ test("pattern cards show available comparisons on phones and retain result detai
   }
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  const sauna = mobile.locator('[data-pattern-factor-row="sauna"]');
+  await sauna.getByRole("button", { name: /^Your HRV was higher/ }).tap();
+  await drawer.locator("summary").click();
+  await expect(drawer).toContainText("Without sauna");
+  await expect(drawer).not.toContainText("doesn't mean");
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await page.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-confirmed-drawer.png"), animations: "disabled", style: "nextjs-portal, main > .sticky { visibility: hidden !important; }" });
+  }
+  await page.keyboard.press("Escape");
   await expect(running.locator("details")).toHaveCount(0);
   await expect(running.getByText("No clear change", { exact: true })).toHaveCount(0);
   await expect(mobile.locator('[data-pattern-state="no-clear-pattern"]')).toHaveCount(0);
@@ -147,6 +171,8 @@ test("pattern cards show available comparisons on phones and retain result detai
         const bounds = await drawer.boundingBox();
         return bounds ? Math.abs(bounds.y + bounds.height - 900) : 900;
       }).toBeLessThanOrEqual(1);
+      await drawer.locator("summary").click();
+      await expect(drawer.getByRole("group", { name: "Comparison dates" })).toBeVisible();
       expect(await drawer.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       await drawer.getByRole("button", { name: "Close pattern details" }).tap();
       await expect(drawer).toHaveCount(0);
@@ -158,6 +184,18 @@ test("pattern cards show available comparisons on phones and retain result detai
       const popover = page.locator('[data-slot="popover-content"]');
       await expect(popover).toBeVisible();
       await expect(popover).toContainText("48 ms");
+      await popover.locator("summary").click();
+      const calendar = popover.getByRole("group", { name: "Comparison dates" });
+      await expect(calendar).toBeVisible();
+      const date = calendar.getByRole("button", { name: "May 10, 2026 · Running", exact: true });
+      await date.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect(calendar.getByRole("button", { name: "May 17, 2026 · No comparison date shown", exact: true })).toBeFocused();
+      await expect(popover.getByRole("status")).toHaveText("May 17, 2026 · No comparison date shown");
+      if (process.env.DESIGN_PROOF_OUTPUT_DIR && width === 1440) {
+        await popover.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-evidence-desktop.png"), animations: "disabled" });
+      }
+
       await expect(drawer).toHaveCount(0);
       await page.keyboard.press("Escape");
     }

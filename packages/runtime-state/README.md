@@ -38,6 +38,14 @@ That assistant runtime root is intentionally not a product-state incubator. If a
 
 Assistant runtime state also has a single filesystem permission policy. The `@murphai/runtime-state/node/assistant-state-fs` subpath owns assistant-state write primitives, audit, and repair. Assistant runtime directories under `.runtime/operations/assistant/**` must be created as `0700`, files must be created as `0600`, and hosted bundle restore/materialization applies that same path-derived policy while writing restored files. `assistant doctor` is the operator-facing diagnostic and explicit repair path; normal runtime writers should enforce modes at write time rather than depending on doctor cleanup.
 
+Directory preparation validates current path types and permissions on every
+call, changes permissions only when they differ, and creates outside ancestors
+only when the private runtime root is missing. Readers prepare the directories
+they actually consume; receipt, transcript, routing, and accepted-input journal
+operations do not require the whole assistant tree. Existing writers secure their
+destination parents, including ancestry needed for secret-sidecar deletion. No
+process-local permission cache substitutes for current checks.
+
 ## Contract
 
 - canonical user truth stays in `vault/**`; local runtime state must never become the canonical store of health facts

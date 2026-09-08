@@ -47,6 +47,20 @@ import {
 const RETIRED_USAGE_TERM = ["cost", "weighted"].join("-");
 
 describe("ChangelogPage", () => {
+  it("keeps historical and current workout announcements in chat", async () => {
+    const ids = ["private-training-review", "workout-routines-in-chat"];
+    const items = listPublishedChangelogItems().filter((item) => ids.includes(item.id));
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(item.tryIt).toMatchObject({ prompt: expect.stringContaining("chat") });
+      expect(item.tryIt).not.toHaveProperty("href");
+    }
+    const markup = await renderChangelogItems(ids);
+    expect(markup).not.toContain('href="/training"');
+    expect(markup).toContain("Workout review stays in chat");
+    expect(markup).toContain("Clearer saved workout routines");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
