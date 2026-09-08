@@ -1686,8 +1686,9 @@ child that is still shutting down. The requesting `UserRunner`
 durably reserves the opaque stop target before immutable bind-once member
 attachment, then opens its normal write fence and restores the encrypted
 workspace. The real resident Codex App Server remains post-restore because its
-launch identity is member-specific. Coordinator claim and bind share one 250 ms
-deadline; no-ready, stale-release, or coordinator failure before slot ownership
+launch identity is member-specific. Coordinator claim and bind share one 1,000 ms
+deadline, capped by the remaining foreground command budget; no-ready,
+stale-release, or coordinator failure before slot ownership
 uses the unchanged exact-user cold target. A pending standby target is
 reconciled before fresh-claim eligibility. For a member-bound target, one
 bounded RPC to that standby-container owner validates the immutable slot, its
@@ -1715,6 +1716,18 @@ breakdown and structured log. The selection log records the same metadata
 before fence or readiness work so a later caller-budget exit remains
 diagnosable without adding member or container identifiers. Failed, retried, or
 superseded starts do not emit an accepted attribution.
+
+Fresh allocation records `runnerTargetReconcileElapsedMs`, `standbyClaimElapsedMs`,
+and `runnerTargetBindElapsedMs` separately within the existing orchestration
+phase. Steps that were not needed record zero. `standbyAllocationElapsedMs` remains
+the complete allocation duration, including pending-target reconciliation and
+cold binding; it is not the coordinator RPC duration. Container readiness is
+recorded separately by the existing fresh-start timestamps.
+
+Worker logs also report coordinator handler duration and remaining deadline,
+and caller RPC settlement duration, outcome and late completion. The existing
+opaque event identifier joins those records without message content or member
+credentials. Retry paths emit phase timings even when no runner is selected.
 
 The active-member replan durably
 appends the original conversation item. For an exact model-approved instant

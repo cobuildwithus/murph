@@ -9,7 +9,9 @@ export const HOSTED_RUNNER_REGION = "GLOBAL" as const;
 export const HOSTED_STANDBY_REGION = "ENAM" as const;
 export type HostedRunnerRegion = typeof HOSTED_RUNNER_REGION | typeof HOSTED_STANDBY_REGION;
 export const HOSTED_STANDBY_LOCATION_HINT = "enam" as const;
-export const HOSTED_STANDBY_CLAIM_TIMEOUT_MS = 250;
+// A distributed claim and bind need room for both RPCs. Keep the optional
+// handoff bounded so an unavailable pool still falls back within one second.
+export const HOSTED_STANDBY_CLAIM_TIMEOUT_MS = 1_000;
 export const HOSTED_STANDBY_READY_TIMEOUT_MS = 75_000;
 export const HOSTED_STANDBY_ORPHAN_GRACE_MS = 2 * 60_000;
 export const HOSTED_STANDBY_RETRY_MS = 30_000;

@@ -1453,6 +1453,15 @@ Last verified: 2026-09-04
   reconciliation path. An epoch-less legacy record or a replaced, missing,
   disconnected, or reauthorization-required connection has no cadence authority
   and drains without a Web write.
+  Companion upload admission permits at most 500 pending payload rows per
+  connection after insertion; exact replay at that cap remains a no-op. The
+  existing request-body, hydration-byte and 100-job execution limits remain
+  separate, so the larger buffer does not enlarge a runtime pass. Dirty-payload
+  hydration establishes the existing operation-scoped domain-root cache, so
+  payloads sharing a root perform one envelope read and KMS unwrap for that
+  user/domain/root identity. Per-payload authentication and row/byte limits still
+  apply; subsequent requests receive a fresh cache and scoped keys are wiped
+  on success or failure.
   Terminal failure uses the same replayable record. Web dirty rows separately
   remain authoritative until dirty resource/deletion jobs are terminally
   acknowledged. Because the device-sync SQLite store is intentionally excluded
@@ -1870,13 +1879,16 @@ Last verified: 2026-09-04
 - Junction historical backfill and non-yieldable full jobs finish inventory,
   summary, profile, and historical scheduling once. A yieldable full reconcile
   instead commits one configured normalization-safe summary unit per full-job
-  continuation, after a live provider inventory read for that attempt, before
-  entering the existing timeseries continuation. The inventory read is one
-  attempt capped at eight seconds, accepts at most 64 provider rows, and its
-  source projection reads the current local source set once before at most 64
-  serial upserts; summary admission adds one fixed local-source read independent
-  of provider cardinality. Ordinary units contain one resource and allow at
-  most three sequential pages with one eight-second request attempt per page.
+  continuation before entering the existing timeseries continuation. Compatible
+  summary continuations reuse inventory and source projection within one worker
+  pass, keyed by connection/source lifecycle and bounded collection policy;
+  failures and history discard reuse. A new inventory read is one attempt capped
+  at eight seconds, accepts at most 64 provider rows, and its source projection
+  reads the current local source set once before at most 64 serial upserts.
+  Every summary admission still reads live sources after the provider fetch,
+  independently of provider cardinality or inventory reuse. Ordinary units contain
+  one resource and allow at most three sequential pages with one eight-second
+  request attempt per page.
   Sleep and sleep-cycle remain one canonical unit so
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
