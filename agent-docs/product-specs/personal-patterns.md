@@ -171,6 +171,19 @@ comparison dates needed to inspect the result.
 An empty report says that Murph needs more comparable data. The page does not
 start a calculation. It reads the latest Browser Vault report.
 
+## Native Home projection
+
+The iOS Home screen reads the saved report through bearer-authenticated
+`GET /api/device-sync/companion/patterns`. This reader checks current active
+member access and launch consent before opening the Browser Vault core shard
+and again before disclosing the report. It reuses Browser Vault member binding,
+key unwrap, bounded decoding, and schema validation. The response contains only
+`report` and `freshness`, uses `Cache-Control: no-store`, and never includes raw
+source records. Missing reports return `report: null`; the reader does not wake
+a runtime or start a calculation. Native retains presentation only in memory.
+Deploy this additive reader before the native release. Existing Web consumers
+remain unchanged; an older backend leaves the native section retryable.
+
 ## Proactive messages
 
 The managed Personal Patterns automation checks each day at 13:00 local time.
