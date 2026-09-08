@@ -34,7 +34,7 @@ import {
 } from "../hosted-mailbox/ai-usage-gate";
 import {
   decodeHostedMailboxStoredPayload,
-  hasHostedMailboxMealPhotoCaptureSince,
+  hasHostedMailboxAutomationEngagementSince,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxLatestPendingConversationItem,
@@ -281,7 +281,7 @@ export async function readHostedRuntimeReconciliationFacts(
       now,
       prisma,
     }))
-    && !(await hasHostedMailboxMealPhotoCaptureSince({
+    && !(await hasHostedMailboxAutomationEngagementSince({
       prisma,
       since: new Date(
         now.getTime()
