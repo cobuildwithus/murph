@@ -12,7 +12,9 @@ import {
   withHostedCanonicalWritePort,
 } from "@murphai/core";
 import type { HostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
-import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import { parseHostedExecutionWake, parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
+import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
@@ -6375,6 +6377,100 @@ describe("hosted device-sync runtime", () => {
       await restoredWorkspace.cleanup();
     }
   });
+
+  test.each(["device-sync.dirty-processed", "device-sync.dirty-processed-batch"] as const)(
+    "retains a drained wake when ingress advances during checkpoint acknowledgement (%s)",
+    async (kind) => {
+      const workspace = await createHostedRuntimeWorkspace("hosted-device-sync-ingress-at-ack-");
+      const restoredWorkspace = await createHostedRuntimeWorkspace("hosted-device-sync-ingress-at-ack-restored-");
+      const executeJob = vi.fn(async () => ({}));
+      const service = createDeviceSyncServiceForVault(restoredWorkspace.vaultRoot, [
+        createFakeProvider({ jobExecutor: { executeJob } }),
+      ]);
+      const logRequests: HostedRuntimeLogRequest[] = [];
+      const occurredAt = "2026-04-04T10:00:00.000Z";
+      const retryAt = "2026-04-04T10:00:01.000Z";
+      const connectionId = "hosted_ingress_at_ack";
+      const wake = buildDirtyDeviceSyncWake(connectionId, occurredAt);
+      const ack = { connectionId, processedRevision: "1", processedDirtyPayloadIds: ["payload-completed"], nextWakeAt: null };
+      const port: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async ackDirtyStateProcessed(request) {
+          // The observed batch completed, then ingress committed another payload.
+          const stillDirty = request.processedRevision === "1";
+          return { connectionId, dirtyRevision: "2", processedRevision: request.processedRevision,
+            recorded: true, stillDirty, nextWakeAt: stillDirty ? retryAt : null, userId: "member_123" };
+        },
+        async fetchDirtyStates() {
+          return { hasMore: false, nextWakeAt: null, userId: "member_123", items: [buildDirtyState({
+            connectionId, dirtyRevision: "2", processedRevision: "1", dirtyResources: [{
+              count: 1, dirtyPayloadId: "payload-new", jobKind: "resource", payload: { resource: "steps" },
+              resource: "steps", resourceCategory: "timeseries", sourceProviderSlug: "demo", windowStart: null, windowEnd: null,
+            }],
+          })] };
+        },
+        async applyUpdates() { throw new Error("No control-plane update expected"); },
+        async createConnectLink() { throw new Error("No connection request expected"); },
+        async fetchSnapshot() { return buildRuntimeSnapshot({ connectionId, externalAccountId: "ingress-at-ack" }); },
+      };
+      const item: HostedSystemMailboxPendingItem = {
+        attemptCount: 1, itemId: "ingress-at-ack-owner", lastAttemptAt: occurredAt,
+        lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: wake.eventId,
+        mailboxLaneSeq: "1", nextAttemptAt: null, occurredAt,
+        postCheckpointRecord: kind === "device-sync.dirty-processed"
+          ? { kind, ...ack }
+          : { kind, records: [ack], nextWakeAt: null },
+        preferenceCausalSeq: null, requestId: null, routeAction: "run-device-sync-wake",
+        status: "recording", wake,
+      };
+      const runtime = createDeviceSyncPostCheckpointRuntime(port);
+      runtime.platform.logPort = { async write(request) {
+        const parsed = parseHostedRuntimeLogRequest(request);
+        logRequests.push(parsed); return { loggedCount: parsed.entries.length };
+      } };
+      try {
+        await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({ pending: [item] }));
+        const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+          item, runtime, vaultRoot: workspace.vaultRoot,
+          deviceSyncCompletionAcceptedInCurrentAdmission: true,
+        });
+        assert.equal(result.failed, 0);
+        const pending = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+        assert.equal(pending.length, 1, "new dirty work must keep a connection-scoped mailbox owner");
+        assert.equal(pending[0]?.status, "pending");
+        assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
+        assert.equal(pending[0]?.postCheckpointRecord, null);
+        assert.equal(pending[0]?.nextAttemptAt, retryAt);
+        const retained = pending[0]!;
+        assert.equal(retained.wake.kind, "device-sync.wake");
+        if (retained.wake.kind !== "device-sync.wake") throw new Error("Expected device wake");
+        assert.deepEqual(retained.wake.hint?.jobs, []);
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake: retained.wake,
+        });
+        const accountId = state.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(accountId);
+        assert.equal(await service.drainWorker(1, accountId), 1);
+        promoteHostedCompletedDirtyPayloadAcks({ service, state });
+        assert.equal(executeJob.mock.calls.length, 1);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds, ["payload-new"]);
+        const completedItem = { ...retained, status: "recording" as const,
+          postCheckpointRecord: { kind: "device-sync.dirty-processed-batch" as const, records: state.pendingDirtyAcks, nextWakeAt: null } };
+        await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({ pending: [completedItem] }));
+        await recordHostedSystemMailboxItemAfterCheckpoint({ item: completedItem, runtime, vaultRoot: workspace.vaultRoot });
+        assert.equal((await readHostedSystemMailboxState(workspace.vaultRoot)).pending.length, 0);
+        await drainHostedRuntimeLogWritesBestEffort();
+        assert.deepEqual(logRequests.flatMap((request) => request.entries)
+          .filter((entry) => entry.eventCode === "device-sync.checkpoint_recorded")
+          .map((entry) => [entry.redactedJson?.stillDirty, entry.redactedJson?.retainedMailboxOwnerPresent]),
+          [[true, true], [false, false]]);
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await workspace.cleanup();
+        await restoredWorkspace.cleanup();
+      }
+    },
+  );
 
   test("a full retained queue defers its webhook edge until capacity can advance", async () => {
     const workspace = await createHostedRuntimeWorkspace(

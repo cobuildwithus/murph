@@ -8271,9 +8271,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         title: "Synthetic scheduled reminder",
         vaultRoot,
       });
-      await enqueueDeviceSyncSystemMailboxItemForTest({
-        item: deviceItem,
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncSystemMailboxItem(deviceItem),
         vaultRoot,
+        wake: {
+          ...createDeviceSyncSystemWakeForMailboxItem(deviceItem),
+          kind: "device-sync.wake",
+          reason: "reconcile_due",
+          connectionId: "device_sync_connection_synthetic",
+        },
       });
       if (defaultOwnedSystemMailboxWakeAt !== null) {
         await enqueueHostedSystemMailboxItem({
@@ -8459,7 +8465,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
-        defaultOwnedSystemMailboxWakeAt === null ? [] : [defaultOwnedItem.id],
+        defaultOwnedSystemMailboxWakeAt === null
+          ? [deviceItem.id]
+          : [deviceItem.id, defaultOwnedItem.id],
       );
       const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
         request.nextWakeAt === followUpWakeAt
@@ -8490,6 +8498,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         });
         const runFollowUpPass = async (input: {
           attemptId: string;
+          processingMode?: "system_mailbox";
           workspace: HostedWorkspaceState;
         }) => {
           const followUpCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -8505,6 +8514,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             createWorkspaceRuntimeJobInput({
               request: {
                 attemptId: input.attemptId,
+                processingMode: input.processingMode,
                 workspace,
                 workspaceVersion: workspace.version,
               },
@@ -8575,8 +8585,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           1,
         );
         assert.deepEqual(
-          (await readHostedSystemMailboxState(vaultRoot)).pending,
-          [],
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
+          [deviceItem.id],
         );
         assert.equal(defaultPass.checkpoint.nextWakeAt, followUpWakeAt);
         assert.equal(
@@ -8594,6 +8604,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         vi.setSystemTime(new Date(followUpWakeAt));
         await runFollowUpPass({
           attemptId: "attempt_synthetic_saved_device_deadline_follow_up",
+          processingMode: "system_mailbox",
           workspace: defaultPass.workspace,
         });
         assert.ok(

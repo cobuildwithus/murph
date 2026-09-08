@@ -1381,18 +1381,21 @@ export class PrismaHostedConnectionStore {
   }): Promise<HostedDeviceSyncDueReconcileConnectionRecord[]> {
     const limit = Math.max(1, Math.min(input.limit, 251));
     const rows = await this.prisma.$queryRaw<Array<{
+      orphaned_dirty_recovery_key: string | null;
       connected_at: Date;
       id: string;
       next_reconcile_at: Date;
       provider: string;
       user_id: string;
     }>>(Prisma.sql`
+      with due_connections as (
       select
         "connection"."connected_at",
         "connection"."id",
         "connection"."next_reconcile_at",
         "connection"."provider",
-        "connection"."user_id"
+        "connection"."user_id",
+        "connection"."updated_at" as sweep_updated_at
       from "device_connection" as "connection"
       join "hosted_member" as "member"
         on "member"."id" = "connection"."user_id"
@@ -1439,9 +1442,36 @@ export class PrismaHostedConnectionStore {
         "connection"."updated_at" asc,
         "connection"."id" asc
       limit ${limit}
+      )
+      select due.*,
+        case when
+          counters.consumed_seq = counters.next_seq - 1
+          and dirty.connection_id is not null
+          and workspace.redacted_status_json->>'hostedMailboxSystemHandledThroughSeq' = counters.consumed_seq::text
+          and workspace.redacted_status_json->'hostedMailboxSystemDeviceSyncContinuationSeqs' = '[]'::jsonb
+          and workspace.redacted_status_json->'hostedMailboxSystemFirstPendingSeq' = 'null'::jsonb
+          and (
+            dirty.dirty_revision > dirty.processed_revision
+            or exists (
+              select 1 from device_sync_dirty_payload payload
+              where payload.connection_id = due.id and payload.user_id = due.user_id
+            )
+          )
+        then counters.consumed_seq::text
+        else null end as orphaned_dirty_recovery_key
+      from due_connections due
+      left join device_sync_dirty_connection dirty
+        on dirty.connection_id = due.id and dirty.user_id = due.user_id
+      left join hosted_workspace workspace on workspace.user_id = due.user_id
+      left join hosted_mailbox_lane_counter counters
+        on counters.user_id = due.user_id and counters.lane = 'system'
+      order by due.next_reconcile_at, due.sweep_updated_at, due.id
     `);
 
     return rows.map((row) => ({
+      ...(row.orphaned_dirty_recovery_key
+        ? { orphanedDirtyRecoveryKey: row.orphaned_dirty_recovery_key }
+        : {}),
       connectionId: row.id,
       connectedAt: toIsoTimestamp(row.connected_at),
       nextReconcileAt: toIsoTimestamp(row.next_reconcile_at),

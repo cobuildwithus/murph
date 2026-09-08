@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
 import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
 import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
@@ -15,6 +16,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@/src/lib/hosted-mailbox/store";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { checkpointHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -42,11 +44,106 @@ describe.skipIf(!runPostgresProof)(
 
     afterAll(async () => {
       if (prisma && memberIds.length > 0) {
+        await prisma.deviceConnection.deleteMany({ where: { userId: { in: memberIds } } });
         await prisma.hostedMember.deleteMany({
           where: { id: { in: memberIds } },
         });
       }
       await prisma?.$disconnect();
+    });
+
+    it("recovers dirty work after its scheduled mailbox owner was fully consumed", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client, consumedSeq: 1n, importedSeq: "1", firstPendingSeq: null,
+        deviceSyncContinuationSeqs: [], memberIds,
+      });
+      const connectionId = fixture.wake.connectionId!;
+      await client.deviceConnection.create({ data: {
+        id: connectionId, userId: fixture.memberId, provider: "oura", status: "active",
+        providerAccountBlindIndex: `synthetic-${connectionId}`,
+        connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+        nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
+        dirtyState: { create: {
+          userId: fixture.memberId, provider: "oura", dirtyRevision: 5n, processedRevision: 2n,
+          firstDirtyAt: new Date("2026-09-01T00:00:00Z"), latestDirtyAt: new Date("2026-09-01T00:00:00Z"),
+        } },
+      } });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma: client });
+      const requestWake = vi.fn(async (_input: { connectionId: string; eventId: string }) => ({ wakeAccepted: true, wakeAppended: true, wakeDuplicate: false, wakeInserted: true }));
+      const now = new Date("2026-09-04T12:00:00Z");
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      const recovered = requestWake.mock.calls[0]?.[0];
+      expect(recovered).toMatchObject({ connectionId });
+      expect(recovered?.eventId).not.toBe(fixture.wake.eventId);
+      await client.hostedWorkspace.update({
+        where: { userId: fixture.memberId }, data: { version: { increment: 1 } },
+      });
+      await client.deviceSyncDirtyConnection.update({
+        where: { connectionId }, data: { dirtyRevision: 6n },
+      });
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[1]?.[0]?.eventId).toBe(recovered?.eventId);
+      await client.hostedMailboxLaneCounter.update({
+        where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+        data: { nextSeq: 3n },
+      });
+      requestWake.mockClear();
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[0]?.[0]?.eventId).toBe(fixture.wake.eventId);
+      await client.hostedMailboxLaneCounter.update({
+        where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+        data: { nextSeq: 2n },
+      });
+      await client.deviceSyncDirtyConnection.update({ where: { connectionId }, data: { processedRevision: 6n } });
+      requestWake.mockClear();
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[0]?.[0]?.eventId).toBe(fixture.wake.eventId);
+      await client.deviceSyncDirtyPayload.create({ data: {
+        id: `synthetic-payload-${connectionId}`, connectionId, userId: fixture.memberId,
+        provider: "oura", dirtyRevision: 5n, resourceEncrypted: "encrypted-synthetic-fixture",
+      } });
+      requestWake.mockClear();
+      await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+      expect(requestWake.mock.calls[0]?.[0]?.eventId).not.toBe(fixture.wake.eventId);
+      // An actual retained owner, pending mailbox work, or absent legacy proof
+      // must keep the ordinary stable schedule identity instead of reopening it.
+      for (const status of [
+        { hostedMailboxSystemHandledThroughSeq: "1", hostedMailboxSystemDeviceSyncContinuationSeqs: ["1"], hostedMailboxSystemFirstPendingSeq: null },
+        { hostedMailboxSystemHandledThroughSeq: "1", hostedMailboxSystemDeviceSyncContinuationSeqs: [], hostedMailboxSystemFirstPendingSeq: "1" },
+        {},
+      ]) {
+        await client.hostedWorkspace.update({ where: { userId: fixture.memberId }, data: { redactedStatusJson: status } });
+        requestWake.mockClear();
+        await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });
+        expect(requestWake.mock.calls[0]?.[0]?.eventId).toBe(fixture.wake.eventId);
+      }
+      if (!recovered) throw new Error("Expected recovered wake");
+      // Exercise the actual append boundary, including stable replay, using
+      // synthetic local crypto. A fresh identity must allocate new lane work.
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value.replace(/^enc:/u, ""),
+        encrypt: ({ value }) => `enc:${value}`,
+      });
+      try {
+        const envelope = { ...fixture.wake, eventId: recovered.eventId };
+        const appended = await client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({ envelope, tx })
+        );
+        expect(appended.inserted).toBe(true);
+        const repeated = await client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({ envelope, tx })
+        );
+        expect(repeated.inserted).toBe(false);
+        expect(repeated.dedupeConflict).toBe(false);
+        const counter = await client.hostedMailboxLaneCounter.findUniqueOrThrow({
+          where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+        });
+        expect(counter.nextSeq).toBe(3n);
+        expect(counter.consumedSeq).toBe(1n);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+      }
     });
 
     it("accepts only the producer-specific duplicate after runtime import", async () => {
