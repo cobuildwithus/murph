@@ -23725,6 +23725,200 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     }
   }, 360_000)
 
+  it.each([
+    { scenario: 'concise comparison', toolMode: 'native' },
+    { scenario: 'concise comparison', toolMode: 'code-only' },
+    { scenario: 'nine separate items', toolMode: 'native' },
+    { scenario: 'nine separate items', toolMode: 'code-only' },
+  ] as const)('compact-table debug: $scenario ($toolMode)', async ({ scenario, toolMode }) => {
+    // This lane permits only the local subscription, never provider-key auth.
+    const config = await resolveRealCodexE2eConfig({
+      sourceEnv: { ...process.env, MURPH_REAL_CODEX_AUTH: 'subscription' },
+    })
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-table-journey-'))
+    const isolatedHomePaths: string[] = []
+    const forbiddenEffects: string[] = []
+    const forbidEffect = (effect: string): never => {
+      forbiddenEffects.push(effect)
+      throw new Error(`Unexpected synthetic-journey effect: ${effect}`)
+    }
+    const stops = [
+      ['Alder', 11], ['Birch', 12], ['Cedar', 13], ['Dogwood', 14],
+      ['Elm', 15], ['Fir', 16], ['Grove', 17], ['Hazel', 18], ['Ivy', 19],
+    ] as const
+    const requestText = scenario === 'concise comparison'
+      ? 'Make a comparison card for these synthetic routes, one row per route: Amber takes ten minutes on flat ground; Birch takes twenty minutes on shaded ground. Include both durations and both terrain descriptions. I only want the card.'
+      : `Make a comparison table for these synthetic shuttle stops, one separate row per stop in this exact order, including each wait: ${stops.map(([name, minutes]) => `${name}: ${minutes} minutes`).join('; ')}. Keep every stop separate; do not merge or omit any.`
+    try {
+      // Reuse the isolated hosted-permission home: only subscription auth is
+      // linked, not the operator's plugins, MCP servers, or conversation state.
+      const isolatedHome = await materializeRealCodexHostedPermissionHome(config)
+      isolatedHomePaths.push(...isolatedHome.temporaryPaths)
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand, directory: isolatedHome.codexHome,
+      })
+      if (toolMode === 'code-only') {
+        const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
+        if (!catalog || !Array.isArray(catalog.models)) {
+          throw new Error('Expected the bundled synthetic-journey model catalog.')
+        }
+        for (const candidate of catalog.models) {
+          const model = readRecord(candidate)
+          if (model) model.tool_mode = 'code_mode_only'
+        }
+        await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
+      }
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null,
+        assistantHostedAutomationAvailable: false,
+        assistantHostedGroupToolSurface: 'none',
+        assistantProgressUpdatesAvailable: false,
+        assistantStyleSettingsAvailable: false,
+        channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'direct',
+        currentLocalDate: '2026-09-08',
+        currentInstant: '2026-09-08T12:00:00.000Z',
+        currentTimeZone: 'America/New_York',
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      const before = await snapshotRealCodexCanonicalVault(workingDirectory)
+      const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand,
+        codexHome: isolatedHome.codexHome,
+        configOverrides: [
+          'features.apps=false',
+          'features.browser_use=false',
+          'features.enable_mcp_apps=false',
+          'features.multi_agent=false',
+          'features.multi_agent_v2=false',
+          'features.shell_tool=false',
+          'features.standalone_web_search=false',
+          'features.tool_suggest=false',
+          'features.web_search_request=false',
+          'memories.generate_memories=false',
+          'memories.use_memories=false',
+          'web_search="disabled"',
+        ],
+        developerInstructions: [
+          layers.staticCacheableCorePrompt,
+          layers.stableRouteCapabilityPrompt,
+          layers.threadContextPrompt,
+        ].join('\n\n'),
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+        excludeResumeTurns: true,
+        fetchImpl: async () => forbidEffect('fetch'),
+        publicInternetFetch: async () => forbidEffect('public-fetch'),
+        groupConversation: false,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => forbidEffect('send-vault-file'),
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [layers.dynamicTurnContextPrompt, requestText].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        vaultRoot: workingDirectory,
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const attempts = readDynamicToolAttempts(result.jsonEvents)
+      const cardCalls = actions.filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name
+      )
+      const authoredReply = result.providerAuthoredFinalMessage?.trim() ?? ''
+      process.stdout.write(`[compact-table-debug-journey] ${JSON.stringify({
+        scenario, toolMode, model: config.model, attempts: attempts.length,
+        invalidCalls: actions.filter((action) => action.kind === 'dynamic' && !action.success).length,
+        replyPreview: result.finalMessage.slice(0, 1_200),
+        replyCharacters: result.finalMessage.length,
+        cardKind: result.responseCard?.kind ?? null,
+      })}\n`)
+      expect(forbiddenEffects).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+      expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+      expect(actions.filter((action) => action.kind === 'dynamic' && !action.success)).toEqual([])
+      expect(actions.filter((action) =>
+        action.kind === 'dynamic' && action.tool !== MURPH_ATTACH_RESPONSE_CARD_TOOL.name
+      )).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.responseMedia ?? []).toEqual([])
+      // Count attempted calls as well as completions; retries cannot hide an
+      // initially invalid authoring attempt behind a later successful card.
+      expect(attempts).toHaveLength(scenario === 'concise comparison' ? 1 : 0)
+      for (const event of result.jsonEvents) {
+        if (readRecord(event)?.method !== 'item/tool/call') continue
+        expect(readMurphDynamicToolRequest(readRecord(event) ?? {}, {
+          responseCardAudience: 'private',
+        })?.kind).toBe('attach-response-card')
+      }
+      if (scenario === 'concise comparison') {
+        expect(cardCalls).toHaveLength(1)
+        expect(cardCalls[0]).toMatchObject({ success: true })
+        const card = result.responseCard
+        if (card?.kind !== 'compact_table' || !('rows' in card)) {
+          throw new Error('Expected the complete generic comparison card.')
+        }
+        expect(card.rows).toHaveLength(2)
+        expect(JSON.stringify(card)).toMatch(/\b(?:minutes?|mins?|m)\b/iu)
+        for (const [name, duration, terrain] of [
+          ['Amber', /\b(?:10|ten)\b/iu, /flat/iu],
+          ['Birch', /\b(?:20|twenty)\b/iu, /shad/iu],
+        ] as const) {
+          const rows = card.rows.filter((row) =>
+            new RegExp(`\\b${name}\\b`, 'iu').test(row.label)
+          )
+          expect(rows, name).toHaveLength(1)
+          const rowText = [rows[0]?.label, ...(rows[0]?.values ?? [])].join(' ')
+          expect(rowText, name).toMatch(duration)
+          expect(rowText, name).toMatch(terrain)
+        }
+        expect(authoredReply).toBe('')
+      } else {
+        // The requested one-row-per-stop representation cannot fit this route's
+        // generic card. The production prompt, not this fixture, owns fallback.
+        expect(cardCalls).toEqual([])
+        expect(result.responseCard).toBeNull()
+        expect(authoredReply.length).toBeGreaterThan(0)
+        expect(result.finalMessage.trim()).toBe(authoredReply)
+        // Units may be shared in the table heading instead of repeated in cells.
+        expect(authoredReply).toMatch(/\b(?:minutes?|mins?|m)\b/iu)
+        const lines = authoredReply.split(/\r?\n/u)
+        let previousLine = -1
+        for (const [name, minutes] of stops) {
+          const matchingLines = lines.flatMap((line, index) =>
+            new RegExp(`\\b${name}\\b`, 'iu').test(line) ? [{ line, index }] : []
+          )
+          expect(matchingLines, name).toHaveLength(1)
+          const match = matchingLines[0]
+          if (!match) throw new Error(`Missing synthetic stop: ${name}`)
+          expect(match.index, name).toBeGreaterThan(previousLine)
+          expect(match.line, name).toMatch(new RegExp(`\\b${minutes}\\b`, 'u'))
+          previousLine = match.index
+        }
+        expect(authoredReply).not.toMatch(/\b(?:I(?:'ve| have)?|successfully)\s+(?:attached|saved|scheduled|sent|logged|updated)\b/iu)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory, ...isolatedHomePaths, ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
+
   it('keeps compact group-email instructions conversational without unauthorized actions', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-email-e2e-'))

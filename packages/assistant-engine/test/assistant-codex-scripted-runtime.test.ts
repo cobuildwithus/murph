@@ -3704,6 +3704,137 @@ text(result.output);
     ])
   })
 
+  it.each(['native', 'code-only'] as const)(
+    'compact-table debug: provider-visible bounds (%s)',
+    { timeout: TURN_TIMEOUT_MS },
+    async (toolMode) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand,
+        directory: scenario.turnInput.codexHome,
+      })
+      if (toolMode === 'code-only') {
+        const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
+        if (!catalog || !Array.isArray(catalog.models)) {
+          throw new Error('Expected the bundled synthetic-test model catalog.')
+        }
+        for (const candidate of catalog.models) {
+          const model = readRecord(candidate)
+          if (model) model.tool_mode = 'code_mode_only'
+        }
+        await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
+      }
+      scenario.stub.captureProviderRequestDiagnostics()
+      scenario.stub.queue(
+        toolMode === 'native'
+          ? { toolSearchCall: { query: 'murph attach_response_card compact_table', limit: 1 } }
+          : { customToolCall: {
+              name: 'exec',
+              input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__attach_response_card");
+if (!tool) throw new Error("Deferred response-card metadata missing");
+text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool.description + "\\nSYNTHETIC_TABLE_METADATA_END");
+`,
+            } },
+        { text: 'SYNTHETIC_TABLE_DECLARATION_CAPTURED' },
+      )
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        env: {
+          ...scenario.turnInput.env,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+        },
+        groupConversation: false,
+        prompt: 'Inspect the available response-card contract without attaching a card.',
+      })
+      const summaries = scenario.stub.requestSummariesSinceBaseline()
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+      expect(result.finalMessage).toBe('SYNTHETIC_TABLE_DECLARATION_CAPTURED')
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.jsonEvents.filter((event) =>
+        readRecord(event)?.method === 'item/tool/call'
+      )).toEqual([])
+      expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+        includesToolSearch: toolMode === 'native',
+      })
+
+      const nominal = MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[1]
+      expect(nominal.properties.rows.maxItems).toBe(8)
+      expect(nominal.properties.rows.items.properties.values.items.maxLength).toBe(32)
+      let providerEvidence: Record<string, unknown>
+      if (toolMode === 'native') {
+        // Read the request AFTER real App Server discovery/serialization, not
+        // thread/start input or a test-owned schema/TypeScript converter.
+        const tool = (summaries[1]?.toolSearchOutputTools ?? [])
+          .flatMap((candidate) => {
+            const record = readRecord(candidate)
+            return Array.isArray(record?.tools)
+              ? record.tools.map(readRecord)
+              : [record]
+          })
+          .find((record) => record?.name === 'attach_response_card')
+        expect(tool).toBeDefined()
+        const card = readRecord(readRecord(readRecord(tool?.parameters)?.properties)?.card)
+        const generic = (Array.isArray(card?.anyOf) ? card.anyOf : [])
+          .map(readRecord)
+          .find((variant) => {
+            const properties = readRecord(variant?.properties)
+            return readRecord(properties?.rowHeader) !== null
+              && readRecord(properties?.rows) !== null
+          })
+        expect(generic, 'provider-visible generic table branch').toBeDefined()
+        const properties = readRecord(generic?.properties)
+        const rows = readRecord(properties?.rows)
+        const rowProperties = readRecord(readRecord(rows?.items)?.properties)
+        const cell = readRecord(readRecord(rowProperties?.values)?.items)
+        expect(rows?.type).toBe('array')
+        expect(cell?.type).toBe('string')
+        providerEvidence = {
+          source: 'provider input.tool_search_output.tools',
+          rowMaxItems: rows?.maxItems ?? null,
+          cellMaxLength: cell?.maxLength ?? null,
+          genericTableSchema: generic,
+          cardDescription: card?.description ?? null,
+          toolDescription: tool?.description ?? null,
+        }
+      } else {
+        const output = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+        const captured = /SYNTHETIC_TABLE_METADATA_LENGTH=(\d+)\n([\s\S]*?)\nSYNTHETIC_TABLE_METADATA_END/u.exec(output)
+        expect(captured, 'complete, untruncated provider-visible metadata').not.toBeNull()
+        const metadata = captured?.[2] ?? ''
+        expect(metadata.length).toBe(Number(captured?.[1]))
+        expect(metadata).toContain('exec tool declaration:')
+        const declaration = metadata.split('exec tool declaration:').slice(1).join('exec tool declaration:')
+        expect(declaration).toContain('murph__attach_response_card')
+        for (const field of ['compact_table', 'rowHeader', 'columns', 'rows', 'values']) {
+          expect(declaration).toContain(field)
+        }
+        providerEvidence = {
+          source: 'provider input.custom_tool_call_output: ALL_TOOLS.description',
+          // These are observations, not claims that a bare numeral proves a
+          // field-specific bound. The complete declaration/prose is evidence.
+          constraintLines: metadata.split('\n').filter((line) =>
+            /maxLength|maxItems|\b(?:8|32)\b/u.test(line)
+          ),
+          toolMetadata: metadata,
+        }
+      }
+      const evidence = JSON.stringify({
+        toolMode,
+        nominalBounds: { rows: 8, cellValue: 32 },
+        initialCompactTableShape: summaries[0]?.providerRequestDiagnostics
+          ?.includesResponseCardCompactTableShape ?? null,
+        providerEvidence,
+      })
+      // No request bodies, auth, prompts, home paths, or member data are logged.
+      // Fail rather than silently truncate declaration evidence on future drift.
+      expect(Buffer.byteLength(evidence, 'utf8')).toBeLessThan(60_000)
+      process.stdout.write(`[compact-table-debug-provider] ${evidence}\n`)
+    },
+  )
+
   it('documents why pinned Codex code-only metadata cannot replace native automation schema search', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
