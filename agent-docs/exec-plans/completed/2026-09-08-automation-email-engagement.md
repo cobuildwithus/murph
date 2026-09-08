@@ -1,6 +1,6 @@
 # Complete cross-channel automation engagement fix
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -18,4 +18,5 @@ Effort: Patch. Active members using Telegram or email retain ordinary scheduled-
 
 ## Verification and candidate review
 
-Pending PostgreSQL regression, focused mailbox/reconciliation/changelog tests, Web typecheck, lint, complexity, and parent review. PR CI and final ReviewGPT run on the stable pushed candidate.
+The real PostgreSQL regression rejected email activity before the extension and passed afterward. All 149 focused tests across mailbox, reconciliation, email ingress, and changelog passed. Web typecheck, focused ESLint (one pre-existing warning), and complexity guard passed. Parent review confirmed the same single metadata-only query, no new authority or persisted state, and preserved usage/consent/delivery checks. Product UX: Ready for the admission patch. The implementation is complete in PR #3046; exact-head CI and final ReviewGPT remain PR delivery gates, recorded in the PR body. No production recovery or deployment was performed.
+Completed: 2026-09-08
