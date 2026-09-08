@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "device-sync-after-completed-delivery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Device sync resumes after completed messages",
+    "summary": "Fixed a case where pending device updates could remain paused after a message had already been delivered.",
+    "details": "Murph now clears the obsolete delivery reminder so background sync can resume, while preserving messages that still need delivery.",
+    "relevanceTags": [
+      "wearables",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3048
+    ]
+  }
+}

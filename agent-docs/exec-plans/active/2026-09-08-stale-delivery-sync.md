@@ -62,3 +62,8 @@ are separate investigations; this task does not claim their recovery.
   device-sync and scheduling suites cover adjacent success paths.
 - Complexity guard passes with unchanged debt and unchanged existing hotspots;
   the two edited helpers remain below the threshold. No new owner or abstraction.
+- Focused verification: all 337 runtime tests across foreground, scheduling,
+  delivery, device-sync and entrypoint scheduling pass across the final affected
+  runs; assistant-runtime typecheck passes. Changelog rendering: 9 tests pass.
+- PR #3048 opened as draft. Parent candidate review complete; final ReviewGPT
+  and exact-head CI remain pending before completion.
