@@ -35,6 +35,7 @@ type HostedIngressLatencyDashboardReadRow = {
   linqDelivery: {
     acceptedAt: Date | null;
     attemptedAt: Date;
+    deliveredAt: Date | null;
     lastReceiptAt: Date | null;
     sourceRef: string | null;
     status: string;
@@ -1325,6 +1326,7 @@ export async function readHostedIngressLatencyDashboard(
         select: {
           acceptedAt: true,
           attemptedAt: true,
+          deliveredAt: true,
           lastReceiptAt: true,
           sourceRef: true,
           status: true,
@@ -1621,12 +1623,12 @@ export async function readHostedIngressLatencyDashboard(
 
     const deliveryAcceptedAtMs = row.linqDelivery.acceptedAt?.getTime() ?? null;
     const deliveryAttemptedAtMs = row.linqDelivery.attemptedAt.getTime();
-    const deliveryReceiptAtMs = (
-      row.linqDelivery.status === "delivered"
-      || row.linqDelivery.status === "failed"
-    )
-      ? row.linqDelivery.lastReceiptAt?.getTime() ?? null
-      : null;
+    const deliveryReceiptAt = row.linqDelivery.status === "delivered"
+      ? row.linqDelivery.deliveredAt
+      : row.linqDelivery.status === "failed"
+        ? row.linqDelivery.lastReceiptAt
+        : null;
+    const deliveryReceiptAtMs = deliveryReceiptAt?.getTime() ?? null;
     const ingressAcceptedAtMs = row.acceptedAt.getTime();
     const providerStartAtMs = providerRow?.providerStartAt?.getTime() ?? null;
 

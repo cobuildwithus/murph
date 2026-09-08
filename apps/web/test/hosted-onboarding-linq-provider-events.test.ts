@@ -7,6 +7,50 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
 describe("parseHostedLinqProviderEvent", () => {
+  it.each(["2026-02-03", "2025-01-01"])("keeps %s delivery lifecycle time separate from event ordering", (webhookVersion) => {
+    const deliveredAt = "2026-03-26T07:59:01.000-04:00";
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        createdAt: "2026-03-26T12:10:00.000Z",
+        eventType: "message.delivered",
+        webhookVersion,
+        data: webhookVersion === "2026-02-03"
+          ? { message_id: "msg_timestamp", delivered_at: deliveredAt }
+          : { message: { id: "msg_timestamp", delivered_at: deliveredAt } },
+      }),
+    });
+    expect(parsed).toMatchObject({
+      linqMessageId: "msg_timestamp",
+      providerCreatedAt: new Date("2026-03-26T12:10:00.000Z"),
+      providerDeliveredAt: new Date(deliveredAt),
+      payloadSanitizedJson: {
+        created_at: "2026-03-26T12:10:00.000Z",
+        delivered_at: new Date(deliveredAt).toISOString(),
+      },
+    });
+  });
+
+  it.each([undefined, null, 42, "not-a-date", "2026-03-26T12:00:01", "2026-99-26T12:00:01Z"])(
+    "falls back to event time for an absent or invalid delivery lifecycle value (%s)",
+    (deliveredAt) => {
+      for (const webhookVersion of ["2026-02-03", "2025-01-01"]) {
+        const parsed = parseHostedLinqProviderEvent({
+          event: buildGenericEvent({
+            eventType: "message.delivered",
+            webhookVersion,
+            data: webhookVersion === "2026-02-03"
+              ? { message_id: "msg_timestamp", delivered_at: deliveredAt }
+              : { message: { id: "msg_timestamp", delivered_at: deliveredAt } },
+          }),
+        });
+        expect(parsed?.providerDeliveredAt).toEqual(parsed?.providerCreatedAt);
+        expect(parsed?.payloadSanitizedJson).toMatchObject({
+          delivered_at: "2026-03-26T12:00:00.000Z",
+        });
+      }
+    },
+  );
+
   it("parses message.edited telemetry without retaining replacement text", () => {
     const event = buildGenericEvent({
       eventType: "message.edited",

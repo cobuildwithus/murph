@@ -93,6 +93,7 @@ export type ParsedHostedLinqProviderEvent = {
   phoneNumberLookupKey: string | null;
   phoneNumberRole: HostedLinqProviderEventPhoneRole;
   providerCreatedAt: Date;
+  providerDeliveredAt?: Date | null;
   providerHealth?: HostedLinqProviderHealthEvent;
   providerReason: string | null;
   providerStatus: string | null;
@@ -714,6 +715,10 @@ function parseGenericHostedLinqProviderEvent(input: {
     phoneNumber,
     phoneNumberRole,
     providerCreatedAt,
+    providerDeliveredAt: deliveryStatus === "delivered"
+      ? parseProviderDate(readStringAtPath(data, ["delivered_at"]))
+        ?? parseProviderDate(readStringAtPath(data, ["message", "delivered_at"]))
+      : null,
     providerReason,
     providerStatus,
     rawBody: input.rawBody,
@@ -736,6 +741,7 @@ function buildParsedProviderEvent(input: {
   phoneNumber: string | null;
   phoneNumberRole: HostedLinqProviderEventPhoneRole;
   providerCreatedAt?: Date | null;
+  providerDeliveredAt?: Date | null;
   providerHealth?: HostedLinqProviderHealthEvent;
   providerReason: string | null;
   providerStatus: string | null;
@@ -748,6 +754,10 @@ function buildParsedProviderEvent(input: {
   service: string | null;
 }): ParsedHostedLinqProviderEvent {
   const providerCreatedAt = input.providerCreatedAt ?? parseProviderCreatedAt(input.event.created_at);
+  // Event order and first confirmed delivery are different provider facts.
+  const providerDeliveredAt = input.deliveryStatus === "delivered"
+    ? input.providerDeliveredAt ?? providerCreatedAt
+    : null;
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   const phoneNumberIsLine = input.phoneNumberRole === "line";
   const phoneNumberLookupKey = phoneNumberIsLine ? createHostedPhoneLookupKey(phoneNumber) : null;
@@ -781,6 +791,7 @@ function buildParsedProviderEvent(input: {
     payloadSanitizedJson: toPrismaJson({
       api_version: normalizeNullableString(input.event.api_version),
       created_at: providerCreatedAt.toISOString(),
+      ...(providerDeliveredAt ? { delivered_at: providerDeliveredAt.toISOString() } : {}),
       event_id_suffix: toHostedOnboardingLogIdSuffix(input.event.event_id),
       event_type: input.event.event_type,
       trace_id_suffix: toHostedOnboardingLogIdSuffix(input.event.trace_id),
@@ -792,6 +803,7 @@ function buildParsedProviderEvent(input: {
     phoneNumberLookupKey,
     phoneNumberRole: input.phoneNumberRole,
     providerCreatedAt,
+    providerDeliveredAt,
     providerHealth:
       input.providerHealth ?? parseHostedLinqProviderHealthEvent(input.event),
     providerReason: normalizeProviderFreeText(input.providerReason),
