@@ -1,6 +1,6 @@
 # Make Junction operator recovery truthful and usable
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -72,5 +72,19 @@ review follows the completion workflow for the cross-package provider boundary.
   new scheduling, dependencies, or member messaging added. Existing account and
   source selection retain one authority. Shared request timeout classification
   preserves parent cancellation and never retries mutations.
-- Delivery pending: candidate commit, isolated preview, required CI and final
-  ReviewGPT for the provider/Web boundary.
+- Final ReviewGPT: PASS on the full production candidate at
+  70a8a56495495448230a3f8ad8bbcd5e45be886c. Mountain lane, GPT-6 Pro platform
+  metadata and response digest verified; observed run approximately 391 seconds
+  including staging. The review traced the Ops/provider boundary, disconnect
+  admission, and cancellation/retry behavior; no qualifying findings.
+- The isolated Vercel preview built successfully. Verified that its deployed
+  ops study serves the recovery anchor and controls. Captures are synthetic.
+- Broad CI identified one stale timeout-code assertion in the existing backfill
+  test. Updated it to the implemented timeout identity and GET retryability;
+  the one-attempt and zero-summary-call assertions remain intact. All 36
+  backfill tests and the affected typecheck passed. Total focused proof:
+  143 tests. This test-only correction does not alter the reviewed implementation.
+- Parent final review complete. PR #3049 retains the reviewed production code;
+  the final commit adds only this task record and the corrected regression
+  assertion. Required CI gates the final PR head. Production is not deployed.
+Completed: 2026-09-08
