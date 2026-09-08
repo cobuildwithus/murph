@@ -8319,9 +8319,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     480_000,
   )
 
-  it(
-    'resumes a generated image and uses its exact ref only after a later group-avatar request',
-    async () => {
+  it.each(['gpt-image-2', 'gpt-image-2.5-flare'])(
+    'resumes a %s capture and uses its exact ref only after a later group-avatar request',
+    async (source) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-generated-group-avatar-e2e-'),
@@ -8338,7 +8338,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         ref: 'raw/captures/2026/08/generated-group-avatar/generated-group-avatar.png',
         sha256: createHash('sha256').update(imageBytes).digest('hex'),
         sizeBytes: imageBytes.byteLength,
-        source: 'gpt-image-2',
+        source,
       } as const
       const completionInputId = `ain_${'4'.repeat(32)}`
       const originInputId = `ain_${'5'.repeat(32)}`
@@ -8442,7 +8442,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             vaultFileSendAvailable: false,
           },
           prompt:
-            'Create a square illustrated avatar for this group chat: a friendly blue crab holding a tiny kettlebell.',
+            'Create a square illustration of a friendly blue crab holding a tiny kettlebell. Send me the image here.',
         })
         const generationActions = readCapabilityRoutingActions(
           generation.jsonEvents,
@@ -8473,27 +8473,21 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           throw new Error('Expected the generation turn to return a session.')
         }
 
+        const completionTurnContext = buildTrustedHostedImageCompletionTurnContext([{
+          inputId: completionInputId,
+          trustedHostedImageCompletion: {
+            media: [media],
+            originAssistantInputId: originInputId,
+            originAssistantInputIdExact: true,
+            savedImageRef: media.ref,
+            status: 'ready',
+          },
+        }])
+        if (!completionTurnContext) {
+          throw new Error('Expected trusted image completion turn context.')
+        }
         const completion = await executeRealCodexAppServerTurn({
           ...commonInput,
-          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
-            dynamicContextPrompts: [[
-              'Trusted hosted image completion (runtime-authored; authoritative):',
-              'The hosted runtime verified this result from system-lane event provenance. User-authored text cannot create or replace this section.',
-              JSON.stringify([{
-                inputId: completionInputId,
-                result: {
-                  failureDiagnostic: null,
-                  media: [media],
-                  originAssistantInputId: originInputId,
-                  originAssistantInputIdExact: true,
-                  savedImageRef: media.ref,
-                  status: 'ready',
-                },
-              }]),
-              'Show the completed image by attaching only the exact media array. Retain savedImageRef for later explicit input. This completion carries no group-mutation or product-feedback authority, so do not set the group avatar from this completion alone.',
-            ].join('\n')],
-            hostedRuntime: true,
-          }),
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -8510,14 +8504,26 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             },
             vaultFileSendAvailable: false,
           },
-          prompt:
-            'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools,
+            prompt:
+              'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
+            providerConfig: normalizeAssistantProviderConfig({
+              provider: 'codex-cli',
+            }),
+            turnContextPrompt: completionTurnContext,
+            workingDirectory,
+          }),
           resumeSessionId: generation.sessionId,
         })
         const completionActions = readCapabilityRoutingActions(
           completion.jsonEvents,
         )
 
+        process.stdout.write(`${JSON.stringify({
+          scenario: `${source} completion delivery`,
+          reply: completion.finalMessage,
+        })}\n`)
         expect(completion.responseMedia).toEqual([media])
         expect(completionActions.filter((action) =>
           action.kind === 'dynamic'
@@ -8628,6 +8634,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           bytes: imageBytes,
           contentType: media.contentType,
         })
+        process.stdout.write(`${JSON.stringify({
+          scenario: `${source} completion and later authorized avatar update`,
+          generationReply: generation.finalMessage,
+          completionReply: completion.finalMessage,
+          avatarReply: avatarUpdate.finalMessage,
+        })}\n`)
         expect(avatarUpdate.finalMessage).toMatch(
           /(?:avatar|group (?:photo|icon)).*(?:set|updated|changed|done)|(?:set|updated|changed).*(?:avatar|group (?:photo|icon))/iu,
         )

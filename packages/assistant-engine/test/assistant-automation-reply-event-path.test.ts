@@ -657,7 +657,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('memo-1.m4a')
   })
 
-  it('binds an exact native reply to the first of two generated captures', async () => {
+  it.each(['gpt-image-2', 'gpt-image-2.5-flare'])('binds an exact native reply to the first of two %s captures', async (source) => {
     const vault = await createTempVault()
     const firstMedia = {
       alt: 'Generated image',
@@ -667,7 +667,7 @@ describe('assistant auto-reply event-first path', () => {
       ref: 'raw/captures/2026/08/first-avatar/first-avatar.png',
       sha256: '1'.repeat(64),
       sizeBytes: 101,
-      source: 'gpt-image-2',
+      source,
     } as const
     const secondMedia = {
       ...firstMedia,

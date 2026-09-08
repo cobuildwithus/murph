@@ -4224,6 +4224,11 @@ An exact provider tool-call id distinguishes multiple commands from one accepted
 or scheduled occurrence without becoming authority. Ordinary product feedback and
 verified-private support escalation remain accepted-message capabilities; scheduled
 turns create neither a feedback candidate nor a delivery-linked feedback obligation.
+Image generation and reference edits use `gpt-image-2.5-flare` through the
+existing OpenAI Images API. Exact-reply provenance and retained delivery evidence
+recognize both current captures and persisted `gpt-image-2` captures. Hosted usage
+accepts both models at the documented shared image token rates; deploy the Web
+usage reader before runners begin emitting GPT Image 2.5 records.
 Background image completion and its physical-note continuation remain bound to a
 real accepted message because they must return through that durable message route.
 The trusted completion keeps the foreground dynamic-tool contract so it resumes

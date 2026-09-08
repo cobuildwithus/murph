@@ -385,7 +385,7 @@ function expectPriceableImageUsage(
       expect.objectContaining({
         allowanceCostUsdMicros: "1080",
         allowanceCounted: true,
-        requestedModel: "gpt-image-2",
+        requestedModel: "gpt-image-2.5-flare",
         totalTokens: 46,
       })
     ),

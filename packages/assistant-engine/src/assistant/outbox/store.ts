@@ -21,7 +21,10 @@ import {
 } from '@murphai/runtime-state/node'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
-import { hasAssistantOutboxDeliveryEvidence } from '../response-media.js'
+import {
+  hasAssistantOutboxDeliveryEvidence,
+  isAssistantGeneratedImageResponseMedia,
+} from '../response-media.js'
 import { ensureAssistantState } from '../store/persistence.js'
 import { resolveAssistantStatePaths } from '../store.js'
 import {
@@ -1700,12 +1703,7 @@ function isGeneratedImageDeliveryEvidenceIntent(
   if (intent.media.length !== 1) {
     return false
   }
-  const media = intent.media[0]
-  return (
-    media?.kind === 'vault_image'
-    && media.source === 'gpt-image-2'
-    && media.ref.startsWith('raw/captures/')
-  )
+  return isAssistantGeneratedImageResponseMedia(intent.media[0])
 }
 
 function isPruneProtectedAssistantOutboxIntent(

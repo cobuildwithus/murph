@@ -753,7 +753,7 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices OpenAI image generation with GPT Image 2 text, image, and output tokens", () => {
+  it.each(["gpt-image-2", "gpt-image-2.5-flare"])("prices %s image generation text, image, and output tokens", (model) => {
     const generatedImage = {
       ...BASE_USAGE_RECORD,
       cachedInputTokens: 0,
@@ -776,7 +776,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
         total_tokens: 1_700,
       },
-      requestedModel: "gpt-image-2",
+      requestedModel: model,
       servedModel: null,
       totalTokens: 1_700,
       usageExtractionSourcePath: "openai.images.generate",
@@ -787,7 +787,7 @@ describe("hosted AI usage allowance pricing", () => {
       costUsdMicros: 21_500n,
       counted: true,
       pricingSnapshot: {
-        model: "gpt-image-2",
+        model,
         modelSource: "requested",
         pricingSource: "https://developers.openai.com/api/docs/pricing",
         standardCostUsdMicros: "21500",

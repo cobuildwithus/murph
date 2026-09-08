@@ -14,7 +14,7 @@ import type {
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
-export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2'
+export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2.5-flare'
 export const OPENAI_IMAGES_BASE_URL = 'https://api.openai.com/v1'
 // Image generation is slow but bounded; complex prompts can exceed two minutes,
 // especially reference-image edits. TimeoutError is deliberately not an

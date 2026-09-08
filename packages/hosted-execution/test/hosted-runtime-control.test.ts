@@ -648,13 +648,13 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/not supported/u);
   });
 
-  it("normalizes OpenAI image usage priced model aliases separately", () => {
-    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-image-2"))
-      .toBe("gpt-image-2");
-    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("openai/gpt-image-2"))
-      .toBe("gpt-image-2");
-    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-image-2-2026-07-01"))
-      .toBe("gpt-image-2");
+  it.each(["gpt-image-2", "gpt-image-2.5-flare"])("normalizes %s image usage aliases separately", (model) => {
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(model))
+      .toBe(model);
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(`openai/${model}`))
+      .toBe(model);
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(`${model}-2026-09-08`))
+      .toBe(model);
     expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-5.6-terra"))
       .toBeNull();
   });

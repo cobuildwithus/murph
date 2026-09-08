@@ -82,6 +82,7 @@ import {
 } from '../store.js'
 import {
   hasAssistantOutboxDeliveryEvidence,
+  isAssistantGeneratedImageResponseMedia,
   stripAssistantImageResponseTranscriptMarker,
 } from '../response-media.js'
 import {
@@ -5815,9 +5816,7 @@ function buildAssistantAutoReplyExplicitGeneratedImageReplyContext(input: {
   delivery: AssistantAutoReplyMatchingOutboxDelivery
 }): string | null {
   const exactMedia = input.delivery.media.length === 1 &&
-      input.delivery.media[0]?.kind === 'vault_image' &&
-      input.delivery.media[0].source === 'gpt-image-2' &&
-      input.delivery.media[0].ref.startsWith('raw/captures/')
+      isAssistantGeneratedImageResponseMedia(input.delivery.media[0])
     ? input.delivery.media[0]
     : null
   if (exactMedia !== null) {
