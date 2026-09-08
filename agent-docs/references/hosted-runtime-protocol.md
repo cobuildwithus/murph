@@ -2736,7 +2736,12 @@ sample of the 16 slowest claimed jobs in that pass. Each summary identifies only
 the provider, job kind, optional code-owned resource class, outcome, attempt/job
 counts, durable-progress presence, and timings for total execution, provider
 execution, unattributed provider work, connection-source reads, credential refreshes,
-and canonical imports. It omits member/account/job identifiers, payloads,
+and canonical imports. Optional historical-pull readiness, proposed follow-up
+count, and earliest follow-up delay explain successful attempts that only
+reschedule history. Delay is measured from the attempt's start, and null means
+no proposed follow-up. These scalar fields fit the existing 32-key summary
+budget and do not change job scheduling or imply canonical import progress.
+It omits member/account/job identifiers, payloads,
 cursors, provider responses, health values, and raw errors. The marker declares
 the total observed count, sample limit, and truncation state. The Web parser must
 accept the object-array field before a runner capable of emitting it is deployed.

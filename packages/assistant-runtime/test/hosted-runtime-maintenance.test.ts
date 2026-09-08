@@ -6942,6 +6942,9 @@ describe("runHostedDeviceSyncWakeLane", () => {
         credentialRefreshElapsedMs: 0,
         durableProgressCommitted: true,
         elapsedMs,
+        historicalPullReadiness: "pending",
+        scheduledJobCount: 1,
+        nextScheduledJobDelayMs: 86_400_000,
         jobCount: 1,
         jobKind: "resource",
         outcome: "completed",
@@ -7008,6 +7011,11 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncJobTimingTruncated: true,
     }));
     expect(timingSummaryObjects).toHaveLength(16);
+    expect(timingSummaryObjects[0]).toMatchObject({
+      historicalPullReadiness: "pending",
+      scheduledJobCount: 1,
+      nextScheduledJobDelayMs: 86_400_000,
+    });
     expect(timingSummaryObjects.map((summary) => summary.elapsedMs)).toEqual(
       Array.from({ length: 16 }, (_, index) => 18_000 - index * 1_000),
     );

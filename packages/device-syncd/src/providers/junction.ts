@@ -1427,6 +1427,20 @@ export function createJunctionDeviceSyncProvider(
     }
   }
 
+  async function readHistoricalPullReadiness(
+    context: ProviderJobContext,
+    resource: string,
+    sourceProviderSlug: string | null,
+  ): Promise<JunctionHistoricalPullReadiness> {
+    const readiness = resolveJunctionHistoricalPullReadiness({
+      resource,
+      snapshot: await loadJunctionHistoricalPullSnapshot(context),
+      sourceProviderSlug,
+    });
+    context.recordHistoricalPullReadiness?.(readiness);
+    return readiness;
+  }
+
   /**
    * Asks Junction to re-run the provider's historical pull for one stalled
    * source. Junction gates this endpoint per team, so a gated answer records a
@@ -3053,11 +3067,11 @@ export function createJunctionDeviceSyncProvider(
           requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && window.windowStart === historicalWindowStart
         ) {
-          const historicalPullReadiness = resolveJunctionHistoricalPullReadiness({
-            resource: effectiveResource,
-            snapshot: await loadJunctionHistoricalPullSnapshot(context),
+          const historicalPullReadiness = await readHistoricalPullReadiness(
+            context,
+            effectiveResource,
             sourceProviderSlug,
-          });
+          );
           if (historicalPullReadiness === "no_obligation") {
             return withJunctionExtendedTimeseriesBackfillFollowUp({
               context,
@@ -3382,11 +3396,11 @@ export function createJunctionDeviceSyncProvider(
         const historicalPullReadiness =
           requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && timeseriesImport.fetchComplete
-            ? resolveJunctionHistoricalPullReadiness({
-                resource: effectiveResource,
-                snapshot: await loadJunctionHistoricalPullSnapshot(context),
+            ? await readHistoricalPullReadiness(
+                context,
+                effectiveResource,
                 sourceProviderSlug,
-              })
+              )
             : undefined;
         if (
           extendedHistoricalBackfill

@@ -2798,6 +2798,10 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
 });
 
 test("sparse history waits for upstream pull success beyond the empty retry ladder", async () => {
+  const readinessDecisions: string[] = [];
+  const recordHistoricalPullReadiness = (readiness: string): void => {
+    readinessDecisions.push(readiness);
+  };
   const historicalPullState: MutableHistoricalPullState = {
     resource: "caffeine",
     status: "in_progress",
@@ -2837,7 +2841,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     },
   }, 1);
   const pending = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
+    { ...createJobContext(), recordHistoricalPullReadiness },
     exhausted,
   );
   const retry = findResourceJob(pending.scheduledJobs ?? [], "caffeine");
@@ -2845,6 +2849,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
   assertHistoryCoverage(pending.metadataPatch, "omron", "caffeine", false);
   assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
   assert.equal(requests.length, 0);
+  assert.deepEqual(readinessDecisions, ["pending"]);
 
   historicalPullState.status = "success";
   timeseriesRecords.push({
@@ -2854,7 +2859,10 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     value: 0.08,
   });
   const completed = await executeImmediateResourceContinuations({
-    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    context: {
+      ...createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+      recordHistoricalPullReadiness,
+    },
     job: toJobRecord(retry, 2),
     provider,
     resource: "caffeine",
@@ -2862,6 +2870,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
 
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
   assert.equal(requests.length, 3);
+  assert.equal(readinessDecisions.at(-1), "ready");
 });
 
 test("sparse history completion resolves supported source aliases", async () => {
