@@ -1493,7 +1493,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Device Connection Return">
+        <Section id="device-connection-return" title="Device Connection Return">
           {callbackRecoveryNotice ? (
             <Alert {...CONNECT_NOTICE_PRESENTATION.info}>
               <AlertTitle>{callbackRecoveryNotice.title}</AlertTitle>
