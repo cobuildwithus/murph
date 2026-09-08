@@ -1142,7 +1142,7 @@ describe("hosted ops Junction diagnostics", () => {
 
     expect(failed.status).toBe(200);
     await expect(failed.json()).resolves.toMatchObject({
-      ok: true,
+      ok: false,
       response: {
         errorCode: "JUNCTION_TRIGGER_HISTORICAL_PULL_FAILED",
         ok: false,
@@ -1150,4 +1150,62 @@ describe("hosted ops Junction diagnostics", () => {
       },
     });
   });
+
+  it("checks live selected-source status without backfill or refresh work", async () => {
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-01-03T00:00:00Z", provider: "junction",
+      result: { selectedSource: { status: "error", errorCode: "token_refresh_failed" } },
+    });
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(createJsonPostRequest(
+      "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+      { memberId: "member_target", sourceProvider: SELECTED_SOURCE_PROVIDER, statusOnly: true },
+      { headers: { origin: "https://join.example.test" } },
+    ));
+    expect(response.status).toBe(200);
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    expect(mocks.probeRest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ endpoint: "providers" }));
+    await expect(response.json()).resolves.toMatchObject({
+      selectedConnection: { id: JUNCTION_PUBLIC_CONNECTION_ID, status: "active" },
+      selectedSource: { status: "error", errorCode: "token_refresh_failed" },
+    });
+  });
+
+  it("preserves a failed refresh and the independent status check without historical reads", async () => {
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-01-03T00:00:00Z", provider: "junction",
+      result: {
+        response: { ok: false, errorCode: "JUNCTION_REFRESH_NO_CONNECTED_SOURCES" },
+        selectedSource: { status: "error", errorCode: "token_refresh_failed" },
+      },
+    });
+    const response = await hostedOpsJunctionRecoveryRoute.POST(createJsonPostRequest(
+      "https://join.example.test/api/ops/device-sync/junction-recovery",
+      { action: "refresh", memberId: "member_target", sourceProvider: SELECTED_SOURCE_PROVIDER },
+      { headers: { origin: "https://join.example.test" } },
+    ));
+    expect(response.status).toBe(200);
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    expect(mocks.probeRest).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      response: { ok: false, errorCode: "JUNCTION_REFRESH_NO_CONNECTED_SOURCES" },
+      selectedSource: { status: "error", errorCode: "token_refresh_failed" },
+    });
+  });
+
+  it.each([
+    { status: "disconnected", lastErrorCode: null },
+    { status: "connected", lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS" },
+  ])("refuses refresh for a source fenced by disconnect: %j", async (source) => {
+    const current = await mocks.listConnectionSources();
+    mocks.listConnectionSources.mockResolvedValue(current.map((entry: Record<string, unknown>) => ({ ...entry, ...source })));
+    const response = await hostedOpsJunctionRecoveryRoute.POST(createJsonPostRequest(
+      "https://join.example.test/api/ops/device-sync/junction-recovery",
+      { action: "refresh", memberId: "member_target", sourceProvider: SELECTED_SOURCE_PROVIDER },
+      { headers: { origin: "https://join.example.test" } },
+    ));
+    expect(response.status).toBe(409);
+    expect(mocks.probeRest).not.toHaveBeenCalled();
+  });
+
 });

@@ -280,3 +280,90 @@ function recoveryWitness(userId: string) {
     workspaceVersion: "24",
   };
 }
+
+test("Junction recovery pins the inspected target and checks status without replaying refresh", async () => {
+  const diagnostic = {
+    generatedAt: "2026-01-03T00:00:00Z", memberId: "member_test", sourceProvider: "oura", ok: true,
+    selectedSource: { status: "error", errorCode: "token_refresh_failed", lastDataAt: null },
+    selectedConnection: {
+      id: "dspc_test", status: "active", provider: "junction", connectionMatchCount: 1,
+      lastSyncStartedAt: null, lastSyncCompletedAt: null, nextReconcileAt: null,
+    },
+    matrix: null,
+    backfill: { hasUsefulHistoricalRecords: null },
+    webSourceProjection: { sourceCount: 1, totalResourceCount: 1 },
+    window: { windowStart: "2026-01-01T00:00:00Z", windowEnd: "2026-01-03T00:00:00Z" },
+  };
+  let releaseRefresh: (() => void) | undefined;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const body = readRequestBody(init);
+    if (String(input).endsWith("junction-recovery")) {
+      await new Promise<void>((resolve) => { releaseRefresh = resolve; });
+      return jsonResponse({
+        action: "refresh", ok: false, memberId: "member_test", sourceProvider: "oura",
+        response: { ok: false, errorCode: "JUNCTION_REFRESH_NO_CONNECTED_SOURCES" },
+        selectedSource: diagnostic.selectedSource,
+      });
+    }
+    if (body.statusOnly) return jsonResponse({
+      ...diagnostic,
+      selectedSource: { status: "connected", errorCode: null, lastDataAt: "2026-01-03T01:00:00Z" },
+    });
+    return jsonResponse(diagnostic);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("FormData", class {
+    private values: Map<string, string>;
+    constructor(form: HTMLFormElement) {
+      this.values = new Map(Array.from(form.querySelectorAll<HTMLInputElement>("input"), (input) => [input.name, input.value]));
+    }
+    get(key: string) { return this.values.get(key) ?? null; }
+  });
+  const rendered = await renderClientComponent(createElement(RuntimeMaintenanceClient, {
+    initialOverview: { candidates: [], generatedAt: "2026-01-03T00:00:00Z", limit: 20, nextCursor: null, totalCandidateCount: 0 },
+    initialStalledRecheckOverview: { candidates: [], generatedAt: "2026-01-03T00:00:00Z", limit: 100, scanTruncated: false, totalCandidateCount: 0 },
+  }), { requireButton: false });
+  const button = (label: string) => {
+    const result = Array.from(rendered.container.querySelectorAll("button")).find(element => element.textContent?.includes(label));
+    assert.ok(result, `Missing button: ${label}`);
+    return result;
+  };
+  try {
+    const member = rendered.container.querySelector<HTMLInputElement>('[name="memberId"]')!;
+    const source = rendered.container.querySelector<HTMLInputElement>('[name="sourceProvider"]')!;
+    member.value = "member_test";
+    source.value = "oura";
+    await act(async () => {
+      rendered.container.querySelector("form")!.dispatchEvent(new rendered.window.Event("submit", { bubbles: true, cancelable: true }));
+      await settleAsyncWork();
+    });
+    expect(rendered.container.textContent).toContain("token_refresh_failed");
+    await act(async () => {
+      button("Retry Junction sync").click();
+      await settleAsyncWork();
+    });
+    expect(button("Retrying").disabled).toBe(true);
+    expect(button("Check status").disabled).toBe(true);
+    expect(member.disabled).toBe(true);
+    expect(readRequestBody(fetchMock.mock.calls[1]?.[1])).toEqual({
+      action: "refresh", memberId: "member_test", connectionId: "dspc_test", sourceProvider: "oura",
+    });
+    await act(async () => { releaseRefresh?.(); await settleAsyncWork(); });
+    expect(rendered.container.textContent).toContain("No sources were refreshed");
+    await act(async () => { button("Check status").click(); await settleAsyncWork(); });
+    expect(readRequestBody(fetchMock.mock.calls[2]?.[1])).toEqual({
+      statusOnly: true, memberId: "member_test", connectionId: "dspc_test", sourceProvider: "oura",
+    });
+    expect(rendered.container.textContent).not.toContain("token_refresh_failed");
+    expect(rendered.container.textContent).toContain("connected");
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("junction-recovery"))).toHaveLength(1);
+    await act(async () => {
+      member.value = "member_other";
+      member.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+      await settleAsyncWork();
+    });
+    expect(rendered.container.querySelector('[aria-label="Junction recovery"]')).toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});

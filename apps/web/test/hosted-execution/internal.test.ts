@@ -8,7 +8,8 @@ import {
 import {
   encodeHostedExecutionSignedRequestPayload,
 } from "@murphai/hosted-execution/auth";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Prisma } from "@prisma/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedOnboardingError } from "../../src/lib/hosted-onboarding/errors";
 import {
@@ -16,7 +17,7 @@ import {
   requireHostedCloudflareCallbackRequest,
   requireHostedCloudflareSystemCallbackRequest,
 } from "../../src/lib/hosted-execution/cloudflare-callback-auth";
-import type { HostedCallbackRequestNonceStore } from "../../src/lib/hosted-execution/internal-request-nonces";
+import { PrismaHostedCallbackRequestNonceStore, type HostedCallbackRequestNonceStore } from "../../src/lib/hosted-execution/internal-request-nonces";
 import { requireVercelCronRequest } from "../../src/lib/hosted-execution/vercel-cron";
 
 const FIXED_TIMESTAMP = "2026-04-05T00:00:00.000Z";
@@ -184,6 +185,38 @@ describe("requireHostedCloudflareCallbackRequest", () => {
       code: "HOSTED_CLOUDFLARE_CALLBACK_REPLAYED",
       httpStatus: 401,
     } satisfies Partial<HostedOnboardingError>);
+  });
+
+  it("rejects a signed callback as replay when reindex raises a nonce conflict", async () => {
+    const request = await createSignedCallbackRequest({
+      body: "",
+      nonce: "0123456789abcdef0123456789abcdef",
+      path: "/api/internal/hosted-runtime/log",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_nonce_conflict",
+    });
+    const queryRaw = vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
+      "Synthetic nonce conflict",
+      {
+        clientVersion: "test",
+        code: "P2010",
+        meta: {
+          driverAdapterError: new Error("Synthetic adapter error", {
+            cause: { originalCode: "23505", constraint: { fields: ["nonce_hash"] } },
+          }),
+        },
+      },
+    ));
+
+    await expect(requireHostedCloudflareCallbackRequest(request, {
+      maxBodyBytes: 0,
+      nonceStore: new PrismaHostedCallbackRequestNonceStore({ $queryRaw: queryRaw } as never),
+      nowMs: FIXED_NOW_MS,
+    })).rejects.toMatchObject({
+      code: "HOSTED_CLOUDFLARE_CALLBACK_REPLAYED",
+      httpStatus: 401,
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it("accepts a system callback without a member header and rejects its replay", async () => {

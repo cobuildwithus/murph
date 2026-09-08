@@ -478,6 +478,7 @@ function GroupUsageFundingStudy() {
         >
           <div inert>
             <GroupSponsorshipManagementCard
+              periodEndTimeZone="UTC"
               endpoint={endpoint}
               initialSelectedMonthlyCapMinor={5_000}
               management={{
@@ -498,6 +499,7 @@ function GroupUsageFundingStudy() {
           state="monthly-paused"
         >
           <GroupSponsorshipManagementCard
+            periodEndTimeZone="UTC"
             endpoint={endpoint}
             inert
             management={{
@@ -517,6 +519,7 @@ function GroupUsageFundingStudy() {
           state="monthly-recovery"
         >
           <GroupSponsorshipManagementCard
+            periodEndTimeZone="UTC"
             endpoint={endpoint}
             management={{
               authorizationId: "hgsa_design_recovery",
@@ -535,6 +538,7 @@ function GroupUsageFundingStudy() {
           state="monthly-cancel-only"
         >
           <GroupSponsorshipManagementCard
+            periodEndTimeZone="UTC"
             cancelOnly
             endpoint="/api/groups/fund/design/sponsorship"
             management={{

@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "cross-channel-scheduled-updates",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Scheduled updates follow you across channels",
+    "summary": "Recent Telegram and email conversations now keep scheduled updates eligible when you also have iMessage connected.",
+    "details": "Murph counts Telegram and email activity within the same 28-day window, so switching channels does not incorrectly pause updates such as Personal Patterns. Your usage limits and delivery preferences still apply.",
+    "relevanceTags": [
+      "telegram",
+      "email",
+      "automations",
+      "personal-patterns"
+    ],
+    "sourcePullRequests": [
+      3046
+    ]
+  }
+}

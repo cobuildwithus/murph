@@ -28,9 +28,11 @@ Cloudflare Containers API. Quota admission and native rollout convergence must
 complete before uploading or activating any Worker version. The serving and
 retained legacy applications are excluded from native mutations.
 Native provider failures report the operation, HTTP status, numeric API codes,
-and bounded symbolic native codes. Raw provider prose, response details and
-request identifiers remain private. Inspect this evidence before retrying or
-changing capacity; transport and malformed-response failures stay distinct.
+and at most five redacted messages of 320 characters each. The existing runtime
+redactor removes credential and personal-identifier shapes; the provider boundary
+also removes its exact token, account, requested name/image and native resource
+identifiers. Raw response details remain private. Inspect the provider explanation
+before retrying or changing capacity; transport and malformed responses stay distinct.
 Member applications require drain evidence before namespace reuse. The dedicated
 smoke application carries no member invocation, so it proceeds directly through
 native rollout and readiness checks without member drain admission.
@@ -58,6 +60,10 @@ The legacy staging pointer predates immutable admission receipts. Its inactive
 application is reconciled through the existing drain/admission path, including
 when a native create committed but its response or subsequent Worker publication
 was lost. Its image is never reused as a verified artifact without provenance.
+A Worker-only release may retain a legacy active record with a mutable image tag.
+The reuse reader applies its legacy-provenance check to whichever release it
+selects, candidate or active, before inspecting the image. Such records require
+a normal immutable image build; they never authorize reuse of a legacy tag.
 No deployment-convergence restart retry is added to message processing.
 
 For a compatible Worker coordination change, the protected workflow may explicitly

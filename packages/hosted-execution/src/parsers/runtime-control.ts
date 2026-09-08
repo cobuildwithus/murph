@@ -354,6 +354,7 @@ const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET = new Set<string>(
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_RUNTIME_DEVICE_SYNC_JOB_TIMING_MAX_KEYS = 32;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
+  "companionSyncAttempts",
   "codexActionToolSummaries",
   "deliveryErrorSummaries",
   "deviceSyncJobTimingSummaries",

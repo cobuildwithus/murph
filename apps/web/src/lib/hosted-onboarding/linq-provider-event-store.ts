@@ -23,6 +23,7 @@ import {
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
+import { lockHostedLinqProviderReceiptTx } from "./linq-message-receipt-lock";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
@@ -39,6 +40,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
   >;
 }> {
   const receivedAt = input.receivedAt ?? new Date();
+  await lockHostedLinqProviderReceiptTx(input);
   const health = input.event.providerHealth ?? {
     chat: null,
     line: null,

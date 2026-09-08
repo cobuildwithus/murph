@@ -30,7 +30,9 @@ import type {
   HostedRuntimeRecheckResult,
   HostedRuntimeStalledRecheckOverview,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
-import type { HostedOpsJunctionDiagnosticResult } from "@/src/lib/hosted-ops/device-sync-diagnostic-types";
+import type { HostedOpsJunctionDiagnosticResult, HostedOpsJunctionRecoveryResult } from "@/src/lib/hosted-ops/device-sync-diagnostic-types";
+
+import { JunctionRecoveryPanel } from "./junction-recovery-panel";
 
 import {
   hasUnresolvedRuntimeRecheckWitness,
@@ -47,6 +49,8 @@ interface RuntimeMaintenanceClientProps {
 
 type PendingAction =
   | { kind: "junction-diagnostic" }
+  | { kind: "junction-refresh" }
+  | { kind: "junction-status" }
   | { kind: "refresh" }
   | { kind: "refresh-stalled-discovery" }
   | { kind: "recheck-runtime-batch" }
@@ -75,6 +79,8 @@ export function RuntimeMaintenanceClient({
     useState<string | null>(null);
   const [junctionDiagnosticResult, setJunctionDiagnosticResult] =
     useState<HostedOpsJunctionDiagnosticResult | null>(null);
+  const [junctionRecoveryResult, setJunctionRecoveryResult] = useState<HostedOpsJunctionRecoveryResult | null>(null);
+  const [junctionRecoveryError, setJunctionRecoveryError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [junctionDiagnosticError, setJunctionDiagnosticError] = useState<string | null>(null);
@@ -82,6 +88,7 @@ export function RuntimeMaintenanceClient({
     () => formatDateTime(overview.generatedAt),
     [overview.generatedAt],
   );
+  const pendingKind = pending?.kind;
   const pendingLabel = describeMaintenancePendingAction(pending);
   const hasUnresolvedRuntimeRecheckBatch = hasUnresolvedRuntimeRecheckWitness(
     runtimeRecheckResult,
@@ -263,6 +270,8 @@ export function RuntimeMaintenanceClient({
     setPending({ kind: "junction-diagnostic" });
     setJunctionDiagnosticError(null);
     setJunctionDiagnosticResult(null);
+    setJunctionRecoveryResult(null);
+    setJunctionRecoveryError(null);
     try {
       const result = await requestJson<HostedOpsJunctionDiagnosticResult>(
         "/api/ops/device-sync/junction-diagnostics",
@@ -285,6 +294,44 @@ export function RuntimeMaintenanceClient({
       setJunctionDiagnosticResult(result);
     } catch (diagnosticError) {
       setJunctionDiagnosticError(describeClientError(diagnosticError));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function runJunctionRecovery(refresh: boolean): Promise<void> {
+    if (!junctionDiagnosticResult || pending) return;
+    const target = {
+      memberId: junctionDiagnosticResult.memberId,
+      connectionId: junctionDiagnosticResult.selectedConnection.id,
+      sourceProvider: junctionDiagnosticResult.sourceProvider,
+    };
+    setPending({ kind: refresh ? "junction-refresh" : "junction-status" });
+    setJunctionRecoveryError(null);
+    if (refresh) setJunctionRecoveryResult(null);
+    try {
+      if (refresh) {
+        const result = await requestJson<HostedOpsJunctionRecoveryResult>("/api/ops/device-sync/junction-recovery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...target, action: "refresh" }),
+        });
+        setJunctionRecoveryResult(result);
+        setJunctionDiagnosticResult(previous => previous ? { ...previous, selectedSource: result.selectedSource } : null);
+      } else {
+        const result = await requestJson<HostedOpsJunctionDiagnosticResult>("/api/ops/device-sync/junction-diagnostics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...target, statusOnly: true }),
+        });
+        setJunctionDiagnosticResult(previous => previous ? {
+          ...previous,
+          selectedSource: result.selectedSource,
+          selectedConnection: result.selectedConnection,
+        } : null);
+      }
+    } catch (error) {
+      setJunctionRecoveryError(`${describeClientError(error)} ${refresh ? "Refresh outcome unknown. Check status before retrying." : "The latest source status could not be checked."}`);
     } finally {
       setPending(null);
     }
@@ -314,7 +361,7 @@ export function RuntimeMaintenanceClient({
       </header>
 
       <section
-        aria-busy={pending?.kind === "junction-diagnostic"}
+        aria-busy={pendingKind?.startsWith("junction-")}
         aria-labelledby="runtime-junction-diagnostic-title"
         className="rounded-xl border border-border/70 bg-card/90 p-5"
       >
@@ -343,6 +390,11 @@ export function RuntimeMaintenanceClient({
 
         <form
           className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-4"
+          onInput={() => {
+            setJunctionDiagnosticResult(null);
+            setJunctionRecoveryResult(null);
+            setJunctionRecoveryError(null);
+          }}
           onSubmit={(event) => {
             event.preventDefault();
             void runJunctionDiagnostic(new FormData(event.currentTarget));
@@ -350,6 +402,7 @@ export function RuntimeMaintenanceClient({
         >
           <Field label="Member id" htmlFor="junction-diagnostic-member-id">
             <Input
+              disabled={pending !== null}
               autoComplete="off"
               id="junction-diagnostic-member-id"
               name="memberId"
@@ -360,6 +413,7 @@ export function RuntimeMaintenanceClient({
           </Field>
           <Field label="Source provider" htmlFor="junction-diagnostic-source-provider">
             <Input
+              disabled={pending !== null}
               autoComplete="off"
               id="junction-diagnostic-source-provider"
               name="sourceProvider"
@@ -370,6 +424,7 @@ export function RuntimeMaintenanceClient({
           </Field>
           <Field label="Connection id" htmlFor="junction-diagnostic-connection-id" optional>
             <Input
+              disabled={pending !== null}
               autoComplete="off"
               id="junction-diagnostic-connection-id"
               name="connectionId"
@@ -379,6 +434,7 @@ export function RuntimeMaintenanceClient({
           </Field>
           <Field label="Lookback days" htmlFor="junction-diagnostic-lookback-days">
             <Input
+              disabled={pending !== null}
               autoComplete="off"
               id="junction-diagnostic-lookback-days"
               inputMode="numeric"
@@ -392,6 +448,7 @@ export function RuntimeMaintenanceClient({
           </Field>
           <Field label="Timeseries probe days" htmlFor="junction-diagnostic-timeseries-days">
             <Input
+              disabled={pending !== null}
               autoComplete="off"
               id="junction-diagnostic-timeseries-days"
               inputMode="numeric"
@@ -405,6 +462,7 @@ export function RuntimeMaintenanceClient({
           </Field>
           <Field label="Window start" htmlFor="junction-diagnostic-window-start" optional>
             <Input
+              disabled={pending !== null}
               autoComplete="off"
               id="junction-diagnostic-window-start"
               name="windowStart"
@@ -414,6 +472,7 @@ export function RuntimeMaintenanceClient({
           </Field>
           <Field label="Window end" htmlFor="junction-diagnostic-window-end" optional>
             <Input
+              disabled={pending !== null}
               autoComplete="off"
               id="junction-diagnostic-window-end"
               name="windowEnd"
@@ -423,14 +482,14 @@ export function RuntimeMaintenanceClient({
           </Field>
           <div className="flex flex-col gap-3 lg:col-span-2 xl:col-span-4 sm:flex-row sm:items-center sm:justify-between">
             <div aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
-              {pending?.kind === "junction-diagnostic" ? "Running Junction diagnostic." : ""}
+              {pendingKind === "junction-diagnostic" ? "Running Junction diagnostic." : ""}
             </div>
             <Button
               disabled={pending !== null}
               type="submit"
             >
               <ActivityIcon data-icon="inline-start" />
-              {pending?.kind === "junction-diagnostic" ? "Running..." : "Run diagnostic"}
+              {pendingKind === "junction-diagnostic" ? "Running..." : "Run diagnostic"}
             </Button>
           </div>
         </form>
@@ -443,7 +502,20 @@ export function RuntimeMaintenanceClient({
         ) : null}
 
         {junctionDiagnosticResult ? (
-          <JunctionDiagnosticResultPanel result={junctionDiagnosticResult} />
+          <>
+            <JunctionRecoveryPanel
+              disabled={pending !== null}
+              error={junctionRecoveryError}
+              memberId={junctionDiagnosticResult.memberId}
+              onCheckStatus={() => void runJunctionRecovery(false)}
+              onRefresh={() => void runJunctionRecovery(true)}
+              pending={pendingKind === "junction-refresh" ? "refresh" : pendingKind === "junction-status" ? "status" : null}
+              response={junctionRecoveryResult?.response ?? null}
+              selectedSource={junctionDiagnosticResult.selectedSource}
+              sourceProvider={junctionDiagnosticResult.sourceProvider}
+            />
+            <JunctionDiagnosticResultPanel result={junctionDiagnosticResult} />
+          </>
         ) : null}
       </section>
 
@@ -499,7 +571,7 @@ export function RuntimeMaintenanceClient({
               variant="outline"
             >
               <RefreshCwIcon data-icon="inline-start" />
-              {pending?.kind === "refresh" ? "Refreshing..." : "Refresh"}
+              {pendingKind === "refresh" ? "Refreshing..." : "Refresh"}
             </Button>
             <Button
               disabled={pending !== null}
@@ -648,7 +720,7 @@ function JunctionDiagnosticResultPanel({
   return (
     <div className="mt-5 flex flex-col gap-4 rounded-lg border border-border/70 bg-muted/20 p-4">
       <div className="grid gap-3 md:grid-cols-4">
-        <MetricTile label="Connection" value={result.selectedConnection.status} />
+        <MetricTile label="Junction account" value={result.selectedConnection.status} />
         <MetricTile
           label="Sources"
           value={formatInteger(result.webSourceProjection.sourceCount)}
@@ -1007,6 +1079,8 @@ function describeMaintenancePendingAction(pending: PendingAction | null): string
   if (pending.kind === "wake-batch") {
     return `Waking ${formatInteger(pending.limit)} workspace${pending.limit === 1 ? "" : "s"}.`;
   }
+  if (pending.kind === "junction-refresh") return "Requesting Junction refresh.";
+  if (pending.kind === "junction-status") return "Checking Junction source status.";
   if (pending.kind === "junction-diagnostic") {
     return "";
   }

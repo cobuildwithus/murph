@@ -53,6 +53,7 @@ type RouteModule = typeof import(
 
 let route: RouteModule;
 let prisma: {
+  $queryRaw: ReturnType<typeof vi.fn>;
   $transaction: ReturnType<typeof vi.fn>;
   hostedMemberRouting: {
     findUnique: ReturnType<typeof vi.fn>;
@@ -69,6 +70,7 @@ describe("hosted runtime Linq delivery route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       $transaction: vi.fn(async (operation) => operation(prisma)),
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -106,6 +108,10 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(response.status).toBe(200);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.materializeHostedSignupWelcomeHomeRouteTx.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550100001",
       fromPhoneNumber: "+15550100099",

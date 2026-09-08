@@ -1558,7 +1558,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("runs due projected default cron work before a model-free mailbox row", async () => {
+  it.each(["assistant", "assistant_delivery"])("runs due cron work behind a projected %s wake before a model-free mailbox row", async (reason) => {
     const dueAt = "2026-04-27T00:00:00.000Z";
     mocks.getAssistantCronStatus.mockResolvedValue({
       dueJobs: 1,
@@ -1588,7 +1588,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       workspace: {
         ...createDueAssistantWorkspace({ nextWakeAt: dueAt }),
         nextDefaultProcessingWakeAt: dueAt,
-        nextDefaultProcessingWakeReason: "assistant",
+        nextDefaultProcessingWakeReason: reason,
         nextWakeReason: "device-sync.reconcile",
         systemMailboxProgressGeneration: "7",
       },

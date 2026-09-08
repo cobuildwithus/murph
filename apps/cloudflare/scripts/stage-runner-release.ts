@@ -31,7 +31,7 @@ export async function readReusableHostedRunnerImage(input: {
   listApplications: ListCloudflareContainerApplications;
 }): Promise<string | null> {
   const deployment = readHostedRunnerDeployment(readReleaseVariables(input.currentVersion));
-  if (!deployment || isLegacyCandidate(deployment.candidate)) return null;
+  if (!deployment || isLegacyRelease(deployment.candidate ?? deployment.active)) return null;
   const release = deployment.candidate ?? deployment.active;
   const className = release.bank === "primary" ? "RunnerContainer" : "NextRunnerContainer";
   const config = input.config;
@@ -166,7 +166,7 @@ function selectDeployment(input: {
     // A legacy staging pointer is not an immutable admission receipt. Native
     // creation may have committed before its response or Worker publication was lost.
     // Reconcile that inactive namespace through the existing drain/admission path.
-    if (input.candidateExists && !isLegacyCandidate(candidate)) throw new Error("A different candidate release is pending; reconcile it before preparing another image.");
+    if (input.candidateExists && !isLegacyRelease(candidate)) throw new Error("A different candidate release is pending; reconcile it before preparing another image.");
     candidate = null;
   }
   candidate ??= {
@@ -217,7 +217,7 @@ function readLogsEnabled(config: Record<string, unknown>): boolean {
     ? config.observability.logs.enabled === true : config.observability.enabled === true);
 }
 
-function isLegacyCandidate(release: HostedRunnerRelease | null): boolean {
+function isLegacyRelease(release: HostedRunnerRelease | null): boolean {
   return release !== null && release.executionIdentity === undefined && release.releaseSha === undefined;
 }
 

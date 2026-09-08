@@ -60,12 +60,14 @@ export function GroupSponsorshipManagementCard({
   inert = false,
   initialSelectedMonthlyCapMinor,
   management: initialManagement,
+  periodEndTimeZone,
 }: {
   cancelOnly?: boolean;
   endpoint: string;
   inert?: boolean;
   initialSelectedMonthlyCapMinor?: MonthlyCapMinor;
   management: GroupSponsorshipManagementProjection;
+  periodEndTimeZone?: string;
 }) {
   const [management, setManagement] = useState(initialManagement);
   const [selectedMonthlyCapMinor, setSelectedMonthlyCapMinor] = useState(
@@ -357,7 +359,7 @@ export function GroupSponsorshipManagementCard({
             Resets
           </dt>
           <dd className="mt-2 text-sm font-medium">
-            {formatPeriodEnd(management.periodEnd)}
+            {formatPeriodEnd(management.periodEnd, periodEndTimeZone)}
           </dd>
         </div>
       </dl>
@@ -764,13 +766,14 @@ function formatMoney(minor: number): string {
   }).format(minor / 100);
 }
 
-function formatPeriodEnd(value: string): string {
+function formatPeriodEnd(value: string, timeZone?: string): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
     ? new Intl.DateTimeFormat("en-US", {
         day: "numeric",
         month: "short",
         year: "numeric",
+        timeZone,
       }).format(date)
     : value;
 }

@@ -1,5 +1,6 @@
 import type { Message } from "@linqapp/sdk/resources/messages";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { lockHostedLinqMessageReceiptsTx } from "@/src/lib/hosted-onboarding/linq-message-receipt-lock";
 
 import {
   buildHostedLinqTerminalRetryMessage,
@@ -15,6 +16,21 @@ const original: Message = {
 };
 
 describe("one terminal Linq retry request", () => {
+  it("bounds receipt serialization and gives reversed message batches the same lock order", async () => {
+    const prisma = { $queryRaw: vi.fn().mockResolvedValue([]) };
+    const messageIds = Array.from({ length: 10 }, (_, index) => `synthetic-message-${index}`);
+    await lockHostedLinqMessageReceiptsTx({ messageIds, prisma });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(10);
+    const first = prisma.$queryRaw.mock.calls.map(([query]) => query);
+    prisma.$queryRaw.mockClear();
+    await lockHostedLinqMessageReceiptsTx({ messageIds: [...messageIds].reverse(), prisma });
+    expect(prisma.$queryRaw.mock.calls.map(([query]) => query)).toEqual(first);
+    expect(JSON.stringify(first)).not.toContain("synthetic-message");
+    prisma.$queryRaw.mockClear();
+    await expect(lockHostedLinqMessageReceiptsTx({ messageIds: [...messageIds, "overflow"], prisma })).rejects.toThrow("limit exceeded");
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["4001", "Message send failed", true],
     ["4001", "Message delivery failed", false],
