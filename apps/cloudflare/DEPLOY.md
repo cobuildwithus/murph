@@ -63,6 +63,8 @@ smoke artifact. There is one Worker activation and no member fleet promotion.
 An existing pending candidate becomes retained history; an absent inactive
 application is omitted from the effective config and exact-state receipt.
 Worker-only mode requires the predeploy gates and does not deploy runner changes.
+Production preflight accepts this explicit retained-image mode; production image
+changes still require immediate rollout and the existing state-isolation floors.
 The selected runner's old parser may omit new optional diagnostics; Worker-side
 logs remain available. Use a full release for changes that require a new runner.
 This mode does not change account quota or the overlap requirement of full image
