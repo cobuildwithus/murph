@@ -8380,6 +8380,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         ]
         const commonInput = {
           approvalPolicy: 'never',
+          // Local subscription auth exposes native image generation; this
+          // hosted journey must exercise Murph's generation/delivery owner.
+          configOverrides: ['features.image_generation=false'],
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
@@ -8448,6 +8451,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           generation.jsonEvents,
         )
 
+        process.stdout.write(`${JSON.stringify({
+          scenario: `${source} generation launch`,
+          reply: generation.finalMessage,
+          launchedImageCount: launchedImageOperationIds.length,
+        })}\n`)
         expect(generationActions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
@@ -8641,7 +8649,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           avatarReply: avatarUpdate.finalMessage,
         })}\n`)
         expect(avatarUpdate.finalMessage).toMatch(
-          /(?:avatar|group (?:photo|icon)).*(?:set|updated|changed|done)|(?:set|updated|changed).*(?:avatar|group (?:photo|icon))/iu,
+          /(?:avatar|group (?:photo|icon)).*(?:set|updated|changed|done|requested)|(?:set|updated|changed|requested).*(?:avatar|group (?:photo|icon))/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

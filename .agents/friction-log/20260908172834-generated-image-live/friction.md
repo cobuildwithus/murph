@@ -24,3 +24,7 @@ Run the focused live generated-image-to-group-avatar journey with local subscrip
 Found while validating an image-model upgrade. Deterministic image delivery, retention, and usage tests passed. The correction is confined to the live fixture and reuses the production prompt builders.
 
 After correcting the context path, the journey passed once. A later run failed at initial generation-tool selection before image-provider execution; the opt-in journey still needs consistency and visible-reply review.
+
+## Follow-up diagnosis
+
+The local subscription binary also enables native image generation by default. Scope `features.image_generation=false` to this hosted image journey so its synthetic launcher and private-delivery owner are exercised. With that override, exact generation, attachment, and avatar-update effects passed. The provider stub returns `requested`, so the reply assertion must also accept a truthful requested-update acknowledgment rather than require completed-update wording. Compact launch diagnostics now appear before assertions.
