@@ -658,9 +658,14 @@ test("device sync service records privacy-safe job phase timings", async () => {
         context.recordProviderRequestTiming?.("inventory", 300);
         advanceClock(400);
         context.recordProviderRequestTiming?.("resource", 400);
+        context.recordHistoricalPullReadiness?.("pending");
         await context.importSnapshot({ kind: "timing-test" });
         advanceClock(1_500);
-        return {};
+        return { scheduledJobs: [{
+          kind: "resource",
+          availableAt: "2026-08-26T10:00:00.000Z",
+          payload: { resource: "sleep" },
+        }] };
       },
     })],
     importer: {
@@ -718,6 +723,9 @@ test("device sync service records privacy-safe job phase timings", async () => {
       credentialRefreshElapsedMs: 500,
       durableProgressCommitted: true,
       elapsedMs: 5_700,
+      historicalPullReadiness: "pending",
+      scheduledJobCount: 1,
+      nextScheduledJobDelayMs: 86_400_000,
       jobCount: 1,
       jobKind: "resource",
       outcome: "completed",
@@ -9166,6 +9174,10 @@ test("device sync scheduler immediately repairs legacy Junction coverage progres
           }
 
           if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({ data: [] });
+          }
+
+          if (new URL(url).pathname === "/v2/introspect/historical_pull") {
             return createJsonResponse({ data: [] });
           }
 
