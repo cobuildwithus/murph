@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { redactHostedRuntimeDiagnosticText } from "@murphai/hosted-execution";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 import { runnerApplicationMatches, type RunnerApplicationSpecification } from "./runner-release-application.ts";
 
@@ -9,10 +10,10 @@ export function createRunnerReleaseProvider(input: {
   fetchImpl?: typeof fetch;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const request = async (pathname: string, method = "GET", body?: unknown): Promise<Record<string, unknown>> => {
-    let value: unknown;
+  const request = async (operation: string, pathname: string, method = "GET", body?: unknown): Promise<Record<string, unknown>> => {
+    let response: Response;
     try {
-      const response = await fetchImpl(
+      response = await fetchImpl(
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(input.accountId)}${pathname}`,
         {
           method,
@@ -22,15 +23,22 @@ export function createRunnerReleaseProvider(input: {
           signal: AbortSignal.timeout(30_000),
         },
       );
-      if (!response.ok) throw unavailable();
-      value = await response.json();
-    } catch { throw unavailable(); }
-    if (!isObjectRecord(value) || value.success !== true) throw unavailable();
+    } catch { throw unavailable(`${operation}: request failed before a response.`); }
+    let value: unknown;
+    try { value = await response.json(); }
+    catch { throw unavailable(`${operation}: HTTP ${response.status}; invalid JSON response.`); }
+    if (!response.ok || !isObjectRecord(value) || value.success !== true) {
+      const requestBody = isObjectRecord(body) ? body : {};
+      const configuration = isObjectRecord(requestBody.configuration) ? requestBody.configuration : {};
+      const privateValues = [input.apiToken, input.accountId, requestBody.name, configuration.image]
+        .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+      throw unavailable(`${operation}: HTTP ${response.status}; errors=${providerErrorSummary(value, privateValues)}.`);
+    }
     return value;
   };
   return {
     async readAccountLimits(): Promise<{ vcpu: number; memoryMiB: number; diskMB: number }> {
-      const response = await request("/containers/me");
+      const response = await request("Read account limits", "/containers/me");
       const account = response.result;
       if (!isObjectRecord(account) || !isObjectRecord(account.limits)) throw unavailable();
       const limits = account.limits;
@@ -46,7 +54,7 @@ export function createRunnerReleaseProvider(input: {
       };
     },
     async readWorkerVersion(workerName: string, versionId: string): Promise<unknown> {
-      const response = await request(`/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
+      const response = await request("Read Worker version", `/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
       return response.result;
     },
     async admitApplication(input: {
@@ -57,20 +65,20 @@ export function createRunnerReleaseProvider(input: {
     }): Promise<"created" | "modified" | "unchanged"> {
       const desired = { ...input.specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
       if (input.applicationId === null) {
-        const response = await request("/containers/applications", "POST", { ...desired, instances: 0 });
+        const response = await request("Create inactive application", "/containers/applications", "POST", { ...desired, instances: 0 });
         if (!isObjectRecord(response.result) || typeof response.result.id !== "string") throw unavailable();
         return "created";
       }
       const pathname = `/containers/applications/${encodeURIComponent(input.applicationId)}`;
-      const response = await request(pathname);
+      const response = await request("Read inactive application", pathname);
       const live = response.result;
       if (!isObjectRecord(live) || live.name !== input.name
         || !isObjectRecord(live.durable_objects) || live.durable_objects.namespace_id !== input.namespaceId) throw unavailable();
       if (live.active_rollout_id) throw new Error("Candidate native rollout is still in progress; active Worker is unchanged.");
       // PATCH updates the target for new deployments; an interrupted PATCH/rollout
       // pair must still roll prefetched instances before readiness is accepted.
-      await request(pathname, "PATCH", input.specification);
-      await request(`${pathname}/rollouts`, "POST", {
+      await request("Modify inactive application", pathname, "PATCH", input.specification);
+      await request("Start inactive rollout", `${pathname}/rollouts`, "POST", {
         description: "Prepare inactive runner release", strategy: "rolling", kind: "full_auto",
         step_percentage: 100, target_configuration: input.specification.configuration,
       });
@@ -98,7 +106,7 @@ export function createRunnerReleaseProvider(input: {
       // paginated historical Durable Object identities shown by the dashboard.
       const deadline = Date.now() + 20 * 60_000;
       do {
-        const response = await request(`/containers/applications/${encodeURIComponent(applicationId)}/deployments`);
+        const response = await request("Read inactive deployments", `/containers/applications/${encodeURIComponent(applicationId)}/deployments`);
         if (!Array.isArray(response.result)) throw unavailable();
         const info = response.result_info;
         if (isObjectRecord(info) && info.next_page_token) throw unavailable();
@@ -117,6 +125,19 @@ export function createRunnerReleaseProvider(input: {
   };
 }
 
-function unavailable(): Error {
-  return new Error("Authoritative runner release state is unavailable; deployment stopped.");
+// Preserve bounded explanations at the provider boundary, never raw response details.
+function providerErrorSummary(value: unknown, privateValues: readonly string[]): string {
+  if (!isObjectRecord(value) || !Array.isArray(value.errors)) return "unavailable";
+  return JSON.stringify(value.errors.slice(0, 5).filter(isObjectRecord).map((error) => {
+    let message = typeof error.message === "string" ? error.message : "unavailable";
+    for (const privateValue of privateValues) message = message.split(privateValue).join("<redacted>");
+    message = redactHostedRuntimeDiagnosticText(message)
+      .replace(/\b(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\b/giu, "<redacted-resource>")
+      .replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, 320);
+    return { code: typeof error.code === "number" && Number.isSafeInteger(error.code) ? error.code : null, message };
+  }));
+}
+
+function unavailable(detail?: string): Error {
+  return new Error(`Authoritative runner release state is unavailable; deployment stopped.${detail ? ` ${detail}` : ""}`);
 }

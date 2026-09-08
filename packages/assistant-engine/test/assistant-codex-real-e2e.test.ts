@@ -23,6 +23,7 @@ import {
   goalMetricTargetSchema,
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
+  researchScoutBatchPayloadSchema,
   resolveFloatingIsoTimestampInTimeZone,
   toLocalDayKey,
   workoutSessionSchema,
@@ -63,6 +64,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
+import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
 import {
   listEntitySchema,
   showResultSchema,
@@ -195,6 +197,7 @@ import {
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
@@ -8484,6 +8487,175 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps four-person scheduled sleep and steps reports in separate participant rows',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-report-rows-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildScheduledAutomationDeveloperInstructions(
+              'group',
+              'shared_read',
+            ),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  status: 'ok',
+                  requestedProjectionScopeKeys: ['sleep-duration-days.v0', 'steps-days.v0'],
+                  members: ['Avery', 'Jordan', 'Casey', 'Morgan'].map((displayName, index) => ({
+                    displayName,
+                    currentTurnHandles: [],
+                    memberId: `member_report_${index}`,
+                    participantId: `participant_report_${index}`,
+                    projections: [
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'sleep-duration-days.v0' },
+                        projectionScopeKey: 'sleep-duration-days.v0',
+                        records: ['2026-08-03', '2026-08-04'].map((date, day) => ({
+                          recordKey: date,
+                          occurredAt: `${date}T00:00:00.000Z`,
+                          data: {
+                            date,
+                            metricKey: 'total-sleep-minutes',
+                            unit: 'minutes',
+                            value: 395 + index * 17 + day * 30,
+                          },
+                        })),
+                      },
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'steps-days.v0' },
+                        projectionScopeKey: 'steps-days.v0',
+                        records: [{
+                          recordKey: '2026-08-04',
+                          occurredAt: '2026-08-04T00:00:00.000Z',
+                          data: { date: '2026-08-04', metricKey: 'steps', unit: 'count', value: 6100 + index * 1320 },
+                        }],
+                      },
+                    ],
+                  })),
+                } satisfies AssistantHostedGroupSharedReadResponse
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation recipe:',
+            'Prepare the daily group check-in using the shared data. Cover sleep on August 3 and August 4 separately, then steps on August 4. Include every member and their values. The agreed targets are at least 7 hours of sleep and at least 8,000 steps.',
+            'Room preference: keep the recap brief, label what each part covers, and use ✅ for meeting a target and ❌ for falling short.',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name
+        )
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: expect.arrayContaining([
+              { projectionKind: 'sleep-duration-days.v0' },
+              { projectionKind: 'steps-days.v0' },
+            ]),
+          },
+        })
+        expect(sharedRequests).toHaveLength(1)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) => action.kind === 'dynamic',
+        )).toHaveLength(1)
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a group report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        expect(reply).not.toMatch(/·|\|[^\n]+\||^\s*---\s*$/mu)
+        const names = ['Avery', 'Jordan', 'Casey', 'Morgan']
+        const sections = reply.split(/\n\s*\n/u).filter(
+          (section) => names.some((name) => section.includes(name)),
+        )
+        expect(sections).toHaveLength(3)
+        for (const [sectionIndex, section] of sections.entries()) {
+          const lines = section.split('\n')
+          const heading = lines[0] ?? ''
+          expect(heading).toMatch(sectionIndex < 2 ? /sleep/iu : /steps/iu)
+          expect(heading).toMatch(sectionIndex === 0 ? /(?:Aug(?:ust)?\.?\s+0?3|0?8[/-]0?3)\b/iu : /(?:Aug(?:ust)?\.?\s+0?4|0?8[/-]0?4)\b/iu)
+          const rows = lines.filter((line) => names.some((name) => line.includes(name)))
+          expect(rows).toHaveLength(4)
+          for (const [index, name] of names.entries()) {
+            const matches = rows.filter((line) => line.includes(name))
+            expect(matches).toHaveLength(1)
+            const row = matches[0] ?? ''
+            expect(names.filter((candidate) => row.includes(candidate))).toEqual([name])
+            const value = sectionIndex < 2
+              ? 395 + index * 17 + sectionIndex * 30
+              : 6100 + index * 1320
+            if (sectionIndex < 2) {
+              const hours = Math.floor(value / 60)
+              const minutes = value % 60
+              expect(row).toMatch(new RegExp(`${hours}\\s*(?:h(?:ours?)?\\s*0?${minutes}\\s*m(?:in(?:utes?)?)?|:0?${minutes})`, 'iu'))
+            } else {
+              expect(row.replaceAll(',', '')).toContain(String(value))
+            }
+            expect(row).toContain(value >= (sectionIndex < 2 ? 420 : 8000) ? '✅' : '❌')
+          }
+        }
+        process.stdout.write(`[group-report-rows-e2e] ${JSON.stringify({
+          model: config.model, sharedReadCount: sharedReads.length, reply,
+        })}\n`)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'attributes a scheduled weekly group comparison from fresh labeled rows',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -13317,6 +13489,142 @@ describeRealCodex(
   )
 })
 
+describeRealCodex('real Codex research scout ongoing interest e2e', () => {
+  it('shares relevant learning without an open decision and suppresses repeated research', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    )
+    if (!automation) throw new Error('Expected the managed research scout automation.')
+    try {
+      for (const repeated of [false, true]) {
+        const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-research-interest-e2e-'))
+        try {
+          const binDirectory = path.join(workingDirectory, 'bin')
+          await mkdir(binDirectory)
+          const finding = 'A synthetic randomized human study found that resistance training with one arm also improved strength in the untrained arm. This suggests some strength adaptation transfers through the nervous system rather than being confined to the practiced muscles. It does not establish injury prevention or a need to change training.'
+          const context = {
+            summary: 'The member has an ongoing interest in resistance training and how strength develops, stated three months ago and never withdrawn. There is no current experiment, symptom, recent change, open question, or decision. They enjoy explanations and do not want extra tasks. No recent unsolicited health note is waiting for a reply.',
+          }
+          const fixture = {
+            context,
+            schema: {
+              schemaVersion: 'murph.payload-schema.v1',
+              command: 'research scout-batch --input',
+              mediaType: 'application/json',
+              schemaName: 'ResearchScoutBatchPayload',
+              schema: researchScoutBatchPayloadSchema.toJSONSchema(),
+              examples: [{ lanes: [{ label: 'resistance training', profile: { behaviors: ['resistance training'] } }] }],
+            },
+            research: { lanes: [{ label: 'resistance training', response: { results: [{
+              title: 'Synthetic resistance training trial',
+              url: 'https://example.org/synthetic-resistance-trial',
+              publishedDate: '2026-07-01',
+              text: finding,
+            }] } }] },
+            ledger: { page: { body: repeated ? finding : '', markdown: repeated ? finding : '' } },
+          }
+          await writeFile(path.join(binDirectory, 'fixture.json'), JSON.stringify(fixture))
+          await writeFile(path.join(binDirectory, 'vault-cli'), [
+            '#!/usr/bin/env node',
+            "const fs = require('node:fs');",
+            "const path = require('node:path');",
+            "const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixture.json'), 'utf8'));",
+            "const { createRequire } = require('node:module');",
+            "const { researchScoutBatchPayloadSchema } = createRequire(process.env.RESEARCH_FIXTURE_RESOLVER)('@murphai/contracts');",
+            'const args = process.argv.slice(2);',
+            "const option = (name) => args.find((arg) => arg.startsWith(name + '='))?.slice(name.length + 1) ?? args[args.indexOf(name) + 1];",
+            "fs.appendFileSync(path.join(__dirname, 'calls.jsonl'), JSON.stringify(args) + String.fromCharCode(10));",
+            "if (args.includes('--help')) console.log('research scout-batch --input @file.json --since YYYY-MM-DD --until YYYY-MM-DD --maxCandidatesPerLane 8; knowledge append-section <slug> <heading> --body <markdown>; knowledge show <slug>; knowledge show-index');",
+            "else if (args[0] === 'research' && args[1] === 'scout-batch-payload-schema') console.log(JSON.stringify(fixture.schema));",
+            "else if (args[0] === 'research' && args[1] === 'scout-batch') {",
+            "  const input = option('--input');",
+            "  const body = input === '-' ? fs.readFileSync(0, 'utf8') : input.startsWith('{') ? input : fs.readFileSync(input.replace(/^@/, ''), 'utf8');",
+            '  const parsed = researchScoutBatchPayloadSchema.safeParse(JSON.parse(body));',
+            '  if (!parsed.success) { console.error(JSON.stringify(parsed.error.issues)); process.exit(64); }',
+            "  fs.appendFileSync(path.join(__dirname, 'retrievals.jsonl'), JSON.stringify(parsed.data) + String.fromCharCode(10));",
+            "  fs.writeFileSync(path.join(__dirname, 'payload.json'), body);",
+            '  console.log(JSON.stringify(fixture.research));',
+            "} else if (args[0] === 'knowledge' && args[1] === 'show') console.log(JSON.stringify(fixture.ledger));",
+            "else if (args[0] === 'knowledge' && args[1] === 'append-section') {",
+            "  const body = option('--body');",
+            "  if (!body || !args[3]) { console.error('Expected append-section <slug> <heading> --body <markdown>'); process.exit(64); }",
+            "  fixture.ledger.page.body += String.fromCharCode(10) + args[3] + String.fromCharCode(10) + body;",
+            '  fixture.ledger.page.markdown = fixture.ledger.page.body;',
+            "  fs.appendFileSync(path.join(__dirname, 'writes.jsonl'), JSON.stringify({ slug: args[2], body }) + String.fromCharCode(10));",
+            "  fs.writeFileSync(path.join(__dirname, 'fixture.json'), JSON.stringify(fixture));",
+            '  console.log(JSON.stringify(fixture.ledger));',
+            '}',
+            "else if ((args[0] === 'knowledge' && ['index', 'show-index', 'list'].includes(args[1])) || ['goal', 'memory', 'list', 'search', 'experiment', 'wearables'].includes(args[0])) console.log(JSON.stringify(fixture.context));",
+            "else { console.error('Unsupported synthetic command'); process.exit(64); }",
+          ].join('\n'), { mode: 0o700 })
+          const result = await executeRealCodexAppServerTurn({
+            allowFinishWithoutReply: true,
+            approvalPolicy: 'never',
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+            codexHome: config.codexHome,
+            configOverrides: ['shell_environment_policy.set.EXA_API_KEY="synthetic-fixture-only"'],
+            fixtureBinDirectory: binDirectory,
+            developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+            dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+            env: {
+              ...config.env,
+              EXA_API_KEY: 'synthetic-fixture-only',
+              RESEARCH_FIXTURE_RESOLVER: fileURLToPath(new URL('../package.json', import.meta.url)),
+            },
+            excludeResumeTurns: true,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: [
+              automation.instructions,
+              'Scheduled occurrence context: 2026-08-09. This is an isolated synthetic fixture; all source findings are test data, not real health claims. Use the local vault-cli for all reads, research, and knowledge writes; no external browsing is needed.',
+              `Canonical member context: ${JSON.stringify(context)}`,
+            ].join('\n\n'),
+            reasoningEffort: 'high',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+          const calls = (await readFile(path.join(binDirectory, 'calls.jsonl'), 'utf8'))
+            .trim().split('\n').map((line) => JSON.parse(line) as string[])
+          console.info(`[research-scout ${repeated ? 'repeated' : 'ongoing-interest'}] ${result.finalMessage || '(silent)'}`)
+          console.info('[research-scout commands]', calls.map((args) => args.slice(0, 2).join(' ')))
+          const retrievals = (await readFile(path.join(binDirectory, 'retrievals.jsonl'), 'utf8')).trim().split('\n')
+          expect(retrievals).toHaveLength(1)
+          const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
+          expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
+          const writesPath = path.join(binDirectory, 'writes.jsonl')
+          const writes = existsSync(writesPath)
+            ? (await readFile(writesPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { slug: string; body: string })
+            : []
+          expect(writes).toHaveLength(repeated ? 0 : 1)
+          if (!repeated) {
+            expect(writes[0]?.slug).toBe('weekly-health-research-scout')
+            expect(writes[0]?.body).toContain('https://example.org/synthetic-resistance-trial')
+          }
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const finishCalls = actions.filter((action) => action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
+          if (repeated) {
+            expect(result.finalMessage === '' && finishCalls.length === 1
+              || /"kind"\s*:\s*"skip"/u.test(result.finalMessage)).toBe(true)
+          } else {
+            expect(finishCalls).toHaveLength(0)
+            expect(result.finalMessage).toMatch(/strength|resistance training/iu)
+            expect(result.finalMessage).toMatch(/untrained|other (?:arm|side)|transfer|one arm[\s\S]*\bother\b/iu)
+            expect(result.finalMessage).not.toMatch(/you should|you need to|start doing|try adding|\?|https?:\/\//iu)
+            expect(result.finalMessage.split(/\s+/u).length).toBeLessThan(180)
+          }
+        } finally {
+          await removeRealCodexTemporaryPath(workingDirectory)
+        }
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex weekly health insight Journal evidence e2e', () => {
   it('uses canonical Journal-backed timing evidence without overclaiming', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -13470,6 +13778,136 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 720_000)
+})
+
+describeRealCodex('real Codex private Journal capture recovery e2e', () => {
+  it('saves a reported symptom without its guessed cause and verifies an empty-page complaint without duplicating it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const input: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
+          currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        excludeResumeTurns: true, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      }
+      const first = await executeRealCodexAppServerTurn({
+        ...input,
+        prompt: 'My left wrist has felt stiff since I woke up this morning. Maybe it is the weather, but that is only a guess. Keep this in mind when we talk about my routines; I do not need advice right now.',
+      })
+      const initial = await readVaultRawTolerant(workingDirectory)
+      const initialFacts = initial.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      process.stdout.write(`[journal-capture-recovery] ${JSON.stringify({ phase: 'capture', reply: first.finalMessage, facts: initialFacts.length })}\n`)
+      const beforeReadback = await readFile(commandLogPath, 'utf8').catch(() => '')
+      const second = await executeRealCodexAppServerTurn({
+        ...input, resumeSessionId: first.sessionId,
+        prompt: 'Did you actually save that? I cannot see it on my Journal page. Is that because of a filter or a sync bug?',
+      })
+      const after = await readVaultRawTolerant(workingDirectory)
+      const facts = after.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      const readbackCommands = (await readFile(commandLogPath, 'utf8').catch(() => '')).slice(beforeReadback.length)
+      process.stdout.write(`[journal-capture-recovery] ${JSON.stringify({ phase: 'verify', reply: second.finalMessage, facts: facts.length })}\n`)
+      expect(initialFacts).toHaveLength(1)
+      expect(facts).toHaveLength(1)
+      expect(facts[0]?.entityId).toBe(initialFacts[0]?.entityId)
+      expect(JSON.stringify(initialFacts[0])).toMatch(/wrist|stiff/iu)
+      expect(JSON.stringify(initialFacts[0])).not.toMatch(/weather/iu)
+      const view = buildJournalView(after, [], { asOf: '2026-05-18' })
+      expect(view.days.find((day) => day.date === '2026-05-18')?.events
+        .flatMap((event) => event.records).some((record) => record.id === facts[0]?.entityId)).toBe(true)
+      expect(readbackCommands).toMatch(/(?:event (?:list|show)|(?:^|\n)(?:list|show|timeline|search)\b|batch)/u)
+      expect(second.finalMessage).toMatch(/saved|recorded|entry|note/iu)
+      expect(second.finalMessage).toMatch(/cannot|can.t|unable|don.t know|haven.t|could|may|might|not sure/iu)
+      expect(second.finalMessage).not.toMatch(/(?:only|always).{0,45}(?:explicit|ask.{0,15}(?:log|save))|(?:refreshed|fixed).{0,25}(?:page|sync|filter)/iu)
+      expect(readbackCommands).not.toMatch(/(?:^|\n)journal\b/u)
+      expect(after.entities.filter((entity) => entity.kind === 'journal_day')).toHaveLength(0)
+      expect(second.finalMessage).not.toMatch(/(?:check|change|clear|reset|turn on|enable|select).{0,35}filters?|includes? all.day Journal notes|(?:linked|linking).{0,25}Journal day/iu)
+      expect(second.finalMessage.length).toBeLessThan(1000)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex private Journal capture recovery boundaries e2e', () => {
+  it.each(['missed', 'launch-failure', 'opt-out'] as const)('handles %s without inventing policy or duplicating facts', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-boundary-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const before = await readVaultRawTolerant(workingDirectory)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      if (scenario === 'launch-failure') {
+        await expect(execFileAsync(path.join(binDirectory, 'vault-cli'), [
+          'event', 'note', 'add', '--title', 'Ankle stiffness', '--note', 'Right ankle; since waking.',
+          '--note-type', 'journal-outcome', '--occurred-at', '2026-05-18', '--timing', 'all_day',
+        ], { cwd: path.join(workingDirectory, 'retired-workspace') })).rejects.toMatchObject({ code: 'ENOENT' })
+        expect((await readVaultRawTolerant(workingDirectory)).events).toHaveLength(0)
+      }
+      const prompts = {
+        missed: 'Earlier today I told you my right ankle felt stiff on waking. You said ordinary conversation never gets saved unless I ask to log it. Is that actually your policy? Please check whether you saved it.',
+        'launch-failure': 'Please save that my right ankle has been stiff since waking today. The previous save attempt failed before the command started because its working directory did not exist. Nothing was saved. Finish the save here and check it.',
+        'opt-out': 'Do not save or remember anything from this message: my right ankle has felt stiff since waking today. This is just a private passing conversation, not something I want retained. Please acknowledge without giving advice.',
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
+          currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: prompts[scenario], reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const after = await readVaultRawTolerant(workingDirectory)
+      const facts = after.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      const commands = (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+      const writes = commands.filter((command) => /^event (?:note|symptom) add\b/u.test(command)
+        && !/--help|--schema/u.test(command))
+      process.stdout.write(`[journal-capture-boundary] ${JSON.stringify({ scenario, reply: result.finalMessage, facts: facts.length, writes: writes.length })}\n`)
+      if (scenario === 'opt-out') {
+        expect(after.entities).toEqual(before.entities)
+        expect(writes).toHaveLength(0)
+        expect(result.finalMessage).toMatch(/won.t|will not|not (?:save|retain|record)|without (?:saving|recording)/iu)
+      } else {
+        expect(facts).toHaveLength(1)
+        expect(writes).toHaveLength(1)
+        expect(JSON.stringify(facts[0])).toMatch(/ankle/iu)
+        expect(result.finalMessage).toMatch(/saved|recorded|logged|added/iu)
+        expect(result.finalMessage).not.toMatch(/(?:would you like|want me|shall I|should I).{0,30}(?:save|log|record)/iu)
+        expect(after.journalEntries).toHaveLength(0)
+      }
+      expect(result.finalMessage.length).toBeLessThan(1000)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 240_000)
 })
 
 describeRealCodex('real Codex private Journal note quality e2e', () => {

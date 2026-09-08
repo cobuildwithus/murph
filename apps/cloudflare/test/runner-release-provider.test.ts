@@ -83,7 +83,17 @@ describe("native candidate admission", () => {
 
   it("reports rejected quota without retrying creation or reducing capacity", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: false, errors: [{ code: 400, message: "synthetic quota failure" }] }, { status: 400 }));
-    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, applicationId: null })).rejects.toThrow("unavailable");
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, applicationId: null })).rejects.toThrow('Create inactive application: HTTP 400; errors=[{"code":400,"message":"synthetic quota failure"}].');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).max_instances).toBe(12);
+  });
+
+  it("redacts the requested application name and image while preserving rejection details", async () => {
+    const message = `Application ${input.name}, image ${specification.configuration.image}: 12 instances exceed the available limit.\nNo application created.`;
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: false, errors: [{ code: 1607, message, details: { private: "discarded" } }] }, { status: 400 }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "synthetic-token", fetchImpl }).admitApplication({ ...input, applicationId: null })).rejects.toMatchObject({
+      message: 'Authoritative runner release state is unavailable; deployment stopped. Create inactive application: HTTP 400; errors=[{"code":1607,"message":"Application <redacted>, image <redacted>: 12 instances exceed the available limit. No application created."}].',
+    });
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).max_instances).toBe(12);
   });
@@ -111,5 +121,62 @@ describe("native candidate admission", () => {
       .mockResolvedValueOnce([specification]);
     await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture" }).assertApplicationReady({ ...input, listApplications })).resolves.toBeUndefined();
     expect(listApplications).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("native provider failure diagnostics", () => {
+  const provider = (fetchImpl: typeof fetch) => createRunnerReleaseProvider({
+    accountId: "private-account", apiToken: "private-token", fetchImpl,
+  });
+
+  it.each([400, 403, 429, 503])("retains HTTP %s and native rejection codes without private details", async (status) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: false,
+      errors: [{ code: 10000, message: "SURPASSED_TOTAL_LIMITS", details: { account: "private-account" } }],
+      result: { token: "private-token" },
+    }, { status }));
+    await expect(provider(fetchImpl).readAccountLimits()).rejects.toMatchObject({
+      message: `Authoritative runner release state is unavailable; deployment stopped. Read account limits: HTTP ${status}; errors=[{"code":10000,"message":"SURPASSED_TOTAL_LIMITS"}].`,
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("retains an unsuccessful API envelope even when HTTP succeeds", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: false, errors: [{ code: 10000, message: "VALIDATE_INPUT" }],
+    }));
+    await expect(provider(fetchImpl).readAccountLimits()).rejects.toThrow('HTTP 200; errors=[{"code":10000,"message":"VALIDATE_INPUT"}]');
+  });
+
+  it("preserves actionable provider prose while redacting known credentials and identifiers", async () => {
+    const resource = "a".repeat(32);
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: false,
+      errors: [null, { code: 1607, message: `Account private-account cannot admit 12 instances. Token private-token; namespace ${resource}; contact ops@example.test.`, details: { private: "unpublished body" } }],
+      result: { private: "unpublished result" },
+    }, { status: 400 }));
+    await expect(provider(fetchImpl).readAccountLimits()).rejects.toMatchObject({
+      message: 'Authoritative runner release state is unavailable; deployment stopped. Read account limits: HTTP 400; errors=[{"code":1607,"message":"Account <redacted> cannot admit 12 instances. Token <redacted>; namespace <redacted-resource>; contact <redacted-email>."}].',
+    });
+  });
+
+  it("bounds messages and error count and excludes malformed code values", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: false,
+      errors: [...Array.from({ length: 5 }, () => ({ code: "private-token", message: "A".repeat(400) })), { code: 999, message: "EXCLUDED" }],
+    }, { status: 400 }));
+    await expect(provider(fetchImpl).readAccountLimits()).rejects.toMatchObject({
+      message: `Authoritative runner release state is unavailable; deployment stopped. Read account limits: HTTP 400; errors=${JSON.stringify(Array.from({ length: 5 }, () => ({ code: null, message: "A".repeat(320) })))}.`,
+    });
+  });
+
+  it("reports invalid JSON with the known HTTP status", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("private response", { status: 502 }));
+    await expect(provider(fetchImpl).readAccountLimits()).rejects.toMatchObject({ message: "Authoritative runner release state is unavailable; deployment stopped. Read account limits: HTTP 502; invalid JSON response." });
+  });
+
+  it("identifies a transport failure without exposing its raw exception", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => { throw new Error("private-account private-token"); });
+    await expect(provider(fetchImpl).readAccountLimits()).rejects.toMatchObject({ message: "Authoritative runner release state is unavailable; deployment stopped. Read account limits: request failed before a response." });
   });
 });

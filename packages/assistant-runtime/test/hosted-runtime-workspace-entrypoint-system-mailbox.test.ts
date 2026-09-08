@@ -38,6 +38,10 @@ import {
   writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
+import {
+  drainHostedRuntimeLogWritesBestEffort,
+} from "../src/hosted-runtime/runtime-logs.ts";
+
 import assert from "node:assert/strict";
 import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -369,6 +373,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemFirstPendingClassifierFailures: null,
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
@@ -4301,6 +4306,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const events: string[] = [];
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -4570,6 +4576,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       };
       const platform = createPlatform({
         artifactBytesByHash,
+        logRequests,
         mailboxPort: createMailboxPort({ events, items: [] }),
         vaultSharePort: {
           async listActiveProjectionScopes() {
@@ -4629,6 +4636,28 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(projectionFailedBeforeRefresh.nextWakeAt, projectionRetryAt);
       assert.equal(projectionFailedBeforeRefresh.nextWakeReason, "assistant");
       assert.equal(projectionFailedBeforeRefresh.immediateRecheckRequested, undefined);
+      await drainHostedRuntimeLogWritesBestEffort();
+      assert.deepEqual(
+        logRequests.flatMap((request) => request.entries)
+          .filter((entry) => entry.eventCode === "runtime.invocation_finished")
+          .map((entry) => entry.redactedJson),
+        [{
+          hostedMailboxSystemFirstPendingClassifierFailures: ["wake_not_device_sync"],
+          hostedMailboxSystemFirstPendingSeq: "1",
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemImportedSeq: "2",
+          invocationStatus: "scheduled",
+          nextWakeAt: projectionRetryAt,
+          nextWakeReason: "assistant",
+          processingMode: "system_mailbox",
+          runtimeReleaseSha: null,
+        }],
+      );
+      assert.deepEqual(
+        projectionFailedBeforeRefresh.redactedStatus
+          ?.hostedMailboxSystemDeviceSyncContinuationSeqs,
+        [],
+      );
       assert.equal(checkpointRequests.length, 0);
       const stateAfterProjectionFailure =
         await readHostedSystemMailboxState(vaultRoot);
@@ -4914,6 +4943,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(afterTerminalization.nextWakeReason ?? null, null);
       assert.equal(checkpointRequests.length, checkpointCountAfterSuccessor);
     } finally {
+      await drainHostedRuntimeLogWritesBestEffort();
       if (previousStdIoLogSetting === undefined) {
         delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
       } else {

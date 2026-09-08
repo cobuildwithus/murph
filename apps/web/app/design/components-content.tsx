@@ -1820,6 +1820,7 @@ export function ComponentsContent() {
               inert
             >
               <GroupSponsorshipManagementCard
+                periodEndTimeZone="UTC"
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
                 initialSelectedMonthlyCapMinor={5_000}
                 management={{

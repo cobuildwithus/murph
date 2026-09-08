@@ -2,6 +2,8 @@
 
 import type { ComponentProps } from "react";
 
+import { JunctionRecoveryPanel } from "../(dashboard)/ops/runtime-maintenance/junction-recovery-panel";
+
 import { RuntimeRecheckPanel } from "../(dashboard)/ops/runtime-maintenance/runtime-recheck-panel";
 
 type RuntimeRecheckPanelProps = ComponentProps<
@@ -88,6 +90,36 @@ export function RuntimeMaintenanceStudy() {
         userIdsText={"hbm_demo_bravo\nhbm_demo_charlie\nhbm_demo_manual"}
         verificationError={null}
         verificationResult={DESIGN_STALLED_RECHECK_VERIFICATION}
+      />
+    </div>
+  );
+}
+
+
+export function JunctionRecoveryStudy() {
+  return (
+    <div className="flex flex-col gap-8" data-design-section="junction-recovery" inert>
+      <JunctionRecoveryPanel
+        disabled={false}
+        error={null}
+        memberId="member_demo"
+        onCheckStatus={() => undefined}
+        onRefresh={() => undefined}
+        pending={null}
+        response={{ ok: false, errorCode: "JUNCTION_REFRESH_NO_CONNECTED_SOURCES" }}
+        selectedSource={{ status: "error", errorCode: "token_refresh_failed", lastDataAt: "2026-01-01T12:00:00Z" }}
+        sourceProvider="oura"
+      />
+      <JunctionRecoveryPanel
+        disabled={true}
+        error={null}
+        memberId="member_demo"
+        onCheckStatus={() => undefined}
+        onRefresh={() => undefined}
+        pending="refresh"
+        response={null}
+        selectedSource={{ status: "unknown", errorCode: null, lastDataAt: null }}
+        sourceProvider="oura"
       />
     </div>
   );

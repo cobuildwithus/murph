@@ -89,8 +89,27 @@ export async function runDeployWorkerVersionCli(
         const before = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "before", containerProvider.readRollout,
         );
+        const uploadVersion = async (configPath: string): Promise<string> => {
+          const output = await runWranglerLoggedCaptured([
+            "versions", "upload", "--config", configPath, "--name", input.workerName,
+            "--message", input.deploymentMessage, "--tag", input.versionTag,
+            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
+          ]);
+          return parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+        };
+        const activateVersion = async (configPath: string, versionId: string, expectedLiveVersion: string): Promise<void> => {
+          await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
+          await runWranglerLogged([
+            "versions", "deploy", `${versionId}@100%`, "--yes", "--config", configPath,
+            "--name", input.workerName, "--message", input.deploymentMessage,
+          ]);
+          await assertLiveVersion(input.workerName, input.configPath, versionId);
+        };
+        // Upload declares container-enabled classes without moving serving traffic.
+        const stageVersionId = await uploadVersion(staged.configPath);
+        await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         const actions: WranglerContainerAction[] = renderedContainers.map((container) => ({ ...container, action: "unchanged" }));
-        // Native admission, including quota rejection, completes before any Worker upload.
+        // Native admission, including quota rejection, completes before Worker activation.
         for (const application of staged.applications) {
           const entry = actions.find((entry) => entry.applicationName === application.name);
           if (!entry || application.name === staged.activeApplicationName) throw new Error("Invalid inactive runner application plan.");
@@ -109,23 +128,7 @@ export async function runDeployWorkerVersionCli(
         const prepared = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
         );
-        await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
-        const uploadAndActivate = async (configPath: string, expectedLiveVersion: string): Promise<string> => {
-          const output = await runWranglerLoggedCaptured([
-            "versions", "upload", "--config", configPath, "--name", input.workerName,
-            "--message", input.deploymentMessage, "--tag", input.versionTag,
-            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-          ]);
-          const versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
-          await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
-          await runWranglerLogged([
-            "versions", "deploy", `${versionId}@100%`, "--yes", "--config", configPath,
-            "--name", input.workerName, "--message", input.deploymentMessage,
-          ]);
-          await assertLiveVersion(input.workerName, input.configPath, versionId);
-          return versionId;
-        };
-        const stageVersionId = await uploadAndActivate(staged.configPath, currentVersionId);
+        await activateVersion(staged.configPath, stageVersionId, currentVersionId);
         await runSmokeHostedDeploy({
           source: {
             ...env,
@@ -136,7 +139,8 @@ export async function runDeployWorkerVersionCli(
         });
         await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
         const workerVersionId = staged.workerOnly ? stageVersionId
-          : await uploadAndActivate(staged.promotionConfigPath, stageVersionId);
+          : await uploadVersion(staged.promotionConfigPath);
+        if (!staged.workerOnly) await activateVersion(staged.promotionConfigPath, workerVersionId, stageVersionId);
         const after = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
         );

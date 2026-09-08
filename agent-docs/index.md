@@ -16,6 +16,10 @@ Device-sync metadata priority within the existing bounded envelope is specified
 by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
 reason in hosted failure events; Junction's progress keys remain provider-owned.
 
+Runtime progress diagnostics (aggregate alerts and code-only first-pending
+evidence) are specified in
+[`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
+
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
 owners relevant to the task. A row's date is its recorded verification date,
@@ -50,7 +54,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, companion upload buffering with scoped hydration key reuse, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-07 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, companion upload buffering with scoped hydration key reuse, accepted-mailbox progress evidence, and metadata-only snapshot response diagnostics. | Runtime reliability policy | High | 2026-09-08 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, hosted media receipt recovery and atomic retirement, and escalation rules. | Security policy | High | 2026-09-05 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
@@ -118,7 +122,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, compiler cache policy, and current coverage owners. | Testing and CI truth | High | 2026-09-05 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
-| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, hot admission and bounded history reads, exact ownership, idle restore publication, and accepted-work monitoring. | Hosted execution architecture | High | 2026-09-08 |
+| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring. | Hosted execution architecture | High | 2026-09-08 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration target. | Hosted Temporal orchestration target | High | 2026-09-03 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
