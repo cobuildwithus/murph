@@ -21,8 +21,8 @@ test("a real HTTP response stalled at the server produces the local retryable Ju
       fetchImpl: (_url, init) => fetch(`http://127.0.0.1:${address.port}/providers`, init),
     });
     await expect(client.listUserProviders("synthetic-user")).rejects.toMatchObject({
-      code: "JUNCTION_API_REQUEST_FAILED",
-      httpStatus: 502,
+      code: "JUNCTION_API_REQUEST_TIMEOUT",
+      httpStatus: 504,
       retryable: true,
       cause: expect.objectContaining({ name: "TimeoutError" }),
     });
