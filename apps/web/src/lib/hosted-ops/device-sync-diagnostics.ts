@@ -41,7 +41,7 @@ export async function runHostedOpsJunctionDiagnostic(
     memberId,
     providerName: "junction",
     restProbe: {
-      endpoint: "matrix",
+      endpoint: input.statusOnly ? "providers" : "matrix",
       resource: null,
       sourceProviderSlug: sourceProvider,
       timeoutSeconds: null,
@@ -93,12 +93,15 @@ export async function runHostedOpsJunctionRecovery(
     windowStart: null,
   });
 
+  const result = readRecord(diagnostic.restProbe?.result);
+  const response = readRecord(result?.response);
   return {
     action,
     generatedAt: diagnostic.generatedAt,
     memberId,
-    ok: true,
-    response: readRecord(readRecord(diagnostic.restProbe?.result)?.response) ?? null,
+    ok: response?.ok === true,
+    response,
+    selectedSource: readSelectedSource(result?.selectedSource, diagnostic.selectedSourceLastDataAt),
     sourceProvider,
   };
 }
@@ -135,6 +138,7 @@ function summarizeHostedOpsJunctionDiagnostic(input: {
   }));
 
   return {
+    selectedSource: readSelectedSource(input.fullDiagnostic.restProbe?.result.selectedSource, input.fullDiagnostic.selectedSourceLastDataAt),
     backfill: {
       hasUsefulHistoricalRecords: readBoolean(summary?.hasUsefulHistoricalRecords),
       scope: "all_sources",
@@ -149,6 +153,7 @@ function summarizeHostedOpsJunctionDiagnostic(input: {
     memberId: input.memberId,
     ok: true,
     selectedConnection: {
+      id: input.fullDiagnostic.selectedConnection.id,
       connectionMatchCount: input.fullDiagnostic.selectedConnection.connectionMatchCount,
       lastErrorCode: input.fullDiagnostic.selectedConnection.lastErrorCode,
       lastSyncCompletedAt: input.fullDiagnostic.selectedConnection.lastSyncCompletedAt,
@@ -168,6 +173,12 @@ function summarizeHostedOpsJunctionDiagnostic(input: {
     },
     window: input.window,
   };
+}
+
+function readSelectedSource(value: unknown, lastDataAt: string | null): HostedOpsJunctionDiagnosticResult["selectedSource"] {
+  const source = readRecord(value);
+  const status = readString(source?.status);
+  return status ? { status, errorCode: readString(source?.errorCode), lastDataAt } : null;
 }
 
 function summarizeMatrix(value: unknown): HostedOpsJunctionDiagnosticResult["matrix"] {

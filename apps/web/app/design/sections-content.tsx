@@ -64,7 +64,7 @@ import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
-import { RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
+import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import {
   PersonaOnboardingStudy,
   PersonaSettingsStudy,
@@ -809,6 +809,10 @@ export function SectionsContent({
       {category === "ops" ? (
         <>
           <Separator />
+
+          <StudySection id="junction-recovery" title="Junction source recovery">
+            <JunctionRecoveryStudy />
+          </StudySection>
 
           <StudySection
             id="stalled-runtime-rechecks"
