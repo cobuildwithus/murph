@@ -94,7 +94,10 @@ export async function runDeployWorkerVersionCli(
         for (const application of staged.applications) {
           const entry = actions.find((entry) => entry.applicationName === application.name);
           if (!entry || application.name === staged.activeApplicationName) throw new Error("Invalid inactive runner application plan.");
-          if (application.applicationId) await releaseProvider.assertDrained(application.applicationId);
+          // Member drain protects retained invocations; dedicated smoke uses native rollout readiness.
+          if (application.applicationId && application.className !== "DeploySmokeRunnerContainer") {
+            await releaseProvider.assertDrained(application.applicationId);
+          }
           const action = await releaseProvider.admitApplication(application);
           entry.action = action;
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });

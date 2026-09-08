@@ -165,6 +165,33 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
   });
 
+  it.each(["immediate", "worker-only"] as const)("rolls dedicated smoke without member drain admission in %s mode", async (mode) => {
+    const smoke = { name: "hosted-worker-smoke", className: "DeploySmokeRunnerContainer", applicationId: "smoke-app", namespaceId: "smoke-namespace", specification: {} };
+    receiptMocks.readRenderedContainerIdentities.mockResolvedValue([{ applicationName: smoke.name, className: smoke.className }]);
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: mode === "worker-only", applications: [smoke],
+    }));
+    releaseMocks.assertDrained.mockRejectedValue(new Error("synthetic member drain endpoint unavailable"));
+    await syntheticDeployment(mode);
+    expect(releaseMocks.assertDrained).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).toHaveBeenCalledWith(smoke);
+    expect(releaseMocks.assertApplicationReady).toHaveBeenCalledOnce();
+    expect(releaseMocks.assertApplicationReady.mock.invocationCallOrder[0]).toBeLessThan(wranglerMocks.runWranglerLoggedCaptured.mock.invocationCallOrder[0]!);
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
+  });
+
+  it.each(["RunnerContainer", "NextRunnerContainer"])("still blocks reuse of %s when member drain evidence is unavailable", async (className) => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
+      applications: [{ name: renderedContainers[0]!.applicationName, className, applicationId: "member-app", namespaceId: "member-namespace", specification: {} }],
+    }));
+    releaseMocks.assertDrained.mockRejectedValue(new Error("synthetic member drain endpoint unavailable"));
+    await expect(syntheticDeployment()).rejects.toThrow("member drain endpoint unavailable");
+    expect(releaseMocks.assertDrained).toHaveBeenCalledWith("member-app");
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+  });
+
   it("publishes an unchanged execution release once, with no container mutation", async () => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: true, applications: [],
@@ -546,12 +573,12 @@ const releasedContainers = [
   },
 ] as const;
 
-async function syntheticDeployment() {
+async function syntheticDeployment(containerRolloutMode: "immediate" | "worker-only" = "immediate") {
   return runDeployWorkerVersionCli([], {
     deployRoot: "/tmp/repo/apps/cloudflare", log: false,
     env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture" },
     runHostedWorkerDeployment: async ({ dependencies }) => {
-      await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode: "immediate", deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
+      await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode, deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
       return createDeploymentResult();
     },
   });
