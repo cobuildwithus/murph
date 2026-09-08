@@ -18,6 +18,7 @@ export interface StagedRunnerRelease {
   activeApplicationName: string;
   applications: RunnerApplicationPreparation[];
   configPath: string;
+  uploadConfigPath?: string;
   deployment: HostedRunnerDeployment;
   promotionConfigPath: string;
   workerOnly: boolean;
@@ -124,12 +125,25 @@ export async function stageHostedRunnerRelease(input: {
   const attempt = randomUUID();
   const configPath = path.join(path.dirname(input.configPath), `wrangler.stage-${attempt}.jsonc`);
   const promotionConfigPath = path.join(path.dirname(input.configPath), `wrangler.promote-${attempt}.jsonc`);
-  const render = (release: HostedRunnerDeployment) => `${JSON.stringify({
-    ...config, containers: effectiveContainers, vars: { ...vars, HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
+  const render = (release: HostedRunnerDeployment, containers = effectiveContainers) => `${JSON.stringify({
+    ...config, containers, vars: { ...vars, HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
   }, null, 2)}\n`;
   await writeFile(configPath, render(deployment), { encoding: "utf8", flag: "wx" });
   await writeFile(promotionConfigPath, render(promoted), { encoding: "utf8", flag: "wx" });
-  return { activeApplicationName: serving.name, applications, configPath, deployment, promotionConfigPath, workerOnly };
+  let uploadConfigPath: string | undefined;
+  if (effectiveContainers.length !== entries.length) {
+    // Native receipts describe admitted applications. Worker metadata must still
+    // declare container capability for existing namespaces without an application.
+    const uploadContainers = entries.map((entry) => {
+      const effective = effectiveContainers.find((container) => container.class_name === entry.className);
+      if (effective) return effective;
+      readNamespaceId(input.currentVersion, entry.className);
+      return entry.rendered;
+    });
+    uploadConfigPath = path.join(path.dirname(input.configPath), `wrangler.upload-${attempt}.jsonc`);
+    await writeFile(uploadConfigPath, render(deployment, uploadContainers), { encoding: "utf8", flag: "wx" });
+  }
+  return { activeApplicationName: serving.name, applications, configPath, uploadConfigPath, deployment, promotionConfigPath, workerOnly };
 }
 
 function assertBoundedSmoke(live: unknown, specification: RunnerApplicationSpecification): void {

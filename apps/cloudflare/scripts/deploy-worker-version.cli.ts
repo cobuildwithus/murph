@@ -125,7 +125,7 @@ export async function runDeployWorkerVersionCli(
           await assertLiveVersion(input.workerName, input.configPath, versionId);
           return versionId;
         };
-        const stageVersionId = await uploadAndActivate(staged.configPath, currentVersionId);
+        const stageVersionId = await uploadAndActivate(staged.uploadConfigPath ?? staged.configPath, currentVersionId);
         await runSmokeHostedDeploy({
           source: {
             ...env,

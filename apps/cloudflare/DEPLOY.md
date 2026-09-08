@@ -44,7 +44,15 @@ checks before a second Worker-only activation selects the candidate. Worker
 version commands preserve existing secrets and non-versioned settings; namespace
 bootstrap/migrations and changes to triggers or non-versioned settings remain
 separate infrastructure operations. The helper requires the candidate and smoke
-namespaces to exist before native preparation. Never substitute full
+namespaces to exist before native preparation. Worker-only releases also retain
+container declarations for existing namespaces whose native applications have
+not been admitted. Version upload uses that complete declaration config; native
+receipts and live-state verification continue to describe only admitted
+applications. This does not create missing namespaces or activate a candidate.
+If native creation reports `DURABLE_OBJECT_NOT_CONTAINER_ENABLED`, first restore
+the declaration through the protected Worker-only path and verify the following
+full release. Do not treat namespace existence or a local mock as recovery proof.
+Never substitute full
 `wrangler deploy` in this sequence: even `rollout_kind: none` can create a
 missing application after activating Worker code.
 

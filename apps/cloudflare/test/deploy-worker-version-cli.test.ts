@@ -207,7 +207,7 @@ describe("runDeployWorkerVersionCli", () => {
   it("forwards explicit retention and records only the effective application set", async () => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath, retainServingRunner }) => {
       expect(retainServingRunner).toBe(true);
-      return { configPath: `${configPath}.retained`, promotionConfigPath: `${configPath}.retained`,
+      return { configPath: `${configPath}.retained`, promotionConfigPath: `${configPath}.retained`, uploadConfigPath: `${configPath}.upload`,
         activeApplicationName: "serving", workerOnly: true, applications: [] };
     });
     await runDeployWorkerVersionCli([], {
@@ -222,6 +222,9 @@ describe("runDeployWorkerVersionCli", () => {
     });
     expect(imageMocks.prepareHostedContainerDeployImage.mock.calls[0]![0]).not.toHaveProperty("release");
     expect(receiptMocks.readRenderedContainerIdentities).toHaveBeenCalledWith("/tmp/generated.jsonc.retained");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledWith(expect.arrayContaining([
+      "versions", "upload", "--config", "/tmp/generated.jsonc.upload",
+    ]));
     expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
     expect(fileMocks.writeFile).toHaveBeenCalledWith("/tmp/generated.jsonc", "{}", "utf8");

@@ -122,21 +122,44 @@ describe("runner deployment staging", () => {
       .every((entry: { max_instances: number; image: string }) => entry.max_instances === 10 && entry.image !== image)).toBe(true);
   });
 
-  it.each([false, true])("retains only existing pending candidate authority (exists=%s)", async (exists) => {
+  it.each([[false, false], [false, true], [true, false], [true, true]])("retains only existing pending candidate authority (exists=%s, reversed=%s)", async (exists, reversed) => {
+    const active = reversed ? next : primary;
+    const candidate = reversed ? primary : next;
+    const candidateClass = reversed ? "RunnerContainer" : "NextRunnerContainer";
     await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config,
       containers: config.containers.map((entry) => ({ ...entry, max_instances: entry.class_name === "DeploySmokeRunnerContainer" ? 1 : 12 })),
     }));
     const staged = await stageHostedRunnerRelease({
       releaseSha: "2".repeat(40), retainServingRunner: true,
       configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
-      currentVersion: version({ active: primary, candidate: next, previous: null }),
-      listApplications: async (name) => !exists && name.endsWith("-nextrunnercontainer") ? []
+      currentVersion: version({ active, candidate, previous: null }),
+      listApplications: async (name) => !exists && name.endsWith(`-${candidateClass.toLowerCase()}`) ? []
         : (await listApplications(name)).map((entry) => ({ ...entry, max_instances: name.endsWith("-deploysmokerunnercontainer") ? 1 : 10 })),
     });
-    expect(staged.deployment).toEqual({ active: primary, candidate: null, previous: exists ? next : null });
+    expect(staged.deployment).toEqual({ active, candidate: null, previous: exists ? candidate : null });
     const effective = JSON.parse(await readFile(staged.configPath, "utf8"));
-    expect(effective.containers.some((entry: { class_name: string }) => entry.class_name === "NextRunnerContainer")).toBe(exists);
+    expect(effective.containers.some((entry: { class_name: string }) => entry.class_name === candidateClass)).toBe(exists);
     expect(staged.applications.map((entry) => entry.className)).toEqual(["DeploySmokeRunnerContainer"]);
+    const upload = JSON.parse(await readFile(staged.uploadConfigPath ?? staged.configPath, "utf8"));
+    // Worker upload metadata must retain the namespace's container capability even
+    // when the native application has not been admitted yet.
+    expect(upload.containers.map((entry: { class_name: string }) => entry.class_name)).toEqual(classes);
+    expect(upload.vars).toEqual(effective.vars);
+    expect(upload.containers.filter((entry: { class_name: string }) => entry.class_name !== candidateClass))
+      .toEqual(effective.containers.filter((entry: { class_name: string }) => entry.class_name !== candidateClass));
+  });
+
+  it("does not enable a missing namespace as an incidental Worker-only migration", async () => {
+    await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config,
+      containers: config.containers.map((entry) => ({ ...entry, max_instances: entry.class_name === "DeploySmokeRunnerContainer" ? 1 : 12 })),
+    }));
+    const currentVersion = version();
+    currentVersion.resources.bindings = currentVersion.resources.bindings.filter((binding) => !("class_name" in binding && binding.class_name === "NextRunnerContainer"));
+    await expect(stageHostedRunnerRelease({ releaseSha: "2".repeat(40), retainServingRunner: true,
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion,
+      listApplications: async (name) => name.endsWith("-nextrunnercontainer") ? []
+        : (await listApplications(name)).map((entry) => ({ ...entry, max_instances: name.endsWith("-deploysmokerunnercontainer") ? 1 : 10 })),
+    })).rejects.toThrow("authoritative live configuration");
   });
 
   it("refuses a Worker-only release that would expand the smoke application", async () => {
