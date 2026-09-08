@@ -1,5 +1,10 @@
 import "server-only";
 
+import { after } from "next/server";
+import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
+import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
+import type { HostedDeviceSyncCallbackProofError } from "./browser-callback-proof";
+
 import { readHostedOperationalAlertEmailConfig } from "../hosted-onboarding/operational-alert-email-config";
 import { sendHostedResendPlainTextEmail } from "../hosted-onboarding/resend-plain-text-email";
 
@@ -11,10 +16,11 @@ const HOSTED_DEVICE_CONNECT_FAILURE_ALERT_RECIPIENTS_ENV =
 // provider, and error code per hour keeps the signal without the noise.
 const HOSTED_DEVICE_CONNECT_FAILURE_ALERT_BUCKET_HOURS = 1;
 
-// Replayed callbacks redirect the member home without a failure; they are the
-// one callback error that does not represent a member stuck at a wall.
+// Replays and unverified browser returns are not connection-failure evidence.
+// Proof rejections have their own bounded runtime diagnostics.
 const HOSTED_DEVICE_CONNECT_FAILURE_ALERT_IGNORED_CODES = new Set([
   "OAUTH_STATE_REPLAYED",
+  "CALLBACK_PROOF_INVALID",
 ]);
 
 export type HostedDeviceConnectFailureAlertOutcome =
@@ -75,7 +81,7 @@ export async function sendHostedDeviceConnectFailureAlert(input: {
       `error code: ${input.errorCode}`,
       `http status: ${input.httpStatus ?? "unknown"}`,
       "",
-      "Inspect device_connection (status, setup_phase, last_error_message) for this member to see the stored failure.",
+      "Inspect callback request logs and current device_connection status. A callback failure may leave no stored connection error.",
     ].join("\n"),
     to: emailConfig.recipients,
   });
@@ -98,5 +104,45 @@ export async function reportHostedDeviceConnectFailure(
       errorCode,
       provider,
     });
+  }
+}
+
+// The category describes only the browser proof. Missing proof may mean an
+// expired cookie, another browser, or a revisit; it cannot prove a failed link.
+export function reportHostedDeviceCallbackRejection(input: {
+  errorCode: HostedDeviceSyncCallbackProofError;
+  memberId: string;
+  provider: string;
+}): void {
+  const provider = resolveConfiguredDeviceSyncProviderManifest(input.provider)?.provider ?? "unknown";
+  const at = new Date().toISOString();
+  const errorCode = input.errorCode;
+  console.info("Hosted device callback requires connection review.", {
+    eventCode: "device-sync.callback_rejected",
+    errorCode,
+    provider,
+  });
+  const task = async () => {
+    try {
+      await writeHostedRuntimeLogs({
+        userId: input.memberId,
+        entries: [{
+          at,
+          component: "device-sync",
+          phase: "invoke",
+          eventCode: "device-sync.callback_rejected",
+          errorCode,
+          level: "info",
+          redactedJson: { provider },
+        }],
+      });
+    } catch {
+      console.warn("Hosted device callback diagnostic write failed.", { errorCode, provider });
+    }
+  };
+  try {
+    after(task);
+  } catch {
+    void task();
   }
 }

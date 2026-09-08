@@ -3698,6 +3698,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "assistant.computer_tool_failed",
   "assistant.onboarding_followup_reconciled",
   "assistant.pass_finished",
+  "device-sync.callback_rejected",
   "device-sync.dense_raw_retention",
   "device-sync.companion_diagnostic",
   "device-sync.dirty_ack_persistence_failed",

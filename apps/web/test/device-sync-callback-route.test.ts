@@ -1,3 +1,4 @@
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,11 +15,21 @@ const CALLBACK_URL =
   + `?murph_state=${CALLBACK_STATE}&result=success`;
 
 const mocks = vi.hoisted(() => ({
+  tasks: [] as Array<() => Promise<void>>,
+  writeLogs: vi.fn(),
+  sendEmail: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   discardConnectionCallback: vi.fn(),
   handleConnectionCallback: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
 }));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: (task: () => Promise<void>) => mocks.tasks.push(task),
+}));
+vi.mock("@/src/lib/hosted-runtime-log/write", () => ({ writeHostedRuntimeLogs: mocks.writeLogs }));
+vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", () => ({ sendHostedResendPlainTextEmail: mocks.sendEmail }));
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
@@ -43,6 +54,13 @@ describe("hosted device-sync callback boundary", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.tasks.length = 0;
+    mocks.writeLogs.mockResolvedValue(1);
+    mocks.sendEmail.mockResolvedValue({ providerMessageId: "email_synthetic" });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("HOSTED_LINQ_ALERT_EMAIL_FROM", "Alerts <alerts@example.test>");
+    vi.stubEnv("HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS", "ops@example.test");
+    vi.stubEnv("RESEND_API_KEY", "re_synthetic");
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       discardConnectionCallback: mocks.discardConnectionCallback,
       handleConnectionCallback: mocks.handleConnectionCallback,
@@ -65,7 +83,10 @@ describe("hosted device-sync callback boundary", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all(mocks.tasks.splice(0).map((task) => task()));
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -91,7 +112,7 @@ describe("hosted device-sync callback boundary", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("burns the callback state and shows the Connect error notice when the URL arrives without its proof", async () => {
+  it("burns the callback state and returns to Connect for review when the URL arrives without its proof", async () => {
     const request = new Request(CALLBACK_URL);
 
     const response = await callbackRoute.GET(
@@ -112,6 +133,47 @@ describe("hosted device-sync callback boundary", () => {
     // The single provider-wide proof slot may belong to a newer concurrent
     // flow, so an unmatched callback must not clear it.
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("keeps an expired revisit after success out of failure emails and records a bounded diagnostic", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T10:00:00Z"));
+    const first = await callbackRoute.GET(buildCallbackRequest(), createRouteContext({ provider: "junction" }));
+    expect(new URL(first.headers.get("location")!).searchParams.get("deviceSyncStatus")).toBe("connected");
+    vi.setSystemTime(new Date("2026-01-01T13:00:00Z"));
+    const revisit = await callbackRoute.GET(new Request(CALLBACK_URL), createRouteContext({ provider: "junction" }));
+    expect(new URL(revisit.headers.get("location")!).pathname).toBe("/connect");
+    expect(revisit.headers.get("set-cookie")).toBeNull();
+    expect(mocks.handleConnectionCallback).toHaveBeenCalledTimes(1);
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    await mocks.tasks.shift()!();
+    expect(mocks.writeLogs).toHaveBeenCalledWith({
+      userId: "member_a",
+      entries: [{ at: "2026-01-01T13:00:00.000Z", component: "device-sync", phase: "invoke",
+        eventCode: "device-sync.callback_rejected", errorCode: "CALLBACK_PROOF_MISSING",
+        level: "info", redactedJson: { provider: "junction" } }],
+    });
+    const { entries } = mocks.writeLogs.mock.calls[0]![0];
+    expect(parseHostedRuntimeLogRequest({ entries }).entries).toHaveLength(1);
+    expect(JSON.stringify(entries)).not.toContain(CALLBACK_STATE);
+  });
+
+  it("omits unrecognized provider path text from diagnostics", async () => {
+    await callbackRoute.GET(new Request(CALLBACK_URL), createRouteContext({ provider: "private-provider-value" }));
+    await mocks.tasks.shift()!();
+    const payload = mocks.writeLogs.mock.calls[0]![0];
+    expect(payload.entries[0].redactedJson).toEqual({ provider: "unknown" });
+    expect(JSON.stringify(payload)).not.toContain("private-provider-value");
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain("private-provider-value");
+  });
+
+  it("recovers even when the diagnostic database fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.writeLogs.mockRejectedValueOnce(new Error("synthetic storage failure"));
+    const response = await callbackRoute.GET(new Request(CALLBACK_URL), createRouteContext({ provider: "junction" }));
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/connect");
+    await expect(mocks.tasks.shift()!()).resolves.toBeUndefined();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
   it("rejects the initiating browser proof when the active member changes", async () => {
