@@ -10,7 +10,7 @@ export function createRunnerReleaseProvider(input: {
   fetchImpl?: typeof fetch;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const request = async (operation: string, pathname: string, method = "GET", body?: unknown): Promise<Record<string, unknown>> => {
+  const request = async (operation: string, pathname: string, method = "GET", body?: unknown, privateRequestValues: readonly string[] = []): Promise<Record<string, unknown>> => {
     let response: Response;
     try {
       response = await fetchImpl(
@@ -30,11 +30,42 @@ export function createRunnerReleaseProvider(input: {
     if (!response.ok || !isObjectRecord(value) || value.success !== true) {
       const requestBody = isObjectRecord(body) ? body : {};
       const configuration = isObjectRecord(requestBody.configuration) ? requestBody.configuration : {};
-      const privateValues = [input.apiToken, input.accountId, requestBody.name, configuration.image]
+      const privateValues = [input.apiToken, input.accountId, requestBody.name, configuration.image, ...privateRequestValues]
         .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
       throw unavailable(`${operation}: HTTP ${response.status}; errors=${providerErrorSummary(value, privateValues)}.`);
     }
     return value;
+  };
+  const readDrainedInstances = async (applicationId: string, deadline: number): Promise<boolean> => {
+    const tokens = new Set<string>();
+    let pageToken: string | undefined;
+    let rows = 0;
+    for (let page = 0; page < 100; page++) {
+      if (Date.now() >= deadline) throw unavailable("Inactive instance inspection exceeded its deadline.");
+      const query = new URLSearchParams({ per_page: "100" });
+      if (pageToken) query.set("page_token", pageToken);
+      const response = await request("Read inactive instances",
+        `/containers/dash/applications/${encodeURIComponent(applicationId)}/instances?${query}`,
+        "GET", undefined, [applicationId, pageToken ?? ""]);
+      const instances = isObjectRecord(response.result) ? response.result.instances : undefined;
+      if (!Array.isArray(instances) || (rows += instances.length) > 10_000) throw unavailable();
+      // Historical Durable Object identities are not running native instances.
+      const stopped = instances.every((instance: unknown) => {
+        if (!isObjectRecord(instance) || !isObjectRecord(instance.current_placement)
+          || !isObjectRecord(instance.current_placement.status)) return false;
+        const status = instance.current_placement.status;
+        return (status.container_status ?? status.health) === "stopped";
+      });
+      if (!stopped) return false;
+      const info = response.result_info;
+      if (info !== undefined && !isObjectRecord(info)) throw unavailable();
+      const next = isObjectRecord(info) ? info.next_page_token : undefined;
+      if (next === undefined || next === null || next === "") return true;
+      if (typeof next !== "string" || !next.trim() || next.length > 2048 || tokens.has(next)) throw unavailable();
+      tokens.add(next);
+      pageToken = next;
+    }
+    throw unavailable("Inactive instance inspection exceeded its page bound.");
   };
   return {
     async readAccountLimits(): Promise<{ vcpu: number; memoryMiB: number; diskMB: number }> {
@@ -102,20 +133,10 @@ export function createRunnerReleaseProvider(input: {
     async assertDrained(applicationId: string): Promise<void> {
       // This waits in CI, while the active target continues serving messages.
       // Never stop a running member invocation to make a deployment progress.
-      // The application deployment list contains native instances, not the
-      // paginated historical Durable Object identities shown by the dashboard.
+      // Use the paginated Containers instance endpoint used by Wrangler.
       const deadline = Date.now() + 20 * 60_000;
       do {
-        const response = await request("Read inactive deployments", `/containers/applications/${encodeURIComponent(applicationId)}/deployments`);
-        if (!Array.isArray(response.result)) throw unavailable();
-        const info = response.result_info;
-        if (isObjectRecord(info) && info.next_page_token) throw unavailable();
-        const drained = response.result.every((instance: unknown) => {
-          if (!isObjectRecord(instance) || !isObjectRecord(instance.current_placement)
-            || !isObjectRecord(instance.current_placement.status)) return false;
-          const status = instance.current_placement.status;
-          return (status.container_status ?? status.health) === "stopped";
-        });
+        const drained = await readDrainedInstances(applicationId, deadline);
         if (drained) return;
         if (Date.now() >= deadline) break;
         await delay(10_000);
