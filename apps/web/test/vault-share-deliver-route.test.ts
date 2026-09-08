@@ -879,6 +879,14 @@ describe("vault-share deliver route", () => {
         error: { code: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE },
       });
       expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(
+        "Hosted vault-share delivery stopped before destination admission.",
+        {
+          errorCode: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+          deadlineElapsed: true,
+          requestAborted: false,
+        },
+      );
     } finally {
       consoleError.mockRestore();
     }
@@ -931,6 +939,48 @@ describe("vault-share deliver route", () => {
       consoleError.mockRestore();
     }
   });
+
+  it.each(["deadline", "cancellation"] as const)(
+    "preserves the underlying replacement failure after %s without exposing it in the response",
+    async (stopReason) => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const nowMs = Date.now();
+      const now = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+      const controller = new AbortController();
+      mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
+      mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementationOnce(async () => {
+        if (stopReason === "deadline") {
+          now.mockReturnValue(nowMs + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS);
+        } else {
+          controller.abort();
+        }
+        throw new Error("Synthetic transaction failure for member_private_fixture.");
+      });
+
+      const response = await deliverRoute.POST(buildRequest(VALID_BODY, controller.signal));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: {
+          code: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+          message: "Hosted vault-share delivery failed. Retry the request.",
+          retryable: true,
+        },
+      });
+      expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalledWith(
+        "Hosted vault-share delivery to a destination share failed.",
+        {
+          errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
+          errorMessage: "Synthetic transaction failure for member_<redacted-id>",
+          errorType: "Error",
+          deadlineElapsed: stopReason === "deadline",
+          requestAborted: stopReason === "cancellation",
+        },
+      );
+      expect(JSON.stringify(consoleError.mock.calls)).not.toContain("member_private_fixture");
+    },
+  );
 
 	it("replaces an all-stale offer with an empty snapshot", async () => {
 		const response = await deliverRoute.POST(
@@ -1090,6 +1140,8 @@ describe("vault-share deliver route", () => {
           errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
           errorMessage: "Hosted ingress domain root envelope is not available for decrypt.",
           errorType: "HostedDomainRootEnvelopeUnavailableError",
+          deadlineElapsed: false,
+          requestAborted: false,
         },
       );
       expect(consoleError).toHaveBeenCalledWith(
@@ -1139,6 +1191,8 @@ describe("vault-share deliver route", () => {
           errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
           errorMessage: "synthetic shared KMS provider failure",
           errorType: "Error",
+          deadlineElapsed: false,
+          requestAborted: false,
         },
       );
     } finally {
