@@ -60,6 +60,8 @@ import {
 } from "@/src/components/ui/tooltip";
 import { usePointerPopoverAnchor } from "@/src/components/ui/use-pointer-popover-anchor";
 import { cn } from "@/src/lib/utils";
+import { PatternEvidenceCalendar } from "./pattern-evidence-calendar";
+import type { PatternEvidenceWindow } from "./pattern-evidence-days";
 import { resolvePatternFactorIcon } from "./pattern-factor-icon";
 
 const INITIAL_VISIBLE_FACTOR_COUNT = 15;
@@ -714,6 +716,7 @@ function PatternOutcomeColumnCell({
 
     return (
       <PatternBubble
+        report={report}
         cell={checked?.cell}
         card={card}
         factorLabel={factorLabel}
@@ -730,6 +733,7 @@ function PatternOutcomeColumnCell({
     const [{ cell, outcome }] = effects;
     return (
       <PatternBubble
+        report={report}
         cell={cell}
         card={card}
         factorLabel={factorLabel}
@@ -744,6 +748,7 @@ function PatternOutcomeColumnCell({
 
   return (
     <PatternCompositeBubble
+      report={report}
       card={card}
       entries={effects}
       factorLabel={factorLabel}
@@ -764,10 +769,12 @@ function isPatternEffectEntry(entry: {
 }
 
 function PatternCompositeBubble({
+  report,
   card = false,
   entries,
   factorLabel,
 }: {
+  report: PatternEvidenceWindow;
   card?: boolean;
   entries: PatternEffectEntry[];
   factorLabel: string;
@@ -845,7 +852,7 @@ function PatternCompositeBubble({
             </p>
             {cell.exposedMean !== null && cell.comparisonMean !== null ? (
               <PatternComparisonBars
-                comparisonLabel={card ? "Other" : "Other days"}
+                comparisonLabel={cell.comparisonBasis === "confirmed_absence" ? `Without ${factor}` : card ? "Other" : "Other days"}
                 comparisonMean={cell.comparisonMean}
                 comparisonDays={card ? cell.comparisonDays : undefined}
                 exposedLabel={`After ${factor}`}
@@ -855,6 +862,7 @@ function PatternCompositeBubble({
                 unit={outcome.unit}
               />
             ) : null}
+            <PatternEvidenceCalendar report={report} cell={cell} factorLabel={factorLabel} />
           </section>
         ))}
       </div>
@@ -867,6 +875,7 @@ function PatternCompositeBubble({
 }
 
 function PatternBubble({
+  report,
   cell,
   card = false,
   factorLabel,
@@ -876,6 +885,7 @@ function PatternBubble({
   outcomeLabel,
   outcomeUnit,
 }: {
+  report: PatternEvidenceWindow;
   cell?: PersonalPatternCell;
   card?: boolean;
   factorLabel: string;
@@ -936,6 +946,7 @@ function PatternBubble({
 
   return (
     <PatternDetails
+      report={report}
       card={card}
       cell={cell}
       factorLabel={factorLabel}
@@ -1124,6 +1135,7 @@ function PatternResultDetails({
 }
 
 function PatternDetails({
+  report,
   card,
   trigger,
   cell,
@@ -1134,6 +1146,7 @@ function PatternDetails({
   outcomeLabel,
   outcomeUnit,
 }: {
+  report: PatternEvidenceWindow;
   card: boolean;
   trigger: ReactElement;
   cell: PersonalPatternCell;
@@ -1184,7 +1197,7 @@ function PatternDetails({
         </>
       ) : null}
 
-      <Separator />
+      <PatternEvidenceCalendar report={report} cell={cell} factorLabel={factorLabel} />
       <p className="text-xs leading-5 text-muted-foreground">
         Data from {formatEvidencePeriod(cell)}.
       </p>

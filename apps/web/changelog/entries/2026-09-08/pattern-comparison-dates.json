@@ -1,0 +1,13 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "pattern-comparison-dates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "See the days behind a pattern",
+    "summary": "Pattern details now show the saved comparison dates in a compact calendar. Select a day to see which group it belongs to.",
+    "relevanceTags": ["patterns", "usability"],
+    "sourcePullRequests": []
+  }
+}

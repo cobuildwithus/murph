@@ -823,6 +823,13 @@ descriptions to one short sentence.
 
 Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts out of the main result grid; expose them in supporting detail. On narrow screens, use one card per factor with its illustration, compact evidence-coverage bars, and available comparisons in a two-column grid. Use serif values for changed results. Show changed results without a neutral-results footer. Neutral-only cards use a compact factor header with a plain `No clear changes` status beneath the name and no expandable list. Omit measures without enough comparable data from mobile cards. Open mobile result details in a bottom drawer with comparison bars, evidence dates, a close control, and safe-area spacing. Keep mobile result headlines free of redundant metric eyebrows. Show the number of days beside each comparison label in mobile detail drawers. Coverage bars open their own mobile drawer leading with the recorded-day count and the factor name underneath. Reuse the detail content in desktop hover popovers. Desktop keeps the sortable comparison matrix.
 
+Comparison details keep their average bars and expose saved dates in one
+`Days compared` disclosure. Use a week-column calendar with filled factor marks,
+bordered sand confirmed-absence marks, and hollow unrecorded marks. Dates reveal
+their group on selection or keyboard focus. Keep the unrecorded-basis warning,
+label partial arrays, and omit the calendar when no valid saved dates exist.
+Do not repeat statistics, evidence grades, or idle tap instructions below it.
+
 ## 6. Do's and Don'ts
 
 ### Do:
