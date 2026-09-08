@@ -417,6 +417,12 @@ replacements at that deadline. Transport receives only a fixed settlement
 margin, and the proxy marks a response as authoritative only after receiving the
 actual Web response; an unmarked proxy-local response or transport loss retains
 invocation ownership until the absolute settlement boundary.
+The replacement transaction rechecks the same absolute deadline and caller
+cancellation after admission and after each authority-lock boundary, before
+issuing the snapshot update. Waiting or retrying transaction admission cannot
+renew write authority. Failures still retain the existing retry obligation;
+operator diagnostics preserve the underlying redacted error together with
+deadline-expired and caller-canceled flags, while the response remains generic.
 No projection watermark is stored on the share, and the group runtime is not
 woken; its next ordinary read continues to query the current Web-owned
 replacement snapshot.
