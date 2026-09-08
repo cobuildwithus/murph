@@ -44,7 +44,7 @@ import { readAssistantCronCanonicalRuntimeStore } from '../cron/runtime-state.js
 
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT = 100
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
-const ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY = 4
+const ASSISTANT_OUTBOX_READ_CONCURRENCY = 4
 const ASSISTANT_OUTBOX_DEDUPE_DATABASE_NAME = 'outbox-dedupe.sqlite'
 const ASSISTANT_OUTBOX_DEDUPE_DATABASE_VERSION = 1
 const ASSISTANT_OUTBOX_LEGACY_DEDUPE_FALLBACK_LIMIT = 100
@@ -97,7 +97,10 @@ export async function readAssistantOutboxIntent(
   intentId: string,
 ): Promise<AssistantOutboxIntent | null> {
   const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  await Promise.all([
+    ensureAssistantStateDirectory(paths.outboxDirectory),
+    ensureAssistantStateDirectory(paths.stateDirectory),
+  ])
 
   return readAssistantOutboxIntentAtPath(
     resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
@@ -159,7 +162,10 @@ export async function listAssistantOutboxIntentsLocal(
   onScan?: (metrics: AssistantOutboxInventoryScanMetrics) => void,
 ): Promise<AssistantOutboxIntent[]> {
   const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  await Promise.all([
+    ensureAssistantStateDirectory(paths.outboxDirectory),
+    ensureAssistantStateDirectory(paths.stateDirectory),
+  ])
   const entries = await readdir(paths.outboxDirectory, {
     withFileTypes: true,
   })
@@ -173,11 +179,11 @@ export async function listAssistantOutboxIntentsLocal(
   for (
     let index = 0;
     index < inventoryEntries.length;
-    index += ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY
+    index += ASSISTANT_OUTBOX_READ_CONCURRENCY
   ) {
     const batch = inventoryEntries.slice(
       index,
-      index + ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY,
+      index + ASSISTANT_OUTBOX_READ_CONCURRENCY,
     )
     const batchIntents = await Promise.all(
       batch.map((entry) =>
@@ -305,7 +311,10 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   const paths = resolveAssistantStatePaths(input.vault)
-  await ensureAssistantState(paths)
+  await Promise.all([
+    ensureAssistantStateDirectory(paths.outboxDirectory),
+    ensureAssistantStateDirectory(paths.stateDirectory),
+  ])
   const dedupeToken = normalizeNullableString(input.dedupeToken)
   const deliveryIdempotencyKey = normalizeNullableString(
     input.deliveryIdempotencyKey,
@@ -366,7 +375,10 @@ export async function listAssistantOutboxIntentsForAutoReplyRoute(
   input: AssistantOutboxAutoReplyRouteQuery,
 ): Promise<AssistantOutboxIntent[]> {
   const paths = resolveAssistantStatePaths(input.vault)
-  await ensureAssistantState(paths)
+  await Promise.all([
+    ensureAssistantStateDirectory(paths.outboxDirectory),
+    ensureAssistantStateDirectory(paths.stateDirectory),
+  ])
   const routeTags = resolveAssistantOutboxAutoReplyQueryTags(input)
   const providerTags = [...new Set(
     (input.providerMessageIds ?? [])
@@ -412,7 +424,10 @@ export async function listAssistantOutboxIntentsForPrivateCompletionRoute(
   input: AssistantOutboxPrivateCompletionRouteQuery,
 ): Promise<AssistantOutboxIntent[]> {
   const paths = resolveAssistantStatePaths(input.vault)
-  await ensureAssistantState(paths)
+  await Promise.all([
+    ensureAssistantStateDirectory(paths.outboxDirectory),
+    ensureAssistantStateDirectory(paths.stateDirectory),
+  ])
   const tagDigest = resolveAssistantOutboxForegroundTagDigest(
     'private-completion-route',
     {
@@ -704,16 +719,28 @@ async function readAssistantOutboxProjectedIntents(input: {
   vault: string
 }): Promise<AssistantOutboxIntent[]> {
   const intents: AssistantOutboxIntent[] = []
-  for (const intentId of input.intentIds) {
-    const intent = await readAssistantOutboxIntentAtPath(
-      resolveAssistantOutboxIntentPath(input.paths.outboxDirectory, intentId),
-      { vault: input.vault },
+  for (
+    let index = 0;
+    index < input.intentIds.length;
+    index += ASSISTANT_OUTBOX_READ_CONCURRENCY
+  ) {
+    const batch = input.intentIds.slice(
+      index,
+      index + ASSISTANT_OUTBOX_READ_CONCURRENCY,
     )
-    if (intent) {
-      intents.push(intent)
-      continue
+    const batchIntents = await Promise.all(batch.map((intentId) =>
+      readAssistantOutboxIntentAtPath(
+        resolveAssistantOutboxIntentPath(input.paths.outboxDirectory, intentId),
+        { vault: input.vault },
+      ),
+    ))
+    for (const [batchIndex, intent] of batchIntents.entries()) {
+      if (intent) {
+        intents.push(intent)
+        continue
+      }
+      await removeAssistantOutboxDedupeProjectionIntent(input.paths, batch[batchIndex]!)
     }
-    await removeAssistantOutboxDedupeProjectionIntent(input.paths, intentId)
   }
   return intents.sort((left, right) =>
     compareAssistantTimestampsAscending(left.createdAt, right.createdAt) ||

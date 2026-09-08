@@ -107,8 +107,11 @@ leaves the durable preference intact; the next invocation and the mandatory
 provider-entry consistency check remain the recovery path. This compares the
 invocation provider with the saved provider; it is not input admission or
 target/audience authorization. Handoff and unavailable settings reads preserve
-accepted work for retry. The warm-wake consistency check precedes mailbox
-prefetch, which can perform usage-denial bookkeeping. The signal carries no
+accepted work for retry. Foreground wakes use the provider-entry consistency
+check after mailbox import, preserving imported input if the provider changed.
+An empty wake checks the provider after its mailbox probe so Settings-only
+changes still hand off. Mailbox access and usage-denial bookkeeping remain
+Web-owned and independent of the invocation's provider. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 
@@ -1885,8 +1888,17 @@ terminal evidence, session preflight, cross-session context, prompt preparation,
 and service handoff. When present, those ten values sum exactly to their parent;
 outbox timing remains nested within cross-session context. Route-scoped
 cross-session consumption reads one exact route record and at most one exact
-pending receipt; it never inventories receipts on this foreground path. The
-subdivision adds no reporting I/O or awaited reporting work. The emitter omits a
+pending receipt; it never inventories receipts on this foreground path. Indexed
+outbox history retains the existing 100-record selection bound and reads canonical
+files in batches of at most four, sharing the outbox inventory reader's bound.
+Record validation, corrupt-file quarantine, stale projection cleanup, and final
+chronological ordering remain with the existing outbox owner. Unanchored replies
+validate their causal bound and exact route, then read the route watermark before
+loading history. Incomplete/corrupt migration or blocked route state omits optional
+prior-delivery context without loading those records. Explicit native replies
+retain exact-target resolution independently of the unanchored watermark; the
+existing pre-egress claim still revalidates consumption. The subdivision adds no
+reporting I/O or awaited reporting work. The emitter omits a
 partial or non-additive subdivision, and Web's best-effort parser drops the
 malformed phase breakdown without losing the core provider-start milestone.
 The complete subdivision is emitted only when the provider-producing group is

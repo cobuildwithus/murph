@@ -5772,13 +5772,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         signal?: AbortSignal;
         systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
-        if (runtimeOwnerHandoffRequested) {
-          return false;
-        }
-        // Graceful shutdown hands staged work to the durable checkpoint before
-        // this invocation starts another assistant or provider turn.
+        // Shutdown or provider handoff preserves staged work for the durable
+        // checkpoint before this invocation starts another assistant turn.
         const shouldContinue = () =>
-          options.shutdownSignal?.aborted !== true
+          !runtimeOwnerHandoffRequested
+          && options.shutdownSignal?.aborted !== true
           && (input.shouldContinue?.() ?? true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         let invocationLocalAssistantInputBatch:
@@ -6002,6 +6000,25 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           || hostedMailboxImportHasForegroundConversationWork(
             conversationImport,
           );
+        if (
+          !hasForegroundConversationWork
+          && input.requestIdKind === "checkpoint-interrupt"
+          && input.latencySeed !== null
+          && !runtimeAbortController.signal.aborted
+          && shouldContinue()
+        ) {
+          try {
+            await resolveInvocationAssistantProviderConsistency();
+          } catch {
+            // An empty runtime wake is only a handoff hint. Foreground
+            // provider entry independently checks the saved provider.
+          }
+          if (runtimeOwnerHandoffRequested) {
+            markIdleCheckpointTimerAfterDirtyWork();
+            await finishMailboxImportWithoutAssistant(conversationImport);
+            return false;
+          }
+        }
         const shouldRunLocalPreCheckpointSystemWork =
           input.systemMailboxAdmission === "pre_checkpoint_safe"
           && !hasForegroundConversationWork
@@ -6115,23 +6132,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
           return ran;
         };
-        if (
-          latencySeed !== null
-          && !runtimeOwnerHandoffRequested
-          && !runtimeAbortController.signal.aborted
-          && options.shutdownSignal?.aborted !== true
-        ) {
-          try {
-            if (await resolveInvocationAssistantProviderConsistency() === "handoff") {
-              markIdleCheckpointTimerAfterDirtyWork();
-              return false;
-            }
-          } catch {
-            // A runtime wake is only a handoff hint. The provider-entry gate
-            // still checks the saved provider when this hint read is
-            // temporarily unavailable.
-          }
-        }
         if (
           !runtimeOwnerHandoffRequested
           && options.shutdownSignal?.aborted !== true
