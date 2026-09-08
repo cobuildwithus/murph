@@ -32,6 +32,8 @@ import {
   addMeal,
   initializeVault,
   listGoals,
+  listAutomations,
+  listWorkoutFormats,
   listWriteOperationMetadataPaths,
   readHabitatAspect,
   readMemoryDocument,
@@ -3501,6 +3503,124 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
     },
     480_000,
   )
+})
+
+describeRealCodex('real Codex routine chat readiness e2e', () => {
+  it('keeps routine drafts, verified saves, and retrieval in chat', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-routine-chat-e2e-'))
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic routine proof', timezone: 'UTC', vaultRoot: workingDirectory })
+      await writeFile(commandLogPath, '', 'utf8')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+        materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
+        materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
+      ])
+      const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-09-08',
+          currentTimeZone: 'UTC',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          murphProductBaseUrl: 'https://www.withmurph.ai',
+          onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }
+      const scenarios = [
+        { kind: 'draft', prompt: 'Draft a routine called Practice A using exactly two sets of six air squats. Plain text only; keep my exercise choice, no form tutorial. I only want a proposal, not a save or a workout start.' },
+        { kind: 'save', prompt: 'Save Practice A as a reusable strength routine: air squats, bodyweight, two sets of six reps. Keep those exact details, no form tutorial. Just save the routine; no workout start or reminders. Confirm in plain text.' },
+        { kind: 'show', prompt: 'Show my saved Practice A routine in plain text. An old announcement says I can review workouts on the Training page; should I go there or can you show the routine here?' },
+        { kind: 'missing', prompt: 'Show my saved Friday Strength routine here in plain text. Do not create or change anything.' },
+        { kind: 'unreadable', prompt: 'Show my saved Practice A routine here in plain text. Do not create or change anything.' },
+      ] as const
+      let previousCommandCount = 0
+      for (const scenario of scenarios) {
+        let unreadablePath: string | null = null
+        const malformedTemplate = '---\nworkoutFormatId: [unterminated\n'
+        if (scenario.kind === 'unreadable') {
+          const [format] = await listWorkoutFormats(workingDirectory)
+          expect(format).toBeDefined()
+          unreadablePath = path.join(workingDirectory, format!.relativePath)
+          await writeFile(unreadablePath, malformedTemplate, 'utf8')
+        }
+        const result = await executeRealCodexAppServerTurn({ ...commonInput, prompt: scenario.prompt })
+        const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        const turnCommands = expandRecordedVaultCommands(commands.slice(previousCommandCount)).filter((command) => !command.includes('--help'))
+        previousCommandCount = commands.length
+        const writes = turnCommands.filter((command) => /workout (?:format (?:save|import-json|log)|start|add|finish|set |exercise )/u.test(command))
+        process.stdout.write(`[routine-chat-readiness-e2e] ${JSON.stringify({ scenario: scenario.kind, reply: result.finalMessage, mutationCount: writes.length })}\n`)
+        expect(result.finalMessage).not.toMatch(/https?:\/\/\S*\/training|(?:go to|open|visit|head to|check) (?:the |your )?(?:web )?Training (?:page|tab)/iu)
+        expect(result.responseCard).toBeNull()
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toEqual([])
+        if (scenario.kind === 'save') {
+          expect(writes).toHaveLength(1)
+          expect(writes[0]).toMatch(/^workout format (?:save|import-json) /u)
+          const showIndex = turnCommands.findIndex((command) => /^workout format show /u.test(command))
+          expect(showIndex).toBeGreaterThan(turnCommands.indexOf(writes[0]!))
+          const formats = await listWorkoutFormats(workingDirectory)
+          expect(formats).toHaveLength(1)
+          expect(formats[0]?.title).toBe('Practice A')
+          expect(formats[0]?.template.exercises).toHaveLength(1)
+          expect(formats[0]?.template.exercises[0]).toMatchObject({ name: expect.stringMatching(/^air squats?$/iu), mode: 'bodyweight', plannedSets: [{ order: 1, targetReps: 6 }, { order: 2, targetReps: 6 }] })
+          expect(result.finalMessage).toMatch(/saved/iu)
+        } else {
+          expect(writes).toEqual([])
+        }
+        if (scenario.kind === 'draft') {
+          expect(await listWorkoutFormats(workingDirectory)).toEqual([])
+          expect(result.finalMessage).toMatch(/draft|propos|not saved|haven[’']t saved|unsaved/iu)
+        }
+        if (scenario.kind === 'draft' || scenario.kind === 'show') {
+          expect(result.finalMessage).toMatch(/air squats?/iu)
+          expect(result.finalMessage).toMatch(/(?:2|two).*?(?:6|six)/iu)
+        }
+        if (scenario.kind === 'show' || scenario.kind === 'missing' || scenario.kind === 'unreadable') {
+          expect(turnCommands.some((command) => /^workout format show /u.test(command)), JSON.stringify(turnCommands)).toBe(true)
+        }
+        if (scenario.kind === 'missing') {
+          expect(result.finalMessage).toMatch(/(?:couldn[’']t|could not|cannot|can[’']t|didn[’']t|did not|don[’']t|do not).*find|not (?:found|saved)|no saved|isn[’']t saved/iu)
+        }
+        if (scenario.kind === 'unreadable') {
+          expect(result.finalMessage).toMatch(/can[’']t|cannot|couldn[’']t|could not|unable|unreadable/iu)
+          expect(result.finalMessage).not.toMatch(/not saved|no saved|successfully saved|ready to (?:use|start)/iu)
+          expect(await readFile(unreadablePath!, 'utf8')).toBe(malformedTemplate)
+        }
+        const vault = await readVaultRawTolerant(workingDirectory)
+        expect(vault.events.filter((event) => event.kind === 'activity_session')).toEqual([])
+        expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 600_000)
 })
 
 describeRealCodex('real Codex live workout prescription e2e', () => {

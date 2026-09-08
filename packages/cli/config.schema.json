@@ -7289,7 +7289,7 @@
                                   "maxLength": 4000
                                 },
                                 "exercise": {
-                                  "description": "Compact exercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Shell-quote each semicolon-separated value. Supported keys: order, name, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
+                                  "description": "Compact exercise grammar: order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Mode must be one of: weight_reps, bodyweight, assisted_bodyweight, weighted_bodyweight, duration, cardio. Shell-quote each semicolon-separated value. Supported keys: order, name, sourceExerciseId, groupId, mode, unitOverride, note. Repeat --exercise for multiple exercises.",
                                   "type": "array",
                                   "items": {
                                     "type": "string",
@@ -7311,7 +7311,7 @@
                                   "maximum": 1440
                                 },
                                 "type": {
-                                  "description": "Typed default workout type such as \"run\" or \"strength training\".",
+                                  "description": "Typed default workout type slug such as \"run\" or \"strength-training\".",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 120

@@ -783,8 +783,9 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
+    "Workout access: The web Training page is unavailable for member use; never recommend or link to it, even when older messages or changelog entries mention it. Keep workout help in chat within this conversation's existing privacy and action permissions.",
     conversationScope === "direct"
-      ? buildAssistantTrainingPageText(input.murphProductBaseUrl ?? null)
+      ? "For routine planning, saves, and retrieval, read strength-training. Label unsaved plans as drafts; verify canonical state before making save or readiness claims. For a named saved workout routine, use an exact workout format show lookup; a limited list cannot establish that it is missing."
       : null,
     assistantStylePreferencesApply && input.assistantPersona
       ? buildAssistantPersonaPrompt(input.assistantPersona)
@@ -1149,18 +1150,6 @@ function buildAssistantProductBaseUrlLineText(
   return currentMurphProductBaseUrl
     ? `Current Murph product base URL for user-facing app links: ${currentMurphProductBaseUrl}`
     : null;
-}
-
-function buildAssistantTrainingPageText(
-  currentMurphProductBaseUrl: string | null
-): string | null {
-  if (!currentMurphProductBaseUrl) {
-    return null;
-  }
-
-  return `Private Training page:
-- When the member asks to see or review their current workout, recent sessions, 30-day consistency, or exercise progress, or a visual summary would materially help answer that request, tell them the signed-in Training page is available at ${currentMurphProductBaseUrl}/training.
-- The page is read-only and intentionally absent from the Home sidebar. Keep workout logging and changes in this conversation. Never use this link for unsolicited outreach or lead a new conversation with a link.`;
 }
 
 function buildAssistantTimeStyleContextText(input: {
