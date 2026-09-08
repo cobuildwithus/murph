@@ -59,7 +59,7 @@ export async function runDeployWorkerVersionCli(
     configPath,
     dependencies: {
       async deployDirect(input) {
-        const renderedContainers = await readRenderedContainerIdentities(input.configPath);
+        const retainServingRunner = input.containerRolloutMode === "worker-only";
         const containerProvider = createCloudflareContainerProvider({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
@@ -75,15 +75,16 @@ export async function runDeployWorkerVersionCli(
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           configPath: input.configPath,
-          release: { currentVersion, releaseSha, listApplications: containerProvider.listApplications },
+          ...(retainServingRunner ? {} : { release: { currentVersion, releaseSha, listApplications: containerProvider.listApplications } }),
         });
         await applyHostedTransientLifecycleRules({ deployRoot, source: env });
         const staged = await stageHostedRunnerRelease({
           configPath: preparedConfigPath,
-          currentVersion, releaseSha,
+          currentVersion, releaseSha, retainServingRunner,
           currentVersionId,
           listApplications: containerProvider.listApplications,
         });
+        const renderedContainers = await readRenderedContainerIdentities(staged.configPath);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         const before = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "before", containerProvider.readRollout,

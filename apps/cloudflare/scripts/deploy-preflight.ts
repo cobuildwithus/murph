@@ -406,9 +406,9 @@ export function listHostedDeployEnvironmentInvariantErrors(
     );
   }
 
-  if (hostedExecutionContainerRollout !== STATE_ISOLATION_CONTAINER_ROLLOUT) {
+  if (![STATE_ISOLATION_CONTAINER_ROLLOUT, "worker-only"].includes(hostedExecutionContainerRollout)) {
     errors.push(
-      `production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; rollback floor is the audience-key, selector-scope, and runner-schema-v16 media-effect bundle.`,
+      `production runner image changes must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; compatible Worker-only deploys may use worker-only; rollback floor is the audience-key, selector-scope, and runner-schema-v16 media-effect bundle.`,
     );
   }
 

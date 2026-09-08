@@ -96,6 +96,56 @@ describe("runner deployment staging", () => {
     expect(resumed.workerOnly).toBe(false);
   });
 
+  it.each([false, true])("retains the serving fleet across artifact changes (reversed=%s)", async (reversed) => {
+    const active = reversed ? next : primary;
+    const previous = reversed ? primary : next;
+    const retainedConfig = { ...config, containers: config.containers.map((entry) => ({
+      ...entry, max_instances: entry.class_name === "DeploySmokeRunnerContainer" ? 1 : 12,
+    })) };
+    await writeFile(path.join(directory, "source.json"), JSON.stringify(retainedConfig));
+    const staged = await stageHostedRunnerRelease({
+      releaseSha: "2".repeat(40), retainServingRunner: true,
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version({ active, candidate: null, previous }),
+      listApplications: async (name) => (await listApplications(name)).map((entry) => ({
+        ...entry, max_instances: name.endsWith("-deploysmokerunnercontainer") ? 1 : 10,
+      })),
+    });
+    const effective = JSON.parse(await readFile(staged.promotionConfigPath, "utf8"));
+    expect(staged.workerOnly).toBe(true);
+    expect(staged.deployment).toEqual({ active, candidate: null, previous });
+    expect(staged.applications.map((entry) => entry.className)).toEqual(["DeploySmokeRunnerContainer"]);
+    expect(staged.applications[0]?.specification.max_instances).toBe(1);
+    expect(effective.containers.filter((entry: { class_name: string }) => entry.class_name !== "DeploySmokeRunnerContainer"))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ max_instances: 10, image: "registry.example.test/previous@sha256:old" })]));
+    expect(effective.containers.filter((entry: { class_name: string }) => entry.class_name !== "DeploySmokeRunnerContainer")
+      .every((entry: { max_instances: number; image: string }) => entry.max_instances === 10 && entry.image !== image)).toBe(true);
+  });
+
+  it.each([false, true])("retains only existing pending candidate authority (exists=%s)", async (exists) => {
+    await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config,
+      containers: config.containers.map((entry) => ({ ...entry, max_instances: entry.class_name === "DeploySmokeRunnerContainer" ? 1 : 12 })),
+    }));
+    const staged = await stageHostedRunnerRelease({
+      releaseSha: "2".repeat(40), retainServingRunner: true,
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version({ active: primary, candidate: next, previous: null }),
+      listApplications: async (name) => !exists && name.endsWith("-nextrunnercontainer") ? []
+        : (await listApplications(name)).map((entry) => ({ ...entry, max_instances: name.endsWith("-deploysmokerunnercontainer") ? 1 : 10 })),
+    });
+    expect(staged.deployment).toEqual({ active: primary, candidate: null, previous: exists ? next : null });
+    const effective = JSON.parse(await readFile(staged.configPath, "utf8"));
+    expect(effective.containers.some((entry: { class_name: string }) => entry.class_name === "NextRunnerContainer")).toBe(exists);
+    expect(staged.applications.map((entry) => entry.className)).toEqual(["DeploySmokeRunnerContainer"]);
+  });
+
+  it("refuses a Worker-only release that would expand the smoke application", async () => {
+    await expect(stageHostedRunnerRelease({ releaseSha: "2".repeat(40), retainServingRunner: true,
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version({ active: primary, candidate: null, previous: null }), listApplications,
+    })).rejects.toThrow("authoritative live configuration");
+  });
+
   it("requires preexisting namespace bindings before a native candidate can be created", async () => {
     const currentVersion = version();
     currentVersion.resources.bindings = currentVersion.resources.bindings.filter((binding) => !("class_name" in binding && binding.class_name === "NextRunnerContainer"));
