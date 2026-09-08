@@ -321,11 +321,14 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       signal: input.signal,
     });
 
-  input.signal?.throwIfAborted();
+  assertHostedVaultShareDeliveryActive(input);
   const transactionOptions = resolveHostedVaultShareProjectionTransactionOptions(
     input.deadlineAtEpochMs,
   );
   return prisma.$transaction(async (tx) => {
+    // Admission can wait or retry after the options were computed. Keep the
+    // caller's absolute deadline and cancellation authoritative inside the callback.
+    assertHostedVaultShareDeliveryActive(input);
     if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
       [input.share.grantorMemberId, input.share.destinationMemberId],
       tx,
@@ -333,6 +336,7 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       return "no-active-share";
     }
 
+    assertHostedVaultShareDeliveryActive(input);
     if (!await lockCurrentHostedVaultShareSourceWorkspaceTx({
       grantorMemberId: input.share.grantorMemberId,
       sourceWorkspaceVersion: input.sourceWorkspaceVersion,
@@ -340,6 +344,7 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
     })) {
       return "no-active-share";
     }
+    assertHostedVaultShareDeliveryActive(input);
     const replaced = await tx.hostedVaultShare.updateMany({
       data: {
         projectionSnapshotCiphertext,
@@ -359,6 +364,16 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
     });
     return replaced.count === 1 ? "replaced" : "no-active-share";
   }, transactionOptions);
+}
+
+function assertHostedVaultShareDeliveryActive(input: {
+  deadlineAtEpochMs?: number;
+  signal?: AbortSignal;
+}): void {
+  input.signal?.throwIfAborted();
+  if (input.deadlineAtEpochMs !== undefined && Date.now() >= input.deadlineAtEpochMs) {
+    throw new DOMException("Hosted vault-share delivery deadline elapsed.", "TimeoutError");
+  }
 }
 
 function resolveHostedVaultShareProjectionTransactionOptions(

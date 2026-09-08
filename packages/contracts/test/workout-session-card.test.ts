@@ -489,6 +489,13 @@ describe("workout session compact-table contract", () => {
     expect(workout.exercises[0]?.sets[0]?.reps).toBeUndefined();
     expect(workout.exercises[0]?.sets[1]?.reps).toBe(9);
     expect(workout.exercises[1]?.setPlanIsFinite).toBe(false);
+    expect(workout.exercises[1]?.memberRepsPerSet).toBeUndefined();
+    const withdrawn = workoutSessionSchema.parse({
+      ...workout,
+      exercises: [{ ...workout.exercises[0], memberRepsPerSet: null }],
+    });
+    expect(withdrawn.exercises[0]?.memberRepsPerSet).toBeNull();
+    expect(withdrawn.exercises[0]?.sets).toEqual(workout.exercises[0]?.sets);
     expect(
       workoutSessionSchema.safeParse({
         ...workout,

@@ -11,7 +11,10 @@ import {
   VaultError,
   withHostedCanonicalWritePort,
 } from "@murphai/core";
-import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import type { HostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
+import { parseHostedExecutionWake, parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
+import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
@@ -6374,6 +6377,100 @@ describe("hosted device-sync runtime", () => {
       await restoredWorkspace.cleanup();
     }
   });
+
+  test.each(["device-sync.dirty-processed", "device-sync.dirty-processed-batch"] as const)(
+    "retains a drained wake when ingress advances during checkpoint acknowledgement (%s)",
+    async (kind) => {
+      const workspace = await createHostedRuntimeWorkspace("hosted-device-sync-ingress-at-ack-");
+      const restoredWorkspace = await createHostedRuntimeWorkspace("hosted-device-sync-ingress-at-ack-restored-");
+      const executeJob = vi.fn(async () => ({}));
+      const service = createDeviceSyncServiceForVault(restoredWorkspace.vaultRoot, [
+        createFakeProvider({ jobExecutor: { executeJob } }),
+      ]);
+      const logRequests: HostedRuntimeLogRequest[] = [];
+      const occurredAt = "2026-04-04T10:00:00.000Z";
+      const retryAt = "2026-04-04T10:00:01.000Z";
+      const connectionId = "hosted_ingress_at_ack";
+      const wake = buildDirtyDeviceSyncWake(connectionId, occurredAt);
+      const ack = { connectionId, processedRevision: "1", processedDirtyPayloadIds: ["payload-completed"], nextWakeAt: null };
+      const port: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async ackDirtyStateProcessed(request) {
+          // The observed batch completed, then ingress committed another payload.
+          const stillDirty = request.processedRevision === "1";
+          return { connectionId, dirtyRevision: "2", processedRevision: request.processedRevision,
+            recorded: true, stillDirty, nextWakeAt: stillDirty ? retryAt : null, userId: "member_123" };
+        },
+        async fetchDirtyStates() {
+          return { hasMore: false, nextWakeAt: null, userId: "member_123", items: [buildDirtyState({
+            connectionId, dirtyRevision: "2", processedRevision: "1", dirtyResources: [{
+              count: 1, dirtyPayloadId: "payload-new", jobKind: "resource", payload: { resource: "steps" },
+              resource: "steps", resourceCategory: "timeseries", sourceProviderSlug: "demo", windowStart: null, windowEnd: null,
+            }],
+          })] };
+        },
+        async applyUpdates() { throw new Error("No control-plane update expected"); },
+        async createConnectLink() { throw new Error("No connection request expected"); },
+        async fetchSnapshot() { return buildRuntimeSnapshot({ connectionId, externalAccountId: "ingress-at-ack" }); },
+      };
+      const item: HostedSystemMailboxPendingItem = {
+        attemptCount: 1, itemId: "ingress-at-ack-owner", lastAttemptAt: occurredAt,
+        lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: wake.eventId,
+        mailboxLaneSeq: "1", nextAttemptAt: null, occurredAt,
+        postCheckpointRecord: kind === "device-sync.dirty-processed"
+          ? { kind, ...ack }
+          : { kind, records: [ack], nextWakeAt: null },
+        preferenceCausalSeq: null, requestId: null, routeAction: "run-device-sync-wake",
+        status: "recording", wake,
+      };
+      const runtime = createDeviceSyncPostCheckpointRuntime(port);
+      runtime.platform.logPort = { async write(request) {
+        const parsed = parseHostedRuntimeLogRequest(request);
+        logRequests.push(parsed); return { loggedCount: parsed.entries.length };
+      } };
+      try {
+        await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({ pending: [item] }));
+        const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+          item, runtime, vaultRoot: workspace.vaultRoot,
+          deviceSyncCompletionAcceptedInCurrentAdmission: true,
+        });
+        assert.equal(result.failed, 0);
+        const pending = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+        assert.equal(pending.length, 1, "new dirty work must keep a connection-scoped mailbox owner");
+        assert.equal(pending[0]?.status, "pending");
+        assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
+        assert.equal(pending[0]?.postCheckpointRecord, null);
+        assert.equal(pending[0]?.nextAttemptAt, retryAt);
+        const retained = pending[0]!;
+        assert.equal(retained.wake.kind, "device-sync.wake");
+        if (retained.wake.kind !== "device-sync.wake") throw new Error("Expected device wake");
+        assert.deepEqual(retained.wake.hint?.jobs, []);
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake: retained.wake,
+        });
+        const accountId = state.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(accountId);
+        assert.equal(await service.drainWorker(1, accountId), 1);
+        promoteHostedCompletedDirtyPayloadAcks({ service, state });
+        assert.equal(executeJob.mock.calls.length, 1);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds, ["payload-new"]);
+        const completedItem = { ...retained, status: "recording" as const,
+          postCheckpointRecord: { kind: "device-sync.dirty-processed-batch" as const, records: state.pendingDirtyAcks, nextWakeAt: null } };
+        await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({ pending: [completedItem] }));
+        await recordHostedSystemMailboxItemAfterCheckpoint({ item: completedItem, runtime, vaultRoot: workspace.vaultRoot });
+        assert.equal((await readHostedSystemMailboxState(workspace.vaultRoot)).pending.length, 0);
+        await drainHostedRuntimeLogWritesBestEffort();
+        assert.deepEqual(logRequests.flatMap((request) => request.entries)
+          .filter((entry) => entry.eventCode === "device-sync.checkpoint_recorded")
+          .map((entry) => [entry.redactedJson?.stillDirty, entry.redactedJson?.retainedMailboxOwnerPresent]),
+          [[true, true], [false, false]]);
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await workspace.cleanup();
+        await restoredWorkspace.cleanup();
+      }
+    },
+  );
 
   test("a full retained queue defers its webhook edge until capacity can advance", async () => {
     const workspace = await createHostedRuntimeWorkspace(
@@ -12772,7 +12869,97 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("admits provider cadence only for a connection wake without retained jobs", () => {
+  test.each(["reconcile_due", "webhook_hint"] as const)(
+    "runs cadence through a %s history owner across cold restores without retrying history early",
+    async (reason) => {
+      const cadenceAt = "2026-04-04T12:00:00.000Z";
+      const historyRetryAt = "2026-04-05T12:00:00.000Z";
+      const connectionId = "hosted_conn_retained_cadence";
+      let wake: HostedExecutionDeviceSyncWake = buildDeviceSyncWake({
+        connectionId, occurredAt: cadenceAt, provider: "strava", reason,
+        hint: { nextReconcileAt: cadenceAt, jobs: [{
+          availableAt: historyRetryAt, dedupeKey: "history-waiting",
+          kind: "backfill", maxAttempts: 3, payload: { windowStart: "2026-01-01T00:00:00.000Z" }, priority: 30,
+        }] },
+      });
+      const scheduledAt: string[] = [];
+      const executedKinds: string[] = [];
+      const [stravaProvider] = createConfiguredDeviceSyncProvidersFromConfigs({ strava: {
+        clientId: "synthetic-client", clientSecret: "synthetic-secret", reconcileIntervalMs: 21_600_000,
+      } });
+      assert.ok(stravaProvider?.jobExecutor?.createScheduledJobs);
+      const createScheduledJobs = stravaProvider.jobExecutor.createScheduledJobs;
+      let failScheduler = true;
+      const provider: DeviceSyncProvider = { ...stravaProvider, jobExecutor: {
+        ...stravaProvider.jobExecutor,
+        createScheduledJobs(account, now, context) {
+          if (failScheduler) throw new Error("Synthetic scheduler failure.");
+          scheduledAt.push(now);
+          return createScheduledJobs(account, now, context);
+        },
+        async executeJob(_context, job) {
+          executedKinds.push(job.kind);
+          return {};
+        },
+      } };
+      vi.useFakeTimers();
+      try {
+        // Each pass starts without the machine-local job store. Only the exact
+        // durable wake survives; Web still carries the original cadence.
+        for (let tick = 0; tick < 3; tick += 1) {
+          const now = new Date(Date.parse(cadenceAt) + tick * 21_600_000).toISOString();
+          vi.setSystemTime(new Date(now));
+          const workspace = await createHostedRuntimeWorkspace("hosted-retained-cadence-");
+          const service = createDeviceSyncServiceForVault(workspace.vaultRoot, [provider]);
+          const port: HostedRuntimeDeviceSyncPort = {
+            ...createNoDirtyStateDeviceSyncPortMethods(),
+            async fetchSnapshot() {
+              return buildRuntimeSnapshot({ connectionId, provider: "strava", externalAccountId: "retained-cadence", localState: { nextReconcileAt: cadenceAt } });
+            },
+            async applyUpdates() { throw new Error("Cadence must remain behind its completion checkpoint."); },
+            async createConnectLink() { throw new Error("Unexpected connect link."); },
+          };
+          try {
+            const state = await syncHostedDeviceSyncControlPlaneState({
+              deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+            });
+            const accountId = resolveHostedDeviceSyncSchedulerAccountId({ state, wake });
+            assert.ok(accountId);
+            assert.equal(getStore(service).getAccountById(accountId)?.nextReconcileAt, now);
+            if (tick === 0) {
+              await service.runSchedulerOnce(accountId);
+              const failedRecovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+              assert.equal(failedRecovery?.retryAt, historyRetryAt);
+              failScheduler = false;
+            }
+            await service.runSchedulerOnce(accountId);
+            assert.equal(await service.drainWorker(100, accountId), 1);
+            const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+            assert.ok(recovery);
+            assert.equal(recovery.retryAt, new Date(Date.parse(now) + 21_600_000).toISOString());
+            assert.deepEqual(recovery.wake.hint?.jobs, [{
+              availableAt: historyRetryAt, dedupeKey: "history-waiting", kind: "backfill",
+              maxAttempts: 3, payload: { windowStart: "2026-01-01T00:00:00.000Z" }, priority: 30,
+            }]);
+            assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
+            // Replaying the same admission does not enqueue the cadence twice.
+            await service.runSchedulerOnce(accountId);
+            assert.equal(await service.drainWorker(100, accountId), 0);
+            wake = recovery.wake;
+          } finally {
+            closeHostedRuntimeDeviceSyncService(service);
+            await workspace.cleanup();
+          }
+        }
+        assert.equal(scheduledAt.length, 3);
+        assert.deepEqual(executedKinds, ["reconcile", "reconcile", "reconcile"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test("admits provider cadence on retained connection jobs but skips bare webhook and completion wakes", () => {
     const state = {
       hostedToLocalAccountIds: new Map([["hosted_conn_scheduler", "local_scheduler"]]),
       localToHostedAccountIds: new Map([["local_scheduler", "hosted_conn_scheduler"]]),
@@ -12816,7 +13003,7 @@ describe("hosted device-sync runtime", () => {
         occurredAt,
         reason: "reconcile_due",
       }),
-    }), null);
+    }), "local_scheduler");
     assert.equal(resolveHostedDeviceSyncSchedulerAccountId({
       state,
       wake: buildDeviceSyncWake({

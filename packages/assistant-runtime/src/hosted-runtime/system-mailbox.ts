@@ -50,9 +50,11 @@ import type {
 import {
   findNextHostedSystemMailboxQueueItem,
   isHostedGroupContextHandoffSystemMailboxItem,
+  isHostedPlainDeviceSyncWakeHint,
+  isHostedRetainedDeviceScheduledAdmission,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedSystemMailboxModelFreeFrontier,
-  projectHostedSystemMailboxRetainedDeviceWebhookAdmission,
+  projectHostedSystemMailboxRetainedDeviceWakeAdmission,
   projectHostedSystemMailboxWakeOwnerFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
@@ -334,7 +336,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
     input.vaultRoot,
     (state) => {
       const admissionState =
-        projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+        projectHostedSystemMailboxRetainedDeviceWakeAdmission({
           now: startedAt,
           state,
         });
@@ -800,21 +802,6 @@ function collapseHostedRetainedDeviceSyncWakeHints(input: {
   });
 }
 
-function isHostedPlainDeviceSyncWakeHint(item: HostedSystemMailboxPendingItem): boolean {
-  const wake = item.wake;
-  return item.routeAction === "run-device-sync-wake"
-    && item.status === "pending"
-    && item.attemptCount === 0
-    && item.postCheckpointRecord === null
-    && item.deviceSyncContinuationOwner !== true
-    && wake.kind === "device-sync.wake"
-    && (wake.reason === "webhook_hint" || wake.reason === "reconcile_due")
-    && (wake.hint?.reason == null || wake.hint.reason === "webhook_dirty_transition")
-    && (wake.hint?.jobs?.length ?? 0) === 0
-    && wake.hint?.scopes === undefined
-    && wake.hint?.revokeWarning == null;
-}
-
 function collapseConsecutiveHostedBrowserVaultRefreshItems(input: {
   pending: readonly HostedSystemMailboxPendingItem[];
   selected: HostedSystemMailboxPendingItem;
@@ -1012,12 +999,18 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       signal: input.signal,
       stillDirty: recordResult.stillDirty,
     });
-    const retainUntil = completion.retainUntil;
+    const { dirtyRemainderDiscovered, retainUntil } = resolveHostedDeviceSyncDirtyRemainderRetention({
+      item: input.item,
+      nextDirtyWakeAt: recordResult.nextWakeAt,
+      retainUntil: completion.retainUntil,
+      stillDirty: recordResult.stillDirty,
+    });
     const immediateDirtyContinuationCanProgress = retainUntil !== null
       && recordResult.newerRevisionPending
       && hostedDeviceSyncRetainedWakeHasCapacity(input.item);
     if (retainUntil) {
       await retainHostedDeviceSyncSystemMailboxItem({
+        dirtyRemainderDiscovered,
         immediateDirtyContinuationCanProgress,
         item: input.item,
         dirtyWakeAt: recordResult.nextWakeAt,
@@ -1030,6 +1023,13 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
         vaultRoot: input.vaultRoot,
       });
     }
+    await writeHostedDeviceSyncCheckpointRecordedLog({
+      dirtyRemainderDiscovered,
+      item: input.item,
+      recordResult,
+      retainUntil,
+      runtime: input.runtime,
+    });
     const deviceSyncWake = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate(
         retainUntil,
@@ -1112,6 +1112,64 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   }
 }
 
+function resolveHostedDeviceSyncDirtyRemainderRetention(input: {
+  item: HostedSystemMailboxPendingItem;
+  nextDirtyWakeAt: string | null;
+  retainUntil: string | null;
+  stillDirty: boolean;
+}): { dirtyRemainderDiscovered: boolean; retainUntil: string | null } {
+  // Ingress may advance after the pass drained its observed batch. Keep its
+  // connection-scoped owner so the next pass can fetch the newly dirty work.
+  const dirtyRemainderDiscovered = input.retainUntil === null
+    && input.item.routeAction === "run-device-sync-wake"
+    && input.item.wake.kind === "device-sync.wake"
+    && input.item.wake.connectionId != null
+    && input.stillDirty;
+  return {
+    dirtyRemainderDiscovered,
+    retainUntil: input.retainUntil ?? (dirtyRemainderDiscovered
+      ? input.nextDirtyWakeAt
+        ?? new Date(Date.now() + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS).toISOString()
+      : null),
+  };
+}
+
+async function writeHostedDeviceSyncCheckpointRecordedLog(input: {
+  dirtyRemainderDiscovered: boolean;
+  item: HostedSystemMailboxPendingItem;
+  recordResult: {
+    recorded: number;
+    stillDirty: boolean;
+    newerRevisionPending: boolean;
+    nextWakeAt: string | null;
+  };
+  retainUntil: string | null;
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<void> {
+  if (input.item.routeAction === "run-device-sync-wake") {
+    await writeHostedRuntimeLogBestEffort({
+      platform: input.runtime.platform,
+      entry: {
+        component: "device-sync",
+        eventCode: "device-sync.checkpoint_recorded",
+        level: "info",
+        phase: "checkpoint",
+        mailboxLane: "system",
+        mailboxSeqStart: input.item.mailboxLaneSeq,
+        mailboxSeqEnd: input.item.mailboxLaneSeq,
+        redactedJson: {
+          dirtyAckRecordedCount: input.recordResult.recorded,
+          stillDirty: input.recordResult.stillDirty,
+          newerRevisionPending: input.recordResult.newerRevisionPending,
+          retainedMailboxOwnerPresent: input.retainUntil !== null,
+          dirtyRemainderDiscovered: input.dirtyRemainderDiscovered,
+          nextWakeAtPresent: input.recordResult.nextWakeAt !== null,
+        },
+      },
+    });
+  }
+}
+
 function presentHostedRuntimeWakeCandidate(
   candidate: HostedRuntimeWakeCandidate,
 ): HostedRuntimeWakeCandidate | undefined {
@@ -1191,6 +1249,7 @@ function hostedDeviceSyncRetainedWakeHasCapacity(
 }
 
 async function retainHostedDeviceSyncSystemMailboxItem(input: {
+  dirtyRemainderDiscovered: boolean;
   dirtyWakeAt: string | null;
   immediateDirtyContinuationCanProgress: boolean;
   item: HostedSystemMailboxPendingItem;
@@ -1223,7 +1282,12 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
             nextAttemptAt,
             postCheckpointRecord: null,
             status: "pending" as const,
-            wake: input.item.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch"
+            wake: input.dirtyRemainderDiscovered && input.item.wake.kind === "device-sync.wake"
+              ? {
+                  ...input.item.wake,
+                  hint: { ...input.item.wake.hint, jobs: [], reason: "retained_dirty_remainder" },
+                }
+              : input.item.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch"
               ? input.item.postCheckpointRecord.retainedWake ?? input.item.wake
               : input.item.wake,
           };
@@ -1236,7 +1300,8 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
           || item.routeAction !== "run-device-sync-wake"
           || item.wake.kind !== "device-sync.wake"
           || item.wake.connectionId !== connectionId
-          || item.wake.reason !== "webhook_hint"
+          || (item.wake.reason !== "webhook_hint"
+            && !isHostedRetainedDeviceScheduledAdmission(input.item, item, admittedAt))
           || !systemMailboxItemIsDue(item, admittedAt)
         ) {
           return item;

@@ -32,7 +32,7 @@ describe("native account capacity evidence", () => {
 describe("inactive runner target drain admission", () => {
   const response = (state: string) => new Response(JSON.stringify({
     success: true,
-    result: [{ current_placement: { status: { container_status: state } } }],
+    result: { instances: [{ id: "native-fixture", current_placement: { status: { container_status: state } } }] },
   }));
 
   it("permits reuse only when the provider reports stopped instances", async () => {
@@ -49,6 +49,68 @@ describe("inactive runner target drain admission", () => {
     const work = createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
       .assertDrained("inactive-app");
     await work;
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads every dashboard page before permitting reuse and ignores inactive historical objects", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: { instances: [],
+        durable_objects: [{ id: "historical-object" }] }, result_info: { next_page_token: "second page" } }))
+      .mockResolvedValueOnce(response("stopped"));
+    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).assertDrained("inactive-app");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const urls = fetchImpl.mock.calls.map(([url]) => new URL(String(url)));
+    expect(urls[0]?.pathname).toBe("/client/v4/accounts/fixture/containers/dash/applications/inactive-app/instances");
+    expect(urls[0]?.searchParams.get("per_page")).toBe("100");
+    expect(urls[1]?.searchParams.get("page_token")).toBe("second page");
+    expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("restarts the complete drain observation when a later page is still running", async () => {
+    const firstPage = () => Response.json({ success: true, result: { instances: [] }, result_info: { next_page_token: "more" } });
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(firstPage()).mockResolvedValueOnce(response("running"))
+      .mockResolvedValueOnce(firstPage()).mockResolvedValueOnce(response("stopped"));
+    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).assertDrained("inactive-app");
+    expect(fetchImpl.mock.calls.map(([url]) => new URL(String(url)).searchParams.get("page_token"))).toEqual([null, "more", null, "more"]);
+  });
+
+  it("waits for unplaced instances instead of treating them as drained", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: { instances: [{ id: "unplaced" }] } }))
+      .mockResolvedValueOnce(response("stopped"));
+    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).assertDrained("inactive-app");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects repeated page tokens without inferring drain", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: true,
+      result: { instances: [] }, result_info: { next_page_token: "same" } }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .assertDrained("inactive-app")).rejects.toThrow("unavailable");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds distinct pages and native rows", async () => {
+    let page = 0;
+    const pages = vi.fn<typeof fetch>(async () => Response.json({ success: true,
+      result: { instances: [] }, result_info: { next_page_token: String(++page) } }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl: pages })
+      .assertDrained("inactive-app")).rejects.toThrow("page bound");
+    expect(pages).toHaveBeenCalledTimes(100);
+    const rows = vi.fn<typeof fetch>(async () => Response.json({ success: true,
+      result: { instances: Array.from({ length: 10_001 }, () => ({})) } }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl: rows })
+      .assertDrained("inactive-app")).rejects.toThrow("unavailable");
+    expect(rows).toHaveBeenCalledOnce();
+  });
+
+  it("keeps opaque page tokens and application identity out of provider failure diagnostics", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ success: true, result: { instances: [] }, result_info: { next_page_token: "opaque-cursor" } }))
+      .mockResolvedValueOnce(Response.json({ success: false, errors: [{ code: 10001, message: "inactive-app rejected opaque-cursor" }] }, { status: 404 }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .assertDrained("inactive-app")).rejects.toThrow('Read inactive instances: HTTP 404; errors=[{"code":10001,"message":"<redacted> rejected <redacted>"}]');
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 

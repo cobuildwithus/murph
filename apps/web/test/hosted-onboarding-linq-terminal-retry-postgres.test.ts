@@ -8,12 +8,14 @@ import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   applyHostedLinqDeliveryReceiptTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import { buildHostedLinqInviteSignupEffectId } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq-webhook";
@@ -85,7 +87,9 @@ async function seed() {
   const phoneNumber = `+1555000${randomInt(1000, 9999)}`;
   const chatKey = createHostedLinqChatLookupKey(chatId)!;
   const lineKey = createHostedPhoneLookupKey(phoneNumber)!;
-  let receiptTime = Date.now() - 5_000;
+  const epoch = Date.now() - 10_000;
+  const at = (offsetMs: number) => new Date(epoch + offsetMs);
+  let receiptTime = epoch + 5_000;
   await prisma.hostedMember.create({ data: { id: memberId, billingStatus: "active" } });
   await prisma.hostedMemberRouting.create({
     data: { memberId, linqChatLookupKey: chatKey, linqRecipientPhoneLookupKey: lineKey },
@@ -97,14 +101,17 @@ async function seed() {
       providerReputationStatus: "HEALTHY", providerServiceStatus: "ACTIVE",
     },
   });
-  const accepted = (messageIds = [messageId], threadIsDirect = true) =>
+  const accepted = (
+    messageIds = [messageId], threadIsDirect = true,
+    client: Prisma.TransactionClient = prisma,
+  ) =>
     recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt: new Date(Date.now() - 10_000),
       attemptedAt: new Date(Date.now() - 11_000),
       idempotencyKey, linqChatId: chatId,
       messageId: messageIds.at(-1), messageIds,
       phoneNumberLookupKey: lineKey, sourceRef: idempotencyKey,
-      targetKind: "thread", threadIsDirect, userId: memberId, prisma,
+      targetKind: "thread", threadIsDirect, userId: memberId, prisma: client,
     });
   const result = await accepted();
   if (!result.deliveryId) throw new Error("Synthetic acceptance must have a delivery.");
@@ -118,6 +125,8 @@ async function seed() {
   };
   provider.read.mockResolvedValue(original);
   provider.send.mockResolvedValue({ chatId, messageId: retryId });
+  const ingest = (event: NonNullable<ReturnType<typeof parseHostedLinqProviderEvent>>) =>
+    prisma.$transaction((tx) => ingestHostedLinqProviderEventTx({ event, prisma: tx }));
   const receipt = async (
     id = messageId,
     status: "failed" | "delivered" = "failed",
@@ -136,7 +145,7 @@ async function seed() {
       } as HostedLinqWebhookEvent,
     });
     if (!event) throw new Error("Synthetic receipt must parse.");
-    await prisma.$transaction((tx) => ingestHostedLinqProviderEventTx({ event, prisma: tx }));
+    await ingest(event);
     return event;
   };
   const retry = (id = messageId) => retryHostedLinqTerminalSend({ chatId, messageId: id, prisma });
@@ -151,8 +160,35 @@ async function seed() {
   });
   return {
     prisma, memberId, containerId, chatId, chatKey, lineKey, messageId, retryId,
-    deliveryId, accepted, original, receipt, retry, grantConsent, withdrawConsent,
+    deliveryId, accepted, at, ingest, original, receipt, retry, grantConsent, withdrawConsent,
   };
+}
+
+// All evidence below passes through the production parser and receipt store.
+function timingReceipt(f: Awaited<ReturnType<typeof seed>>, input: {
+  eventAt: Date;
+  deliveredAt?: unknown;
+  messageId?: string;
+  status?: "delivered" | "failed";
+  webhookVersion?: "2026-02-03" | "2025-01-01";
+}) {
+  const status = input.status ?? "delivered";
+  const lifecycle = input.deliveredAt instanceof Date
+    ? input.deliveredAt.toISOString() : input.deliveredAt;
+  const event = parseHostedLinqProviderEvent({ event: {
+    api_version: "v3", webhook_version: input.webhookVersion ?? "2026-02-03",
+    event_id: `timing-receipt-${randomUUID()}`, event_type: `message.${status}`,
+    created_at: input.eventAt.toISOString(),
+    data: {
+      chat_id: f.chatId, service: "iMessage",
+      ...(input.webhookVersion === "2025-01-01"
+        ? { message: { id: input.messageId ?? f.messageId, delivered_at: lifecycle } }
+        : { message_id: input.messageId ?? f.messageId, delivered_at: lifecycle }),
+      ...(status === "failed" ? { code: 4001, reason: "Message send failed" } : {}),
+    },
+  } as HostedLinqWebhookEvent });
+  if (!event) throw new Error("Synthetic delivery timing receipt must parse.");
+  return event;
 }
 
 function deferred() {
@@ -209,6 +245,223 @@ async function settleOrBlock(prisma: Awaited<ReturnType<typeof seed>>["prisma"],
 }
 
 describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boundary", () => {
+  it.each(["scalar", "owned"])("keeps first %s delivery through duplicates, reordering, failure and callback replay", async (owner) => {
+    await withFixture(async (f) => {
+      const messageIds = owner === "owned" ? [f.messageId, `${f.messageId}-part-2`] : [f.messageId];
+      if (owner === "owned") {
+        await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
+        await f.accepted(messageIds);
+      }
+      const read = () => f.prisma.hostedLinqDelivery.findUniqueOrThrow({
+        where: { id: f.deliveryId }, select: { status: true, deliveredAt: true, lastReceiptAt: true, lastProviderEventId: true },
+      });
+      await f.ingest(timingReceipt(f, { eventAt: f.at(10_000), deliveredAt: f.at(2_000) }));
+      if (owner === "owned") {
+        expect(await read()).toMatchObject({ status: "accepted", deliveredAt: null });
+        await f.ingest(timingReceipt(f, {
+          messageId: messageIds[1], eventAt: f.at(12_000), deliveredAt: f.at(1_500),
+        }));
+      }
+      await f.ingest(timingReceipt(f, { eventAt: f.at(600_000), deliveredAt: f.at(590_000) }));
+      const latest = await read();
+      expect(latest).toMatchObject({ status: "delivered", deliveredAt: f.at(2_000), lastReceiptAt: f.at(600_000) });
+      const line = await f.prisma.hostedLinqLine.findUniqueOrThrow({ where: { phoneNumberLookupKey: f.lineKey } });
+      const earlier = timingReceipt(f, { eventAt: f.at(500_000), deliveredAt: f.at(1_000), webhookVersion: "2025-01-01" });
+      expect(await f.ingest(earlier)).toMatchObject({ duplicate: false });
+      expect(await read()).toEqual({ ...latest, deliveredAt: f.at(owner === "owned" ? 1_500 : 1_000) });
+      expect(await f.ingest(earlier)).toMatchObject({ duplicate: true });
+      expect(await f.prisma.hostedLinqLine.findUniqueOrThrow({ where: { phoneNumberLookupKey: f.lineKey } })).toEqual(line);
+
+      await f.ingest(timingReceipt(f, { eventAt: f.at(700_000), status: "failed" }));
+      const failure = await read();
+      await f.ingest(timingReceipt(f, { eventAt: f.at(650_000), deliveredAt: f.at(500) }));
+      expect(await read()).toEqual({ ...failure, status: "failed", deliveredAt: owner === "owned" ? null : f.at(500) });
+      if (owner === "owned") {
+        expect(await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({
+          where: { deliveryId: f.deliveryId, ordinal: 0 },
+        })).toMatchObject({ status: "failed", deliveredAt: f.at(500), lastReceiptAt: f.at(700_000) });
+      }
+      await f.ingest(timingReceipt(f, { eventAt: f.at(800_000), deliveredAt: f.at(790_000) }));
+      const recovered = await read();
+      expect(recovered).toMatchObject({
+        status: "delivered", deliveredAt: f.at(owner === "owned" ? 1_500 : 500), lastReceiptAt: f.at(800_000),
+      });
+      await f.accepted(messageIds);
+      expect(await read()).toEqual(recovered);
+      expect(provider.send).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    { owner: "scalar", legacyMetadata: false }, { owner: "owned", legacyMetadata: false },
+    { owner: "scalar", legacyMetadata: true }, { owner: "owned", legacyMetadata: true },
+  ])("catches up first delivery beyond the latest-status window: $owner, legacy metadata=$legacyMetadata", async ({ owner, legacyMetadata }) => {
+    await withFixture(async (f) => {
+      const ids = Array.from({ length: owner === "owned" ? 10 : 1 }, (_, i) =>
+        i === 0 ? f.messageId : `${f.messageId}-part-${i + 1}`);
+      const aggregates: Prisma.Sql[] = [];
+      let activeAggregates = 0;
+      let peakAggregates = 0;
+      const observe = (tx: Prisma.TransactionClient): Prisma.TransactionClient =>
+        new Proxy(tx, {
+          get(target, key) {
+            if (key === "$transaction") {
+              // Keep observing the real nested transaction used by the store.
+              return (operation: (nested: Prisma.TransactionClient) => Promise<unknown>) =>
+                target.$transaction((nested) => operation(observe(nested)));
+            }
+            if (key !== "$queryRaw") return Reflect.get(target, key);
+            return async (...args: Parameters<typeof target.$queryRaw>) => {
+              const [sql] = args;
+              if (!("sql" in sql) || !sql.sql.includes("SELECT MIN(COALESCE(")) {
+                return target.$queryRaw(...args);
+              }
+              // Observe the actual SQL and await the real database, without replacing it.
+              aggregates.push(sql);
+              peakAggregates = Math.max(peakAggregates, ++activeAggregates);
+              try { return await target.$queryRaw(...args); } finally { activeAggregates--; }
+            };
+          },
+        });
+      const accept = () => f.prisma.$transaction((tx) => f.accepted(ids, owner !== "owned", observe(tx)));
+      await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
+      await accept(); // No receipt: no added aggregate, including the ten-part group path.
+      expect(aggregates).toHaveLength(0);
+      expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).toMatchObject({
+        status: owner === "owned" ? "sent_no_receipt_expected" : "accepted", deliveredAt: null,
+      });
+      await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
+      await f.ingest(timingReceipt(f, { eventAt: f.at(10_000), deliveredAt: f.at(2_000) }));
+      if (legacyMetadata) {
+        // Pre-fix stored receipts have no lifecycle metadata; their event time is the fallback.
+        await f.prisma.hostedLinqProviderEvent.updateMany({
+          where: { linqChatLookupKey: f.chatKey }, data: { payloadSanitizedJson: Prisma.DbNull },
+        });
+      }
+      for (let i = 0; i < 21; i++) {
+        await f.ingest(timingReceipt(f, { eventAt: f.at(60_000 + i * 1_000), deliveredAt: f.at(50_000 + i * 1_000) }));
+      }
+      await f.ingest(timingReceipt(f, { eventAt: f.at(90_000), deliveredAt: "invalid" }));
+      for (let i = 1; i < ids.length; i++) {
+        await f.ingest(timingReceipt(f, {
+          messageId: ids[i], eventAt: f.at(30_000 + i * 1_000),
+          deliveredAt: f.at((i + 1) * 2_000), webhookVersion: "2025-01-01",
+        }));
+      }
+      await accept();
+      expect(aggregates.map((sql) => sql.values)).toEqual(
+        ids.map((id) => createHostedLinqMessageLookupKeyReadCandidates(id)),
+      );
+      for (const sql of aggregates) {
+        expect(sql.sql).toMatch(/FROM hosted_linq_provider_event\s+WHERE message_lookup_key IN \([?,\s]+\)\s+AND delivery_status = 'delivered'\s*$/u);
+      }
+      expect(peakAggregates).toBe(1);
+      expect(activeAggregates).toBe(0);
+      expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).toMatchObject({
+        status: "delivered", lastReceiptAt: f.at(90_000),
+        deliveredAt: f.at(owner === "owned" ? 20_000 : legacyMetadata ? 10_000 : 2_000),
+      });
+      if (owner === "owned") expect(await f.prisma.hostedLinqDeliveryMessage.findMany({
+        where: { deliveryId: f.deliveryId }, orderBy: { ordinal: "asc" },
+        select: { deliveredAt: true, lastReceiptAt: true },
+      })).toEqual(ids.map((_, i) => ({
+        deliveredAt: f.at(i === 0 ? legacyMetadata ? 10_000 : 2_000 : (i + 1) * 2_000),
+        lastReceiptAt: f.at(i === 0 ? 90_000 : 30_000 + i * 1_000),
+      })));
+      expect(provider.read).not.toHaveBeenCalled();
+      expect(provider.send).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(["scalar", "owned"])("retains %s buffered first delivery when the latest receipt is failed", async (owner) => {
+    await withFixture(async (f) => {
+      await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
+      await f.ingest(timingReceipt(f, { eventAt: f.at(2_000) })); // Missing lifecycle uses event time.
+      await f.ingest(timingReceipt(f, { eventAt: f.at(20_000), status: "failed" }));
+      const ids = owner === "owned" ? [f.messageId, `${f.messageId}-part-2`] : [f.messageId];
+      if (owner === "owned") await f.ingest(timingReceipt(f, { messageId: ids[1], eventAt: f.at(1_000) }));
+      await f.accepted(ids);
+      expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).toMatchObject({
+        status: "failed", lastReceiptAt: f.at(20_000), deliveredAt: owner === "owned" ? null : f.at(2_000),
+      });
+      await f.ingest(timingReceipt(f, { eventAt: f.at(30_000), deliveredAt: "invalid" }));
+      expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).toMatchObject({
+        status: "delivered", lastReceiptAt: f.at(30_000), deliveredAt: f.at(2_000),
+      });
+    });
+  });
+
+  it.each(["scalar", "owned"])("converges concurrent %s delivery evidence to minimum timing and latest event", async (owner) => {
+    await withFixture(async (f) => {
+      if (owner === "owned") {
+        await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
+        await f.accepted([f.messageId, `${f.messageId}-part-2`]);
+        await f.ingest(timingReceipt(f, { messageId: `${f.messageId}-part-2`, eventAt: f.at(500) }));
+      }
+      await Promise.all([[8_000, 5_000], [30_000, 2_000], [25_000, 1_000], [10_000, 3_000]].map(([eventAt, deliveredAt]) =>
+        f.ingest(timingReceipt(f, { eventAt: f.at(eventAt!), deliveredAt: f.at(deliveredAt!) })),
+      ));
+      expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).toMatchObject({
+        status: "delivered", deliveredAt: f.at(1_000), lastReceiptAt: f.at(30_000),
+      });
+    });
+  });
+
+  it.each(["scalar", "owned"])("does not repeat %s onboarding effects for later or reordered delivered notifications", async (owner) => {
+    await withFixture(async (f) => {
+      if (owner === "owned") {
+        await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
+        await f.accepted([f.messageId, `${f.messageId}-part-2`]);
+        await f.ingest(timingReceipt(f, { messageId: `${f.messageId}-part-2`, eventAt: f.at(500) }));
+      }
+      await f.prisma.hostedLinqDelivery.update({ where: { id: f.deliveryId }, data: {
+        template: "invite_signup",
+        sourceRef: buildHostedLinqInviteSignupEffectId({ memberId: f.memberId, occurredAt: f.at(0) }),
+      } });
+      expect((await f.ingest(timingReceipt(f, { eventAt: f.at(10_000), deliveredAt: f.at(2_000) }))).restoreOnboardingLink)
+        .toMatchObject({ memberId: f.memberId });
+      expect((await f.ingest(timingReceipt(f, { eventAt: f.at(30_000), deliveredAt: f.at(20_000) }))).restoreOnboardingLink)
+        .toBeUndefined();
+      expect((await f.ingest(timingReceipt(f, { eventAt: f.at(20_000), deliveredAt: f.at(1_000) }))).restoreOnboardingLink)
+        .toBeUndefined();
+      await f.ingest(timingReceipt(f, { eventAt: f.at(40_000), status: "failed" }));
+      expect((await f.ingest(timingReceipt(f, { eventAt: f.at(50_000) }))).restoreOnboardingLink)
+        .toMatchObject({ memberId: f.memberId });
+    });
+  });
+
+  it("resets original timing and catches up only replacement delivery evidence", async () => {
+    await withFixture(async (f) => {
+      await f.receipt();
+      provider.send.mockImplementation(async () => {
+        await f.ingest(timingReceipt(f, { eventAt: f.at(8_000), deliveredAt: f.at(1_000) }));
+        await f.ingest(timingReceipt(f, { messageId: f.retryId, eventAt: f.at(9_000), deliveredAt: f.at(6_000) }));
+        await f.ingest(timingReceipt(f, { messageId: f.retryId, eventAt: f.at(600_000), deliveredAt: f.at(590_000) }));
+        return { chatId: f.chatId, messageId: f.retryId };
+      });
+      await f.retry();
+      const current = await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } });
+      expect(current).toMatchObject({ status: "delivered", deliveredAt: f.at(6_000), lastReceiptAt: f.at(600_000) });
+      await f.ingest(timingReceipt(f, { eventAt: f.at(700_000), deliveredAt: f.at(500) }));
+      expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } })).toEqual(current);
+      expect(provider.send).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("preserves first delivery during legacy promotion when replacement acceptance is ambiguous", async () => {
+    await withFixture(async (f) => {
+      await f.ingest(timingReceipt(f, { eventAt: f.at(2_000), deliveredAt: f.at(1_000) }));
+      await f.receipt();
+      provider.send.mockRejectedValue(new Error("synthetic ambiguous send"));
+      await expect(f.retry()).rejects.toThrow("synthetic ambiguous send");
+      expect(await f.prisma.hostedLinqDeliveryMessage.findFirstOrThrow({ where: { deliveryId: f.deliveryId } }))
+        .toMatchObject({ deliveredAt: f.at(1_000), terminalRetryOriginalMessageLookupKey: null });
+      await f.ingest(timingReceipt(f, { eventAt: f.at(20_000), deliveredAt: f.at(19_000) }));
+      expect(await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } }))
+        .toMatchObject({ status: "delivered", deliveredAt: f.at(1_000) });
+    });
+  });
+
   it("keeps successful acceptance quiet and explains failed-event skips and accepted retries", async () => {
     await withFixture(async (f) => {
       await f.retry();
@@ -326,16 +579,18 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
     });
   });
 
-  it("does not let a legacy receipt that already read the parent overwrite a replacement", async () => {
+  it.each(["failed", "delivered"])("does not let a legacy %s receipt that already read the parent overwrite a replacement", async (status) => {
     await withFixture(async (f) => {
-      const event = await f.receipt();
+      const failure = await f.receipt();
+      const event = status === "delivered"
+        ? timingReceipt(f, { eventAt: f.at(20_000), deliveredAt: f.at(1_000) }) : failure;
       const paused = await pauseLegacyReceipt(f, event, false);
       try { await f.retry(); }
       finally { paused.resume.resolve(); }
       expect(await paused.pending).toMatchObject({ advanced: false });
       expect(await f.prisma.hostedLinqDelivery.findUnique({
-        where: { id: f.deliveryId }, select: { status: true },
-      })).toEqual({ status: "accepted" });
+        where: { id: f.deliveryId }, select: { status: true, deliveredAt: true },
+      })).toEqual({ status: "accepted", deliveredAt: null });
       await f.receipt(f.retryId, "delivered");
       expect(await f.prisma.hostedLinqDelivery.findUnique({
         where: { id: f.deliveryId }, select: { status: true },

@@ -90,8 +90,11 @@ releases. Land the public selector before enabling its private workflow input.
 A bound, still-warm previous session retains its exact namespace, member, claim,
 and write fence through promotion. Fresh member allocation selects only the
 active release. Previous inventory cannot prepare, bind new members, or restart
-cold processes. Before reusing its namespace, CI requires native drain evidence;
-unknown state leaves the active release serving. Native rollout admission uses
+cold processes. Before reusing its namespace, CI requires native drain evidence
+from every page of the Containers dashboard instance endpoint used by Wrangler. Only an empty
+or entirely stopped native instance list proves drain; historical Durable Object
+identities are not occupancy. Unknown state, failed pages, invalid continuation
+tokens, and bounded-inspection exhaustion leave the active release serving. Native rollout admission uses
 the configured capacity without automatically reducing a serving ceiling.
 Account quota and overlap capacity must be verified against the actual account.
 
@@ -836,6 +839,18 @@ than rolling back below the floor. After convergence, exercise a controlled
 finite workout through stored repetitions, terse final-set completion, automatic
 closure, and a subsequent workout start. Monitor bounded hosted-runtime error
 aggregates for strict workout parse failures and rejected workout CLI commands.
+
+The repetition-rule recovery update uses `memberRepsPerSet: null` for an
+explicit withdrawal; omission remains unestablished legacy state. Use the full
+Worker-and-runner immediate rollout above. Existing member pinning and write
+fences allow a previous warm runtime to keep its own workspace until normal
+retirement; fresh allocation uses the promoted compatible bundle. Every reader
+of a workspace must support null before that workspace emits a clear. The first
+null write establishes its compatible-bundle rollback floor; do not send that
+workspace back to an older image. A Worker-only release does not ship this fix.
+The controlled workout check must also clear a rule, reread it, and confirm a
+later completion without a count cannot recover the withdrawn number from saved
+context.
 
 ## Public Goal Lineage Rollout
 

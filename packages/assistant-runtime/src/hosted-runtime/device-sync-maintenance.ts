@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   createConfiguredDeviceSyncProvidersFromConfigs,
 } from "@murphai/device-syncd/config";
@@ -1594,6 +1596,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
         processedJobs: input.processedJobs,
         ...(input.lifecycle === "finished"
           ? {
+              ...buildHostedDeviceSyncPassProgressDiagnostics(input.input.wake, input.result),
               pendingJobCountAfter: queueSnapshotAfter?.jobCount ?? null,
               pendingJobCountAfterTruncated:
                 queueSnapshotAfter?.jobCountTruncated ?? null,
@@ -1635,6 +1638,42 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   });
 }
 
+function buildHostedDeviceSyncPassProgressDiagnostics(
+  wake: HostedRuntimeEvent,
+  result: HostedMaintenanceMetrics | null,
+): Record<string, string | number | boolean | null> {
+  const record = result?.postCheckpointRecord;
+  const retainedWake = record?.kind === "device-sync.dirty-processed-batch"
+    ? record.retainedWake
+    : null;
+  const incoming = wake.kind === "device-sync.wake" ? wake.hint?.jobs ?? [] : [];
+  const outgoing = retainedWake?.hint?.jobs ?? [];
+  const fingerprint = (jobs: typeof incoming) => createHash("sha256")
+    .update(JSON.stringify(["device-sync-continuation-progress-v1", wake.userId]))
+    .update(JSON.stringify(jobs.map((job) => JSON.stringify([
+      job.kind,
+      job.dedupeKey ?? null,
+      job.payload?.windowStart ?? null,
+      job.payload?.windowEnd ?? null,
+      job.payload?.timeseriesCursor ?? null,
+      job.payload?.timeseriesResourceCursor ?? null,
+      job.payload?.workoutStreamCursor ?? null,
+      job.payload?.emptyBackfillAttempts ?? null,
+    ])).sort()))
+    .digest("hex");
+  return {
+    incomingRetainedJobCount: incoming.length,
+    outgoingRetainedJobCount: outgoing.length,
+    incomingRetainedProgressFingerprint: fingerprint(incoming),
+    outgoingRetainedProgressFingerprint: fingerprint(outgoing),
+    retainedMailboxOwnerPresent: record?.kind === "device-sync.dirty-processed-batch"
+      && record.retainMailboxItemUntil != null,
+    stagedDirtyPayloadAckCount: result?.stagedDirtyAcks?.reduce(
+      (count, ack) => count + (ack.processedDirtyPayloadIds?.length ?? 0), 0,
+    ) ?? 0,
+  };
+}
+
 function summarizeHostedDeviceSyncJobTimings(
   diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
 ): {
@@ -1653,6 +1692,15 @@ function summarizeHostedDeviceSyncJobTimings(
       credentialRefreshCount: diagnostic.credentialRefreshCount,
       credentialRefreshElapsedMs: diagnostic.credentialRefreshElapsedMs,
       durableProgressCommitted: diagnostic.durableProgressCommitted,
+      ...(diagnostic.historicalPullReadiness
+        ? { historicalPullReadiness: toHostedRuntimeLogCode(diagnostic.historicalPullReadiness) }
+        : {}),
+      ...(diagnostic.scheduledJobCount === undefined
+        ? {}
+        : {
+            scheduledJobCount: diagnostic.scheduledJobCount,
+            nextScheduledJobDelayMs: diagnostic.nextScheduledJobDelayMs ?? null,
+          }),
       elapsedMs: diagnostic.elapsedMs,
       jobCount: diagnostic.jobCount,
       jobKind: toHostedRuntimeLogCode(diagnostic.jobKind),

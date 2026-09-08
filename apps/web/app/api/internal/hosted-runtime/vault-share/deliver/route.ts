@@ -146,6 +146,11 @@ export const POST = withJsonError(async (request: Request) => {
 
   for (const share of page.shares) {
     if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
+      console.error("Hosted vault-share delivery stopped before destination admission.", {
+        errorCode: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+        deadlineElapsed: Date.now() >= effectDeadlineAtEpochMs,
+        requestAborted: request.signal.aborted,
+      });
       deliveryFailed = true;
       break;
     }
@@ -161,6 +166,15 @@ export const POST = withJsonError(async (request: Request) => {
       delivered ||= outcome === "replaced";
       deliveryDeferred ||= outcome === "no-active-share";
     } catch (error) {
+      // Preserve the original failure even when the effect deadline has elapsed.
+      // Never include payload fields, timestamps, or raw destination identifiers.
+      console.error("Hosted vault-share delivery to a destination share failed.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
+        }),
+        deadlineElapsed: Date.now() >= effectDeadlineAtEpochMs,
+        requestAborted: request.signal.aborted,
+      });
       if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
         deliveryFailed = true;
         break;
@@ -173,12 +187,6 @@ export const POST = withJsonError(async (request: Request) => {
       // Best-effort per destination: one failing share must not block replacement for
       // the others when its member-specific root is absent. Unknown crypto, access,
       // database, and transaction failures stop fanout because they may be systemic.
-      // Log only redacted error details — never payload fields, timestamps, or raw ids.
-      console.error("Hosted vault-share delivery to a destination share failed.", {
-        ...formatHostedExecutionSafeLogErrorDetails(error, {
-          code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
-        }),
-      });
       if (deliveryFailed) {
         break;
       }

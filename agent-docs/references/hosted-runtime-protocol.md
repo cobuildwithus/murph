@@ -420,6 +420,12 @@ replacements at that deadline. Transport receives only a fixed settlement
 margin, and the proxy marks a response as authoritative only after receiving the
 actual Web response; an unmarked proxy-local response or transport loss retains
 invocation ownership until the absolute settlement boundary.
+The replacement transaction rechecks the same absolute deadline and caller
+cancellation after admission and after each authority-lock boundary, before
+issuing the snapshot update. Waiting or retrying transaction admission cannot
+renew write authority. Failures still retain the existing retry obligation;
+operator diagnostics preserve the underlying redacted error together with
+deadline-expired and caller-canceled flags, while the response remains generic.
 No projection watermark is stored on the share, and the group runtime is not
 woken; its next ordinary read continues to query the current Web-owned
 replacement snapshot.
@@ -2748,7 +2754,12 @@ sample of the 16 slowest claimed jobs in that pass. Each summary identifies only
 the provider, job kind, optional code-owned resource class, outcome, attempt/job
 counts, durable-progress presence, and timings for total execution, provider
 execution, unattributed provider work, connection-source reads, credential refreshes,
-and canonical imports. It omits member/account/job identifiers, payloads,
+and canonical imports. Optional historical-pull readiness, proposed follow-up
+count, and earliest follow-up delay explain successful attempts that only
+reschedule history. Delay is measured from the attempt's start, and null means
+no proposed follow-up. These scalar fields fit the existing 32-key summary
+budget and do not change job scheduling or imply canonical import progress.
+It omits member/account/job identifiers, payloads,
 cursors, provider responses, health values, and raw errors. The marker declares
 the total observed count, sample limit, and truncation state. The Web parser must
 accept the object-array field before a runner capable of emitting it is deployed.
@@ -2817,8 +2828,19 @@ explicit lifecycle events, not high-cardinality freshness hints.
 The machine-local job store projects its earliest queued-job continuation
 through the runtime-owned workspace `nextWakeAt` while the runner is warm. The
 hosted provider scheduler runs only for the account mapped by a connection
-mailbox wake; a retained job wake and a generic runtime timer cannot admit
-provider cadence. Only that connection mailbox wake may fetch its exact
+mailbox wake, including its retained job continuation. Bare webhook, dirty-remainder,
+and completion-fence wakes with no jobs still skip scheduling, and a generic
+runtime timer cannot admit provider cadence. The canonical scheduler checks the
+account cadence and active job dedupe keys after exact wake jobs are restored.
+A retained owner wakes at the earlier of its actual job retry and a future
+provider cadence; job retry times and attempts remain unchanged. A past cadence
+left by a failed scheduler never becomes an immediate continuation timer.
+A due plain scheduled hint for the same connection epoch can admit a future
+owner, just as a webhook hint can. Admission does not consume the scheduled
+obligation: existing compaction still requires a strictly advanced carried
+cadence. When a pass cannot progress, already-due eligible schedule hints share
+the owner retry backoff so they cannot repeatedly readmit it.
+Only that connection mailbox wake may fetch its exact
 Web-owned dirty row or claim its account's local jobs; a generic runtime timer
 does neither. The connection-specific encrypted system-mailbox item remains
 pending while that account has queued or running work. Before checkpoint

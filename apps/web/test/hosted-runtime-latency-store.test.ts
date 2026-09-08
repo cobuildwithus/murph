@@ -51,6 +51,7 @@ type LatencyDashboardRow = {
   linqDelivery?: {
     acceptedAt: Date | null;
     attemptedAt: Date;
+    deliveredAt: Date | null;
     lastReceiptAt: Date | null;
     sourceRef: string | null;
     status: string;
@@ -221,11 +222,12 @@ describe("hosted runtime latency dashboard store", () => {
     });
   });
 
-  it("reports deduplicated cold and warm reply delivery spans", async () => {
+  it("reports deduplicated cold and warm reply spans using first delivery, not the latest notification", async () => {
     const coldDelivery = {
       acceptedAt: instant("2026-05-27T12:00:11.000Z"),
       attemptedAt: instant("2026-05-27T12:00:10.000Z"),
-      lastReceiptAt: instant("2026-05-27T12:00:12.000Z"),
+      deliveredAt: instant("2026-05-27T12:00:12.000Z"),
+      lastReceiptAt: instant("2026-05-27T12:10:12.000Z"),
       sourceRef: deliverySourceRef("intent_cold"),
       status: "delivered",
     };
@@ -265,6 +267,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:01:09.000Z"),
           attemptedAt: instant("2026-05-27T12:01:08.000Z"),
+          deliveredAt: null,
           lastReceiptAt: null,
           sourceRef: deliverySourceRef("intent_warm"),
           status: "accepted",
@@ -286,6 +289,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:02:05.000Z"),
           attemptedAt: instant("2026-05-27T12:02:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:02:06.000Z"),
           lastReceiptAt: instant("2026-05-27T12:02:06.000Z"),
           sourceRef: deliverySourceRef("intent_unknown"),
           status: "delivered",
@@ -304,6 +308,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:03:05.000Z"),
           attemptedAt: instant("2026-05-27T12:03:04.000Z"),
+          deliveredAt: null,
           lastReceiptAt: null,
           sourceRef: deliverySourceRef("intent_handoff"),
           status: "accepted",
@@ -433,6 +438,7 @@ describe("hosted runtime latency dashboard store", () => {
         attemptedAt: "2026-05-27T12:00:04.000Z",
         deliveryId: "delivery_failed_receipt",
         deliveryStatus: "failed",
+        deliveredAt: "2026-05-27T12:00:05.000Z",
         intentId: "intent_failed_receipt",
         providerStartAt: "2026-05-27T12:00:01.000Z",
         receiptAt: "2026-05-27T12:00:07.000Z",
@@ -500,6 +506,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:00:05.000Z"),
           attemptedAt: instant("2026-05-27T12:00:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:00:06.000Z"),
           lastReceiptAt: instant("2026-05-27T12:00:06.000Z"),
           sourceRef: deliverySourceRef("intent_telegram"),
           status: "delivered",
@@ -542,6 +549,7 @@ describe("hosted runtime latency dashboard store", () => {
     const handoffDelivery = {
       acceptedAt: instant("2026-05-27T12:00:06.000Z"),
       attemptedAt: instant("2026-05-27T12:00:05.000Z"),
+      deliveredAt: instant("2026-05-27T12:00:07.000Z"),
       lastReceiptAt: instant("2026-05-27T12:00:07.000Z"),
       sourceRef: deliverySourceRef("intent_handoff_grouped"),
       status: "delivered",
@@ -575,6 +583,7 @@ describe("hosted runtime latency dashboard store", () => {
         linqDelivery: {
           acceptedAt: instant("2026-05-27T12:01:05.000Z"),
           attemptedAt: instant("2026-05-27T12:01:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:01:06.000Z"),
           lastReceiptAt: instant("2026-05-27T12:01:06.000Z"),
           sourceRef: deliverySourceRef("intent_without_generation_diagnostics"),
           status: "delivered",
@@ -2803,6 +2812,7 @@ function createLinkedDashboardRow(input: {
   acceptedAt: string;
   attemptedAt: string;
   deliveryAcceptedAt?: string | null;
+  deliveredAt?: string | null;
   deliveryId: string;
   deliveryStatus?: string;
   intentId: string;
@@ -2812,6 +2822,11 @@ function createLinkedDashboardRow(input: {
 }): LatencyDashboardRow {
   const acceptedAt = instant(input.acceptedAt);
   const attemptedAt = instant(input.attemptedAt);
+  const receiptAt = input.receiptAt === null
+    ? null
+    : input.receiptAt
+      ? instant(input.receiptAt)
+      : new Date(attemptedAt.getTime() + 1_000);
   return {
     acceptedAt,
     assistantInputStagedAt: new Date(acceptedAt.getTime() + 500),
@@ -2822,11 +2837,10 @@ function createLinkedDashboardRow(input: {
           ? instant(input.deliveryAcceptedAt)
           : new Date(attemptedAt.getTime() + 500),
       attemptedAt,
-      lastReceiptAt: input.receiptAt === null
-        ? null
-        : input.receiptAt
-          ? instant(input.receiptAt)
-          : new Date(attemptedAt.getTime() + 1_000),
+      deliveredAt: input.deliveredAt === undefined
+        ? receiptAt
+        : input.deliveredAt === null ? null : instant(input.deliveredAt),
+      lastReceiptAt: receiptAt,
       sourceRef: deliverySourceRef(input.intentId),
       status: input.deliveryStatus ?? "delivered",
     },

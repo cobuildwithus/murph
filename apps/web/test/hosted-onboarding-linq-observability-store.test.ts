@@ -70,6 +70,54 @@ function buildCurrentAiUsageNoticeKey(
 }
 
 describe("hosted Linq observability stores", () => {
+  it.each(["2026-02-03", "2025-01-01"])("refines a reordered %s receipt without projecting status or onboarding effects", async (webhookVersion) => {
+    const fixture = createObservabilityPrismaFixture();
+    const deliveredAt = new Date("2026-03-26T12:00:02.000Z");
+    const event = requireParsedProviderEvent({
+      ...buildProviderEvent({
+        createdAt: "2026-03-26T12:00:03.000Z",
+        eventId: "evt_earlier_timing",
+        eventType: "message.delivered",
+        data: webhookVersion === "2026-02-03"
+          ? { message_id: "msg_timestamp", delivered_at: deliveredAt.toISOString() }
+          : { message: { id: "msg_timestamp", delivered_at: deliveredAt.toISOString() } },
+      }),
+      webhook_version: webhookVersion,
+    } as HostedLinqWebhookEvent);
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
+      id: "hld_timestamp", phoneNumberLookupKey: "line_timestamp",
+    });
+    fixture.queryRaw.mockResolvedValue([{ status: "failed" }]);
+    fixture.hostedLinqDeliveryUpdateMany
+      .mockResolvedValueOnce({ count: 1 }) // Earlier evidence wins its own predicate.
+      .mockResolvedValueOnce({ count: 0 }); // A newer terminal event still owns status.
+
+    const result = await ingestHostedLinqProviderEventTx({ event, prisma: fixture.prisma as never });
+
+    expect(result).toMatchObject({ duplicate: false });
+    expect(result.restoreOnboardingLink).toBeUndefined();
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerCreatedAt: event.providerCreatedAt,
+        payloadSanitizedJson: expect.objectContaining({ delivered_at: deliveredAt.toISOString() }),
+      }),
+    }));
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "hld_timestamp",
+        messageLookupKey: { in: event.messageLookupKeyReadCandidates },
+        OR: [{ deliveredAt: null }, { deliveredAt: { gt: deliveredAt } }],
+      },
+      data: { deliveredAt },
+    });
+    expect(fixture.hostedLinqDeliveryUpdateMany.mock.calls[1]?.[0].data).toMatchObject({
+      lastReceiptAt: event.providerCreatedAt, status: "delivered",
+    });
+    expect(fixture.hostedLinqDeliveryUpdateMany.mock.calls[1]?.[0].data).not.toHaveProperty("deliveredAt");
+    expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("preserves the legacy zero-credit notice key and keys later capacity epochs by ledger version", () => {
     const legacyKey = buildCurrentAiUsageNoticeKey();
     const replenishedKey = buildCurrentAiUsageNoticeKey(2n);
@@ -4244,6 +4292,7 @@ describe("hosted Linq observability stores", () => {
   it("projects receipt-before-runtime delivery callbacks through the accepted delivery line", async () => {
     const fixture = createObservabilityPrismaFixture();
     const receiptAt = new Date("2026-03-26T12:00:03.000Z");
+    fixture.queryRaw.mockResolvedValue([{ deliveredAt: receiptAt }]);
     fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
       phoneNumberHint: "+0000",
       phoneNumberLookupKey: "hbidx:phone:runtime-line",
@@ -4273,10 +4322,15 @@ describe("hosted Linq observability stores", () => {
       userId: "member_123",
     });
 
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { deliveredAt: receiptAt },
+      where: expect.objectContaining({
+        OR: [{ deliveredAt: null }, { deliveredAt: { gt: receiptAt } }],
+      }),
+    }));
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          deliveredAt: receiptAt,
           lastReceiptAt: receiptAt,
           status: "delivered",
         }),
@@ -4309,6 +4363,7 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     const receiptAt = new Date("2026-03-26T12:00:03.000Z");
+    fixture.queryRaw.mockResolvedValue([{ deliveredAt: receiptAt }]);
     fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
       phoneNumberHint: "+0000",
       phoneNumberLookupKey: "hbidx:phone:runtime-line",
@@ -4356,10 +4411,15 @@ describe("hosted Linq observability stores", () => {
         },
       }),
     );
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { deliveredAt: receiptAt },
+      where: expect.objectContaining({
+        OR: [{ deliveredAt: null }, { deliveredAt: { gt: receiptAt } }],
+      }),
+    }));
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          deliveredAt: receiptAt,
           lastReceiptAt: receiptAt,
           status: "delivered",
         }),
@@ -4766,7 +4826,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          deliveredAt: new Date("2026-03-26T12:00:00.000Z"),
+          lastReceiptAt: new Date("2026-03-26T12:00:00.000Z"),
           status: "delivered",
         }),
         where: expect.objectContaining({

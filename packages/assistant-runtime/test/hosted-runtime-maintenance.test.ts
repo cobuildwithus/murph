@@ -6625,6 +6625,52 @@ describe("runHostedAssistantAutomationLane", () => {
     );
   });
 
+  it("logs bounded continuation progress without retained provider payloads", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const at = "2026-04-08T00:00:00.000Z";
+    const nextAt = "2026-04-08T00:30:00.000Z";
+    const incomingJobs = [{ kind: "resource", dedupeKey: "synthetic-job", payload: {
+      resource: "steps", windowStart: "2026-04-01T00:00:00Z", windowEnd: at,
+      webhookDataJson: "PRIVATE_FIXTURE_MUST_NOT_BE_LOGGED",
+    } }];
+    const wake = { eventId: "evt_progress", kind: "device-sync.wake" as const,
+      occurredAt: at, reason: "webhook_hint" as const, userId: "member_123",
+      hint: { jobs: incomingJobs } };
+    const outgoingWake = { ...wake, hint: { jobs: [{ ...incomingJobs[0]!,
+      payload: { ...incomingJobs[0]!.payload, windowStart: "2026-04-03T00:00:00Z" },
+    }] } };
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({ retryAt: nextAt, wake: outgoingWake });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      drainWorker: vi.fn(async () => 1), getNextJobWakeAt: () => nextAt,
+      getNextWakeAt: () => nextAt, listAccounts: () => [],
+      listJobFailureDiagnostics: () => [], listJobTimingDiagnostics: () => [],
+      runSchedulerOnce: async () => undefined,
+    });
+    const platform = { logPort: { async write(request: HostedRuntimeLogRequest) {
+      const parsed = parseHostedRuntimeLogRequest(request);
+      logRequests.push(parsed); return { loggedCount: parsed.entries.length };
+    } } };
+    await runHostedDeviceSyncWakeLane({ wake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
+      runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+    await drainHostedRuntimeLogWritesBestEffort();
+    const first = logRequests.flatMap((r) => r.entries).find((e) => e.eventCode === "device-sync.pass_finished")?.redactedJson;
+    expect(first).toMatchObject({ incomingRetainedJobCount: 1, outgoingRetainedJobCount: 1,
+      stagedDirtyPayloadAckCount: 0, retainedMailboxOwnerPresent: true });
+    expect(first?.incomingRetainedProgressFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(first?.outgoingRetainedProgressFingerprint).not.toBe(first?.incomingRetainedProgressFingerprint);
+    logRequests.length = 0;
+    await runHostedDeviceSyncWakeLane({ wake: outgoingWake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
+      runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+    await drainHostedRuntimeLogWritesBestEffort();
+    const second = logRequests.flatMap((r) => r.entries).find((e) => e.eventCode === "device-sync.pass_finished")?.redactedJson;
+    expect(second?.incomingRetainedProgressFingerprint).toBe(first?.outgoingRetainedProgressFingerprint);
+    expect(JSON.stringify([first, second])).not.toContain("PRIVATE_FIXTURE");
+    expect(JSON.stringify([first, second])).not.toContain("synthetic-job");
+    expect(JSON.stringify([first, second])).not.toContain("2026-04-03");
+  });
+
   it("reports unready hosted assistant profiles with the active provider label", async () => {
     mocks.readHostedAssistantRuntimeState.mockResolvedValue({
       assistantActiveProfileId: "platform-default",
@@ -6942,6 +6988,9 @@ describe("runHostedDeviceSyncWakeLane", () => {
         credentialRefreshElapsedMs: 0,
         durableProgressCommitted: true,
         elapsedMs,
+        historicalPullReadiness: "pending",
+        scheduledJobCount: 1,
+        nextScheduledJobDelayMs: 86_400_000,
         jobCount: 1,
         jobKind: "resource",
         outcome: "completed",
@@ -7008,6 +7057,11 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncJobTimingTruncated: true,
     }));
     expect(timingSummaryObjects).toHaveLength(16);
+    expect(timingSummaryObjects[0]).toMatchObject({
+      historicalPullReadiness: "pending",
+      scheduledJobCount: 1,
+      nextScheduledJobDelayMs: 86_400_000,
+    });
     expect(timingSummaryObjects.map((summary) => summary.elapsedMs)).toEqual(
       Array.from({ length: 16 }, (_, index) => 18_000 - index * 1_000),
     );

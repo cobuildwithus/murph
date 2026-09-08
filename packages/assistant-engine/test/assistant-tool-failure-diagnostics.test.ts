@@ -1,5 +1,13 @@
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseAssistantRuntimeIssueRecord } from '@murphai/runtime-state/node'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
+import { DERIVED_KNOWLEDGE_PAGES_ROOT } from '@murphai/query'
+
+import { getKnowledgePage, listKnowledgePages } from '../src/knowledge/service.js'
 
 import {
   executeMurphDynamicToolRequest,
@@ -327,6 +335,108 @@ describe('recognized CLI failure diagnostics', () => {
   })
 })
 
+describe('knowledge command completion diagnostics', () => {
+  it.each([
+    ['show', 'knowledge_page_not_found', 'read', 'not_found'],
+    ['show', 'knowledge_page_invalid', 'integrity', 'invalid_result'],
+    ['upsert', 'knowledge_page_conflict', undefined, 'conflict'],
+    ['append-section', 'knowledge_duplicate_slug', undefined, 'conflict'],
+  ] as const)('classifies %s %s without changing completion counts', (operation, code, stage, category) => {
+    const error = envelope(code, stage)
+    for (const fullOutput of [false, true]) {
+      const command = `vault-cli knowledge ${operation} ${sentinel} --format json${fullOutput ? ' --full-output' : ''}`
+      const output = JSON.stringify(fullOutput ? { ok: false, error, meta: { command: sentinel } } : error)
+      const input = eventInput(commandEvent(output, command))
+      const tracker = createCodexActionRuntimeIssueTracker()
+      const reducer = createCodexActionDiagnosticsReducer()
+      const issue = tracker.recordEvent(input)
+      expect(issue).toEqual({
+        component: 'assistant.codex-action', operation: 'command.execution', phase: 'provider_turn',
+        issueKind: 'tool_error', severity: 'warning', errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+        summary: 'Codex command execution failed during provider turn.',
+        details: { failureStage: 'execution', failureReason: 'nonzero_exit', diagnosticRole: 'completion',
+          errorCategory: category, actionKind: 'command.execution', durationMsBucket: 'unknown', outputBytesBucket: 'lt_1kb',
+          commandFamily: 'vault-cli knowledge', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category },
+      })
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(tracker.recordEvent(input)).toBeNull()
+      reducer.recordEvent({ ...input, observedAtMs: 1 })
+      reducer.recordEvent({ ...input, observedAtMs: 2 })
+      // Error-looking output must not turn an exit-zero completion into a failure.
+      const success = commandEvent(output, command, 0)
+      success.params.item.id = `${sentinel}-success`
+      const successInput = eventInput(success)
+      expect(tracker.recordEvent(successInput)).toBeNull()
+      reducer.recordEvent({ ...successInput, observedAtMs: 3 })
+      expect(reducer.buildTraceEvent({ codexThreadId: null, providerActionCount: 2,
+        providerStartedAtMs: null, turnCorrelation: null, turnId: null })).toMatchObject({
+        codexActionCommandCount: 2, codexActionCompletedCount: 2, codexActionFailedCount: 1,
+      })
+    }
+  })
+
+  it.each([
+    ...['knowledge_page_not_found_extra', 'KNOWLEDGE_PAGE_NOT_FOUND', 'knowledge_page_not_found ',
+      'knowledge_page_reserved', 'knowledge_page_not_loadable', sentinel.repeat(4)]
+      .map((code) => JSON.stringify(envelope(code))),
+    JSON.stringify({ ...envelope('knowledge_page_not_found'), message: null }),
+    JSON.stringify({ ...envelope('knowledge_page_invalid'), retryable: 'false' }),
+    JSON.stringify({ cause: envelope('knowledge_page_not_found') }),
+    JSON.stringify({ ok: true, error: envelope('knowledge_page_not_found') }),
+    JSON.stringify(envelope('knowledge_page_not_found')).slice(0, -1),
+    JSON.stringify({ ok: false, error: envelope('knowledge_page_not_found') }) + '\ntruncated',
+    JSON.stringify({ ...envelope('knowledge_page_not_found'), message: '界'.repeat(6000) }),
+    JSON.stringify({ ok: false, error: envelope('knowledge_page_invalid'), meta: sentinel.repeat(1000) }),
+  ])('keeps unproven codes and malformed or oversized knowledge output unknown (%#)', (output) => {
+    const issue = commandIssue(output, `vault-cli knowledge show ${sentinel} --format json`, 7)
+    expect(issue?.details).toMatchObject({
+      commandFamily: 'vault-cli knowledge', exitCode: 7, failureReason: 'nonzero_exit',
+      errorCategory: 'unknown', vaultCliErrorCategory: 'unknown',
+    })
+    expect(JSON.stringify(issue)).not.toContain(sentinel)
+  })
+
+  it('classifies a real missing-page read and keeps a discovered nearby page successful', async () => {
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-diagnostics-'))
+    try {
+      const pages = path.join(vault, DERIVED_KNOWLEDGE_PAGES_ROOT)
+      await mkdir(pages, { recursive: true })
+      await writeFile(path.join(pages, 'synthetic-nearby.md'), [
+        '---', 'title: Synthetic nearby page', 'slug: synthetic-nearby',
+        'pageType: concept', 'status: active', '---', '', '# Synthetic nearby page', '', sentinel, '',
+      ].join('\n'))
+      let missing: unknown
+      try {
+        await getKnowledgePage({ vault, slug: sentinel })
+      } catch (error) { missing = error }
+      expect(missing).toMatchObject({
+        code: 'knowledge_page_not_found',
+        context: { retryable: false, stage: 'read', hint: expect.stringContaining('Do not retry the same missing slug.') },
+      })
+      const error = projectVaultCliError(missing)
+      for (const fullOutput of [false, true]) {
+        const output = JSON.stringify(fullOutput ? { ok: false, error } : error)
+        const issue = commandIssue(output, `vault-cli knowledge show ${sentinel} --format json${fullOutput ? ' --full-output' : ''}`)
+        expect(issue?.details).toMatchObject({
+          commandFamily: 'vault-cli knowledge', exitCode: 1,
+          errorCategory: 'not_found', vaultCliErrorCategory: 'not_found',
+        })
+        expect(JSON.stringify(issue)).not.toContain(sentinel)
+        expect(JSON.stringify(issue)).not.toContain(vault)
+      }
+      // Follow the existing discovery guidance, not a retry of the missing slug.
+      const listed = await listKnowledgePages({ vault })
+      expect(listed.pages.map((page) => page.slug)).toEqual(['synthetic-nearby'])
+      const shown = await getKnowledgePage({ vault, slug: listed.pages[0]!.slug })
+      expect(shown.page.body).toContain(sentinel)
+      expect(shown.degradation).toBeNull()
+      for (const body of [shown, { ok: true, data: shown }]) {
+        expect(commandIssue(JSON.stringify(body), 'vault-cli knowledge show synthetic-nearby --format json', 0)).toBeNull()
+      }
+    } finally { await rm(vault, { recursive: true, force: true }) }
+  })
+})
+
 describe('opaque MCP and command failures', () => {
   it.each([
     ['mcpToolCall', { success: false }, 'result', 'reported_failure'],
@@ -382,7 +492,8 @@ describe('existing diagnostic transport and denominator', () => {
     const automation = await dispatch(requests[0], { automationTool: { request: vi.fn<AssistantHostedAutomationTool['request']>().mockRejectedValue(
       Object.assign(new Error(sentinel), { code: 'invalid_option', cause: { content: sentinel } }),
     ) } })
-    const cli = commandIssue(JSON.stringify({ ok: false, error: envelope('conflict'), meta: { content: sentinel } }))
+    const cli = commandIssue(JSON.stringify({ ok: false, error: envelope('knowledge_page_not_found'), meta: { content: sentinel } }),
+      `vault-cli knowledge show ${sentinel} --format json --full-output`)
     if (!cli || !automation.runtimeIssueInputs) throw new Error('Expected synthetic diagnostics')
     const issues: AssistantRuntimeIssueInput[] = [...automation.runtimeIssueInputs, cli]
     let release!: () => void

@@ -3702,6 +3702,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.dense_raw_retention",
   "device-sync.companion_diagnostic",
   "device-sync.dirty_ack_persistence_failed",
+  "device-sync.checkpoint_recorded",
   "device-sync.fitbit_migration_cutover_failed",
   "device-sync.import_completed",
   "device-sync.job_failed",

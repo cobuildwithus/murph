@@ -92,6 +92,7 @@ export interface HostedDeviceSyncDirtyConnectionAckRecord {
 }
 
 export interface HostedDeviceSyncDueReconcileConnectionRecord {
+  orphanedDirtyRecoveryKey?: string;
   connectionId: string;
   connectedAt: string;
   userId: string;
