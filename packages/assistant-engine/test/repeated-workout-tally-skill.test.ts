@@ -84,7 +84,23 @@ describe('repeated workout tally guidance', () => {
     expect(strength).toContain(
       'Resolve one exercise, one owner, and one current per-occurrence standard',
     )
+    expect(strength).toContain('a daily `activity_session` is not required')
+    expect(strength).toContain('use its returned typed `contextReferences` before reminder prose')
     expect(strength).toContain('ask one narrow clarification and write nothing')
+  })
+
+  it('keeps explicit repeated completions loggable without scheduled occurrence provenance', async () => {
+    const experiment = await readSkill('experiment-onboarding')
+
+    expect(experiment).toContain('no `plannedOccurrenceAt` or matching `supportSeriesId`')
+    expect(experiment).toContain('Never pass its intent id to `--reminder-intent-id`')
+    expect(experiment).toContain('Explicit repeated-set completions use the ordinary resolution below')
+    expect(experiment).toContain('do not require a scheduled slot or daily workout')
+    expect(experiment).toContain('For other planned-session reconciliation')
+    expect(experiment).toContain('including legacy reminder replies')
+    expect(experiment).not.toContain(
+      'then use the existing ordinary session-resolution path only when the canonical plan identifies exactly one applicable uncompleted occurrence',
+    )
   })
 
   it('keeps ordinary habit completion and plan-repair authority separate from repeated-set attribution', async () => {

@@ -67,7 +67,7 @@ describe('live workout model', () => {
     )
   })
 
-  test('projects exact ad-hoc prescriptions into every pending editor row', () => {
+  test.each([8, null])('projects ad-hoc repetition state (%s) into every pending editor row', (memberRepsPerSet) => {
     const workout = workoutSessionSchema.parse({
       sourceApp: LIVE_WORKOUT_SOURCE_APP,
       startedAt: '2026-08-26T05:31:00.000Z',
@@ -76,7 +76,7 @@ describe('live workout model', () => {
         order: 1,
         mode: 'weight_reps',
         unitOverride: 'lb',
-        memberRepsPerSet: 8,
+        memberRepsPerSet,
         targetWeightPerSet: 135,
         targetWeightUnit: 'lb',
         setPlanIsFinite: true,
@@ -104,7 +104,7 @@ describe('live workout model', () => {
       projected?.workout.exercises[0]?.sets,
       Array.from({ length: 3 }, () => ({
         status: 'pending',
-        target: '135 lb × 8',
+        target: memberRepsPerSet === null ? '135 lb' : '135 lb × 8',
         actual: null,
       })),
     )
@@ -143,7 +143,7 @@ describe('live workout model', () => {
     })
     assert.equal(
       decimalProjection?.workout.exercises[0]?.sets[0]?.target,
-      '72.6 kg × 8',
+      memberRepsPerSet === null ? '72.6 kg' : '72.6 kg × 8',
     )
   })
 

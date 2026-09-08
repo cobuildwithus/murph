@@ -158,17 +158,24 @@ Targets, member prescriptions, and actual results are distinct authorities:
 - planned targets come from the verified workout format;
 - `memberRepsPerSet` is the smallest canonical exercise-owned fact for one exact
   repetition count the member explicitly assigns to every set of that exercise;
+- an omitted field is unestablished; `null` preserves an explicit withdrawal
+  and prevents recovery from older saved instructions;
 - completed actuals come from the verified canonical workout event;
 - a target, prior workout value, card label, assistant suggestion, range, AMRAP,
   or qualitative instruction is never evidence for `memberRepsPerSet` or for a
   completed set;
-- when a terse completion omits repetitions and the exact exercise has
-  `memberRepsPerSet`, the canonical set-log use case copies that member-owned
+- when a terse completion omits repetitions and the exact exercise has a
+  positive `memberRepsPerSet`, the canonical set-log use case copies that member-owned
   fact into the completed set's actual `reps` field in the same write;
 - only an explicit statement that one exact repetition count applies to every
   set updates the member prescription before logging the current completion; an
   exact result for one set changes only that set's actual, while a conflict,
   ambiguous exercise, range, or AMRAP asks one narrow question instead;
+- if that field is omitted, a successful canonical read may recover an earlier
+  explicit member instruction whose scope includes this exact workout and
+  exercise. Murph saves it through the existing exercise repetition command
+  before logging. An exercise-name match alone does not prove scope, and older
+  context does not overwrite a current prescription or an explicit clear;
 - weight, duration, distance, RPE, bodyweight, assistance, added load, and every
   other actual field never carry forward under this rule;
 - pending planned sets become skipped only when an early or targetless workout
@@ -198,6 +205,14 @@ delivery that makes no workout-context decision is transparent. An explicit
 clear, invalid result, multiple ids, mismatch, or conflict ends implicit
 continuity. This creates no active-workout selector, focused-workout state,
 timeout, or recency fallback.
+
+In a private conversation, consuming a delivery suppresses its replay without
+discarding its latest exact workout relationship. The reader retains that
+single reference from the same bounded, route-matched, causally eligible
+delivery history until a newer explicit context decision supersedes it. It
+does not replay the consumed text, carry its automation occurrence metadata,
+or claim that delivery again. Canonical reads still resolve the actual
+workout, exercise, and set.
 
 Starting or logging a new workout is independent of older unfinished workouts.
 Every mutation carries the exact canonical workout id and uses that workout's
@@ -312,13 +327,18 @@ needs to be closed first.
 
 Legacy reminders can lack a canonical workout reference. When the delivered
 reminder has an exact host-preserved automation id, the private reply may inspect
-that saved automation's title and instructions before requesting clarification.
+that saved automation's typed context references first, then its title and
+instructions before requesting clarification.
 Inspection is read-only and does not establish that a workout or completed set
 exists. A complete standalone workout definition and the member's explicit set
 completion can start one ad-hoc workout through the ordinary canonical owner.
 Only reported sets receive actual values; numbering a reminder never backfills
 earlier sets. Named formats, regimens, and experiments retain their existing
-exact-record paths. Missing or ambiguous definitions and explicit cleared or
+exact-record paths. A resolved experiment or regimen completion uses its ordinary
+occurrence owner and saved completion convention without requiring a daily live
+workout. Without a planned-occurrence timestamp, an explicit repeated-set report
+uses the ordinary occurrence path; reminder intent ids do not substitute for
+missing schedule identity. Missing or ambiguous definitions and explicit cleared or
 mismatched event references require clarification without a write. Recovery
 does not patch the reminder or select an older workout by recency.
 
@@ -428,7 +448,11 @@ operations, assistant tools, or a new queue.
 `memberRepsPerSet` and `setPlanIsFinite` are optional canonical exercise fields,
 so existing workout records require no bulk migration. Deploy all strict event
 readers and writers together before the first new field is emitted; after that
-write, those compatible bundles are the rollback floor. Legacy saved-routine
+write, those compatible bundles are the rollback floor. The same rule applies
+to explicit-null repetition withdrawals: older strict readers reject null.
+Historical omitted fields remain unspecified; ordinary reads cannot reconstruct
+a past withdrawal that was not retained separately. Known withdrawals and
+conflicts still block restoration. Legacy saved-routine
 exercises with no finite marker retain finite-plan semantics, while new
 targetless exercises write `setPlanIsFinite: false` so they cannot inherit that
 legacy default. Legacy ad hoc workouts remain explicit-finish sessions. The

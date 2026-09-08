@@ -972,20 +972,15 @@ async function setLiveWorkoutExerciseRepsWithLockHeld(
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!
   if (
-    (clear && exercise.memberRepsPerSet === undefined)
+    (clear && exercise.memberRepsPerSet === null)
     || (!clear && exercise.memberRepsPerSet === reps)
   ) {
     return shown
   }
 
   if (clear) {
-    return editWorkoutRecord({
-      vault: shown.vault,
-      lookup: shown.entity.id,
-      clear: [`workout.exercises.${exerciseIndex}.memberRepsPerSet`],
-    })
-  }
-  if (reps !== undefined) {
+    exercise.memberRepsPerSet = null
+  } else if (reps !== undefined) {
     exercise.memberRepsPerSet = reps
   }
   exercises[exerciseIndex] = exercise
@@ -1016,7 +1011,7 @@ async function logLiveWorkoutSetWithLockHeld(
   const patch = compactSetPatch(input)
   if (
     input.reps === undefined
-    && exercise.memberRepsPerSet !== undefined
+    && typeof exercise.memberRepsPerSet === 'number'
     && (currentSet === undefined || !hasLoggedWorkoutSet(currentSet))
   ) {
     patch.reps = exercise.memberRepsPerSet
@@ -1025,7 +1020,7 @@ async function logLiveWorkoutSetWithLockHeld(
     if (
       currentSet !== undefined
       && hasLoggedWorkoutSet(currentSet)
-      && exercise.memberRepsPerSet !== undefined
+      && typeof exercise.memberRepsPerSet === 'number'
     ) {
       return shown
     }

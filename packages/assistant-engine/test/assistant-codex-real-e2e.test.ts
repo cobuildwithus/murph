@@ -85,6 +85,7 @@ import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
+  setLiveWorkoutExerciseReps,
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
@@ -4340,6 +4341,30 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ...config.temporaryPaths,
         ])
       }
+    },
+    360_000,
+  )
+
+  it(
+    'restores a scoped saved repetition instruction and reuses it in a fresh workout turn',
+    async () => {
+      await runLiveWorkoutRepetitionRecoveryProbe('saved-instruction')
+    },
+    720_000,
+  )
+
+  it(
+    'does not promote matching prior sets and plan targets into a repetition rule',
+    async () => {
+      await runLiveWorkoutRepetitionRecoveryProbe('prior-actuals-and-targets')
+    },
+    360_000,
+  )
+
+  it(
+    'keeps an explicitly cleared repetition rule withdrawn despite an older saved instruction',
+    async () => {
+      await runLiveWorkoutRepetitionRecoveryProbe('cleared-instruction')
     },
     360_000,
   )
@@ -19306,6 +19331,40 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 
 describeRealCodex('real Codex repeated-set resolution e2e', () => {
   it(
+    'recovers a legacy reminder experiment reference without requiring a daily workout',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('legacy-experiment-reminder')
+      const writes = result.commandLog.filter((command) =>
+        command.startsWith(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+        && !isRecordedVaultHelpCommand(command)
+      )
+
+      process.stdout.write(`[legacy-reminder-experiment-e2e] ${JSON.stringify({
+        automationInspections: result.automationInspections,
+        commandLog: result.commandLog,
+        writeCount: writes.length,
+        reply: result.finalMessage,
+      })}\n`)
+      expect(result.automationInspections).toHaveLength(1)
+      expect(result.commandLog.some((command) =>
+        command.startsWith(`experiment show ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+        && !isRecordedVaultHelpCommand(command)
+      )).toBe(true)
+      expect(writes).toHaveLength(1)
+      expect(writes[0]?.replaceAll(/['"]/gu, '')).toContain('--field repetitions=8')
+      expect(writes[0]).not.toContain('--reminder-intent-id')
+      expect(result.commandLog.some((command) => /^workout /u.test(command))).toBe(false)
+      expect(result.commandLog.some((command) =>
+        command.includes(`experiment session log ${REPEATED_SET_BETA_EXPERIMENT_ID}`)
+      )).toBe(false)
+      expect(result.finalMessage).not.toMatch(/which workout|what workout|how many|\?/iu)
+      expect(result.finalMessage).toMatch(/logged|recorded|saved/iu)
+      expect(result.runtimeIssueInputs).toEqual([])
+    },
+    360_000,
+  )
+
+  it(
     'keeps an experiment reminder authoritative when it also carries a workout-format template',
     async () => {
       const result = await runRepeatedSetResolutionProbe('experiment-reminder')
@@ -26394,6 +26453,44 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(message).not.toContain('thread_sensitive')
   })
 
+  it.each([
+    ['httpConnectionFailed', 'httpConnectionFailed'],
+    ['request_sensitive_123', 'unrecognized'],
+  ])('preserves only safe structured live failure diagnostics for %s', (errorInfo, expectedErrorInfo) => {
+    const error = Object.assign(new Error('Provider detail for request_sensitive_123'), {
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexErrorInfo: errorInfo,
+        codexErrorInfoPresent: true,
+        codexErrorHttpStatusCode: 502,
+        codexFailureDetailPresent: true,
+        codexProviderRequestStarted: false,
+        codexAbortRequested: false,
+        codexShutdownRequested: true,
+        codexLiveTurnOpen: false,
+        retryable: true,
+        codexThreadId: 'thread_sensitive_123',
+        codexStderr: 'stderr_sensitive_123',
+      },
+    })
+
+    expect(buildRealCodexE2eFailureMessage(error)).toBe([
+      'Real Codex turn failed: code=ASSISTANT_CODEX_FAILED',
+      `errorInfo=${expectedErrorInfo}`,
+      'httpStatus=502',
+      'errorInfoPresent=true',
+      'detailPresent=true',
+      'providerRequestStarted=false',
+      'abortRequested=false',
+      'shutdownRequested=true',
+      'liveTurnOpen=false',
+      'retryable=true',
+    ].join(' '))
+    expect(buildRealCodexE2eFailureMessage({
+      context: { codexErrorHttpStatusCode: '502', retryable: 'secret_sensitive_123' },
+    })).toBe('Real Codex turn failed: code=UNKNOWN')
+  })
+
   it('distinguishes turn/start result ids from turn/started event ids', () => {
     const events = [
       {
@@ -30633,6 +30730,8 @@ describe('recorded vault command parsing', () => {
       'workout add --help',
       'workout defaults set --help --format json',
       'experiment session log -h',
+      'experiment session log --schema --format json',
+      'workout set log --schema',
     ]) {
       expect(isRecordedVaultHelpCommand(command), command).toBe(true)
     }
@@ -30664,7 +30763,7 @@ describe('recorded vault command parsing', () => {
 
 function isRecordedVaultHelpCommand(command: string): boolean {
   return command.split(/\s+/u).some((token) =>
-    token === '--help' || token === '-h'
+    token === '--help' || token === '-h' || token === '--schema'
   )
 }
 
@@ -32887,6 +32986,7 @@ type RepeatedSetResolutionMode =
   | 'ambiguous'
   | 'experiment-reminder'
   | 'group'
+  | 'legacy-experiment-reminder'
   | 'success'
 
 async function runRepeatedSetResolutionProbe(
@@ -32896,6 +32996,8 @@ async function runRepeatedSetResolutionProbe(
   const workingDirectory = await mkdtemp(
     path.join(tmpdir(), `murph-repeated-set-${mode}-e2e-`),
   )
+  const automationInspections: string[] = []
+  let automationDirectory: string | undefined
 
   try {
     const binDirectory = path.join(workingDirectory, 'bin')
@@ -32925,13 +33027,52 @@ async function runRepeatedSetResolutionProbe(
       writeFile(commandLogPath, '', 'utf8'),
     ])
 
+    let savedReminder: Awaited<ReturnType<typeof upsertAutomation>> | undefined
+    if (mode === 'legacy-experiment-reminder') {
+      automationDirectory = await mkdtemp(path.join(tmpdir(), 'murph-legacy-reminder-owner-e2e-'))
+      await initializeVault({ vaultRoot: automationDirectory, timezone: 'UTC' })
+      savedReminder = await upsertAutomation({
+        contextReferences: [{ entityKind: 'experiment', entityId: REPEATED_SET_ALPHA_EXPERIMENT_ID }],
+        continuityPolicy: 'preserve',
+        instructions: 'Send the accepted training cue and invite a completion reply.',
+        now: new Date('2030-01-15T10:00:00.000Z'),
+        route: {
+          channel: 'linq', deliveryTarget: 'synthetic-legacy-set-cue',
+          identityId: null, participantId: null,
+          threadId: 'synthetic-legacy-set-cue', threadIsDirect: true,
+        },
+        schedule: { kind: 'dailyLocal', localTime: '14:00', timeZone: 'UTC' },
+        slug: 'synthetic-legacy-set-cue', status: 'active', tags: [],
+        title: 'Training cue', vaultRoot: automationDirectory,
+      })
+    }
+
+    // This probe starts at the provider boundary. The cross-session delivery
+    // renderer is private to automation/reply.ts; event-path tests cover its
+    // extraction from settled delivery receipts.
     const prompt = mode === 'group'
       ? [
           'Trusted group transcript:',
           'A participant says: “Sets 1 through 3 are done. Log them to my saved alternating routine and tell me the total.”',
           'Respond to that participant without exposing or changing private member state.',
         ].join('\n')
-      : mode === 'experiment-reminder'
+      : mode === 'legacy-experiment-reminder'
+        ? resolveAssistantProviderPrompt({
+            dynamicTools: [MURPH_AUTOMATION_TOOL],
+            prompt: 'That set is done.',
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+            turnContextPrompt: [
+              'Conversation context:',
+              'The assistant previously sent this provider-accepted reminder in the same private conversation:',
+              `- automationId: ${savedReminder!.record.automationId}`,
+              '- providerAcceptedAt: 2030-01-15T14:00:00.000Z',
+              'Text: Time for the next set. Reply when complete.',
+              'The legacy delivery has no contextReferences, supportSeriesId, intentId, or occurrence timestamps.',
+              'Use this reminder as interpretation context; it does not prove a workout exists or any completion occurred.',
+            ].join('\n'),
+            workingDirectory,
+          })
+        : mode === 'experiment-reminder'
         ? [
             'Conversation context:',
             'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
@@ -32965,6 +33106,9 @@ async function runRepeatedSetResolutionProbe(
         workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
       }),
     )
+    const legacyReminder = savedReminder && automationDirectory
+      ? { record: savedReminder.record, vaultRoot: automationDirectory }
+      : null
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -32976,6 +33120,34 @@ async function runRepeatedSetResolutionProbe(
         mode === 'group' ? 'group' : 'direct',
         assistantCliContract,
       ),
+      ...(legacyReminder ? {
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        hostedToolContext: {
+          automationTool: {
+            async request(request) {
+              expect(request).toEqual({ action: 'inspect', lookup: legacyReminder.record.automationId })
+              if (request.action !== 'inspect') throw new Error('Reminder writes are forbidden.')
+              automationInspections.push(request.lookup)
+              const record = await showAutomation({ automationId: request.lookup, vaultRoot: legacyReminder.vaultRoot })
+              if (!record) throw new Error('Expected the saved synthetic reminder.')
+              return {
+                action: 'inspect', automationId: record.automationId,
+                contextReferences: record.contextReferences,
+                instructions: record.instructions, title: record.title,
+                effectiveTimeZone: 'UTC', lookupId: record.slug,
+                occurrenceProjection: { nextOccurrenceAt: '2030-01-16T14:00:00.000Z', status: 'resolved' },
+                routeBinding: 'preserved', schedule: record.schedule,
+                status: record.status, updatedAt: record.updatedAt,
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('File sends are forbidden.') },
+          vaultFileSendAvailable: false,
+        },
+      } satisfies Partial<CodexAppServerTurnInput> : {}),
       env: {
         ...config.env,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -32995,15 +33167,22 @@ async function runRepeatedSetResolutionProbe(
       .map((command) => command.trim())
       .filter((command) => command.length > 0)
 
+    if (savedReminder && automationDirectory) {
+      expect(await showAutomation({ automationId: savedReminder.record.automationId, vaultRoot: automationDirectory }))
+        .toEqual(savedReminder.record)
+    }
+
     return {
       ...result,
       actions: readCapabilityRoutingActions(result.jsonEvents),
+      automationInspections,
       commandLog,
       prompt,
     }
   } finally {
     await removeRealCodexTemporaryPaths([
       workingDirectory,
+      ...(automationDirectory ? [automationDirectory] : []),
       ...config.temporaryPaths,
     ])
   }
@@ -33041,6 +33220,7 @@ async function materializeRepeatedSetVaultCli(input: {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
   const vault = '/private-vault'
+  const legacyReminderMode = input.mode === 'legacy-experiment-reminder'
   const regimenId = REPEATED_SET_REGIMEN_ID
   const alphaExperimentId = REPEATED_SET_ALPHA_EXPERIMENT_ID
   const betaExperimentId = REPEATED_SET_BETA_EXPERIMENT_ID
@@ -33072,8 +33252,24 @@ async function materializeRepeatedSetVaultCli(input: {
     runPlan: {
       interventionStart: '2030-01-13',
       interventionEnd: '2030-02-12',
-      dose: '8 repetitions per completed set of Movement Alpha',
+      dose: input.mode === 'legacy-experiment-reminder'
+        ? 'Four separate Movement Alpha sets on each scheduled date; 8 repetitions per set.'
+        : '8 repetitions per completed set of Movement Alpha',
       logging: { sessionFields: ['repetitions'] },
+      ...(input.mode === 'legacy-experiment-reminder' ? {
+        adherenceTargets: [{
+          targetId: 'movement-alpha-sets', label: 'One completed Movement Alpha set', phase: 'intervention',
+          calendar: {
+            kind: 'explicitDates', timeZone: 'America/New_York',
+            dates: Array.from({ length: 16 }, (_, index) => ({
+              localDate: new Date(Date.UTC(2030, 0, 13 + index * 2)).toISOString().slice(0, 10),
+              targetCount: 4,
+            })),
+          },
+          evidence: { kind: 'linkedEventCount', eventKind: 'intervention_session', missing: 'unknown' },
+          rollup: { targetCompletions: 64, minimumUsefulCompletions: 32 },
+        }],
+      } : {}),
     },
   })
   const betaExperimentData = experimentFrontmatterSchema.parse({
@@ -33121,7 +33317,12 @@ async function materializeRepeatedSetVaultCli(input: {
     data: alphaExperimentData,
     id: alphaExperimentId,
     kind: 'experiment',
-    markdown: '# Movement Alpha sets',
+    markdown: input.mode === 'legacy-experiment-reminder'
+      ? [
+          '# Movement Alpha sets',
+          'Saved member convention: a singular completion reply to a set cue confirms one set of 8 repetitions. Each reply confirms only that occurrence, not all four sets scheduled for the day.',
+        ].join('\n\n')
+      : '# Movement Alpha sets',
     path: 'bank/experiments/movement-alpha.md',
     title: 'Movement Alpha sets',
   })
@@ -33191,10 +33392,10 @@ async function materializeRepeatedSetVaultCli(input: {
         evidence: { eventKind: 'intervention_session' },
         expectedSessionsByNow: null,
         loggedSessions: input.completedSessions,
-        minimumUsefulSessions: null,
+        minimumUsefulSessions: legacyReminderMode && input.experimentId === alphaExperimentId ? 32 : null,
         sessionEventIds: input.eventIds,
         status: 'on_track',
-        targetSessions: null,
+        targetSessions: legacyReminderMode && input.experimentId === alphaExperimentId ? 64 : null,
       },
       confounders: [],
       dataCoverage: {
@@ -33509,6 +33710,204 @@ async function materializeHabitatVoiceVaultCli(input: {
     },
   )
   await chmod(executablePath, 0o700)
+}
+
+async function runLiveWorkoutRepetitionRecoveryProbe(
+  mode: 'saved-instruction' | 'prior-actuals-and-targets' | 'cleared-instruction',
+): Promise<void> {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-repetition-source-e2e-'))
+  const binDirectory = path.join(workingDirectory, 'bin')
+  const skillsRoot = path.join(workingDirectory, 'skills')
+  const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+  try {
+    await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+    await Promise.all([
+      materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+      materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
+      materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
+    ])
+    const formatId = 'wfmt_01K1ABCDEFGHJKMNPQRSTVWXYR'
+    if (mode === 'prior-actuals-and-targets') {
+      await saveWorkoutFormat({
+        vault: workingDirectory,
+        payload: {
+          workoutFormatId: formatId, title: 'Synthetic lunge practice',
+          status: 'active', activityType: 'strength-training',
+          template: { exercises: [{
+            name: 'Reverse lunge', mode: 'bodyweight', order: 1,
+            plannedSets: Array.from({ length: 4 }, (_, index) => ({ order: index + 1, targetReps: 13 })),
+          }] },
+        },
+      })
+    }
+    const started = await startLiveWorkout({
+      vault: workingDirectory,
+      name: 'Synthetic lunge practice',
+      ...(mode === 'prior-actuals-and-targets'
+        ? { routine: formatId }
+        : { exercises: [{ name: 'Reverse lunge', mode: 'bodyweight' as const, setCount: 4 }] }),
+    })
+    const saved = mode !== 'prior-actuals-and-targets'
+      ? await upsertMemory(workingDirectory, {
+          section: 'Instructions',
+          text: `For workout ${started.eventId}, exercise 1 (Reverse lunge), use exactly 13 reps for every set I report complete without a count.`,
+        })
+      : null
+    for (const setOrder of [1, 2]) {
+      await logLiveWorkoutSet({
+        vault: workingDirectory, workoutId: started.eventId,
+        exerciseOrder: 1, setOrder, reps: mode === 'prior-actuals-and-targets' ? 13 : setOrder + 5,
+      })
+    }
+    if (mode === 'cleared-instruction') {
+      await setLiveWorkoutExerciseReps({
+        vault: workingDirectory, workoutId: started.eventId, exerciseOrder: 1, reps: 13,
+      })
+      await setLiveWorkoutExerciseReps({
+        vault: workingDirectory, workoutId: started.eventId, exerciseOrder: 1, clear: true,
+      })
+    }
+    const before = await showWorkoutRecord(workingDirectory, started.eventId)
+    expect(workoutSessionSchema.parse(before.entity.data.workout).exercises[0]?.memberRepsPerSet)
+      .toBe(mode === 'cleared-instruction' ? null : undefined)
+    const memoryBefore = await readMemoryDocument(workingDirectory)
+    const currentStatePrompt = await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory })
+    if (saved) expect(currentStatePrompt).toContain(saved.record.text)
+    const contextReferences = [{ entityKind: 'activity_session' as const, entityId: started.eventId }]
+    const dynamicTools = [MURPH_ATTACH_RESPONSE_CARD_TOOL]
+    const assistantCliContract = buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifest({
+      timeoutMs: 5 * 60_000,
+      workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+    }))
+    const developerInstructions = buildAssistantSystemPrompt({
+      assistantCliContract,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: 'direct', currentLocalDate: new Date().toISOString().slice(0, 10),
+      currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false, turnTrigger: null,
+    })
+    const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+      approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: config.codexHome, configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+      developerInstructions, dynamicTools,
+      env: {
+        ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+      },
+      excludeResumeTurns: true, groupConversation: false,
+      model: config.model, modelProvider: config.modelProvider,
+      reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+    }
+    const promptForSet = (
+      setOrder: number,
+      references: CodexAppServerTurnResult['responseContextReferences'],
+      savedStatePrompt?: string | null,
+    ) => resolveAssistantProviderPrompt({
+      dynamicTools, prompt: `Set ${setOrder} is done.`,
+      providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+      turnContextPrompt: [
+        savedStatePrompt,
+        'Conversation context:',
+        `Host-preserved contextReferences: ${JSON.stringify(references)}`,
+      ].filter(Boolean).join('\n'),
+      workingDirectory,
+    })
+    const recovered = await executeRealCodexAppServerTurn({
+      ...commonInput,
+      trustedContextReferences: contextReferences,
+      prompt: promptForSet(3, contextReferences, currentStatePrompt),
+    })
+    const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+      .filter((command) => command.length > 0 && !isRecordedVaultHelpCommand(command))
+    const after = await showWorkoutRecord(workingDirectory, started.eventId)
+    const workout = workoutSessionSchema.parse(after.entity.data.workout)
+    const mutationCommands = commands.filter((command) =>
+      /^(?:workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))|experiment session log|regimen (?:add|edit)|memory (?:upsert|update|forget))\b/u.test(command)
+    )
+    const workoutReadIndex = commands.findIndex((command) =>
+      command.startsWith('workout show ') && command.includes(started.eventId)
+    )
+    process.stdout.write(`[workout-repetition-recovery-e2e] ${JSON.stringify({
+      scenario: mode, reply: recovered.finalMessage,
+      commandLog: commands,
+      memberRepsPerSet: workout.exercises[0]?.memberRepsPerSet ?? null,
+      repetitions: workout.exercises[0]?.sets.map((set) => set.reps ?? null),
+      mutationCount: mutationCommands.length,
+    })}\n`)
+    expect(workoutReadIndex).toBeGreaterThanOrEqual(0)
+    expect(recovered.runtimeIssueInputs).toEqual([])
+    expect(await readMemoryDocument(workingDirectory)).toEqual(expect.objectContaining({
+      exists: memoryBefore.exists, records: memoryBefore.records, updatedAt: memoryBefore.updatedAt,
+    }))
+    if (mode !== 'saved-instruction') {
+      expect(after).toEqual(before)
+      expect(mutationCommands).toEqual([])
+      if (mode === 'cleared-instruction') {
+        expect(workout.exercises[0]?.memberRepsPerSet).toBeNull()
+        expect(workout.exercises[0]?.sets.map((set) => set.reps)).toEqual([6, 7, undefined, undefined])
+      }
+      expect(recovered.finalMessage).toMatch(/\b(?:reps|repetitions)\b|\bhow many (?:reverse )?lunges?\b/iu)
+      expect(recovered.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
+      expect(recovered.finalMessage).not.toMatch(/(?:logged|recorded|saved).{0,40}set 3/iu)
+      return
+    }
+    expect(saved).not.toBeNull()
+    const ruleIndex = commands.findIndex((command) => command.startsWith('workout exercise set-reps '))
+    const logIndex = commands.findIndex((command) => command.startsWith('workout set log '))
+    expect(ruleIndex).toBeGreaterThan(workoutReadIndex)
+    expect(logIndex).toBeGreaterThan(ruleIndex)
+    expect(mutationCommands).toHaveLength(2)
+    expect(commands[ruleIndex]).toContain(started.eventId)
+    expect(commands[ruleIndex]).toMatch(/--reps(?:=|\s)13\b/u)
+    expect(workout.exercises[0]?.memberRepsPerSet).toBe(13)
+    expect(workout.exercises[0]?.sets.map((set) => set.reps)).toEqual([6, 7, 13, undefined])
+    expect(recovered.finalMessage).not.toMatch(/how many|which workout|\?/iu)
+    expect(recovered.responseContextReferences).toEqual(contextReferences)
+    expect(recovered.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+    expect(recovered.responseCard).toMatchObject({
+      kind: 'compact_table', tracking: { entityId: started.eventId, kind: 'workout' },
+      workout: { state: 'active' },
+    })
+
+    // Fresh provider execution receives only the preceding delivery's causal
+    // reference. The restored exercise fact is now the repetition owner.
+    const continued = await executeRealCodexAppServerTurn({
+      ...commonInput,
+      trustedContextReferences: recovered.responseContextReferences,
+      prompt: promptForSet(4, recovered.responseContextReferences),
+    })
+    const final = workoutSessionSchema.parse((await showWorkoutRecord(workingDirectory, started.eventId)).entity.data.workout)
+    const laterCommands = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+      .filter((command) => command.length > 0 && !isRecordedVaultHelpCommand(command))
+      .slice(commands.length)
+    expect(laterCommands.filter((command) => command.startsWith('workout set log '))).toHaveLength(1)
+    expect(laterCommands.some((command) => /^workout (?:start|delete|finish|edit|exercise)/u.test(command))).toBe(false)
+    expect(final.exercises[0]?.memberRepsPerSet).toBe(13)
+    expect(final.exercises[0]?.sets.map((set) => set.reps)).toEqual([6, 7, 13, 13])
+    expect(final.endedAt).toEqual(expect.any(String))
+    expect(continued.finalMessage).not.toMatch(/how many|which workout|\?/iu)
+    expect(continued.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+    expect(continued.responseCard).toMatchObject({
+      kind: 'compact_table', tracking: { entityId: started.eventId, kind: 'workout' },
+      workout: { state: 'completed' },
+    })
+    expect(continued.runtimeIssueInputs).toEqual([])
+    expect(await readMemoryDocument(workingDirectory)).toEqual(expect.objectContaining({
+      exists: memoryBefore.exists, records: memoryBefore.records, updatedAt: memoryBefore.updatedAt,
+    }))
+    process.stdout.write(`[workout-repetition-reuse-e2e] ${JSON.stringify({
+      reply: continued.finalMessage, repetitions: final.exercises[0]?.sets.map((set) => set.reps),
+    })}\n`)
+  } finally {
+    await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+  }
 }
 
 async function materializeRealWorkoutVaultCli(input: {
@@ -36587,6 +36986,43 @@ function buildRealCodexE2eFailureMessage(error: unknown): string {
   const providerActionCount = readNonNegativeInteger(context?.providerActionCount)
   if (providerActionCount !== null) {
     parts.push(`providerActionCount=${providerActionCount}`)
+  }
+
+  const errorInfo = context?.codexErrorInfo
+  if (typeof errorInfo === 'string') {
+    const knownErrorKinds = [
+      'contextWindowExceeded',
+      'usageLimitExceeded',
+      'serverOverloaded',
+      'httpConnectionFailed',
+      'responseStreamConnectionFailed',
+      'internalServerError',
+      'unauthorized',
+      'badRequest',
+      'threadRollbackFailed',
+      'responseStreamDisconnected',
+      'responseTooManyFailedAttempts',
+      'other',
+    ]
+    parts.push(`errorInfo=${knownErrorKinds.includes(errorInfo) ? errorInfo : 'unrecognized'}`)
+  }
+  const httpStatus = readNonNegativeInteger(context?.codexErrorHttpStatusCode)
+  if (httpStatus !== null && httpStatus >= 100 && httpStatus <= 599) {
+    parts.push(`httpStatus=${httpStatus}`)
+  }
+  for (const [key, label] of [
+    ['codexErrorInfoPresent', 'errorInfoPresent'],
+    ['codexFailureDetailPresent', 'detailPresent'],
+    ['codexProviderRequestStarted', 'providerRequestStarted'],
+    ['codexAbortRequested', 'abortRequested'],
+    ['codexShutdownRequested', 'shutdownRequested'],
+    ['codexLiveTurnOpen', 'liveTurnOpen'],
+    ['retryable', 'retryable'],
+  ] as const) {
+    const value = context?.[key]
+    if (typeof value === 'boolean') {
+      parts.push(`${label}=${value}`)
+    }
   }
 
   return `Real Codex turn failed: ${parts.join(' ')}`

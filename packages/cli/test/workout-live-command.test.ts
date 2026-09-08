@@ -73,7 +73,7 @@ interface WorkoutResult {
     sessionNote?: string
     exercises: Array<{
       groupId?: string
-      memberRepsPerSet?: number
+      memberRepsPerSet?: number | null
       mode?: string
       name: string
       note?: string
@@ -1013,7 +1013,7 @@ test('live workout usecases fail closed on missing exact selectors and coordinat
   )
 })
 
-test('clearing fixed exercise repetitions stops value-less set logging', async () => {
+test('cleared exercise repetitions survive fresh reads until explicitly re-enabled', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-clear-reps-',
   )
@@ -1034,7 +1034,7 @@ test('clearing fixed exercise repetitions stops value-less set logging', async (
     '--order', '1',
     '--mode', 'weight_reps',
     '--unit-override', 'lb',
-    '--sets', '1',
+    '--sets', '2',
     '--vault', vaultRoot,
   ])).envelope)
   requireData((await run<ShowResult>(cli, [
@@ -1054,10 +1054,22 @@ test('clearing fixed exercise repetitions stops value-less set logging', async (
   ])).envelope)
   assert.equal(
     cleared.entity.data.workout.exercises[0]?.memberRepsPerSet,
-    undefined,
+    null,
   )
 
-  const rejected = await run<ShowResult>(cli, [
+  const freshCli = createWorkoutCli()
+  const reread = requireData((await run<ShowResult>(freshCli, [
+    'workout', 'show', started.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(reread.entity.data.workout.exercises[0]?.memberRepsPerSet, null)
+  const clearedAgain = requireData((await run<ShowResult>(freshCli, [
+    'workout', 'exercise', 'set-reps', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1', '--clear', '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(requireShownRevision(clearedAgain), requireShownRevision(reread))
+
+  const rejected = await run<ShowResult>(freshCli, [
     'workout', 'set', 'log', 'Bench press',
     '--workout-id', started.eventId,
     '--exercise-order', '1',
@@ -1074,9 +1086,39 @@ test('clearing fixed exercise repetitions stops value-less set logging', async (
     'workout', 'show', started.eventId, '--vault', vaultRoot,
   ])).envelope)
   assert.deepEqual(unchanged.entity.data.workout.exercises[0]?.sets, [
-    { order: 1 },
+    { order: 1 }, { order: 2 },
   ])
   assert.equal(unchanged.entity.data.workout.endedAt, undefined)
+
+  const explicit = requireData((await run<ShowResult>(freshCli, [
+    'workout', 'set', 'log', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1', '--set-order', '1', '--reps', '5',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(explicit.entity.data.workout.exercises[0]?.memberRepsPerSet, null)
+  assert.equal(explicit.entity.data.workout.exercises[0]?.sets[0]?.reps, 5)
+
+  const reenabled = requireData((await run<ShowResult>(freshCli, [
+    'workout', 'exercise', 'set-reps', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1', '--reps', '13', '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(reenabled.entity.data.workout.exercises[0]?.memberRepsPerSet, 13)
+  const repeated = requireData((await run<ShowResult>(freshCli, [
+    'workout', 'set', 'log', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1', '--set-order', '1', '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(requireShownRevision(repeated), requireShownRevision(reenabled))
+  const completed = requireData((await run<ShowResult>(freshCli, [
+    'workout', 'set', 'log', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1', '--set-order', '2', '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(completed.entity.data.workout.exercises[0]?.sets, [
+    { order: 1, reps: 5 }, { order: 2, reps: 13 },
+  ])
 })
 
 test('concurrent exact-workout mutations serialize without losing set updates', async () => {

@@ -548,6 +548,9 @@ describe('experiment onboarding skill guidance', () => {
       'Prefer a marked exact reply or reaction target, but do not treat the native edge alone as completion.',
     )
     expect(raw).toContain(
+      'context includes `plannedOccurrenceAt` and the matching experiment `supportSeriesId`',
+    )
+    expect(raw).toContain(
       'vault-cli experiment session log <id> --reminder-intent-id <intentId>',
     )
     expect(raw).toContain(
@@ -560,16 +563,19 @@ describe('experiment onboarding skill guidance', () => {
       'a second accepted reminder for that same planned occurrence returns the existing event',
     )
     expect(raw).toContain(
-      'A trusted legacy reminder with no `plannedOccurrenceAt` is conversational context only, not reminder-write provenance.',
+      'A trusted legacy reminder with no `plannedOccurrenceAt` or matching `supportSeriesId` is conversational context only, not reminder-write provenance.',
     )
     expect(raw).toContain(
       'Never pass its intent id to `--reminder-intent-id`, and never substitute its notification time for session chronology.',
     )
     expect(raw).toContain(
-      'only when the canonical plan identifies exactly one applicable uncompleted occurrence',
+      'Explicit repeated-set completions use the ordinary resolution below and do not require a scheduled slot or daily workout.',
     )
     expect(raw).toContain(
-      'ask one narrow question about which session was completed and write nothing',
+      'For other planned-session reconciliation, read the current experiment and progress',
+    )
+    expect(raw).toContain(
+      'with plan-derived chronology only when the plan identifies exactly one applicable uncompleted occurrence; otherwise ask one narrow question and write nothing.',
     )
     expect(raw).toContain(
       'A later change, archival, or deletion of the automation does not rewrite the historical message the member received.',
