@@ -1084,12 +1084,12 @@ test("a member action cannot remove every set through the real vault boundary", 
   }
 });
 
-test("generic structural edits retain exercise-owned live tracking facts", async () => {
+test.each([12, null])("generic structural edits retain exercise-owned repetition rules (%s)", async (memberRepsPerSet) => {
   const fixture = await createLoggedWorkout([8, 10]);
   try {
     await setLiveWorkoutExerciseReps({
       exerciseOrder: 1,
-      reps: 12,
+      ...(memberRepsPerSet === null ? { clear: true } : { reps: memberRepsPerSet }),
       vault: fixture.vault,
       workoutId: fixture.workoutId,
     });
@@ -1097,6 +1097,7 @@ test("generic structural edits retain exercise-owned live tracking facts", async
       await showWorkoutRecord(fixture.vault, fixture.workoutId),
     );
     const exercise = before.exercises[0]!;
+    expect(exercise.memberRepsPerSet).toBe(memberRepsPerSet);
 
     await editWorkoutRecord({
       lookup: fixture.workoutId,
@@ -1113,7 +1114,7 @@ test("generic structural edits retain exercise-owned live tracking facts", async
       await showWorkoutRecord(fixture.vault, fixture.workoutId),
     );
     expect(after.exercises[0]).toMatchObject({
-      memberRepsPerSet: 12,
+      memberRepsPerSet,
       note: "Member-requested label cleanup.",
       setPlanIsFinite: false,
     });

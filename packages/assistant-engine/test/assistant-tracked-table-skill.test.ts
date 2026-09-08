@@ -86,7 +86,9 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).toContain('recover the saved reminder definition before asking')
     expect(skill).toContain('`action: inspect` and that exact id as `lookup`')
+    expect(skill).toContain('Inspect its returned `contextReferences` before interpreting')
     expect(skill).toContain('returned `title` and `instructions`')
+    expect(skill).toContain('A resolved experiment occurrence needs no daily workout')
     expect(skill).toContain('Do not patch the reminder during recovery')
     expect(skill).toContain('leave every unreported set pending')
     expect(skill).toContain('Missing definition fields, an ambiguous exercise or owner')
@@ -163,7 +165,7 @@ describe('assistant tracked workout table skill', () => {
       'keep every terse or repeated set confirmation on this owner',
     )
     expect(skill).toContain(
-      'ask which workout, exercise, or set the member means without switching record types',
+      'Never switch an already verified live workout to another record type',
     )
     expect(skill).toContain(
       'There is no global active or focused workout selector. Never choose a workout by recency.',
@@ -175,7 +177,23 @@ describe('assistant tracked workout table skill', () => {
       'immediately persist that smallest exercise-owned fact with `workout exercise set-reps`',
     )
     expect(skill).toContain(
-      'The fact survives provider-thread loss and bounded transcript replay because it belongs to the workout exercise, not assistant memory.',
+      'Use `memberRepsPerSet` from the exact workout read before asking',
+    )
+    expect(skill).toContain('First exact-read the relevant saved canonical source')
+    expect(skill).toContain('explicit member every-set instruction')
+    expect(skill).toContain('whose scope proves that it applies to this exact workout exercise')
+    expect(skill).toContain('matching exercise names alone is insufficient')
+    expect(skill).toContain('## Repetition defaults')
+    expect(skill).toContain('follow Repetition defaults before logging or changing a rule')
+    expect(skill).toContain('`memberRepsPerSet: null` | Explicit withdrawal. Ask for this set')
+    expect(skill).toContain('Do not call `set-reps` or log a count from saved Instructions')
+    expect(skill).toContain('A terse completion never changes a number or null')
+    expect(skill).toContain('Only a new every-set instruction in the current member message may replace either')
+    expect(skill).toContain('saved Instructions and other canonical sources are historical context, not a new member instruction')
+    expect(skill).toContain('| Field omitted | First exact-read')
+    expect(skill).toContain('ask for repetitions before attempting a set log')
+    expect(skill).not.toContain(
+      'Only an explicit new statement that one exact count applies to every set updates the fact',
     )
     expect(skill).toContain(
       "copies the stored member fact into that completed set's actual `reps` field",
@@ -186,6 +204,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain(
       'never derived from a saved-plan target, prior workout, card target, assistant suggestion, range, AMRAP, or qualitative instruction',
     )
+    expect(skill).toContain('Matching prior set actuals never establish an every-set instruction')
     expect(skill).toContain(
       'Never carry forward weight, duration, distance, RPE, bodyweight, assistance, added weight, or any other actual field.',
     )
@@ -306,7 +325,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Keep the last exact coordinate the member identified.')
     expect(skill).toContain('Never advance to another set from an acknowledgement.')
     expect(skill).toContain(
-      'If that recovery cannot resolve the intended workout and coordinate, ask which workout, exercise, or set the member means without switching record types.',
+      'Follow its resolved canonical owner; otherwise ask one narrow question about the missing owner or completion.',
     )
     expect(skill).toContain(
       'Do not block unrelated new work, demand closure metadata for another workout, or create a workout merely to make an earlier assistant claim appear true.',

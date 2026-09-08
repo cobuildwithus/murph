@@ -4734,53 +4734,6 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
   }
 
   const replyToMessageId = input.replyToMessageId
-  const matchingDeliveries =
-    await listAssistantAutoReplyMatchingOutboxDeliveries({
-      allowAcceptedNonSentMedia: replyToMessageId !== null,
-      deliveryTarget,
-      historyReader: input.historyReader,
-      input: input.input,
-      providerMessageIds: replyToMessageId === null
-        ? []
-        : [replyToMessageId],
-    })
-  const replyTargetDelivery = replyToMessageId === null
-    ? null
-    : resolveAssistantAutoReplyExactOutboxDelivery(
-        matchingDeliveries,
-        replyToMessageId,
-      )
-  // Generic same-session history is already present in the transcript. An
-  // explicit native reply still needs its one selected assistant message
-  // preserved so the model can distinguish it from newer transcript turns.
-  if (
-    input.preserveSameSessionReplyTarget &&
-    replyTargetDelivery !== null &&
-    input.session !== null &&
-    replyTargetDelivery.sessionId === input.session.sessionId
-  ) {
-    return {
-      claim: null,
-      deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
-        deliveries: [replyTargetDelivery],
-        exactReplyTargetIntentId: replyTargetDelivery.intentId,
-      }),
-      replyTargetDelivery,
-    }
-  }
-  const orderedMatchingDeliveries = [...matchingDeliveries]
-    .sort((left, right) =>
-      compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
-    )
-  const contextEligible = orderedMatchingDeliveries
-    .flatMap((delivery) => {
-      const projected = projectAssistantAutoReplyPriorDelivery({
-        delivery,
-        preserveLegacyContextBarrier: false,
-        sessionId: input.session?.sessionId ?? null,
-      })
-      return projected === null ? [] : [projected]
-    })
   const inputRoute = resolveAssistantAutoReplyInputExactRoute({
     conversation: input.input.conversation,
     deliveryTarget,
@@ -4792,6 +4745,49 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
   // claim as an unanchored selection; a completed older anchor cannot move
   // settledThrough backwards.
   if (replyToMessageId) {
+    const matchingDeliveries =
+      await listAssistantAutoReplyMatchingOutboxDeliveries({
+        allowAcceptedNonSentMedia: true,
+        deliveryTarget,
+        historyReader: input.historyReader,
+        input: input.input,
+        providerMessageIds: [replyToMessageId],
+      })
+    const replyTargetDelivery = resolveAssistantAutoReplyExactOutboxDelivery(
+      matchingDeliveries,
+      replyToMessageId,
+    )
+    // Generic same-session history is already present in the transcript. An
+    // explicit native reply still needs its one selected assistant message
+    // preserved so the model can distinguish it from newer transcript turns.
+    if (
+      input.preserveSameSessionReplyTarget &&
+      replyTargetDelivery !== null &&
+      input.session !== null &&
+      replyTargetDelivery.sessionId === input.session.sessionId
+    ) {
+      return {
+        claim: null,
+        deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
+          deliveries: [replyTargetDelivery],
+          exactReplyTargetIntentId: replyTargetDelivery.intentId,
+        }),
+        replyTargetDelivery,
+      }
+    }
+    const orderedMatchingDeliveries = [...matchingDeliveries]
+      .sort((left, right) =>
+        compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
+      )
+    const contextEligible = orderedMatchingDeliveries
+      .flatMap((delivery) => {
+        const projected = projectAssistantAutoReplyPriorDelivery({
+          delivery,
+          preserveLegacyContextBarrier: false,
+          sessionId: input.session?.sessionId ?? null,
+        })
+        return projected === null ? [] : [projected]
+      })
     const selected = resolveAssistantAutoReplyExactOutboxDelivery(
       contextEligible,
       replyToMessageId,
@@ -4843,13 +4839,35 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     return {
       claim: null,
       deliveries: [],
-      replyTargetDelivery,
+      replyTargetDelivery: null,
     }
   }
 
-  const fresh = orderedMatchingDeliveries.filter(
-    (delivery) => delivery.sentAtMs <= causalUpperBoundMs,
-  )
+  // Unanchored context cannot use history while its route is blocked.
+  const routeState = await readAssistantAutoReplyRouteState({
+    routeDigest: inputRoute.digest,
+    vault: input.vault,
+  }).catch(() => null)
+  if (routeState?.kind !== 'ready') {
+    return {
+      claim: null,
+      deliveries: [],
+      replyTargetDelivery: null,
+    }
+  }
+
+  const matchingDeliveries =
+    await listAssistantAutoReplyMatchingOutboxDeliveries({
+      deliveryTarget,
+      historyReader: input.historyReader,
+      input: input.input,
+      providerMessageIds: [],
+    })
+  const fresh = [...matchingDeliveries]
+    .sort((left, right) =>
+      compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
+    )
+    .filter((delivery) => delivery.sentAtMs <= causalUpperBoundMs)
   if (
     fresh.length === 0 ||
     fresh.some((delivery) => delivery.exactRouteDigest !== inputRoute.digest)
@@ -4860,22 +4878,11 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     return {
       claim: null,
       deliveries: [],
-      replyTargetDelivery,
+      replyTargetDelivery: null,
     }
   }
 
   try {
-    const routeState = await readAssistantAutoReplyRouteState({
-      routeDigest: inputRoute.digest,
-      vault: input.vault,
-    })
-    if (routeState.kind === 'blocked') {
-      return {
-        claim: null,
-        deliveries: [],
-        replyTargetDelivery,
-      }
-    }
     const deliveries = fresh.filter((delivery) =>
       routeState.settledThrough === null ||
       compareAssistantAutoReplyDeliveryOrders(
@@ -4886,8 +4893,10 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     const selected = deliveries.at(-1) ?? null
     const projectedDeliveries =
       projectAssistantAutoReplyUnanchoredPriorDeliveries({
-        deliveries,
+        deliveries: fresh,
         sessionId: input.session?.sessionId ?? null,
+        settledThrough: routeState.settledThrough,
+        threadIsDirect: input.input.conversation.threadIsDirect,
       })
     return {
       claim: selected === null
@@ -4902,13 +4911,13 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
         deliveries: projectedDeliveries,
         exactReplyTargetIntentId: null,
       }),
-      replyTargetDelivery,
+      replyTargetDelivery: null,
     }
   } catch {
     return {
       claim: null,
       deliveries: [],
-      replyTargetDelivery,
+      replyTargetDelivery: null,
     }
   }
 }
@@ -5424,11 +5433,40 @@ function findLatestAssistantAutoReplyContextDecision<
 function projectAssistantAutoReplyUnanchoredPriorDeliveries(input: {
   deliveries: readonly AssistantAutoReplyMatchingOutboxDelivery[]
   sessionId: string | null
+  settledThrough: AssistantAutoReplyDeliveryOrder | null
+  threadIsDirect: boolean | null
 }): AssistantAutoReplyMatchingOutboxDelivery[] {
   const contextDecisionIntentId =
     findLatestAssistantAutoReplyContextDecision(input.deliveries)?.intentId ??
       null
   return input.deliveries.flatMap((delivery) => {
+    if (
+      input.settledThrough !== null &&
+      compareAssistantAutoReplyDeliveryOrders(
+        delivery.order,
+        input.settledThrough,
+      ) <= 0
+    ) {
+      if (
+        input.threadIsDirect === true &&
+        delivery.intentId === contextDecisionIntentId &&
+        delivery.automationContextReferences?.length === 1 &&
+        delivery.automationContextReferences[0]?.entityKind === 'activity_session'
+      ) {
+        // Consumption prevents replaying a delivered message, not continuing its
+        // exact workout. Old reminder text and occurrence annotations must not
+        // become a new completion request.
+        return [{
+          ...delivery,
+          automationId: null,
+          message: null,
+          plannedOccurrenceAt: null,
+          scheduledOccurrenceAt: null,
+          supportSeriesId: null,
+        }]
+      }
+      return []
+    }
     const decisionOwnedDelivery =
       delivery.automationContextReferences === null ||
         delivery.intentId === contextDecisionIntentId

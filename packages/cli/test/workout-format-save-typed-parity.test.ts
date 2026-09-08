@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { workoutExerciseModeSchema } from '@murphai/contracts'
 import { Cli } from 'incur'
 import { afterEach, test } from 'vitest'
 
@@ -186,6 +187,11 @@ test('workout format save LLM schema exposes compact routine keys', async () => 
   const cli = createWorkoutFormatCli()
   const schema = await readLlmCommandSchema(cli, 'workout format save')
 
+  for (const mode of workoutExerciseModeSchema.options) {
+    assert.ok(optionDescription(schema, 'exercise').includes(mode))
+  }
+  assert.match(optionDescription(schema, 'type'), /strength-training/u)
+  assert.doesNotMatch(optionDescription(schema, 'type'), /strength training/u)
   assert.match(optionDescription(schema, 'exercise'), /Compact exercise grammar/u)
   assert.match(optionDescription(schema, 'exercise'), /Shell-quote each semicolon-separated value/u)
   assert.match(optionDescription(schema, 'exercise'), /Supported keys: order, name, sourceExerciseId/u)

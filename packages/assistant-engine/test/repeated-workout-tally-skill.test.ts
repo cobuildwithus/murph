@@ -21,6 +21,19 @@ async function readSkill(slug: string) {
 }
 
 describe('repeated workout tally guidance', () => {
+  it('distinguishes routine drafts, verified saves, retrieval, and live workouts', async () => {
+    const strength = await readSkill('strength-training')
+    expect(strength).toContain('say it has not been saved')
+    expect(strength).toContain('vault-cli workout format save')
+    expect(strength).toContain('vault-cli workout format show <returned-slug> --format json')
+    expect(strength).toContain('saved template matches the request before confirming')
+    expect(strength).toContain('inspect the exact\nrecord before retrying')
+    expect(strength).toContain('a limited list is not proof that no other routine exists')
+    expect(strength).toContain('read fails, say the saved state could not be checked')
+    expect(strength).toContain('does not start or complete a workout')
+    expect(strength).toContain('Keep private reads and writes out of group conversations')
+  })
+
   it('requires explicit occurrence logs and separates actual from theoretical totals', async () => {
     const experiment = await readSkill('experiment-onboarding')
     const behavior = await readSkill('behavior-followthrough')
@@ -71,7 +84,23 @@ describe('repeated workout tally guidance', () => {
     expect(strength).toContain(
       'Resolve one exercise, one owner, and one current per-occurrence standard',
     )
+    expect(strength).toContain('a daily `activity_session` is not required')
+    expect(strength).toContain('use its returned typed `contextReferences` before reminder prose')
     expect(strength).toContain('ask one narrow clarification and write nothing')
+  })
+
+  it('keeps explicit repeated completions loggable without scheduled occurrence provenance', async () => {
+    const experiment = await readSkill('experiment-onboarding')
+
+    expect(experiment).toContain('no `plannedOccurrenceAt` or matching `supportSeriesId`')
+    expect(experiment).toContain('Never pass its intent id to `--reminder-intent-id`')
+    expect(experiment).toContain('Explicit repeated-set completions use the ordinary resolution below')
+    expect(experiment).toContain('do not require a scheduled slot or daily workout')
+    expect(experiment).toContain('For other planned-session reconciliation')
+    expect(experiment).toContain('including legacy reminder replies')
+    expect(experiment).not.toContain(
+      'then use the existing ordinary session-resolution path only when the canonical plan identifies exactly one applicable uncompleted occurrence',
+    )
   })
 
   it('keeps ordinary habit completion and plan-repair authority separate from repeated-set attribution', async () => {

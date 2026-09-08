@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 200,
+  "item": {
+    "id": "workout-routines-in-chat",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer saved workout routines",
+    "summary": "Review your routine directly in chat, with a clear distinction between a proposed plan and a saved routine.",
+    "details": "When you ask to save a routine, Murph checks the saved exercises and sets before confirming. Missing or unreadable routines get an explanation in chat instead of a link to the unfinished Training preview.",
+    "relevanceTags": [
+      "workouts",
+      "training"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Review my routine",
+      "prompt": "Show my saved workout routine here in chat."
+    }
+  }
+}

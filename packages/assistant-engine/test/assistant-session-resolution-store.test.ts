@@ -1,4 +1,14 @@
-import { rm } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
+import path from 'node:path'
 
 import {
   createAssistantModelTarget,
@@ -12,8 +22,13 @@ import {
   listAssistantTranscriptEntries,
   listAssistantSessions,
   resolveAssistantSession,
+  resolveAssistantStatePaths,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
+import {
+  resolveAssistantSessionPath,
+  resolveAssistantSessionRoutingDatabasePath,
+} from '../src/assistant/store/persistence.ts'
 import { resolveLegacyAssistantConversationKey } from '../src/assistant/bindings.ts'
 import {
   resolveAssistantSessionForMessage,
@@ -38,6 +53,158 @@ afterEach(async () => {
 })
 
 describe('assistant session resolution store integration', () => {
+  it('prepares only session persistence directories during creation and warm lookup', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-directories-',
+    )
+    cleanupPaths.push(parentRoot)
+    const created = await resolveAssistantSession({
+      alias: 'directory-test',
+      target: createCodexTarget(),
+      vault: vaultRoot,
+    })
+    const { paths } = created
+    const persistenceDirectories = [
+      paths.sessionsDirectory,
+      paths.stateDirectory,
+      paths.sessionSecretsDirectory,
+    ]
+    for (const directory of persistenceDirectories) {
+      expect((await stat(directory)).mode & 0o777).toBe(0o700)
+      await chmod(directory, 0o755)
+    }
+
+    const resolved = await resolveAssistantSession({
+      alias: 'directory-test',
+      createIfMissing: false,
+      vault: vaultRoot,
+    })
+    expect(resolved.session.sessionId).toBe(created.session.sessionId)
+    expect(await getAssistantSession(vaultRoot, created.session.sessionId))
+      .toEqual(resolved.session)
+    for (const directory of persistenceDirectories) {
+      expect((await stat(directory)).mode & 0o777).toBe(0o700)
+    }
+    for (const directory of [
+      paths.transcriptsDirectory,
+      paths.outboxDirectory,
+      paths.turnsDirectory,
+      paths.diagnosticsDirectory,
+      paths.issuesDirectory,
+      paths.quarantineDirectory,
+    ]) {
+      await expect(stat(directory)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it.each([
+    'sessionsDirectory',
+    'stateDirectory',
+    'sessionSecretsDirectory',
+  ] as const)('rejects a replaced %s before resolving or updating a session', async (directoryKey) => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-directory-symlink-',
+    )
+    cleanupPaths.push(parentRoot)
+    const created = await resolveAssistantSession({
+      alias: 'original-alias',
+      target: createCodexTarget(),
+      vault: vaultRoot,
+    })
+    const directory = created.paths[directoryKey]
+    const outside = path.join(parentRoot, 'outside')
+    await mkdir(outside, { mode: 0o755 })
+    const outsideFile = path.join(outside, `${created.session.sessionId}.json`)
+    await writeFile(outsideFile, 'must remain untouched', 'utf8')
+    await rm(directory, { recursive: true })
+    await symlink(outside, directory)
+
+    await expect(resolveAssistantSession({
+      alias: 'changed-alias',
+      sessionId: created.session.sessionId,
+      vault: vaultRoot,
+    })).rejects.toThrow(/symlinks/u)
+    if (directoryKey === 'sessionsDirectory') {
+      await expect(getAssistantSession(vaultRoot, created.session.sessionId))
+        .rejects.toThrow(/symlinks/u)
+    }
+    expect(await readFile(outsideFile, 'utf8')).toBe('must remain untouched')
+    expect((await stat(outside)).mode & 0o777).toBe(0o755)
+    expect(await readdir(outside)).toEqual([`${created.session.sessionId}.json`])
+  })
+
+  it('validates transcript storage only when diagnosing a missing session', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-missing-directory-',
+    )
+    cleanupPaths.push(parentRoot)
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const sessionId = 'session-missing'
+    await appendAssistantTranscriptEntries(vaultRoot, sessionId, [{
+      kind: 'user',
+      text: 'Synthetic transcript retained after session removal.',
+    }])
+    await expect(getAssistantSession(vaultRoot, sessionId)).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_NOT_FOUND',
+      context: {
+        sessionExists: false,
+        transcriptExists: true,
+      },
+    })
+
+    const outside = path.join(parentRoot, 'outside')
+    await mkdir(outside, { mode: 0o755 })
+    await rm(paths.transcriptsDirectory, { recursive: true })
+    await symlink(outside, paths.transcriptsDirectory)
+    await expect(getAssistantSession(vaultRoot, sessionId)).rejects.toThrow(/symlinks/u)
+    await expect(resolveAssistantSession({ sessionId, vault: vaultRoot }))
+      .rejects.toThrow(/symlinks/u)
+    expect((await stat(outside)).mode & 0o777).toBe(0o755)
+  })
+
+  it('creates private recovery directories only when routing or session corruption needs them', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-directory-recovery-',
+    )
+    cleanupPaths.push(parentRoot)
+    const created = await resolveAssistantSession({
+      alias: 'recoverable-alias',
+      target: createCodexTarget(),
+      vault: vaultRoot,
+    })
+    const { paths } = created
+    const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+    await rm(databasePath)
+    expect((await resolveAssistantSession({
+      alias: 'recoverable-alias',
+      createIfMissing: false,
+      vault: vaultRoot,
+    })).session.sessionId).toBe(created.session.sessionId)
+
+    await writeFile(databasePath, 'corrupted projection', 'utf8')
+    await rm(paths.journalsDirectory, { recursive: true })
+    expect((await resolveAssistantSession({
+      alias: 'recoverable-alias',
+      createIfMissing: false,
+      vault: vaultRoot,
+    })).session.sessionId).toBe(created.session.sessionId)
+    for (const directory of [
+      paths.quarantineDirectory,
+      path.join(paths.quarantineDirectory, 'indexes'),
+      paths.journalsDirectory,
+    ]) {
+      expect((await stat(directory)).mode & 0o777).toBe(0o700)
+    }
+
+    const sessionPath = resolveAssistantSessionPath(paths, created.session.sessionId)
+    await writeFile(sessionPath, '{corrupted session', 'utf8')
+    await expect(getAssistantSession(vaultRoot, created.session.sessionId))
+      .rejects.toMatchObject({ code: 'ASSISTANT_SESSION_CORRUPTED' })
+    await expect(stat(sessionPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await stat(path.join(paths.quarantineDirectory, 'session'))).mode & 0o777)
+      .toBe(0o700)
+  })
+
   it('preserves conversation-key sessions before applying partial message target overrides', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-session-resolution-store-',

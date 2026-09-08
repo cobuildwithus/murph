@@ -291,8 +291,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
-      foregroundWork: false,
-      futureMailboxWake: false,
+      futureWakeReason: null,
       label: "keeps the idle window when the provider still matches",
       providerReadOutcome: "openai" as const,
       slug: "matching_provider",
@@ -300,8 +299,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
-      foregroundWork: false,
-      futureMailboxWake: false,
+      futureWakeReason: null,
       label: "hands off immediately when the provider changed",
       providerReadOutcome: "venice" as const,
       slug: "changed_provider",
@@ -309,8 +307,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
-      foregroundWork: false,
-      futureMailboxWake: true,
+      futureWakeReason: "mailbox" as const,
       label: "hands off immediately with a future mailbox continuation",
       providerReadOutcome: "venice" as const,
       slug: "changed_provider_future_mailbox",
@@ -318,17 +315,15 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
-      foregroundWork: true,
-      futureMailboxWake: false,
-      label: "hands foreground work to the saved provider before importing it",
+      futureWakeReason: "assistant" as const,
+      label: "hands off immediately with a future assistant continuation",
       providerReadOutcome: "venice" as const,
-      slug: "changed_provider_foreground_work",
+      slug: "changed_provider_future_assistant",
     },
     {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
-      foregroundWork: false,
-      futureMailboxWake: false,
+      futureWakeReason: null,
       label: "keeps the idle window when provider authority is unavailable",
       providerReadOutcome: "unavailable" as const,
       slug: "provider_unavailable",
@@ -336,8 +331,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
   ])("$label after an external runtime wake", async ({
     expectImmediateRecheck,
     expectedElapsedBoundaryMs,
-    foregroundWork,
-    futureMailboxWake,
+    futureWakeReason,
     providerReadOutcome,
     slug,
   }) => {
@@ -456,10 +450,10 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             checkpointRequests,
             events: [],
             workspace: createWorkspaceState({
-              ...(futureMailboxWake
+              ...(futureWakeReason
                 ? {
                     nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
-                    nextWakeReason: "mailbox",
+                    nextWakeReason: futureWakeReason,
                   }
                 : {}),
               version: "0",
@@ -483,12 +477,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         1_000,
         () => "Dirty checkpoint wait did not arm.",
       );
-      if (foregroundWork) {
-        mailboxItems.push(createMailboxItem({
-          id: "mailbox_item_provider_handoff_foreground",
-          laneSeq: "1",
-        }));
-      }
       const wakeNotifiedAt = Date.now();
       runtimeWakeSignal.notify();
 
@@ -523,7 +511,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         result.immediateRecheckRequested === true,
         expectImmediateRecheck,
       );
-      assert.equal(result.status, futureMailboxWake ? "scheduled" : "idle");
+      assert.equal(result.status, futureWakeReason ? "scheduled" : "idle");
     } finally {
       if (previousStdIoLogSetting === undefined) {
         delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;

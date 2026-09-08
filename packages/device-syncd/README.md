@@ -255,8 +255,13 @@ the worker still checks the foreground-yield fence before each job.
 Privacy-safe job timing separates Junction inventory requests, Junction
 resource requests, normalization, event-identity indexing, canonical writes,
 and remaining provider time. `device-sync.pass_finished` reports only bounded
-counts, durations, cache-hit counts, and provider/job/resource classification;
-it never includes account or job ids, cursors, provider records, health values,
+counts, durations, cache-hit counts, and provider/job/resource classification.
+Historical resource jobs also report their last upstream readiness classification
+(ready, pending, terminal failure, no obligation, or unavailable). Successful
+provider execution reports the proposed follow-up count and earliest delay from
+the attempt's start; these fields do not imply imported data or committed jobs.
+The durable-progress and canonical-progress fields retain that distinction.
+The diagnostic stream never includes account or job ids, cursors, provider records, health values,
 credentials, or filesystem paths.
 
 Junction timeseries use one exhaustive static history policy. Dense/default

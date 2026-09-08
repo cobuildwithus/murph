@@ -19,6 +19,24 @@ const BASE_EXERCISES = [{
 }] satisfies WorkoutExercise[]
 
 describe('workout action binding', () => {
+  it('clearing a repetition rule invalidates numeric bindings but matches an unestablished rule', () => {
+    const prescribed = [{ ...BASE_EXERCISES[0]!, memberRepsPerSet: 12 }]
+    const cleared = [{ ...BASE_EXERCISES[0]!, memberRepsPerSet: null }]
+    const binding = deriveWorkoutActionBinding('evt_workout', { exercises: cleared })
+    expect(binding).toBe(deriveWorkoutActionBinding('evt_workout', {
+      exercises: BASE_EXERCISES,
+    }))
+    expect(binding.slice(0, 32)).not.toBe(deriveWorkoutActionBinding('evt_workout', {
+      exercises: prescribed,
+    }).slice(0, 32))
+    expect(deriveWorkoutSetRemovalBinding('evt_workout', cleared)).toBe(
+      deriveWorkoutSetRemovalBinding('evt_workout', BASE_EXERCISES),
+    )
+    expect(deriveWorkoutSetRemovalBinding('evt_workout', cleared)).not.toBe(
+      deriveWorkoutSetRemovalBinding('evt_workout', prescribed),
+    )
+  })
+
   it('changes when hidden same-name exercise identity moves', () => {
     const exercises = [
       {

@@ -935,6 +935,8 @@ class DeviceSyncServiceController {
     let credentialRefreshCount = 0;
     let credentialRefreshElapsedMs = 0;
     let durableProgressCommitted = false;
+    let historicalPullReadiness: DeviceSyncJobTimingDiagnostic["historicalPullReadiness"];
+    let scheduledJobDiagnostics: ReturnType<typeof summarizeDeviceSyncScheduledJobs> = {};
     let outcome: DeviceSyncJobTimingOutcome = "cancelled";
     let providerExecutionElapsedMs: number | null = null;
     let providerInventoryRequestCount = 0;
@@ -965,6 +967,8 @@ class DeviceSyncServiceController {
         credentialRefreshCount,
         credentialRefreshElapsedMs,
         durableProgressCommitted,
+        ...(historicalPullReadiness ? { historicalPullReadiness } : {}),
+        ...scheduledJobDiagnostics,
         elapsedMs: nonnegativeDeviceSyncDurationMs(now, finishedAt),
         jobCount: Math.max(1, activeJobs.length),
         jobKind: job.kind,
@@ -1323,6 +1327,9 @@ class DeviceSyncServiceController {
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
         throwIfAborted: assertJobExecutionNotYielded,
+        recordHistoricalPullReadiness: (readiness) => {
+          historicalPullReadiness = readiness;
+        },
         recordProviderRequestTiming: (category, elapsedMs) => {
           if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
             return;
@@ -1520,6 +1527,8 @@ class DeviceSyncServiceController {
 
       ensureJobLeasesOwned();
       ensureAccountActive();
+
+      scheduledJobDiagnostics = summarizeDeviceSyncScheduledJobs(result, now);
 
       if (preservesAcceptedCompanionHrv && !isOriginalActiveAccountExecutionCurrent()) {
         const completed = this.store.completeJobsIfOwned(
@@ -2193,6 +2202,24 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
       controller.drainWorker(limit, accountId, options),
   } satisfies DeviceSyncService);
   return service;
+}
+
+function summarizeDeviceSyncScheduledJobs(
+  result: ProviderJobResult,
+  now: string,
+): Pick<DeviceSyncJobTimingDiagnostic, "scheduledJobCount" | "nextScheduledJobDelayMs"> {
+  const jobs = result.scheduledJobs ?? [];
+  let nextScheduledJobDelayMs: number | null = null;
+  for (const job of jobs) {
+    const delayMs = nonnegativeDeviceSyncDurationMs(now, job.availableAt ?? now);
+    nextScheduledJobDelayMs = nextScheduledJobDelayMs === null
+      ? delayMs
+      : Math.min(nextScheduledJobDelayMs, delayMs);
+  }
+  return {
+    scheduledJobCount: jobs.length,
+    nextScheduledJobDelayMs,
+  };
 }
 
 function nonnegativeDeviceSyncDurationMs(startAt: string, endAt: string): number {
