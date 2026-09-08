@@ -1,6 +1,6 @@
 # Preserve runner namespace container declarations
 
-Status: active
+Status: completed
 Created: 2026-09-08
 
 ## Outcome and invariant
@@ -49,3 +49,14 @@ Pinned Wrangler passes `config.containers` to version upload metadata and does
 not deploy native applications in that command. Parent review found no serving
 image, capacity, release pointer, native mutation or admission-order change.
 The change is internal deployment repair; no separate member changelog item.
+
+## Final implementation review
+
+Required ReviewGPT passed on `73005470c0209e5eb0c3b197018e33ca1d1287f6`,
+with the captured response hash and actual `gpt-6-pro` model verified. Its
+independent staging checks reproduced the omission in both bank directions and
+found no blocking defect. Parent final review confirms that the reviewed source
+remains unchanged. Exact-head CI and protected deployment remain release gates;
+this archived implementation record is not a production recovery receipt.
+Updated: 2026-09-08
+Completed: 2026-09-08
