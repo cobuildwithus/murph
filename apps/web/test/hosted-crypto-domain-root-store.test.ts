@@ -2574,6 +2574,55 @@ test("the prepared Web root token commits and reuses only its exact scoped root"
   assert.equal(tx.persistedEnvelopes.length, 1);
 });
 
+test("dirty payload revision rebinding preserves real ciphertext AAD without another KMS call", async () => {
+  const { tx, decryptMetrics, encryptCalls, signCalls } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache, runWithHostedDomainRootProviderCallsDisabled } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const {
+    openHostedDeviceSyncDirtyPayloadJson,
+    prepareHostedDeviceSyncDirtyPayloadCrypto,
+    rebindHostedDeviceSyncDirtyPayloadRevision,
+    revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx,
+    sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto,
+  } = await import("../src/lib/device-sync/prisma-store/dirty-payloads");
+  const userId = "member-test-payload-rebinding";
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "device", prisma: tx.prisma, reason: "test.payload-rebinding", userId,
+  });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await prepareHostedDeviceSyncDirtyPayloadCrypto({ prisma: tx.prisma, userId });
+    const identity = { connectionId: "connection-rebinding", dirtyRevision: 2n,
+      payloadId: "payload-rebinding", provider: "junction", userId };
+    const resource = { payload: { webhookDataJson: JSON.stringify({ value: 321 }) } };
+    const value = await sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto({
+      ...identity, prepared, value: resource,
+    });
+    const callsBefore = [decryptMetrics.calls.length, encryptCalls.length, signCalls.length];
+    await runWithHostedDomainRootProviderCallsDisabled(async () => {
+      await revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx({
+        prepared, tx: tx.prisma as Prisma.TransactionClient,
+      });
+      const rebound = await rebindHostedDeviceSyncDirtyPayloadRevision({
+        ...identity, prepared, value, nextDirtyRevision: 7n,
+      });
+      expect(rebound).not.toBe(value);
+      const openInput = { ...identity, dirtyRevision: 7n, prisma: tx.prisma, value: rebound };
+      expect(await openHostedDeviceSyncDirtyPayloadJson(openInput)).toEqual(resource);
+      await expect(openHostedDeviceSyncDirtyPayloadJson({ ...openInput, dirtyRevision: 2n })).rejects.toThrow();
+      await expect(openHostedDeviceSyncDirtyPayloadJson({ ...openInput, connectionId: "another-connection" })).rejects.toThrow();
+      await expect(rebindHostedDeviceSyncDirtyPayloadRevision({
+        ...identity, prepared: { ...prepared }, value, nextDirtyRevision: 7n,
+      })).rejects.toThrow("not the exact request-local capability");
+      await expect(rebindHostedDeviceSyncDirtyPayloadRevision({
+        ...identity, prepared, value, nextDirtyRevision: 1n,
+      })).rejects.toThrow("same owner and a newer revision");
+      expect([decryptMetrics.calls.length, encryptCalls.length, signCalls.length]).toEqual(callsBefore);
+    });
+  });
+});
+
 test("the prepared Web root token rejects an exact winner drift", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const {

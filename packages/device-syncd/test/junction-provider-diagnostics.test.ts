@@ -2878,3 +2878,80 @@ test("Junction unproven historical coverage saturates at a daily retry without a
     false,
   );
 });
+
+
+test("Junction refresh reports a provider no-op and reads selected source status afterward", async () => {
+  const methods: string[] = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    methods.push(init?.method ?? "GET");
+    if (readUrl(input).includes("/user/refresh/")) {
+      return createJsonResponse({
+        success: true,
+        user_id: "synthetic-user",
+        error: "user has no connected sources",
+        refreshed_sources: [],
+        failed_sources: [],
+        in_progress_sources: [],
+      });
+    }
+    return createJsonResponse({ providers: [{
+      slug: "oura", name: "Oura", logo: "https://example.test/logo.svg",
+      status: "error", created_on: "2026-01-01T00:00:00Z",
+      resource_availability: {},
+      error_details: {
+        error_type: "token_refresh_failed",
+        error_message: "Private provider account detail",
+        errored_at: "2026-01-02T00:00:00Z",
+      },
+    }] });
+  });
+  const result = await provider.diagnostics!.probeRest!({
+    account: createAccount(), endpoint: "refresh", sourceProviderSlug: "oura",
+    now: "2026-01-03T00:00:00Z",
+  });
+  assert.deepEqual(methods, ["POST", "GET"]);
+  const response = result.result.response as Record<string, unknown>;
+  assert.equal(response.ok, false);
+  assert.equal(response.success, false);
+  assert.equal(response.errorCode, "JUNCTION_REFRESH_NO_CONNECTED_SOURCES");
+  assert.deepEqual(result.result.selectedSource, { status: "error", errorCode: "token_refresh_failed" });
+  assert.doesNotMatch(JSON.stringify(result), /Private provider|synthetic-user/);
+});
+
+for (const payload of [
+  { success: false, refreshed_sources: ["oura.sleep"] },
+  { success: true, error: { reason: "rejected" }, refreshed_sources: ["oura.sleep"] },
+  { success: true, refreshed_sources: [] },
+]) {
+  test(`Junction refresh does not claim recovery from an unsuccessful envelope ${JSON.stringify(payload)}`, async () => {
+    const provider = createJunctionProvider(async () => createJsonResponse({
+      user_id: "synthetic-user", failed_sources: [], in_progress_sources: [], ...payload,
+    }));
+    const result = await provider.diagnostics!.probeRest!({
+      account: createAccount(), endpoint: "refresh", now: "2026-01-03T00:00:00Z",
+    });
+    const response = result.result.response as Record<string, unknown>;
+    assert.equal(response.ok, false);
+    assert.equal(response.errorCode, payload.refreshed_sources.length === 0
+      ? "JUNCTION_REFRESH_NO_SOURCES" : "JUNCTION_REFRESH_FAILED");
+  });
+}
+
+
+test("Junction refresh preserves its outcome when the following source status read fails", async () => {
+  const methods: string[] = [];
+  const provider = createJunctionProvider(async (_input, init) => {
+    methods.push(init?.method ?? "GET");
+    return init?.method === "POST"
+      ? createJsonResponse({ user_id: "synthetic-user", success: true, refreshed_sources: ["oura.sleep"], failed_sources: [], in_progress_sources: [] })
+      : new Response("unavailable", { status: 400 });
+  });
+  const result = await provider.diagnostics!.probeRest!({
+    account: createAccount(), endpoint: "refresh", sourceProviderSlug: "oura",
+    now: "2026-01-03T00:00:00Z",
+  });
+  assert.deepEqual(methods, ["POST", "GET"]);
+  assert.equal((result.result.response as Record<string, unknown>).ok, true);
+  assert.equal((result.result.selectedSource as Record<string, unknown>).status, "unknown");
+  assert.equal(typeof (result.result.selectedSource as Record<string, unknown>).errorCode, "string");
+});

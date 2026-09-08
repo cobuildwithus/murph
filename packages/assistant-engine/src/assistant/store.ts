@@ -23,6 +23,7 @@ import {
 } from './conversation-ref.js'
 import {
   compareAssistantTimestampsAscending,
+  ensureAssistantStateDirectory,
   normalizeNullableString,
   resolveTimestamp,
 } from './shared.js'
@@ -135,7 +136,11 @@ async function resolveAssistantSessionWithPersistence(
   persistBinding: boolean,
 ): Promise<ResolvedAssistantSession> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await Promise.all([
+      ensureAssistantStateDirectory(paths.sessionsDirectory),
+      ensureAssistantStateDirectory(paths.stateDirectory),
+      ensureAssistantStateDirectory(paths.sessionSecretsDirectory),
+    ])
     const requestedProviderOptions =
       resolveAssistantSessionRequestedProviderOptions(input)
     const requestedContinuityFingerprint =
@@ -556,7 +561,7 @@ export async function getAssistantSessionLocal(
   sessionId: string,
 ): Promise<AssistantSession> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.sessionsDirectory)
 
     const session = await readAssistantSession({ paths, sessionId })
     if (!session) {
@@ -610,7 +615,7 @@ export async function listAssistantTranscriptEntries(
   sessionId: string,
 ): Promise<AssistantTranscriptEntry[]> {
   const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  await ensureAssistantStateDirectory(paths.transcriptsDirectory)
   return readAssistantTranscriptEntries(paths, sessionId)
 }
 
@@ -620,7 +625,7 @@ export async function listAssistantTranscriptTailEntries(
   options: { maxBytes: number },
 ): Promise<AssistantTranscriptEntry[]> {
   const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  await ensureAssistantStateDirectory(paths.transcriptsDirectory)
   return readAssistantTranscriptTailEntries(paths, sessionId, options.maxBytes)
 }
 
@@ -646,8 +651,6 @@ export async function appendAssistantTranscriptEntriesWithRefs(
   refs: AssistantTranscriptEntryRef[]
 }> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
-
     if (entries.length === 0) {
       return {
         entries: [],
@@ -655,6 +658,7 @@ export async function appendAssistantTranscriptEntriesWithRefs(
       }
     }
 
+    await ensureAssistantStateDirectory(paths.transcriptsDirectory)
     const existingEntries = await readAssistantTranscriptEntries(paths, sessionId)
     const firstEntryIndex = existingEntries.length
     const parsed = entries.map((entry) => {
@@ -697,6 +701,7 @@ async function createAssistantSessionNotFoundError(input: {
   paths: AssistantStatePaths
   sessionId: string
 }): Promise<VaultCliError> {
+  await ensureAssistantStateDirectory(input.paths.transcriptsDirectory)
   const diagnosis = await inspectAssistantSessionStorage(input)
   const message = [
     'Assistant session was not found in the current vault assistant state.',

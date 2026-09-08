@@ -1154,7 +1154,8 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     }
   });
 
-  it("rejects forged or stale prepared dirty-write capabilities before mutation", async () => {
+  it.each(["acknowledgement", "owner", "missing", "metadata"] as const)("rejects forged capabilities and %s drift before mutation", async (drift) => {
+    installHostedSecureBoxStringTestCodec();
     const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
     const existing = {
       connectionId: "dsc_prepared_stale_1",
@@ -1190,7 +1191,8 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       resourceCategory: "sleep",
       resources: [{
         count: 1,
-        jobKind: "reconcile",
+        jobKind: "delete",
+        payload: { objectId: "synthetic-sleep-record" },
         resource: "sleep",
         resourceCategory: "sleep",
         sourceProviderSlug: "oura",
@@ -1201,9 +1203,11 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       userId: existing.userId,
     });
     const updateManyAndReturn = vi.fn();
-    const changed = {
+    const changed = drift === "missing" ? null : {
       ...existing,
-      dirtyRevision: 3n,
+      dirtyRevision: drift === "metadata" ? 2n : 3n,
+      processedRevision: drift === "acknowledgement" ? 3n : 2n,
+      userId: drift === "owner" ? "another-synthetic-member" : existing.userId,
       updatedAt: new Date("2026-05-26T12:00:01.000Z"),
     };
     const tx = {
@@ -1219,6 +1223,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       tx: tx as never,
     })).rejects.toMatchObject({
       code: "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH",
+      reason: drift === "acknowledgement" ? "dirty_acknowledgement_changed"
+        : drift === "owner" ? "dirty_owner_changed"
+          : drift === "missing" ? "dirty_marker_missing" : "dirty_marker_changed",
     });
     expect(updateManyAndReturn).not.toHaveBeenCalled();
 

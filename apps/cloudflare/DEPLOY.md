@@ -22,15 +22,21 @@ That rendered surface is then used by:
 
 The rendered deploy helper path is the canonical direct Wrangler deploy contract consumed from the private deployment workflow. The checked-in Wrangler scaffold remains useful for local development, but production deploys must run from private Murph Cloud and use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
-The production helper publishes one immutable registry image, then prepares only
-its inactive native application and dedicated smoke application through the
-Cloudflare Containers API. Quota admission and native rollout convergence must
-complete before uploading or activating any Worker version. The serving and
-retained legacy applications are excluded from native mutations.
+The production helper publishes one immutable registry image and uploads an
+inactive Worker version with its container class metadata. This declaration must
+precede native creation: an existing Durable Object namespace alone does not prove
+container enablement. Version upload does not move serving traffic. The helper
+revalidates the live version, then prepares only the inactive native application
+and dedicated smoke application through the Cloudflare Containers API. Quota
+admission and native rollout convergence must complete before Worker activation.
+A failed admission may leave an unactivated version; it never selects that version.
+The serving and retained legacy applications are excluded from native mutations.
 Native provider failures report the operation, HTTP status, numeric API codes,
-and bounded symbolic native codes. Raw provider prose, response details and
-request identifiers remain private. Inspect this evidence before retrying or
-changing capacity; transport and malformed-response failures stay distinct.
+and at most five redacted messages of 320 characters each. The existing runtime
+redactor removes credential and personal-identifier shapes; the provider boundary
+also removes its exact token, account, requested name/image and native resource
+identifiers. Raw response details remain private. Inspect the provider explanation
+before retrying or changing capacity; transport and malformed responses stay distinct.
 Member applications require drain evidence before namespace reuse. The dedicated
 smoke application carries no member invocation, so it proceeds directly through
 native rollout and readiness checks without member drain admission.
@@ -830,6 +836,18 @@ than rolling back below the floor. After convergence, exercise a controlled
 finite workout through stored repetitions, terse final-set completion, automatic
 closure, and a subsequent workout start. Monitor bounded hosted-runtime error
 aggregates for strict workout parse failures and rejected workout CLI commands.
+
+The repetition-rule recovery update uses `memberRepsPerSet: null` for an
+explicit withdrawal; omission remains unestablished legacy state. Use the full
+Worker-and-runner immediate rollout above. Existing member pinning and write
+fences allow a previous warm runtime to keep its own workspace until normal
+retirement; fresh allocation uses the promoted compatible bundle. Every reader
+of a workspace must support null before that workspace emits a clear. The first
+null write establishes its compatible-bundle rollback floor; do not send that
+workspace back to an older image. A Worker-only release does not ship this fix.
+The controlled workout check must also clear a rule, reread it, and confirm a
+later completion without a count cannot recover the withdrawn number from saved
+context.
 
 ## Public Goal Lineage Rollout
 

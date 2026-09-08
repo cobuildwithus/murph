@@ -123,6 +123,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     mocks.resolveWebhookPreflight.mockResolvedValue(null);
     mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValue({
       enabled: false,
+      reason: "provider_not_enabled",
     });
     mocks.pairAgent.mockResolvedValue({
       agent: {
@@ -432,6 +433,41 @@ describe("hosted device-sync agent and webhook routes", () => {
     expect(response.status).toBe(503);
     expect(mocks.handleWebhook).not.toHaveBeenCalled();
   });
+
+  it.each(["body_too_large", "provider_not_enabled", "queue_enabled"])(
+    "records a content-free %s transport decision alongside retryable failures",
+    async (reason) => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const privateBody = Buffer.from("synthetic-private-payload-and-account");
+      mocks.readWebhookRawBody.mockResolvedValueOnce(privateBody);
+      mocks.prepareHostedDeviceWebhookQueueTransport.mockReturnValueOnce({
+        enabled: reason === "queue_enabled", reason,
+      });
+      const error = deviceSyncError({ code: "HOSTED_DEVICE_SYNC_PREPARATION_STALE",
+        httpStatus: 503, retryable: true, message: "Retry the request.",
+        details: { payload: privateBody.toString() } });
+      if (reason === "queue_enabled") {
+        mocks.prepareWebhookForDurableEnqueue.mockRejectedValueOnce(error);
+      } else {
+        mocks.handleWebhook.mockRejectedValueOnce(error);
+      }
+      const response = await webhookRoute.POST(new Request("https://example.test/api/device-sync/webhooks/junction", {
+        method: "POST", headers: { authorization: "synthetic-private-header" },
+      }), createRouteContext({ provider: "junction" }));
+      expect(response.status).toBe(503);
+      expect(info).toHaveBeenCalledWith("Hosted device webhook transport selected.", {
+        eventCode: "device_webhook.transport_selected", reason,
+        transport: reason === "queue_enabled" ? "queue" : "synchronous",
+        rawBodyBytes: privateBody.byteLength,
+      });
+      const emitted = JSON.stringify([info.mock.calls, warn.mock.calls]);
+      expect(emitted).not.toContain(privateBody.toString());
+      expect(emitted).not.toContain("synthetic-private-header");
+      info.mockRestore();
+      warn.mockRestore();
+    },
+  );
 
   it("returns 202 for hosted Junction orphan webhook deliveries instead of 503", async () => {
     mocks.handleWebhook.mockResolvedValue({

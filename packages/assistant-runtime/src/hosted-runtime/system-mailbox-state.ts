@@ -154,8 +154,28 @@ export async function readHostedSystemMailboxProgress(input: {
 
 export interface HostedSystemMailboxProgress {
   deviceSyncContinuationSeqs: string[];
+  firstPendingClassifierFailures: HostedSystemMailboxFirstPendingClassifierFailure[] | null;
   firstPendingSeq: string | null;
   handledThroughSeq: string;
+}
+
+const HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURE_VALUES = [
+  "continuation_owner_missing",
+  "continuation_projection_invalid",
+  "wake_not_device_sync",
+] as const;
+
+export type HostedSystemMailboxFirstPendingClassifierFailure =
+  typeof HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURE_VALUES[number];
+
+const HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURES =
+  new Set<string>(HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURE_VALUES);
+
+export function isHostedSystemMailboxFirstPendingClassifierFailure(
+  value: unknown,
+): value is HostedSystemMailboxFirstPendingClassifierFailure {
+  return typeof value === "string"
+    && HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURES.has(value);
 }
 
 export function resolveHostedSystemMailboxHandledThroughSeq(input: {
@@ -177,6 +197,7 @@ export function resolveHostedSystemMailboxProgress(input: {
 
   const importedSeq = BigInt(input.importedSeq);
   let earliestPendingSeq: bigint | null = null;
+  let earliestPendingItem: HostedSystemMailboxPendingItem | null = null;
   const deviceSyncContinuation = resolveHostedDeviceSyncContinuationProjection({
     importedSeq,
     state: input.state,
@@ -198,6 +219,10 @@ export function resolveHostedSystemMailboxProgress(input: {
     if (item.mailboxLaneSeq === null) {
       return {
         deviceSyncContinuationSeqs: [],
+        firstPendingClassifierFailures: classifyHostedSystemMailboxFirstPendingItem(
+          item,
+          deviceSyncContinuation !== null,
+        ),
         firstPendingSeq: null,
         handledThroughSeq: "0",
       };
@@ -205,6 +230,7 @@ export function resolveHostedSystemMailboxProgress(input: {
     const pendingSeq = BigInt(item.mailboxLaneSeq);
     if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
       earliestPendingSeq = pendingSeq;
+      earliestPendingItem = item;
     }
   }
 
@@ -214,10 +240,30 @@ export function resolveHostedSystemMailboxProgress(input: {
   return {
     deviceSyncContinuationSeqs:
       deviceSyncContinuation?.seqs.map((seq) => seq.toString()) ?? [],
+    firstPendingClassifierFailures: earliestPendingItem === null
+      ? null
+      : classifyHostedSystemMailboxFirstPendingItem(
+          earliestPendingItem,
+          deviceSyncContinuation !== null,
+        ),
     firstPendingSeq: earliestPendingSeq?.toString() ?? null,
     handledThroughSeq:
       (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString(),
   };
+}
+
+function classifyHostedSystemMailboxFirstPendingItem(
+  item: HostedSystemMailboxPendingItem,
+  continuationProjectionValid: boolean,
+): HostedSystemMailboxFirstPendingClassifierFailure[] {
+  if (item.wake.kind !== "device-sync.wake") {
+    return ["wake_not_device_sync"];
+  }
+  // Called only for a blocker left by the authoritative projection above.
+  // Do not reconstruct continuation ownership from retry or status hints.
+  return [continuationProjectionValid
+    ? "continuation_owner_missing"
+    : "continuation_projection_invalid"];
 }
 
 function resolveHostedDeviceSyncContinuationProjection(
@@ -474,6 +520,7 @@ export async function resolveHostedSystemMailboxWakeCandidates(input: {
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   excludeItemId?: string | null;
   now?: () => string;
+  state?: HostedSystemMailboxState;
   vaultRoot: string;
 }): Promise<{
   defaultOwned: HostedRuntimeWakeCandidate;
@@ -481,7 +528,7 @@ export async function resolveHostedSystemMailboxWakeCandidates(input: {
 }> {
   const now = (input.now ?? (() => new Date().toISOString()))();
   const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
-    await readHostedSystemMailboxState(input.vaultRoot),
+    input.state ?? await readHostedSystemMailboxState(input.vaultRoot),
     now,
   );
   return resolveHostedSystemMailboxWakeCandidatesFromState({
@@ -509,7 +556,7 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
         ),
       }
     : input.state;
-  const remainingState = projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+  const remainingState = projectHostedSystemMailboxRetainedDeviceWakeAdmission({
     now,
     state: remainingStateBeforeAdmission,
   });
@@ -635,7 +682,7 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
-  const state = projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+  const state = projectHostedSystemMailboxRetainedDeviceWakeAdmission({
     now: input.now,
     state: excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
       input.state,
@@ -669,7 +716,7 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   });
 }
 
-export function projectHostedSystemMailboxRetainedDeviceWebhookAdmission(input: {
+export function projectHostedSystemMailboxRetainedDeviceWakeAdmission(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxState {
@@ -696,7 +743,8 @@ export function projectHostedSystemMailboxRetainedDeviceWebhookAdmission(input: 
       continue;
     }
     if (
-      item.wake.reason === "webhook_hint"
+      (item.wake.reason === "webhook_hint"
+        || isHostedRetainedDeviceScheduledAdmission(retained, item, input.now))
       && systemMailboxItemIsDue(item, input.now)
     ) {
       admittedItemIds.add(retained.itemId);
@@ -714,29 +762,63 @@ export function projectHostedSystemMailboxRetainedDeviceWebhookAdmission(input: 
       };
 }
 
+export function isHostedPlainDeviceSyncWakeHint(item: HostedSystemMailboxPendingItem): boolean {
+  const wake = item.wake;
+  return item.routeAction === "run-device-sync-wake"
+    && item.status === "pending"
+    && item.attemptCount === 0
+    && item.postCheckpointRecord === null
+    && item.deviceSyncContinuationOwner !== true
+    && wake.kind === "device-sync.wake"
+    && (wake.reason === "webhook_hint" || wake.reason === "reconcile_due")
+    && (wake.hint?.reason == null || wake.hint.reason === "webhook_dirty_transition")
+    && (wake.hint?.jobs?.length ?? 0) === 0
+    && wake.hint?.scopes === undefined
+    && wake.hint?.revokeWarning == null;
+}
+
+export function isHostedRetainedDeviceScheduledAdmission(
+  owner: HostedSystemMailboxPendingItem,
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): boolean {
+  const wake = item.wake;
+  return owner.wake.kind === "device-sync.wake"
+    && Boolean(owner.wake.expectedConnectedAt)
+    && wake.kind === "device-sync.wake"
+    && wake.reason === "reconcile_due"
+    && wake.expectedConnectedAt === owner.wake.expectedConnectedAt
+    && wake.userId === owner.wake.userId
+    && wake.provider === owner.wake.provider
+    && isHostedPlainDeviceSyncWakeHint(item)
+    && wake.hint?.nextReconcileAt != null
+    && Date.parse(wake.hint.nextReconcileAt) <= Date.parse(now);
+}
+
 function isHostedFutureRetainedDeviceJobRetry(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): boolean {
-  return isHostedRetainedDeviceJobRetry(item)
+  return (isHostedRetainedDeviceJobRetry(item)
+      || (item.deviceSyncContinuationOwner === true
+        && item.status === "pending"
+        && item.postCheckpointRecord === null
+        && item.wake.kind === "device-sync.wake"
+        && (item.wake.hint?.jobs?.length ?? 0) > 0))
     && !systemMailboxItemIsDue(item, now);
 }
 
 function isHostedRetainedDeviceJobRetry(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
-  if (
-    item.status !== "pending"
-    || item.postCheckpointRecord !== null
-    || item.nextAttemptAt === null
-    || item.wake.kind !== "device-sync.wake"
-    || !item.wake.connectionId
-  ) {
-    return false;
-  }
-  return item.wake.hint?.jobs?.some((job) =>
-    job.availableAt === item.nextAttemptAt
-  ) === true;
+  // Legacy promotion and retry admission only. Live continuation
+  // authority belongs to resolveHostedDeviceSyncContinuationProjection.
+  return item.wake.kind === "device-sync.wake"
+    && item.status === "pending"
+    && item.postCheckpointRecord === null
+    && item.nextAttemptAt !== null
+    && Boolean(item.wake.connectionId)
+    && item.wake.hint?.jobs?.some((job) => job.availableAt === item.nextAttemptAt) === true;
 }
 
 function withHostedLegacyDeviceSyncContinuationOwnership(

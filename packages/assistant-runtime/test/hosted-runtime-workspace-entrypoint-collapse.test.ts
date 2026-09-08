@@ -525,13 +525,9 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       assert.deepEqual(configurationRequests.map((request) => request.action), [
         "update",
         "read",
-        "read",
         "update",
-        "read",
         "update",
-        "read",
         "update",
-        "read",
         "update",
       ]);
       assert.equal(configurationResponses.length, 0);

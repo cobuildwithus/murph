@@ -32,6 +32,8 @@ import {
   addMeal,
   initializeVault,
   listGoals,
+  listAutomations,
+  listWorkoutFormats,
   listWriteOperationMetadataPaths,
   readHabitatAspect,
   readMemoryDocument,
@@ -55,6 +57,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import type { HostedRuntimeGroupSummary, HostedRuntimeGroupToolRequest } from '@murphai/hosted-execution/runtime-control'
 import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -64,6 +67,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
+import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
 import {
   listEntitySchema,
   showResultSchema,
@@ -81,6 +85,7 @@ import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
+  setLiveWorkoutExerciseReps,
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
@@ -3503,6 +3508,124 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
   )
 })
 
+describeRealCodex('real Codex routine chat readiness e2e', () => {
+  it('keeps routine drafts, verified saves, and retrieval in chat', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-routine-chat-e2e-'))
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+    try {
+      await initializeVault({ title: 'Synthetic routine proof', timezone: 'UTC', vaultRoot: workingDirectory })
+      await writeFile(commandLogPath, '', 'utf8')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+        materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
+        materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
+      ])
+      const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null,
+          assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false,
+          channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct',
+          currentLocalDate: '2026-09-08',
+          currentTimeZone: 'UTC',
+          hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic',
+          murphProductBaseUrl: 'https://www.withmurph.ai',
+          onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true,
+        groupConversation: false,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }
+      const scenarios = [
+        { kind: 'draft', prompt: 'Draft a routine called Practice A using exactly two sets of six air squats. Plain text only; keep my exercise choice, no form tutorial. I only want a proposal, not a save or a workout start.' },
+        { kind: 'save', prompt: 'Save Practice A as a reusable strength routine: air squats, bodyweight, two sets of six reps. Keep those exact details, no form tutorial. Just save the routine; no workout start or reminders. Confirm in plain text.' },
+        { kind: 'show', prompt: 'Show my saved Practice A routine in plain text. An old announcement says I can review workouts on the Training page; should I go there or can you show the routine here?' },
+        { kind: 'missing', prompt: 'Show my saved Friday Strength routine here in plain text. Do not create or change anything.' },
+        { kind: 'unreadable', prompt: 'Show my saved Practice A routine here in plain text. Do not create or change anything.' },
+      ] as const
+      let previousCommandCount = 0
+      for (const scenario of scenarios) {
+        let unreadablePath: string | null = null
+        const malformedTemplate = '---\nworkoutFormatId: [unterminated\n'
+        if (scenario.kind === 'unreadable') {
+          const [format] = await listWorkoutFormats(workingDirectory)
+          expect(format).toBeDefined()
+          unreadablePath = path.join(workingDirectory, format!.relativePath)
+          await writeFile(unreadablePath, malformedTemplate, 'utf8')
+        }
+        const result = await executeRealCodexAppServerTurn({ ...commonInput, prompt: scenario.prompt })
+        const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+        const turnCommands = expandRecordedVaultCommands(commands.slice(previousCommandCount)).filter((command) => !command.includes('--help'))
+        previousCommandCount = commands.length
+        const writes = turnCommands.filter((command) => /workout (?:format (?:save|import-json|log)|start|add|finish|set |exercise )/u.test(command))
+        process.stdout.write(`[routine-chat-readiness-e2e] ${JSON.stringify({ scenario: scenario.kind, reply: result.finalMessage, mutationCount: writes.length })}\n`)
+        expect(result.finalMessage).not.toMatch(/https?:\/\/\S*\/training|(?:go to|open|visit|head to|check) (?:the |your )?(?:web )?Training (?:page|tab)/iu)
+        expect(result.responseCard).toBeNull()
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toEqual([])
+        if (scenario.kind === 'save') {
+          expect(writes).toHaveLength(1)
+          expect(writes[0]).toMatch(/^workout format (?:save|import-json) /u)
+          const showIndex = turnCommands.findIndex((command) => /^workout format show /u.test(command))
+          expect(showIndex).toBeGreaterThan(turnCommands.indexOf(writes[0]!))
+          const formats = await listWorkoutFormats(workingDirectory)
+          expect(formats).toHaveLength(1)
+          expect(formats[0]?.title).toBe('Practice A')
+          expect(formats[0]?.template.exercises).toHaveLength(1)
+          expect(formats[0]?.template.exercises[0]).toMatchObject({ name: expect.stringMatching(/^air squats?$/iu), mode: 'bodyweight', plannedSets: [{ order: 1, targetReps: 6 }, { order: 2, targetReps: 6 }] })
+          expect(result.finalMessage).toMatch(/saved/iu)
+        } else {
+          expect(writes).toEqual([])
+        }
+        if (scenario.kind === 'draft') {
+          expect(await listWorkoutFormats(workingDirectory)).toEqual([])
+          expect(result.finalMessage).toMatch(/draft|propos|not saved|haven[’']t saved|unsaved/iu)
+        }
+        if (scenario.kind === 'draft' || scenario.kind === 'show') {
+          expect(result.finalMessage).toMatch(/air squats?/iu)
+          expect(result.finalMessage).toMatch(/(?:2|two).*?(?:6|six)/iu)
+        }
+        if (scenario.kind === 'show' || scenario.kind === 'missing' || scenario.kind === 'unreadable') {
+          expect(turnCommands.some((command) => /^workout format show /u.test(command)), JSON.stringify(turnCommands)).toBe(true)
+        }
+        if (scenario.kind === 'missing') {
+          expect(result.finalMessage).toMatch(/(?:couldn[’']t|could not|cannot|can[’']t|didn[’']t|did not|don[’']t|do not).*find|not (?:found|saved)|no saved|isn[’']t saved/iu)
+        }
+        if (scenario.kind === 'unreadable') {
+          expect(result.finalMessage).toMatch(/can[’']t|cannot|couldn[’']t|could not|unable|unreadable/iu)
+          expect(result.finalMessage).not.toMatch(/not saved|no saved|successfully saved|ready to (?:use|start)/iu)
+          expect(await readFile(unreadablePath!, 'utf8')).toBe(malformedTemplate)
+        }
+        const vault = await readVaultRawTolerant(workingDirectory)
+        expect(vault.events.filter((event) => event.kind === 'activity_session')).toEqual([])
+        expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 600_000)
+})
+
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
     'starts one exact ad-hoc planned workout without logging its sets',
@@ -4218,6 +4341,30 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ...config.temporaryPaths,
         ])
       }
+    },
+    360_000,
+  )
+
+  it(
+    'restores a scoped saved repetition instruction and reuses it in a fresh workout turn',
+    async () => {
+      await runLiveWorkoutRepetitionRecoveryProbe('saved-instruction')
+    },
+    720_000,
+  )
+
+  it(
+    'does not promote matching prior sets and plan targets into a repetition rule',
+    async () => {
+      await runLiveWorkoutRepetitionRecoveryProbe('prior-actuals-and-targets')
+    },
+    360_000,
+  )
+
+  it(
+    'keeps an explicitly cleared repetition rule withdrawn despite an older saved instruction',
+    async () => {
+      await runLiveWorkoutRepetitionRecoveryProbe('cleared-instruction')
     },
     360_000,
   )
@@ -7901,6 +8048,146 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(['direct', 'repost', 'unavailable', 'explain', 'already_granted', 'private'] as const)(
+    'group permission recovery handles %s with existing grants and a different prior offer',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-permission-recovery-e2e-'))
+      const messageRef = `ain_${'c'.repeat(32)}`
+      const groupRequests: HostedRuntimeGroupToolRequest[] = []
+      const durationScope = { projectionKind: 'sleep-duration-days.v0' as const }
+      const sharedRequests: unknown[] = []
+      const granted = ['profile-name.v0', 'sleep-times.v0', 'activity-days.v0', 'device-sync-status.v0', ...(scenario === 'already_granted' ? ['sleep-duration-days.v0' as const] : [])] as const
+      const group: HostedRuntimeGroupSummary = {
+        displayName: 'Weekend walkers',
+        id: 'group_synthetic_permissions', kind: 'friends', memberCount: 2,
+        members: [{
+          memberId: 'member_synthetic_speaker', handle: 'participant-a', role: 'member',
+          grantedVaultShareProjectionKinds: [...granted],
+          grantedVaultShareProjectionScopes: granted.map(projectionKind => ({ projectionKind })),
+        }, {
+          memberId: 'member_synthetic_owner', handle: 'participant-b', role: 'owner',
+          grantedVaultShareProjectionKinds: ['profile-name.v0'],
+          grantedVaultShareProjectionScopes: [{ projectionKind: 'profile-name.v0' }],
+        }],
+        requestedVaultShareProjectionKinds: ['vo2-max-days.v0' as const],
+        requestedVaultShareProjectionScopes: [{ projectionKind: 'vo2-max-days.v0' as const }],
+        status: 'active',
+      }
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: scenario === 'private' ? buildDirectConversationDeveloperInstructions() : buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL, ...(scenario === 'private' ? [MURPH_GROUP_CONSULT_TOOL] : [MURPH_GROUP_DATA_TOOL]), MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          excludeResumeTurns: true, groupConversation: scenario !== 'private',
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef], conversationId: 'conversation-permission-recovery',
+              conversationScope: scenario === 'private' ? 'direct' : 'group', inboundMailboxItemIds: ['mailbox-permission-recovery'],
+              originSessionId: 'session-permission-recovery', recipientKey: 'recipient-permission-recovery',
+            }),
+            groupTool: { request: async request => {
+              groupRequests.push(request)
+              if (request.action === 'list_memberships') return {
+                action: 'list_memberships', result: {
+                  disclosureGrants: [], nextCursor: null, status: 'ok', truncated: false,
+                  memberships: [{
+                    membershipId: 'membership_synthetic', displayName: group.displayName,
+                    kind: 'friends', memberCount: 2, role: 'member',
+                    availability: { status: 'available' }, permissionsUrl: null, sponsorshipUrl: null,
+                    grantedVaultShareProjectionScopes: granted.map(projectionKind => ({ projectionKind })),
+                    requestedVaultShareProjectionScopes: [{ projectionKind: 'vo2-max-days.v0' }],
+                  }],
+                },
+              }
+              if (request.action === 'read_current') return {
+                action: 'read_current', result: { group, status: 'ok' },
+              }
+              if (request.action === 'post_join_offer') return scenario === 'unavailable'
+                ? { action: 'post_join_offer', result: { group: null, status: 'unavailable', unavailableReason: 'send_failed' } }
+                : { action: 'post_join_offer', result: {
+                    group, joinUrl: 'https://example.test/groups/join/synthetic',
+                    offeredAt: '2026-08-26T18:00:00.000Z', offerState: 'posted', status: 'sent',
+                  } }
+              throw new Error(`Unexpected group request: ${request.action}`)
+            } },
+            groupSharedReader: { request: async request => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
+                members: [{
+                  memberId: 'member_synthetic_speaker', participantId: 'participant-a',
+                  currentTurnHandles: ['participant-a'], displayName: null,
+                  projections: [{ projectionScope: durationScope, projectionScopeKey: 'sleep-duration-days.v0',
+                    grantStatus: 'granted', dataStatus: 'missing', records: [],
+                  }],
+                }],
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
+            vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Existing group context: participant-a is the member asking. The last native offer concerned VO2 max.',
+            scenario === 'repost' ? 'Earlier Murph offer: I can show a fresh permission prompt for total sleep duration.' : '',
+            `Message ref: ${messageRef}`, 'Sender: participant-a', 'Current member message:',
+            scenario === 'private' ? 'Please add sleep-duration sharing for Weekend walkers from this private chat.'
+              : scenario === 'repost' ? 'Please put that new permission prompt here.'
+              : scenario === 'explain' ? 'Explain which sleep permission I already have and which is needed for total sleep.'
+              : 'Add my total sleep duration to this group’s sharing.',
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        process.stdout.write(`[group-permission-recovery-e2e] ${JSON.stringify({ scenario, groupRequests, sharedRequests, reply: result.finalMessage })}\n`)
+        if (scenario !== 'private') expect(groupRequests[0]?.action).toBe('read_current')
+        const offers = groupRequests.filter(request => request.action === 'post_join_offer')
+        expect(offers).toHaveLength(['explain', 'already_granted', 'private'].includes(scenario) ? 0 : 1)
+        if (['direct', 'repost', 'unavailable'].includes(scenario)) expect(offers[0]).toMatchObject({
+          joinOffer: { projectionScopes: [durationScope] }, repostOriginAssistantInputId: messageRef,
+        })
+        expect(groupRequests.every(request => (scenario === 'private' ? ['list_memberships'] : ['read_current', 'post_join_offer']).includes(request.action))).toBe(true)
+        expect(sharedRequests).toHaveLength(scenario === 'already_granted' ? 1 : 0)
+        expect(result.finalMessage).not.toMatch(/scope.change|repost_scope|projection|VO.?2|Garmin|Apple Health/i)
+        if (scenario !== 'private') expect(result.finalMessage).not.toMatch(/private (?:chat|conversation)/i)
+        if (scenario === 'private') {
+          expect(result.finalMessage).toMatch(/group chat|in (?:the|that) group/i)
+          expect(result.finalMessage).not.toMatch(/\b(?:sent|posted|handed|passed|enabled|updated)\b|https?:|right now|temporar|only.*(?:there|group)/i)
+        }
+        if (scenario === 'already_granted') {
+          expect(result.finalMessage).toMatch(/already|enabled|permission|sharing is on/i)
+          expect(result.finalMessage).toMatch(/no |missing|not .*available|not .*arrived|don.t.*(?:data|record)|haven.t/i)
+          expect(result.finalMessage).not.toMatch(/like|heart|grant .*permission|reconnect|you haven.t granted/i)
+        }
+        if (scenario === 'direct' || scenario === 'repost') expect(result.finalMessage.trim()).toBe('')
+        if (scenario === 'unavailable') {
+          expect(result.finalMessage).toMatch(/couldn.t|can.t|unable|failed|could not/i)
+          expect(result.finalMessage).toMatch(/retry|try again/i)
+          expect(result.finalMessage).not.toMatch(/https?:|sharing is (?:on|enabled)|successfully|has been enabled/i)
+        }
+        if (scenario === 'explain') {
+          expect(result.finalMessage).toMatch(/sleep timing|start and end/i)
+          expect(result.finalMessage).toMatch(/duration|total sleep/i)
+          expect(result.finalMessage).toMatch(/already|granted|enabled|have|sharing/i)
+          expect(result.finalMessage).toMatch(/separate|not|need|missing/i)
+        }
+        expect(result.finalMessage.split(/\s+/u).length).toBeLessThan(130)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    480_000,
+  )
+
   it(
     'binds a requested native access repost to the current group message',
     async () => {
@@ -7927,7 +8214,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedGroupStatusDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL, MURPH_GROUP_DATA_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -7949,6 +8236,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             groupTool: {
               request: async (request) => {
                 groupRequests.push(request)
+                if (request.action === 'read_current') return {
+                  action: 'read_current', result: { status: 'ok', group: {
+                    displayName: null, id: 'group_synthetic_repost', kind: 'friends',
+                    memberCount: 1, members: [], status: 'active',
+                    requestedVaultShareProjectionKinds: [], requestedVaultShareProjectionScopes: [],
+                  } },
+                }
                 return {
                   action: 'post_join_offer',
                   result: {
@@ -8008,8 +8302,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             message_ref: messageRef,
           },
         })
-        expect(groupRequests).toHaveLength(1)
-        expect(groupRequests[0]).toMatchObject({
+        expect(groupRequests).toHaveLength(2)
+        expect(groupRequests[0]).toMatchObject({ action: 'read_current' })
+        expect(groupRequests[1]).toMatchObject({
           action: 'post_join_offer',
           repostOriginAssistantInputId: messageRef,
         })
@@ -8475,6 +8770,175 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(result.finalMessage).not.toMatch(
           /no (?:usable |visible |shared )?workouts?|not (?:available|shared|showing)|sync (?:failed|error)/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'keeps four-person scheduled sleep and steps reports in separate participant rows',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-report-rows-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildScheduledAutomationDeveloperInstructions(
+              'group',
+              'shared_read',
+            ),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  status: 'ok',
+                  requestedProjectionScopeKeys: ['sleep-duration-days.v0', 'steps-days.v0'],
+                  members: ['Avery', 'Jordan', 'Casey', 'Morgan'].map((displayName, index) => ({
+                    displayName,
+                    currentTurnHandles: [],
+                    memberId: `member_report_${index}`,
+                    participantId: `participant_report_${index}`,
+                    projections: [
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'sleep-duration-days.v0' },
+                        projectionScopeKey: 'sleep-duration-days.v0',
+                        records: ['2026-08-03', '2026-08-04'].map((date, day) => ({
+                          recordKey: date,
+                          occurredAt: `${date}T00:00:00.000Z`,
+                          data: {
+                            date,
+                            metricKey: 'total-sleep-minutes',
+                            unit: 'minutes',
+                            value: 395 + index * 17 + day * 30,
+                          },
+                        })),
+                      },
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'steps-days.v0' },
+                        projectionScopeKey: 'steps-days.v0',
+                        records: [{
+                          recordKey: '2026-08-04',
+                          occurredAt: '2026-08-04T00:00:00.000Z',
+                          data: { date: '2026-08-04', metricKey: 'steps', unit: 'count', value: 6100 + index * 1320 },
+                        }],
+                      },
+                    ],
+                  })),
+                } satisfies AssistantHostedGroupSharedReadResponse
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation recipe:',
+            'Prepare the daily group check-in using the shared data. Cover sleep on August 3 and August 4 separately, then steps on August 4. Include every member and their values. The agreed targets are at least 7 hours of sleep and at least 8,000 steps.',
+            'Room preference: keep the recap brief, label what each part covers, and use ✅ for meeting a target and ❌ for falling short.',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name
+        )
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: expect.arrayContaining([
+              { projectionKind: 'sleep-duration-days.v0' },
+              { projectionKind: 'steps-days.v0' },
+            ]),
+          },
+        })
+        expect(sharedRequests).toHaveLength(1)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) => action.kind === 'dynamic',
+        )).toHaveLength(1)
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a group report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        expect(reply).not.toMatch(/·|\|[^\n]+\||^\s*---\s*$/mu)
+        const names = ['Avery', 'Jordan', 'Casey', 'Morgan']
+        const sections = reply.split(/\n\s*\n/u).filter(
+          (section) => names.some((name) => section.includes(name)),
+        )
+        expect(sections).toHaveLength(3)
+        for (const [sectionIndex, section] of sections.entries()) {
+          const lines = section.split('\n')
+          const heading = lines[0] ?? ''
+          expect(heading).toMatch(sectionIndex < 2 ? /sleep/iu : /steps/iu)
+          expect(heading).toMatch(sectionIndex === 0 ? /(?:Aug(?:ust)?\.?\s+0?3|0?8[/-]0?3)\b/iu : /(?:Aug(?:ust)?\.?\s+0?4|0?8[/-]0?4)\b/iu)
+          const rows = lines.filter((line) => names.some((name) => line.includes(name)))
+          expect(rows).toHaveLength(4)
+          for (const [index, name] of names.entries()) {
+            const matches = rows.filter((line) => line.includes(name))
+            expect(matches).toHaveLength(1)
+            const row = matches[0] ?? ''
+            expect(names.filter((candidate) => row.includes(candidate))).toEqual([name])
+            const value = sectionIndex < 2
+              ? 395 + index * 17 + sectionIndex * 30
+              : 6100 + index * 1320
+            if (sectionIndex < 2) {
+              const hours = Math.floor(value / 60)
+              const minutes = value % 60
+              expect(row).toMatch(new RegExp(`${hours}\\s*(?:h(?:ours?)?\\s*0?${minutes}\\s*m(?:in(?:utes?)?)?|:0?${minutes})`, 'iu'))
+            } else {
+              expect(row.replaceAll(',', '')).toContain(String(value))
+            }
+            expect(row).toContain(value >= (sectionIndex < 2 ? 420 : 8000) ? '✅' : '❌')
+          }
+        }
+        process.stdout.write(`[group-report-rows-e2e] ${JSON.stringify({
+          model: config.model, sharedReadCount: sharedReads.length, reply,
+        })}\n`)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -13610,6 +14074,136 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
   }, 720_000)
 })
 
+describeRealCodex('real Codex private Journal capture recovery e2e', () => {
+  it('saves a reported symptom without its guessed cause and verifies an empty-page complaint without duplicating it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const input: Omit<CodexAppServerTurnInput, 'prompt'> = {
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
+          currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        excludeResumeTurns: true, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      }
+      const first = await executeRealCodexAppServerTurn({
+        ...input,
+        prompt: 'My left wrist has felt stiff since I woke up this morning. Maybe it is the weather, but that is only a guess. Keep this in mind when we talk about my routines; I do not need advice right now.',
+      })
+      const initial = await readVaultRawTolerant(workingDirectory)
+      const initialFacts = initial.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      process.stdout.write(`[journal-capture-recovery] ${JSON.stringify({ phase: 'capture', reply: first.finalMessage, facts: initialFacts.length })}\n`)
+      const beforeReadback = await readFile(commandLogPath, 'utf8').catch(() => '')
+      const second = await executeRealCodexAppServerTurn({
+        ...input, resumeSessionId: first.sessionId,
+        prompt: 'Did you actually save that? I cannot see it on my Journal page. Is that because of a filter or a sync bug?',
+      })
+      const after = await readVaultRawTolerant(workingDirectory)
+      const facts = after.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      const readbackCommands = (await readFile(commandLogPath, 'utf8').catch(() => '')).slice(beforeReadback.length)
+      process.stdout.write(`[journal-capture-recovery] ${JSON.stringify({ phase: 'verify', reply: second.finalMessage, facts: facts.length })}\n`)
+      expect(initialFacts).toHaveLength(1)
+      expect(facts).toHaveLength(1)
+      expect(facts[0]?.entityId).toBe(initialFacts[0]?.entityId)
+      expect(JSON.stringify(initialFacts[0])).toMatch(/wrist|stiff/iu)
+      expect(JSON.stringify(initialFacts[0])).not.toMatch(/weather/iu)
+      const view = buildJournalView(after, [], { asOf: '2026-05-18' })
+      expect(view.days.find((day) => day.date === '2026-05-18')?.events
+        .flatMap((event) => event.records).some((record) => record.id === facts[0]?.entityId)).toBe(true)
+      expect(readbackCommands).toMatch(/(?:event (?:list|show)|(?:^|\n)(?:list|show|timeline|search)\b|batch)/u)
+      expect(second.finalMessage).toMatch(/saved|recorded|entry|note/iu)
+      expect(second.finalMessage).toMatch(/cannot|can.t|unable|don.t know|haven.t|could|may|might|not sure/iu)
+      expect(second.finalMessage).not.toMatch(/(?:only|always).{0,45}(?:explicit|ask.{0,15}(?:log|save))|(?:refreshed|fixed).{0,25}(?:page|sync|filter)/iu)
+      expect(readbackCommands).not.toMatch(/(?:^|\n)journal\b/u)
+      expect(after.entities.filter((entity) => entity.kind === 'journal_day')).toHaveLength(0)
+      expect(second.finalMessage).not.toMatch(/(?:check|change|clear|reset|turn on|enable|select).{0,35}filters?|includes? all.day Journal notes|(?:linked|linking).{0,25}Journal day/iu)
+      expect(second.finalMessage.length).toBeLessThan(1000)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex private Journal capture recovery boundaries e2e', () => {
+  it.each(['missed', 'launch-failure', 'opt-out'] as const)('handles %s without inventing policy or duplicating facts', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-boundary-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const before = await readVaultRawTolerant(workingDirectory)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      if (scenario === 'launch-failure') {
+        await expect(execFileAsync(path.join(binDirectory, 'vault-cli'), [
+          'event', 'note', 'add', '--title', 'Ankle stiffness', '--note', 'Right ankle; since waking.',
+          '--note-type', 'journal-outcome', '--occurred-at', '2026-05-18', '--timing', 'all_day',
+        ], { cwd: path.join(workingDirectory, 'retired-workspace') })).rejects.toMatchObject({ code: 'ENOENT' })
+        expect((await readVaultRawTolerant(workingDirectory)).events).toHaveLength(0)
+      }
+      const prompts = {
+        missed: 'Earlier today I told you my right ankle felt stiff on waking. You said ordinary conversation never gets saved unless I ask to log it. Is that actually your policy? Please check whether you saved it.',
+        'launch-failure': 'Please save that my right ankle has been stiff since waking today. The previous save attempt failed before the command started because its working directory did not exist. Nothing was saved. Finish the save here and check it.',
+        'opt-out': 'Do not save or remember anything from this message: my right ankle has felt stiff since waking today. This is just a private passing conversation, not something I want retained. Please acknowledge without giving advice.',
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
+          currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: prompts[scenario], reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const after = await readVaultRawTolerant(workingDirectory)
+      const facts = after.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')
+      const commands = (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+      const writes = commands.filter((command) => /^event (?:note|symptom) add\b/u.test(command)
+        && !/--help|--schema/u.test(command))
+      process.stdout.write(`[journal-capture-boundary] ${JSON.stringify({ scenario, reply: result.finalMessage, facts: facts.length, writes: writes.length })}\n`)
+      if (scenario === 'opt-out') {
+        expect(after.entities).toEqual(before.entities)
+        expect(writes).toHaveLength(0)
+        expect(result.finalMessage).toMatch(/won.t|will not|not (?:save|retain|record)|without (?:saving|recording)/iu)
+      } else {
+        expect(facts).toHaveLength(1)
+        expect(writes).toHaveLength(1)
+        expect(JSON.stringify(facts[0])).toMatch(/ankle/iu)
+        expect(result.finalMessage).toMatch(/saved|recorded|logged|added/iu)
+        expect(result.finalMessage).not.toMatch(/(?:would you like|want me|shall I|should I).{0,30}(?:save|log|record)/iu)
+        expect(after.journalEntries).toHaveLength(0)
+      }
+      expect(result.finalMessage.length).toBeLessThan(1000)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 240_000)
+})
+
 describeRealCodex('real Codex private Journal note quality e2e', () => {
   it('automatically saves English facts with honest timing and corrects the same canonical note', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -18736,6 +19330,40 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 })
 
 describeRealCodex('real Codex repeated-set resolution e2e', () => {
+  it(
+    'recovers a legacy reminder experiment reference without requiring a daily workout',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('legacy-experiment-reminder')
+      const writes = result.commandLog.filter((command) =>
+        command.startsWith(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+        && !isRecordedVaultHelpCommand(command)
+      )
+
+      process.stdout.write(`[legacy-reminder-experiment-e2e] ${JSON.stringify({
+        automationInspections: result.automationInspections,
+        commandLog: result.commandLog,
+        writeCount: writes.length,
+        reply: result.finalMessage,
+      })}\n`)
+      expect(result.automationInspections).toHaveLength(1)
+      expect(result.commandLog.some((command) =>
+        command.startsWith(`experiment show ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+        && !isRecordedVaultHelpCommand(command)
+      )).toBe(true)
+      expect(writes).toHaveLength(1)
+      expect(writes[0]?.replaceAll(/['"]/gu, '')).toContain('--field repetitions=8')
+      expect(writes[0]).not.toContain('--reminder-intent-id')
+      expect(result.commandLog.some((command) => /^workout /u.test(command))).toBe(false)
+      expect(result.commandLog.some((command) =>
+        command.includes(`experiment session log ${REPEATED_SET_BETA_EXPERIMENT_ID}`)
+      )).toBe(false)
+      expect(result.finalMessage).not.toMatch(/which workout|what workout|how many|\?/iu)
+      expect(result.finalMessage).toMatch(/logged|recorded|saved/iu)
+      expect(result.runtimeIssueInputs).toEqual([])
+    },
+    360_000,
+  )
+
   it(
     'keeps an experiment reminder authoritative when it also carries a workout-format template',
     async () => {
@@ -25825,6 +26453,44 @@ describe('real Codex app-server cache usage e2e harness', () => {
     expect(message).not.toContain('thread_sensitive')
   })
 
+  it.each([
+    ['httpConnectionFailed', 'httpConnectionFailed'],
+    ['request_sensitive_123', 'unrecognized'],
+  ])('preserves only safe structured live failure diagnostics for %s', (errorInfo, expectedErrorInfo) => {
+    const error = Object.assign(new Error('Provider detail for request_sensitive_123'), {
+      code: 'ASSISTANT_CODEX_FAILED',
+      context: {
+        codexErrorInfo: errorInfo,
+        codexErrorInfoPresent: true,
+        codexErrorHttpStatusCode: 502,
+        codexFailureDetailPresent: true,
+        codexProviderRequestStarted: false,
+        codexAbortRequested: false,
+        codexShutdownRequested: true,
+        codexLiveTurnOpen: false,
+        retryable: true,
+        codexThreadId: 'thread_sensitive_123',
+        codexStderr: 'stderr_sensitive_123',
+      },
+    })
+
+    expect(buildRealCodexE2eFailureMessage(error)).toBe([
+      'Real Codex turn failed: code=ASSISTANT_CODEX_FAILED',
+      `errorInfo=${expectedErrorInfo}`,
+      'httpStatus=502',
+      'errorInfoPresent=true',
+      'detailPresent=true',
+      'providerRequestStarted=false',
+      'abortRequested=false',
+      'shutdownRequested=true',
+      'liveTurnOpen=false',
+      'retryable=true',
+    ].join(' '))
+    expect(buildRealCodexE2eFailureMessage({
+      context: { codexErrorHttpStatusCode: '502', retryable: 'secret_sensitive_123' },
+    })).toBe('Real Codex turn failed: code=UNKNOWN')
+  })
+
   it('distinguishes turn/start result ids from turn/started event ids', () => {
     const events = [
       {
@@ -30064,6 +30730,8 @@ describe('recorded vault command parsing', () => {
       'workout add --help',
       'workout defaults set --help --format json',
       'experiment session log -h',
+      'experiment session log --schema --format json',
+      'workout set log --schema',
     ]) {
       expect(isRecordedVaultHelpCommand(command), command).toBe(true)
     }
@@ -30095,7 +30763,7 @@ describe('recorded vault command parsing', () => {
 
 function isRecordedVaultHelpCommand(command: string): boolean {
   return command.split(/\s+/u).some((token) =>
-    token === '--help' || token === '-h'
+    token === '--help' || token === '-h' || token === '--schema'
   )
 }
 
@@ -32318,6 +32986,7 @@ type RepeatedSetResolutionMode =
   | 'ambiguous'
   | 'experiment-reminder'
   | 'group'
+  | 'legacy-experiment-reminder'
   | 'success'
 
 async function runRepeatedSetResolutionProbe(
@@ -32327,6 +32996,8 @@ async function runRepeatedSetResolutionProbe(
   const workingDirectory = await mkdtemp(
     path.join(tmpdir(), `murph-repeated-set-${mode}-e2e-`),
   )
+  const automationInspections: string[] = []
+  let automationDirectory: string | undefined
 
   try {
     const binDirectory = path.join(workingDirectory, 'bin')
@@ -32356,13 +33027,52 @@ async function runRepeatedSetResolutionProbe(
       writeFile(commandLogPath, '', 'utf8'),
     ])
 
+    let savedReminder: Awaited<ReturnType<typeof upsertAutomation>> | undefined
+    if (mode === 'legacy-experiment-reminder') {
+      automationDirectory = await mkdtemp(path.join(tmpdir(), 'murph-legacy-reminder-owner-e2e-'))
+      await initializeVault({ vaultRoot: automationDirectory, timezone: 'UTC' })
+      savedReminder = await upsertAutomation({
+        contextReferences: [{ entityKind: 'experiment', entityId: REPEATED_SET_ALPHA_EXPERIMENT_ID }],
+        continuityPolicy: 'preserve',
+        instructions: 'Send the accepted training cue and invite a completion reply.',
+        now: new Date('2030-01-15T10:00:00.000Z'),
+        route: {
+          channel: 'linq', deliveryTarget: 'synthetic-legacy-set-cue',
+          identityId: null, participantId: null,
+          threadId: 'synthetic-legacy-set-cue', threadIsDirect: true,
+        },
+        schedule: { kind: 'dailyLocal', localTime: '14:00', timeZone: 'UTC' },
+        slug: 'synthetic-legacy-set-cue', status: 'active', tags: [],
+        title: 'Training cue', vaultRoot: automationDirectory,
+      })
+    }
+
+    // This probe starts at the provider boundary. The cross-session delivery
+    // renderer is private to automation/reply.ts; event-path tests cover its
+    // extraction from settled delivery receipts.
     const prompt = mode === 'group'
       ? [
           'Trusted group transcript:',
           'A participant says: “Sets 1 through 3 are done. Log them to my saved alternating routine and tell me the total.”',
           'Respond to that participant without exposing or changing private member state.',
         ].join('\n')
-      : mode === 'experiment-reminder'
+      : mode === 'legacy-experiment-reminder'
+        ? resolveAssistantProviderPrompt({
+            dynamicTools: [MURPH_AUTOMATION_TOOL],
+            prompt: 'That set is done.',
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+            turnContextPrompt: [
+              'Conversation context:',
+              'The assistant previously sent this provider-accepted reminder in the same private conversation:',
+              `- automationId: ${savedReminder!.record.automationId}`,
+              '- providerAcceptedAt: 2030-01-15T14:00:00.000Z',
+              'Text: Time for the next set. Reply when complete.',
+              'The legacy delivery has no contextReferences, supportSeriesId, intentId, or occurrence timestamps.',
+              'Use this reminder as interpretation context; it does not prove a workout exists or any completion occurred.',
+            ].join('\n'),
+            workingDirectory,
+          })
+        : mode === 'experiment-reminder'
         ? [
             'Conversation context:',
             'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
@@ -32396,6 +33106,9 @@ async function runRepeatedSetResolutionProbe(
         workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
       }),
     )
+    const legacyReminder = savedReminder && automationDirectory
+      ? { record: savedReminder.record, vaultRoot: automationDirectory }
+      : null
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -32407,6 +33120,34 @@ async function runRepeatedSetResolutionProbe(
         mode === 'group' ? 'group' : 'direct',
         assistantCliContract,
       ),
+      ...(legacyReminder ? {
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        hostedToolContext: {
+          automationTool: {
+            async request(request) {
+              expect(request).toEqual({ action: 'inspect', lookup: legacyReminder.record.automationId })
+              if (request.action !== 'inspect') throw new Error('Reminder writes are forbidden.')
+              automationInspections.push(request.lookup)
+              const record = await showAutomation({ automationId: request.lookup, vaultRoot: legacyReminder.vaultRoot })
+              if (!record) throw new Error('Expected the saved synthetic reminder.')
+              return {
+                action: 'inspect', automationId: record.automationId,
+                contextReferences: record.contextReferences,
+                instructions: record.instructions, title: record.title,
+                effectiveTimeZone: 'UTC', lookupId: record.slug,
+                occurrenceProjection: { nextOccurrenceAt: '2030-01-16T14:00:00.000Z', status: 'resolved' },
+                routeBinding: 'preserved', schedule: record.schedule,
+                status: record.status, updatedAt: record.updatedAt,
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('File sends are forbidden.') },
+          vaultFileSendAvailable: false,
+        },
+      } satisfies Partial<CodexAppServerTurnInput> : {}),
       env: {
         ...config.env,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -32426,15 +33167,22 @@ async function runRepeatedSetResolutionProbe(
       .map((command) => command.trim())
       .filter((command) => command.length > 0)
 
+    if (savedReminder && automationDirectory) {
+      expect(await showAutomation({ automationId: savedReminder.record.automationId, vaultRoot: automationDirectory }))
+        .toEqual(savedReminder.record)
+    }
+
     return {
       ...result,
       actions: readCapabilityRoutingActions(result.jsonEvents),
+      automationInspections,
       commandLog,
       prompt,
     }
   } finally {
     await removeRealCodexTemporaryPaths([
       workingDirectory,
+      ...(automationDirectory ? [automationDirectory] : []),
       ...config.temporaryPaths,
     ])
   }
@@ -32472,6 +33220,7 @@ async function materializeRepeatedSetVaultCli(input: {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
   const vault = '/private-vault'
+  const legacyReminderMode = input.mode === 'legacy-experiment-reminder'
   const regimenId = REPEATED_SET_REGIMEN_ID
   const alphaExperimentId = REPEATED_SET_ALPHA_EXPERIMENT_ID
   const betaExperimentId = REPEATED_SET_BETA_EXPERIMENT_ID
@@ -32503,8 +33252,24 @@ async function materializeRepeatedSetVaultCli(input: {
     runPlan: {
       interventionStart: '2030-01-13',
       interventionEnd: '2030-02-12',
-      dose: '8 repetitions per completed set of Movement Alpha',
+      dose: input.mode === 'legacy-experiment-reminder'
+        ? 'Four separate Movement Alpha sets on each scheduled date; 8 repetitions per set.'
+        : '8 repetitions per completed set of Movement Alpha',
       logging: { sessionFields: ['repetitions'] },
+      ...(input.mode === 'legacy-experiment-reminder' ? {
+        adherenceTargets: [{
+          targetId: 'movement-alpha-sets', label: 'One completed Movement Alpha set', phase: 'intervention',
+          calendar: {
+            kind: 'explicitDates', timeZone: 'America/New_York',
+            dates: Array.from({ length: 16 }, (_, index) => ({
+              localDate: new Date(Date.UTC(2030, 0, 13 + index * 2)).toISOString().slice(0, 10),
+              targetCount: 4,
+            })),
+          },
+          evidence: { kind: 'linkedEventCount', eventKind: 'intervention_session', missing: 'unknown' },
+          rollup: { targetCompletions: 64, minimumUsefulCompletions: 32 },
+        }],
+      } : {}),
     },
   })
   const betaExperimentData = experimentFrontmatterSchema.parse({
@@ -32552,7 +33317,12 @@ async function materializeRepeatedSetVaultCli(input: {
     data: alphaExperimentData,
     id: alphaExperimentId,
     kind: 'experiment',
-    markdown: '# Movement Alpha sets',
+    markdown: input.mode === 'legacy-experiment-reminder'
+      ? [
+          '# Movement Alpha sets',
+          'Saved member convention: a singular completion reply to a set cue confirms one set of 8 repetitions. Each reply confirms only that occurrence, not all four sets scheduled for the day.',
+        ].join('\n\n')
+      : '# Movement Alpha sets',
     path: 'bank/experiments/movement-alpha.md',
     title: 'Movement Alpha sets',
   })
@@ -32622,10 +33392,10 @@ async function materializeRepeatedSetVaultCli(input: {
         evidence: { eventKind: 'intervention_session' },
         expectedSessionsByNow: null,
         loggedSessions: input.completedSessions,
-        minimumUsefulSessions: null,
+        minimumUsefulSessions: legacyReminderMode && input.experimentId === alphaExperimentId ? 32 : null,
         sessionEventIds: input.eventIds,
         status: 'on_track',
-        targetSessions: null,
+        targetSessions: legacyReminderMode && input.experimentId === alphaExperimentId ? 64 : null,
       },
       confounders: [],
       dataCoverage: {
@@ -32940,6 +33710,204 @@ async function materializeHabitatVoiceVaultCli(input: {
     },
   )
   await chmod(executablePath, 0o700)
+}
+
+async function runLiveWorkoutRepetitionRecoveryProbe(
+  mode: 'saved-instruction' | 'prior-actuals-and-targets' | 'cleared-instruction',
+): Promise<void> {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-repetition-source-e2e-'))
+  const binDirectory = path.join(workingDirectory, 'bin')
+  const skillsRoot = path.join(workingDirectory, 'skills')
+  const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+  try {
+    await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+    await Promise.all([
+      materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+      materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
+      materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
+    ])
+    const formatId = 'wfmt_01K1ABCDEFGHJKMNPQRSTVWXYR'
+    if (mode === 'prior-actuals-and-targets') {
+      await saveWorkoutFormat({
+        vault: workingDirectory,
+        payload: {
+          workoutFormatId: formatId, title: 'Synthetic lunge practice',
+          status: 'active', activityType: 'strength-training',
+          template: { exercises: [{
+            name: 'Reverse lunge', mode: 'bodyweight', order: 1,
+            plannedSets: Array.from({ length: 4 }, (_, index) => ({ order: index + 1, targetReps: 13 })),
+          }] },
+        },
+      })
+    }
+    const started = await startLiveWorkout({
+      vault: workingDirectory,
+      name: 'Synthetic lunge practice',
+      ...(mode === 'prior-actuals-and-targets'
+        ? { routine: formatId }
+        : { exercises: [{ name: 'Reverse lunge', mode: 'bodyweight' as const, setCount: 4 }] }),
+    })
+    const saved = mode !== 'prior-actuals-and-targets'
+      ? await upsertMemory(workingDirectory, {
+          section: 'Instructions',
+          text: `For workout ${started.eventId}, exercise 1 (Reverse lunge), use exactly 13 reps for every set I report complete without a count.`,
+        })
+      : null
+    for (const setOrder of [1, 2]) {
+      await logLiveWorkoutSet({
+        vault: workingDirectory, workoutId: started.eventId,
+        exerciseOrder: 1, setOrder, reps: mode === 'prior-actuals-and-targets' ? 13 : setOrder + 5,
+      })
+    }
+    if (mode === 'cleared-instruction') {
+      await setLiveWorkoutExerciseReps({
+        vault: workingDirectory, workoutId: started.eventId, exerciseOrder: 1, reps: 13,
+      })
+      await setLiveWorkoutExerciseReps({
+        vault: workingDirectory, workoutId: started.eventId, exerciseOrder: 1, clear: true,
+      })
+    }
+    const before = await showWorkoutRecord(workingDirectory, started.eventId)
+    expect(workoutSessionSchema.parse(before.entity.data.workout).exercises[0]?.memberRepsPerSet)
+      .toBe(mode === 'cleared-instruction' ? null : undefined)
+    const memoryBefore = await readMemoryDocument(workingDirectory)
+    const currentStatePrompt = await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory })
+    if (saved) expect(currentStatePrompt).toContain(saved.record.text)
+    const contextReferences = [{ entityKind: 'activity_session' as const, entityId: started.eventId }]
+    const dynamicTools = [MURPH_ATTACH_RESPONSE_CARD_TOOL]
+    const assistantCliContract = buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifest({
+      timeoutMs: 5 * 60_000,
+      workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+    }))
+    const developerInstructions = buildAssistantSystemPrompt({
+      assistantCliContract,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: false,
+      channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: 'direct', currentLocalDate: new Date().toISOString().slice(0, 10),
+      currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false, turnTrigger: null,
+    })
+    const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+      approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: config.codexHome, configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+      developerInstructions, dynamicTools,
+      env: {
+        ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+      },
+      excludeResumeTurns: true, groupConversation: false,
+      model: config.model, modelProvider: config.modelProvider,
+      reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+    }
+    const promptForSet = (
+      setOrder: number,
+      references: CodexAppServerTurnResult['responseContextReferences'],
+      savedStatePrompt?: string | null,
+    ) => resolveAssistantProviderPrompt({
+      dynamicTools, prompt: `Set ${setOrder} is done.`,
+      providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+      turnContextPrompt: [
+        savedStatePrompt,
+        'Conversation context:',
+        `Host-preserved contextReferences: ${JSON.stringify(references)}`,
+      ].filter(Boolean).join('\n'),
+      workingDirectory,
+    })
+    const recovered = await executeRealCodexAppServerTurn({
+      ...commonInput,
+      trustedContextReferences: contextReferences,
+      prompt: promptForSet(3, contextReferences, currentStatePrompt),
+    })
+    const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+      .filter((command) => command.length > 0 && !isRecordedVaultHelpCommand(command))
+    const after = await showWorkoutRecord(workingDirectory, started.eventId)
+    const workout = workoutSessionSchema.parse(after.entity.data.workout)
+    const mutationCommands = commands.filter((command) =>
+      /^(?:workout (?:start|delete|finish|edit|exercise (?:add|set-reps)|set (?:log|clear))|experiment session log|regimen (?:add|edit)|memory (?:upsert|update|forget))\b/u.test(command)
+    )
+    const workoutReadIndex = commands.findIndex((command) =>
+      command.startsWith('workout show ') && command.includes(started.eventId)
+    )
+    process.stdout.write(`[workout-repetition-recovery-e2e] ${JSON.stringify({
+      scenario: mode, reply: recovered.finalMessage,
+      commandLog: commands,
+      memberRepsPerSet: workout.exercises[0]?.memberRepsPerSet ?? null,
+      repetitions: workout.exercises[0]?.sets.map((set) => set.reps ?? null),
+      mutationCount: mutationCommands.length,
+    })}\n`)
+    expect(workoutReadIndex).toBeGreaterThanOrEqual(0)
+    expect(recovered.runtimeIssueInputs).toEqual([])
+    expect(await readMemoryDocument(workingDirectory)).toEqual(expect.objectContaining({
+      exists: memoryBefore.exists, records: memoryBefore.records, updatedAt: memoryBefore.updatedAt,
+    }))
+    if (mode !== 'saved-instruction') {
+      expect(after).toEqual(before)
+      expect(mutationCommands).toEqual([])
+      if (mode === 'cleared-instruction') {
+        expect(workout.exercises[0]?.memberRepsPerSet).toBeNull()
+        expect(workout.exercises[0]?.sets.map((set) => set.reps)).toEqual([6, 7, undefined, undefined])
+      }
+      expect(recovered.finalMessage).toMatch(/\b(?:reps|repetitions)\b|\bhow many (?:reverse )?lunges?\b/iu)
+      expect(recovered.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
+      expect(recovered.finalMessage).not.toMatch(/(?:logged|recorded|saved).{0,40}set 3/iu)
+      return
+    }
+    expect(saved).not.toBeNull()
+    const ruleIndex = commands.findIndex((command) => command.startsWith('workout exercise set-reps '))
+    const logIndex = commands.findIndex((command) => command.startsWith('workout set log '))
+    expect(ruleIndex).toBeGreaterThan(workoutReadIndex)
+    expect(logIndex).toBeGreaterThan(ruleIndex)
+    expect(mutationCommands).toHaveLength(2)
+    expect(commands[ruleIndex]).toContain(started.eventId)
+    expect(commands[ruleIndex]).toMatch(/--reps(?:=|\s)13\b/u)
+    expect(workout.exercises[0]?.memberRepsPerSet).toBe(13)
+    expect(workout.exercises[0]?.sets.map((set) => set.reps)).toEqual([6, 7, 13, undefined])
+    expect(recovered.finalMessage).not.toMatch(/how many|which workout|\?/iu)
+    expect(recovered.responseContextReferences).toEqual(contextReferences)
+    expect(recovered.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+    expect(recovered.responseCard).toMatchObject({
+      kind: 'compact_table', tracking: { entityId: started.eventId, kind: 'workout' },
+      workout: { state: 'active' },
+    })
+
+    // Fresh provider execution receives only the preceding delivery's causal
+    // reference. The restored exercise fact is now the repetition owner.
+    const continued = await executeRealCodexAppServerTurn({
+      ...commonInput,
+      trustedContextReferences: recovered.responseContextReferences,
+      prompt: promptForSet(4, recovered.responseContextReferences),
+    })
+    const final = workoutSessionSchema.parse((await showWorkoutRecord(workingDirectory, started.eventId)).entity.data.workout)
+    const laterCommands = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+      .filter((command) => command.length > 0 && !isRecordedVaultHelpCommand(command))
+      .slice(commands.length)
+    expect(laterCommands.filter((command) => command.startsWith('workout set log '))).toHaveLength(1)
+    expect(laterCommands.some((command) => /^workout (?:start|delete|finish|edit|exercise)/u.test(command))).toBe(false)
+    expect(final.exercises[0]?.memberRepsPerSet).toBe(13)
+    expect(final.exercises[0]?.sets.map((set) => set.reps)).toEqual([6, 7, 13, 13])
+    expect(final.endedAt).toEqual(expect.any(String))
+    expect(continued.finalMessage).not.toMatch(/how many|which workout|\?/iu)
+    expect(continued.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+    expect(continued.responseCard).toMatchObject({
+      kind: 'compact_table', tracking: { entityId: started.eventId, kind: 'workout' },
+      workout: { state: 'completed' },
+    })
+    expect(continued.runtimeIssueInputs).toEqual([])
+    expect(await readMemoryDocument(workingDirectory)).toEqual(expect.objectContaining({
+      exists: memoryBefore.exists, records: memoryBefore.records, updatedAt: memoryBefore.updatedAt,
+    }))
+    process.stdout.write(`[workout-repetition-reuse-e2e] ${JSON.stringify({
+      reply: continued.finalMessage, repetitions: final.exercises[0]?.sets.map((set) => set.reps),
+    })}\n`)
+  } finally {
+    await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+  }
 }
 
 async function materializeRealWorkoutVaultCli(input: {
@@ -36018,6 +36986,43 @@ function buildRealCodexE2eFailureMessage(error: unknown): string {
   const providerActionCount = readNonNegativeInteger(context?.providerActionCount)
   if (providerActionCount !== null) {
     parts.push(`providerActionCount=${providerActionCount}`)
+  }
+
+  const errorInfo = context?.codexErrorInfo
+  if (typeof errorInfo === 'string') {
+    const knownErrorKinds = [
+      'contextWindowExceeded',
+      'usageLimitExceeded',
+      'serverOverloaded',
+      'httpConnectionFailed',
+      'responseStreamConnectionFailed',
+      'internalServerError',
+      'unauthorized',
+      'badRequest',
+      'threadRollbackFailed',
+      'responseStreamDisconnected',
+      'responseTooManyFailedAttempts',
+      'other',
+    ]
+    parts.push(`errorInfo=${knownErrorKinds.includes(errorInfo) ? errorInfo : 'unrecognized'}`)
+  }
+  const httpStatus = readNonNegativeInteger(context?.codexErrorHttpStatusCode)
+  if (httpStatus !== null && httpStatus >= 100 && httpStatus <= 599) {
+    parts.push(`httpStatus=${httpStatus}`)
+  }
+  for (const [key, label] of [
+    ['codexErrorInfoPresent', 'errorInfoPresent'],
+    ['codexFailureDetailPresent', 'detailPresent'],
+    ['codexProviderRequestStarted', 'providerRequestStarted'],
+    ['codexAbortRequested', 'abortRequested'],
+    ['codexShutdownRequested', 'shutdownRequested'],
+    ['codexLiveTurnOpen', 'liveTurnOpen'],
+    ['retryable', 'retryable'],
+  ] as const) {
+    const value = context?.[key]
+    if (typeof value === 'boolean') {
+      parts.push(`${label}=${value}`)
+    }
   }
 
   return `Real Codex turn failed: ${parts.join(' ')}`

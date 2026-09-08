@@ -1,6 +1,12 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
+import { appendHostedMailboxEnvelopeTx, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
+import { buildHostedThreadNotificationDestination } from "../hosted-routing/assistant-notification-destination";
+import { buildHostedThreadDeliveryRoute } from "../hosted-routing/thread-delivery-route";
+import { projectHostedVaultShareProjectionDisplays } from "./join-policy";
 
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -39,7 +45,7 @@ import {
   enqueueHostedGroupJoinOutreachTx,
   revokeHostedGroupJoinOutreachForRemovedReactionTx,
 } from "./group-join-outreach-store";
-import { readHostedGroupJoinOfferTargetTx } from "./group-store";
+import { readHostedGroupJoinOfferTargetTx, type HostedGroupJoinOfferAcceptanceTxResult } from "./group-store";
 import { isHostedGroupJoinOutreachSupportedRegion } from "./group-join-outreach-window";
 import {
   hostedOnboardingError,
@@ -353,8 +359,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     memberId: member.id,
     messageLookupKeyReadCandidates,
     now: input.event.providerCreatedAt,
-    onAcceptedTx: async (tx) => {
+    onAcceptedTx: async (tx, acceptedJoin) => {
       reactionMailboxAppend = await appendHostedGroupOfferReactionRoomEvidenceTx({
+        acceptedJoin,
         actor: null,
         event: input.event,
         tx,
@@ -383,6 +390,7 @@ async function appendHostedGroupOfferReactionRoomEvidenceTx(input: {
   // Pre-member handles must stay `null` so no pre-member phone enters
   // group-visible room evidence; a member's handle is already group-known and
   // may attribute the retained reaction.
+  acceptedJoin?: HostedGroupJoinOfferAcceptanceTxResult;
   actor: string | null;
   event: ParsedHostedLinqProviderEvent;
   expectedContainerMemberId?: string;
@@ -415,12 +423,69 @@ async function appendHostedGroupOfferReactionRoomEvidenceTx(input: {
   ) {
     throw new Error("Hosted group offer reaction route could not be resolved.");
   }
-  return appendHostedLinqGroupReactionMailboxTx({
+  const reaction = await appendHostedLinqGroupReactionMailboxTx({
     actor,
     event: input.event,
     route,
     tx: input.tx,
   });
+  const accepted = input.acceptedJoin;
+  // Legacy routes may accept consent before acquiring a sender-account binding.
+  if (!accepted?.alreadyMember || accepted.selectedVaultShareProjectionScopes.length === 0
+    || !route.accountLookupKey) {
+    return reaction;
+  }
+  const notificationKey = `group-sharing-confirmed:${createHash("sha256")
+    .update(JSON.stringify([accepted.membershipId, accepted.messageLookupKey]))
+    .digest("hex")}`;
+  const eventId = `assistant.notification.requested:${notificationKey}`;
+  const existing = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: eventId,
+    prisma: input.tx,
+    userId: route.containerMemberId,
+  });
+  if (existing) {
+    if (existing.kind !== "assistant.notification.requested") {
+      throw new Error("Group sharing confirmation has an invalid mailbox kind.");
+    }
+    return { containerMemberId: route.containerMemberId, item: existing };
+  }
+  const destination = buildHostedThreadNotificationDestination({
+    containerMemberId: route.containerMemberId,
+    deliveryRoute: buildHostedThreadDeliveryRoute({
+      accountLookupKey: route.accountLookupKey,
+      channel: "linq",
+      threadId,
+    }),
+  });
+  const labels = projectHostedVaultShareProjectionDisplays(
+    accepted.selectedVaultShareProjectionScopes,
+  ).map((scope) => scope.label.replace(/^[A-Z](?=[a-z])/u, (first) => first.toLowerCase()));
+  const scopeText = new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(labels);
+  const appended = await appendHostedMailboxEnvelopeTx({
+    envelope: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: route.containerMemberId,
+      occurredAt: input.event.providerCreatedAt.toISOString(),
+      notification: {
+        deliveryDedupeToken: notificationKey,
+        deliveryIdempotencyKey: notificationKey,
+        deliveryDispatchMode: "queue-only",
+        externalThreadRouteAuthority: destination.externalThreadRouteAuthority,
+        route: destination.route,
+        instructions: "Confirm the completed group sharing change using the exact response text.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: `Your reaction enabled ${scopeText} sharing. Your other sharing is unchanged.`,
+        },
+      },
+    }),
+    tx: input.tx,
+  });
+  if (appended.dedupeConflict) {
+    throw new Error("Group sharing confirmation conflicts with an existing notification.");
+  }
+  return { containerMemberId: route.containerMemberId, item: appended.item };
 }
 
 /**
