@@ -23,6 +23,7 @@ import {
   goalMetricTargetSchema,
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
+  researchScoutBatchPayloadSchema,
   resolveFloatingIsoTimestampInTimeZone,
   toLocalDayKey,
   workoutSessionSchema,
@@ -195,6 +196,7 @@ import {
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
@@ -13315,6 +13317,142 @@ describeRealCodex(
     },
     720_000,
   )
+})
+
+describeRealCodex('real Codex research scout ongoing interest e2e', () => {
+  it('shares relevant learning without an open decision and suppresses repeated research', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    )
+    if (!automation) throw new Error('Expected the managed research scout automation.')
+    try {
+      for (const repeated of [false, true]) {
+        const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-research-interest-e2e-'))
+        try {
+          const binDirectory = path.join(workingDirectory, 'bin')
+          await mkdir(binDirectory)
+          const finding = 'A synthetic randomized human study found that resistance training with one arm also improved strength in the untrained arm. This suggests some strength adaptation transfers through the nervous system rather than being confined to the practiced muscles. It does not establish injury prevention or a need to change training.'
+          const context = {
+            summary: 'The member has an ongoing interest in resistance training and how strength develops, stated three months ago and never withdrawn. There is no current experiment, symptom, recent change, open question, or decision. They enjoy explanations and do not want extra tasks. No recent unsolicited health note is waiting for a reply.',
+          }
+          const fixture = {
+            context,
+            schema: {
+              schemaVersion: 'murph.payload-schema.v1',
+              command: 'research scout-batch --input',
+              mediaType: 'application/json',
+              schemaName: 'ResearchScoutBatchPayload',
+              schema: researchScoutBatchPayloadSchema.toJSONSchema(),
+              examples: [{ lanes: [{ label: 'resistance training', profile: { behaviors: ['resistance training'] } }] }],
+            },
+            research: { lanes: [{ label: 'resistance training', response: { results: [{
+              title: 'Synthetic resistance training trial',
+              url: 'https://example.org/synthetic-resistance-trial',
+              publishedDate: '2026-07-01',
+              text: finding,
+            }] } }] },
+            ledger: { page: { body: repeated ? finding : '', markdown: repeated ? finding : '' } },
+          }
+          await writeFile(path.join(binDirectory, 'fixture.json'), JSON.stringify(fixture))
+          await writeFile(path.join(binDirectory, 'vault-cli'), [
+            '#!/usr/bin/env node',
+            "const fs = require('node:fs');",
+            "const path = require('node:path');",
+            "const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixture.json'), 'utf8'));",
+            "const { createRequire } = require('node:module');",
+            "const { researchScoutBatchPayloadSchema } = createRequire(process.env.RESEARCH_FIXTURE_RESOLVER)('@murphai/contracts');",
+            'const args = process.argv.slice(2);',
+            "const option = (name) => args.find((arg) => arg.startsWith(name + '='))?.slice(name.length + 1) ?? args[args.indexOf(name) + 1];",
+            "fs.appendFileSync(path.join(__dirname, 'calls.jsonl'), JSON.stringify(args) + String.fromCharCode(10));",
+            "if (args.includes('--help')) console.log('research scout-batch --input @file.json --since YYYY-MM-DD --until YYYY-MM-DD --maxCandidatesPerLane 8; knowledge append-section <slug> <heading> --body <markdown>; knowledge show <slug>; knowledge show-index');",
+            "else if (args[0] === 'research' && args[1] === 'scout-batch-payload-schema') console.log(JSON.stringify(fixture.schema));",
+            "else if (args[0] === 'research' && args[1] === 'scout-batch') {",
+            "  const input = option('--input');",
+            "  const body = input === '-' ? fs.readFileSync(0, 'utf8') : input.startsWith('{') ? input : fs.readFileSync(input.replace(/^@/, ''), 'utf8');",
+            '  const parsed = researchScoutBatchPayloadSchema.safeParse(JSON.parse(body));',
+            '  if (!parsed.success) { console.error(JSON.stringify(parsed.error.issues)); process.exit(64); }',
+            "  fs.appendFileSync(path.join(__dirname, 'retrievals.jsonl'), JSON.stringify(parsed.data) + String.fromCharCode(10));",
+            "  fs.writeFileSync(path.join(__dirname, 'payload.json'), body);",
+            '  console.log(JSON.stringify(fixture.research));',
+            "} else if (args[0] === 'knowledge' && args[1] === 'show') console.log(JSON.stringify(fixture.ledger));",
+            "else if (args[0] === 'knowledge' && args[1] === 'append-section') {",
+            "  const body = option('--body');",
+            "  if (!body || !args[3]) { console.error('Expected append-section <slug> <heading> --body <markdown>'); process.exit(64); }",
+            "  fixture.ledger.page.body += String.fromCharCode(10) + args[3] + String.fromCharCode(10) + body;",
+            '  fixture.ledger.page.markdown = fixture.ledger.page.body;',
+            "  fs.appendFileSync(path.join(__dirname, 'writes.jsonl'), JSON.stringify({ slug: args[2], body }) + String.fromCharCode(10));",
+            "  fs.writeFileSync(path.join(__dirname, 'fixture.json'), JSON.stringify(fixture));",
+            '  console.log(JSON.stringify(fixture.ledger));',
+            '}',
+            "else if ((args[0] === 'knowledge' && ['index', 'show-index', 'list'].includes(args[1])) || ['goal', 'memory', 'list', 'search', 'experiment', 'wearables'].includes(args[0])) console.log(JSON.stringify(fixture.context));",
+            "else { console.error('Unsupported synthetic command'); process.exit(64); }",
+          ].join('\n'), { mode: 0o700 })
+          const result = await executeRealCodexAppServerTurn({
+            allowFinishWithoutReply: true,
+            approvalPolicy: 'never',
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+            codexHome: config.codexHome,
+            configOverrides: ['shell_environment_policy.set.EXA_API_KEY="synthetic-fixture-only"'],
+            fixtureBinDirectory: binDirectory,
+            developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+            dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+            env: {
+              ...config.env,
+              EXA_API_KEY: 'synthetic-fixture-only',
+              RESEARCH_FIXTURE_RESOLVER: fileURLToPath(new URL('../package.json', import.meta.url)),
+            },
+            excludeResumeTurns: true,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: [
+              automation.instructions,
+              'Scheduled occurrence context: 2026-08-09. This is an isolated synthetic fixture; all source findings are test data, not real health claims. Use the local vault-cli for all reads, research, and knowledge writes; no external browsing is needed.',
+              `Canonical member context: ${JSON.stringify(context)}`,
+            ].join('\n\n'),
+            reasoningEffort: 'high',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+          const calls = (await readFile(path.join(binDirectory, 'calls.jsonl'), 'utf8'))
+            .trim().split('\n').map((line) => JSON.parse(line) as string[])
+          console.info(`[research-scout ${repeated ? 'repeated' : 'ongoing-interest'}] ${result.finalMessage || '(silent)'}`)
+          console.info('[research-scout commands]', calls.map((args) => args.slice(0, 2).join(' ')))
+          const retrievals = (await readFile(path.join(binDirectory, 'retrievals.jsonl'), 'utf8')).trim().split('\n')
+          expect(retrievals).toHaveLength(1)
+          const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
+          expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
+          const writesPath = path.join(binDirectory, 'writes.jsonl')
+          const writes = existsSync(writesPath)
+            ? (await readFile(writesPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { slug: string; body: string })
+            : []
+          expect(writes).toHaveLength(repeated ? 0 : 1)
+          if (!repeated) {
+            expect(writes[0]?.slug).toBe('weekly-health-research-scout')
+            expect(writes[0]?.body).toContain('https://example.org/synthetic-resistance-trial')
+          }
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const finishCalls = actions.filter((action) => action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
+          if (repeated) {
+            expect(result.finalMessage === '' && finishCalls.length === 1
+              || /"kind"\s*:\s*"skip"/u.test(result.finalMessage)).toBe(true)
+          } else {
+            expect(finishCalls).toHaveLength(0)
+            expect(result.finalMessage).toMatch(/strength|resistance training/iu)
+            expect(result.finalMessage).toMatch(/untrained|other (?:arm|side)|transfer|one arm[\s\S]*\bother\b/iu)
+            expect(result.finalMessage).not.toMatch(/you should|you need to|start doing|try adding|\?|https?:\/\//iu)
+            expect(result.finalMessage.split(/\s+/u).length).toBeLessThan(180)
+          }
+        } finally {
+          await removeRealCodexTemporaryPath(workingDirectory)
+        }
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
 })
 
 describeRealCodex('real Codex weekly health insight Journal evidence e2e', () => {
