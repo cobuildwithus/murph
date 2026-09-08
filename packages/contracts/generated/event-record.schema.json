@@ -10225,9 +10225,16 @@
                     "maxLength": 4000
                   },
                   "memberRepsPerSet": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 999
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 999
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "targetWeightPerSet": {
                     "type": "number",

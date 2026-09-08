@@ -671,7 +671,8 @@ export const workoutExerciseSchema = z
     mode: workoutExerciseModeSchema.optional(),
     unitOverride: workoutLoadUnitSchema.optional(),
     note: boundedString(1, 4000).optional(),
-    memberRepsPerSet: integerSchema(1, 999).optional(),
+    // Omitted means unestablished; null records an explicit member withdrawal.
+    memberRepsPerSet: integerSchema(1, 999).nullable().optional(),
     targetWeightPerSet: numberSchema(0.01, 9999).multipleOf(0.01).optional(),
     targetWeightUnit: workoutLoadUnitSchema.optional(),
     setPlanIsFinite: z.boolean().optional(),

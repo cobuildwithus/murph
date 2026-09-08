@@ -4886,8 +4886,10 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     const selected = deliveries.at(-1) ?? null
     const projectedDeliveries =
       projectAssistantAutoReplyUnanchoredPriorDeliveries({
-        deliveries,
+        deliveries: fresh,
         sessionId: input.session?.sessionId ?? null,
+        settledThrough: routeState.settledThrough,
+        threadIsDirect: input.input.conversation.threadIsDirect,
       })
     return {
       claim: selected === null
@@ -5424,11 +5426,40 @@ function findLatestAssistantAutoReplyContextDecision<
 function projectAssistantAutoReplyUnanchoredPriorDeliveries(input: {
   deliveries: readonly AssistantAutoReplyMatchingOutboxDelivery[]
   sessionId: string | null
+  settledThrough: AssistantAutoReplyDeliveryOrder | null
+  threadIsDirect: boolean | null
 }): AssistantAutoReplyMatchingOutboxDelivery[] {
   const contextDecisionIntentId =
     findLatestAssistantAutoReplyContextDecision(input.deliveries)?.intentId ??
       null
   return input.deliveries.flatMap((delivery) => {
+    if (
+      input.settledThrough !== null &&
+      compareAssistantAutoReplyDeliveryOrders(
+        delivery.order,
+        input.settledThrough,
+      ) <= 0
+    ) {
+      if (
+        input.threadIsDirect === true &&
+        delivery.intentId === contextDecisionIntentId &&
+        delivery.automationContextReferences?.length === 1 &&
+        delivery.automationContextReferences[0]?.entityKind === 'activity_session'
+      ) {
+        // Consumption prevents replaying a delivered message, not continuing its
+        // exact workout. Old reminder text and occurrence annotations must not
+        // become a new completion request.
+        return [{
+          ...delivery,
+          automationId: null,
+          message: null,
+          plannedOccurrenceAt: null,
+          scheduledOccurrenceAt: null,
+          supportSeriesId: null,
+        }]
+      }
+      return []
+    }
     const decisionOwnedDelivery =
       delivery.automationContextReferences === null ||
         delivery.intentId === contextDecisionIntentId

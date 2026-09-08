@@ -116,6 +116,14 @@ test('workout result contracts retain exercise-owned live tracking facts', async
   assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
   assert.equal(parsed.note, 'Eight set workout')
 
+  const withdrawn = workoutAddResultSchema.parse({
+    ...parsed,
+    workout: {
+      exercises: [{ ...parsed.workout?.exercises[0], memberRepsPerSet: null }],
+    },
+  })
+  assert.equal(withdrawn.workout?.exercises[0]?.memberRepsPerSet, null)
+
   const noteLess = workoutAddResultSchema.parse({
     ...parsed,
     note: null,

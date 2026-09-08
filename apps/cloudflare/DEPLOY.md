@@ -833,6 +833,13 @@ finite workout through stored repetitions, terse final-set completion, automatic
 closure, and a subsequent workout start. Monitor bounded hosted-runtime error
 aggregates for strict workout parse failures and rejected workout CLI commands.
 
+The repetition-rule recovery update uses `memberRepsPerSet: null` for an
+explicit withdrawal; omission remains unestablished legacy state. Deploy every
+strict reader with this nullable contract before emitting a clear, and treat
+that compatible bundle as the rollback floor after the first null write. The
+controlled workout check must also clear a rule, reread it, and confirm a later
+countless completion cannot recover the withdrawn number from saved context.
+
 ## Public Goal Lineage Rollout
 
 The public Goal guide release adds optional `commonsGoalRef` lineage to the
