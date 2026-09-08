@@ -1,6 +1,6 @@
 # Diagnosable terminal Linq recovery
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -68,5 +68,13 @@ Updated: 2026-09-08
 - Complexity diff passes with no new debt; existing store/route hotspots were
   inspected. Independent read-only audit and parent diff review found no
   remaining serious patch issues.
-- Remaining: scoped commits, final external PR review, exact-head CI and
-  mergeability proof. Production deployment and live resend are out of scope.
+- PR #3044 contains the scoped fix and changelog. Final external review passed
+  on `deb1f3c3396cfe206ab9ae83468f095ff306101e` with no qualifying findings;
+  response digest and GPT-6 Pro model metadata were validated locally.
+- All required CI checks, all four Web test shards, Web build and release
+  typecheck passed on the reviewed head. Final metadata-only commit CI remains
+  the PR completion gate. Merge-tree proof against current main is clean.
+- Parent final review found no remaining serious issues. The final owner-doc
+  wording clarifies that attemptClaimed describes the current evaluation.
+  Production deployment and live resend remain out of scope.
+Completed: 2026-09-08

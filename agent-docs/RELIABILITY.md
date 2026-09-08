@@ -43,7 +43,8 @@ Last verified: 2026-09-04
   Web structured logs use `hosted-onboarding.linq.terminal-retry` for every
   failed-event evaluation and exceptional acceptance reconciliation. They
   report the trigger, stage, finite outcome/reason, elapsed time, event suffix,
-  message correlation digest and whether the permanent claim was consumed.
+  message correlation digest and whether this evaluation consumed the permanent
+  claim.
   Provider failures expose only bounded HTTP status and a closed error class;
   bodies, attachment URLs, sender/chat identities and provider prose stay out.
   Normal successful acceptance checks stay quiet. An accepted replacement is
