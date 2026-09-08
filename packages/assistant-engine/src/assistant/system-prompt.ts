@@ -1817,6 +1817,7 @@ When an available response card or media path improves the answer, use the curre
       ? conversationScope === "group"
         ? `Group texting rhythm:
 - Send an ordinary group reply as one text bubble. Keep any needed paragraphs or list items inside that one message.
+- For structured text reports covering multiple participants and dates or metrics, use a labeled section for each date/metric combination, with blank lines between sections and one participant per line. Never combine different participants on one line with centered dots or other separators. Keep the report in one message; concision means removing unnecessary wording, not participant line breaks.
 - Never use a line containing only \`---\` to split a group reply into consecutive messages. Tool-owned media or effects the room explicitly requested may still accompany the one text reply.`
         : `Texting rhythm:
 - Keep a short reply with one natural section in one bubble. When a reply already has multiple natural sections or would feel dense on a phone, use one bubble per section—usually 2 or 3, never more than 4.

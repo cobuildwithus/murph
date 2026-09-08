@@ -64,6 +64,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
+import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
 import {
   listEntitySchema,
   showResultSchema,
@@ -8475,6 +8476,175 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(result.finalMessage).not.toMatch(
           /no (?:usable |visible |shared )?workouts?|not (?:available|shared|showing)|sync (?:failed|error)/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'keeps four-person scheduled sleep and steps reports in separate participant rows',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-report-rows-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildScheduledAutomationDeveloperInstructions(
+              'group',
+              'shared_read',
+            ),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  status: 'ok',
+                  requestedProjectionScopeKeys: ['sleep-duration-days.v0', 'steps-days.v0'],
+                  members: ['Avery', 'Jordan', 'Casey', 'Morgan'].map((displayName, index) => ({
+                    displayName,
+                    currentTurnHandles: [],
+                    memberId: `member_report_${index}`,
+                    participantId: `participant_report_${index}`,
+                    projections: [
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'sleep-duration-days.v0' },
+                        projectionScopeKey: 'sleep-duration-days.v0',
+                        records: ['2026-08-03', '2026-08-04'].map((date, day) => ({
+                          recordKey: date,
+                          occurredAt: `${date}T00:00:00.000Z`,
+                          data: {
+                            date,
+                            metricKey: 'total-sleep-minutes',
+                            unit: 'minutes',
+                            value: 395 + index * 17 + day * 30,
+                          },
+                        })),
+                      },
+                      {
+                        dataStatus: 'available',
+                        grantStatus: 'granted',
+                        grantedAt: '2026-07-01T12:00:00.000Z',
+                        projectionScope: { projectionKind: 'steps-days.v0' },
+                        projectionScopeKey: 'steps-days.v0',
+                        records: [{
+                          recordKey: '2026-08-04',
+                          occurredAt: '2026-08-04T00:00:00.000Z',
+                          data: { date: '2026-08-04', metricKey: 'steps', unit: 'count', value: 6100 + index * 1320 },
+                        }],
+                      },
+                    ],
+                  })),
+                } satisfies AssistantHostedGroupSharedReadResponse
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation recipe:',
+            'Prepare the daily group check-in using the shared data. Cover sleep on August 3 and August 4 separately, then steps on August 4. Include every member and their values. The agreed targets are at least 7 hours of sleep and at least 8,000 steps.',
+            'Room preference: keep the recap brief, label what each part covers, and use ✅ for meeting a target and ❌ for falling short.',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name
+        )
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: expect.arrayContaining([
+              { projectionKind: 'sleep-duration-days.v0' },
+              { projectionKind: 'steps-days.v0' },
+            ]),
+          },
+        })
+        expect(sharedRequests).toHaveLength(1)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter(
+          (action) => action.kind === 'dynamic',
+        )).toHaveLength(1)
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a group report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        expect(reply).not.toMatch(/·|\|[^\n]+\||^\s*---\s*$/mu)
+        const names = ['Avery', 'Jordan', 'Casey', 'Morgan']
+        const sections = reply.split(/\n\s*\n/u).filter(
+          (section) => names.some((name) => section.includes(name)),
+        )
+        expect(sections).toHaveLength(3)
+        for (const [sectionIndex, section] of sections.entries()) {
+          const lines = section.split('\n')
+          const heading = lines[0] ?? ''
+          expect(heading).toMatch(sectionIndex < 2 ? /sleep/iu : /steps/iu)
+          expect(heading).toMatch(sectionIndex === 0 ? /(?:Aug(?:ust)?\.?\s+0?3|0?8[/-]0?3)\b/iu : /(?:Aug(?:ust)?\.?\s+0?4|0?8[/-]0?4)\b/iu)
+          const rows = lines.filter((line) => names.some((name) => line.includes(name)))
+          expect(rows).toHaveLength(4)
+          for (const [index, name] of names.entries()) {
+            const matches = rows.filter((line) => line.includes(name))
+            expect(matches).toHaveLength(1)
+            const row = matches[0] ?? ''
+            expect(names.filter((candidate) => row.includes(candidate))).toEqual([name])
+            const value = sectionIndex < 2
+              ? 395 + index * 17 + sectionIndex * 30
+              : 6100 + index * 1320
+            if (sectionIndex < 2) {
+              const hours = Math.floor(value / 60)
+              const minutes = value % 60
+              expect(row).toMatch(new RegExp(`${hours}\\s*(?:h(?:ours?)?\\s*0?${minutes}\\s*m(?:in(?:utes?)?)?|:0?${minutes})`, 'iu'))
+            } else {
+              expect(row.replaceAll(',', '')).toContain(String(value))
+            }
+            expect(row).toContain(value >= (sectionIndex < 2 ? 420 : 8000) ? '✅' : '❌')
+          }
+        }
+        process.stdout.write(`[group-report-rows-e2e] ${JSON.stringify({
+          model: config.model, sharedReadCount: sharedReads.length, reply,
+        })}\n`)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
