@@ -12,7 +12,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
-import { buildCalendarEventUrl, goalMetricTargetSchema } from '@murphai/contracts'
+import { buildCalendarEventUrl, compactTableCardV1Bounds, goalMetricTargetSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
@@ -61,6 +61,7 @@ import {
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL,
   MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_DATA_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -103,7 +104,9 @@ import {
 } from '../src/assistant/group-challenge-response-card-schema.ts'
 import {
   buildAssistantSystemPrompt,
+  buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
+import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
 } from '../src/assistant/first-contact-welcome.ts'
@@ -340,7 +343,7 @@ function waitForDeferredExecResponses(): ScriptedResponse[] {
 
 interface ScriptedStub {
   baseUrl: string
-  captureProviderRequestDiagnostics(): void
+  captureProviderRequestDiagnostics(options?: { completeInput?: boolean }): void
   close(): Promise<void>
   completedResponseLabelsSinceBaseline(): string[]
   markRequestBaseline(): void
@@ -351,6 +354,7 @@ interface ScriptedStub {
 }
 
 interface ScriptedProviderRequestSummary {
+  completeProviderInput?: { json: string; excludedTransportFields: string[] }
   customToolCallOutputs?: string[]
   functionCallOutputs?: string[]
   imageWidths?: number[]
@@ -3758,15 +3762,22 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
       )).toEqual([])
       expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
         includesToolSearch: toolMode === 'native',
+        includesResponseCardCompactTableShape: false,
       })
 
+      // The fix exposes existing bounds; it must not relax their real owner.
+      expect(compactTableCardV1Bounds).toMatchObject({ rows: 8, columns: 4, cellValue: 32 })
       const nominal = MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema.properties.card.anyOf[1]
-      expect(nominal.properties.rows.maxItems).toBe(8)
-      expect(nominal.properties.rows.items.properties.values.items.maxLength).toBe(32)
+      expect(nominal.properties.rows.maxItems).toBe(compactTableCardV1Bounds.rows)
+      expect(nominal.properties.columns.maxItems).toBe(compactTableCardV1Bounds.columns)
+      expect(nominal.properties.rows.items.properties.values.maxItems).toBe(compactTableCardV1Bounds.columns)
+      expect(nominal.properties.rows.items.properties.values.items.maxLength).toBe(compactTableCardV1Bounds.cellValue)
+      let providerText: string
+      let providerSchemaText: string
       let providerEvidence: Record<string, unknown>
       if (toolMode === 'native') {
-        // Read the request AFTER real App Server discovery/serialization, not
-        // thread/start input or a test-owned schema/TypeScript converter.
+        // Read AFTER real App Server discovery/serialization, not thread/start
+        // input or a test-owned schema/TypeScript converter.
         const tool = (summaries[1]?.toolSearchOutputTools ?? [])
           .flatMap((candidate) => {
             const record = readRecord(candidate)
@@ -3787,53 +3798,335 @@ text("SYNTHETIC_TABLE_METADATA_LENGTH=" + tool.description.length + "\\n" + tool
         expect(generic, 'provider-visible generic table branch').toBeDefined()
         const properties = readRecord(generic?.properties)
         const rows = readRecord(properties?.rows)
+        const columns = readRecord(properties?.columns)
         const rowProperties = readRecord(readRecord(rows?.items)?.properties)
         const cell = readRecord(readRecord(rowProperties?.values)?.items)
         expect(rows?.type).toBe('array')
+        expect(columns?.type).toBe('array')
         expect(cell?.type).toBe('string')
+        providerText = readString(tool?.description) ?? ''
+        providerSchemaText = JSON.stringify(generic)
         providerEvidence = {
           source: 'provider input.tool_search_output.tools',
           rowMaxItems: rows?.maxItems ?? null,
+          columnMaxItems: columns?.maxItems ?? null,
           cellMaxLength: cell?.maxLength ?? null,
-          genericTableSchema: generic,
-          cardDescription: card?.description ?? null,
-          toolDescription: tool?.description ?? null,
+          descriptionLength: providerText.length,
         }
       } else {
         const output = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
         const captured = /SYNTHETIC_TABLE_METADATA_LENGTH=(\d+)\n([\s\S]*?)\nSYNTHETIC_TABLE_METADATA_END/u.exec(output)
-        expect(captured, 'complete, untruncated provider-visible metadata').not.toBeNull()
-        const metadata = captured?.[2] ?? ''
-        expect(metadata.length).toBe(Number(captured?.[1]))
-        expect(metadata).toContain('exec tool declaration:')
-        const declaration = metadata.split('exec tool declaration:').slice(1).join('exec tool declaration:')
-        expect(declaration).toContain('murph__attach_response_card')
-        for (const field of ['compact_table', 'rowHeader', 'columns', 'rows', 'values']) {
-          expect(declaration).toContain(field)
-        }
+        expect(captured !== null, 'complete, untruncated provider-visible metadata').toBe(true)
+        providerText = captured?.[2] ?? ''
+        expect(providerText.length).toBe(Number(captured?.[1]))
+        expect(providerText.includes('exec tool declaration:')).toBe(true)
+        const declaration = providerText.split('exec tool declaration:').slice(1).join('exec tool declaration:')
+        providerSchemaText = declaration
+        const declarationComplete = [
+          'murph__attach_response_card', 'compact_table', 'rowHeader', 'columns', 'rows', 'values',
+        ].every((field) => declaration.includes(field))
+        expect(declarationComplete).toBe(true)
         providerEvidence = {
           source: 'provider input.custom_tool_call_output: ALL_TOOLS.description',
-          // These are observations, not claims that a bare numeral proves a
-          // field-specific bound. The complete declaration/prose is evidence.
-          constraintLines: metadata.split('\n').filter((line) =>
-            /maxLength|maxItems|\b(?:8|32)\b/u.test(line)
-          ),
-          toolMetadata: metadata,
+          metadataLength: providerText.length,
+          declarationLength: declaration.length,
+          declarationComplete,
         }
+      }
+      // Scope the proof to this tool's generic-table guidance, not unrelated
+      // nutrition/workout numerals or a bare 8/32 elsewhere in the declaration.
+      const guidance = /For generic compact_table only \([^)]*\): .*?Never claim attachment without success\./u.exec(providerText.replace(/\s+/gu, ' '))?.[0] ?? ''
+      const clauses = {
+        genericOnly: guidance.includes('rowHeader/columns/rows, not structured workouts'),
+        rows: guidance.includes(`card.rows has at most ${compactTableCardV1Bounds.rows} rows`),
+        columns: guidance.includes(`card.columns at most ${compactTableCardV1Bounds.columns} columns`),
+        cells: guidance.includes(`each card.rows[].values[] string at most ${compactTableCardV1Bounds.cellValue} characters`),
+        preserveMeaning: /Before calling, use concise labels and cells only when they preserve all meaning/u.test(guidance),
+        completeTextFallback: /if required rows or exact wording cannot fit, give complete ordinary text and no card/u.test(guidance),
+        noLossOrInvention: /Never omit or invent rows, merge explicitly separate items, or truncate meaning to fit/u.test(guidance),
+        correctedRetryOnly: /retry only with a fixable field corrected; never repeat identical invalid arguments/u.test(guidance),
+        truthfulAttachment: /Never claim attachment without success/u.test(guidance),
       }
       const evidence = JSON.stringify({
         toolMode,
-        nominalBounds: { rows: 8, cellValue: 32 },
-        initialCompactTableShape: summaries[0]?.providerRequestDiagnostics
-          ?.includesResponseCardCompactTableShape ?? null,
+        nominalBounds: { rows: nominal.properties.rows.maxItems, columns: nominal.properties.columns.maxItems, cellValue: nominal.properties.rows.items.properties.values.items.maxLength },
         providerEvidence,
+        schemaKeywordsPresent: { maxItems: providerSchemaText.includes('maxItems'), maxLength: providerSchemaText.includes('maxLength') },
+        clauses,
       })
-      // No request bodies, auth, prompts, home paths, or member data are logged.
-      // Fail rather than silently truncate declaration evidence on future drift.
-      expect(Buffer.byteLength(evidence, 'utf8')).toBeLessThan(60_000)
+      // Keep full synthetic metadata in memory only; print finite facts even on
+      // the red baseline. Do not dump the long nutrition/workout description.
+      expect(Buffer.byteLength(evidence, 'utf8')).toBeLessThan(2_500)
       process.stdout.write(`[compact-table-debug-provider] ${evidence}\n`)
+      expect(clauses).toEqual(Object.fromEntries(Object.keys(clauses).map((key) => [key, true])))
     },
   )
+
+  // Equality projection for this opt-in measurement only. These exact paths
+  // differed in all four pinned-App-Server fixture pairs; never scrub metadata
+  // wholesale or alter the raw capture used for byte counts and digests.
+  function normalizeCompactTableFirstInputForEquality(json: string): {
+    json: string
+    normalizedFields: string[]
+  } {
+    const body = readRecord(JSON.parse(json))
+    const input = body?.input
+    const metadata = readRecord(body?.client_metadata)
+    const encodedTurnMetadata = metadata?.['x-codex-turn-metadata']
+    if (!body || !Array.isArray(input) || !metadata || typeof encodedTurnMetadata !== 'string') {
+      throw new Error('Unexpected compact-table first-input metadata shape.')
+    }
+    const turnMetadataPath = 'client_metadata["x-codex-turn-metadata"]'
+    let turnMetadata: Record<string, unknown> | null
+    try {
+      turnMetadata = readRecord(JSON.parse(encodedTurnMetadata))
+    } catch {
+      throw new Error(`Expected a JSON object at ${turnMetadataPath}.`)
+    }
+    if (!turnMetadata || !Number.isSafeInteger(turnMetadata.turn_started_at_unix_ms)) {
+      throw new Error(`Expected an object with an integer timestamp at ${turnMetadataPath}.`)
+    }
+    const identities = [
+      ...Array.from({ length: 7 }, (_, index) =>
+        [readRecord(input[index]), 'id', `input[${index}].id`] as const),
+      ...['session_id', 'thread_id', 'turn_id', 'root_turn_id', 'x-codex-window-id'].map((key) =>
+        [metadata, key, `client_metadata.${key}`] as const),
+      ...['session_id', 'thread_id', 'turn_id', 'window_id', 'context_window_id', 'root_turn_id'].map((key) =>
+        [turnMetadata, key, `${turnMetadataPath}.${key}`] as const),
+    ]
+    for (const [record, key, field] of identities) {
+      const value = record?.[key]
+      if (!record || typeof value !== 'string' || value.length === 0) {
+        throw new Error(`Expected a nonempty identity string at ${field}.`)
+      }
+      record[key] = '<generated-identity>'
+    }
+    turnMetadata.turn_started_at_unix_ms = 0
+    // Decode only in the equality projection; retain every static nested field.
+    metadata['x-codex-turn-metadata'] = turnMetadata
+    return {
+      json: JSON.stringify(body, (_key, value: unknown) => {
+        const record = readRecord(value)
+        return record
+          ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
+          : value
+      }),
+      normalizedFields: [...identities.map(([, , field]) => field), `${turnMetadataPath}.turn_started_at_unix_ms`],
+    }
+  }
+
+  it('compact-table fix: first-input identity normalization preserves meaningful differences', () => {
+    const fixture = (identity: string) => ({
+      instructions: 'SYNTHETIC complete comparison.',
+      input: Array.from({ length: 8 }, (_, index) => ({
+        id: index < 7 ? `msg_${identity.repeat(36)}` : 'unchanged-eighth-item-id',
+        type: 'message',
+        role: index === 0 ? 'developer' : 'user',
+        content: [{ type: 'input_text', text: `SYNTHETIC item ${index}` }],
+      })),
+      tools: [{ type: 'function', name: 'synthetic_tool', parameters: { type: 'object' } }],
+      client_metadata: {
+        session_id: identity, thread_id: identity, turn_id: identity,
+        root_turn_id: identity, 'x-codex-window-id': identity,
+        static_client: 'synthetic',
+        'x-codex-turn-metadata': JSON.stringify({
+          session_id: identity, thread_id: identity, turn_id: identity,
+          window_id: identity, context_window_id: identity, root_turn_id: identity,
+          turn_started_at_unix_ms: identity === 'a' ? 1 : 2,
+          static_route: { mode: 'synthetic' },
+        }),
+      },
+    })
+    const baseline = JSON.stringify(fixture('a'))
+    const candidate = JSON.stringify(fixture('b'))
+    expect(Buffer.byteLength(candidate)).toBe(Buffer.byteLength(baseline))
+    expect(candidate === baseline).toBe(false)
+    const normalized = normalizeCompactTableFirstInputForEquality(baseline)
+    expect(normalizeCompactTableFirstInputForEquality(candidate)).toEqual(normalized)
+    const changes: Array<(body: ReturnType<typeof fixture>) => void> = [
+      (body) => { body.instructions += ' Changed.' },
+      (body) => { body.tools[0]!.parameters.type = 'string' },
+      (body) => { body.input[0]!.content[0]!.text += ' Changed.' },
+      (body) => { body.input[0]!.role = 'system' },
+      (body) => { body.input.reverse() },
+      (body) => { body.input[7]!.id = 'changed-eighth-item-id' },
+      (body) => { body.client_metadata.static_client = 'changed' },
+      (body) => {
+        body.client_metadata['x-codex-turn-metadata'] = body.client_metadata['x-codex-turn-metadata']
+          .replace('"synthetic"', '"changed"')
+      },
+    ]
+    for (const change of changes) {
+      const body = fixture('b')
+      change(body)
+      expect(normalizeCompactTableFirstInputForEquality(JSON.stringify(body)).json === normalized.json).toBe(false)
+    }
+    for (const invalidMetadata of ['not-json', '[]', '{}']) {
+      const body = fixture('b')
+      body.client_metadata['x-codex-turn-metadata'] = invalidMetadata
+      expect(() => normalizeCompactTableFirstInputForEquality(JSON.stringify(body))).toThrow()
+    }
+  })
+
+  // Optional, synthetic, free measurement. Each pair uses fresh App Server
+  // threads with the SAME home/workspace, production prompt layers and full
+  // route tool array. Only the private description differs; no converter fake.
+  it.skipIf(process.env.MURPH_MEASURE_COMPACT_TABLE_INPUT !== '1').each([
+    { scope: 'direct', toolMode: 'native' },
+    { scope: 'direct', toolMode: 'code-only' },
+    { scope: 'group', toolMode: 'native' },
+    { scope: 'group', toolMode: 'code-only' },
+  ] as const)('compact-table fix: complete first provider input ($scope, $toolMode)', {
+    timeout: TURN_TIMEOUT_MS * 2,
+  }, async ({ scope, toolMode }) => {
+    const candidateDescription = MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+    const addedGuidance = /For generic compact_table only \([^)]*\): .*?Never claim attachment without success\. /u.exec(candidateDescription)?.[0]
+    if (!addedGuidance) throw new Error('Expected the candidate generic-table paragraph.')
+    const baselineDescription = candidateDescription.replace(addedGuidance, '')
+    // Bind the ablation to the exact pre-fix owner, not a reduced description.
+    // This optional before/after experiment is tied to this fix packet.
+    expect(createHash('sha256').update(baselineDescription).digest('hex')).toBe(
+      '625446f7e99ab9079baf18e12e8c29b44402cf1f1f557569c54a5bdc6ccbda18',
+    )
+    const groupConversation = scope === 'group'
+    const tools = resolveMurphDynamicTools({
+      allowFinishWithoutReply: true,
+      assistantConfigurationAvailable: !groupConversation,
+      automationAvailable: true,
+      groupAssistantConfigurationAvailable: groupConversation,
+      groupAvailable: !groupConversation,
+      groupChallengeResponseCardsAvailable: groupConversation,
+      groupSharedReadAvailable: groupConversation,
+      imageGenerationAvailable: false,
+      progressUpdatesAvailable: false,
+      responseCardsAvailable: !groupConversation,
+    })
+    const baselineTools = tools.map((tool) => tool === MURPH_ATTACH_RESPONSE_CARD_TOOL
+      ? { ...tool, description: baselineDescription }
+      : tool)
+    expect(tools.includes(MURPH_ATTACH_RESPONSE_CARD_TOOL)).toBe(!groupConversation)
+    if (groupConversation) {
+      expect(tools.includes(MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL)).toBe(true)
+      expect(baselineTools).toEqual(tools)
+    }
+    const layers = buildAssistantSystemPromptLayers({
+      assistantCliContract: null,
+      assistantHostedAutomationAvailable: true,
+      assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+      assistantProgressUpdatesAvailable: false,
+      assistantStyleSettingsAvailable: false,
+      channel: 'linq',
+      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: scope,
+      currentLocalDate: '2026-09-08',
+      currentInstant: '2026-09-08T16:00:00.000Z',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      ordinaryInboundTurn: true,
+    })
+    const developerInstructions = [
+      layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt,
+    ].join('\n\n')
+    const prompt = [
+      layers.dynamicTurnContextPrompt, 'Compare two synthetic routes: Amber takes ten minutes; Birch takes twenty minutes.',
+    ].join('\n\n')
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    if (toolMode === 'code-only') {
+      const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
+      if (!catalog || !Array.isArray(catalog.models)) throw new Error('Expected the bundled model catalog.')
+      for (const candidate of catalog.models) {
+        const model = readRecord(candidate)
+        if (model) model.tool_mode = 'code_mode_only'
+      }
+      await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
+    }
+    const captures = []
+    for (const [phase, dynamicTools] of [['baseline', baselineTools], ['candidate', tools]] as const) {
+      await stopWarmCodexAppServer()
+      scenario.stub.markRequestBaseline()
+      scenario.stub.captureProviderRequestDiagnostics({ completeInput: true })
+      scenario.stub.queue({ text: 'SYNTHETIC_FIRST_INPUT_CAPTURED' })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        developerInstructions,
+        dynamicTools,
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
+        excludeResumeTurns: true,
+        groupConversation,
+        prompt,
+      })
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+      expect(result.finalMessage).toBe('SYNTHETIC_FIRST_INPUT_CAPTURED')
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.jsonEvents.filter((event) => readRecord(event)?.method === 'item/tool/call')).toEqual([])
+      const capture = scenario.stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      if (!capture) throw new Error('Missing complete first provider input.')
+      // Inspect actual input, not only the supplied thread/start parameters.
+      for (const text of [MURPH_CODEX_BASE_INSTRUCTIONS, developerInstructions, prompt]) {
+        expect(capture.json.includes(JSON.stringify(text.trim()).slice(1, -1))).toBe(true)
+      }
+      const body = readRecord(JSON.parse(capture.json))
+      expect(body?.model).toBe(SCRIPTED_MODEL)
+      expect(Array.isArray(body?.input)).toBe(true)
+      const directTools = Array.isArray(body?.tools)
+        ? body.tools.map(readRecord)
+        : []
+      const additionalTools = Array.isArray(body?.input)
+        ? body.input
+          .map(readRecord)
+          .filter((item) => item?.type === 'additional_tools')
+          .flatMap((item) =>
+            Array.isArray(item?.tools) ? item.tools.map(readRecord) : []
+          )
+        : []
+      const visibleTools = [...directTools, ...additionalTools]
+      if (visibleTools.length === 0) {
+        throw new Error('Expected the complete provider tool array.')
+      }
+      expect(capture.json.includes(addedGuidance)).toBe(false)
+      captures.push({
+        ...capture,
+        phase,
+        bytes: Buffer.byteLength(capture.json, 'utf8'),
+        sha256: createHash('sha256').update(capture.json).digest('hex'),
+        equalityInput: normalizeCompactTableFirstInputForEquality(capture.json),
+      })
+    }
+    const [baseline, candidate] = captures
+    if (!baseline || !candidate) throw new Error('Expected both complete first-input captures.')
+    // Print counts/digests only, including on mismatch; never dump full prompts,
+    // instructions, tool descriptions, workspace paths, or transport identities.
+    process.stdout.write(`[compact-table-first-input] ${JSON.stringify({
+      scope, toolMode, model: SCRIPTED_MODEL, toolCount: tools.length,
+      raw: {
+        method: 'Complete decoded provider request, recursively sorted JSON keys; only top-level prompt_cache_key omitted. All other identities/timestamps retained.',
+        baseline: { utf8Bytes: baseline.bytes, sha256: baseline.sha256 },
+        candidate: { utf8Bytes: candidate.bytes, sha256: candidate.sha256 },
+        utf8ByteDelta: candidate.bytes - baseline.bytes,
+        identical: candidate.json === baseline.json,
+        excludedTransportFields: candidate.excludedTransportFields,
+      },
+      equality: {
+        method: 'Decode x-codex-turn-metadata; normalize only the listed identity/timestamp fields. Preserve every other property/value and array order.',
+        normalizedFields: candidate.equalityInput.normalizedFields,
+        baselineSha256: createHash('sha256').update(baseline.equalityInput.json).digest('hex'),
+        candidateSha256: createHash('sha256').update(candidate.equalityInput.json).digest('hex'),
+        identical: candidate.equalityInput.json === baseline.equalityInput.json,
+      },
+      targetTokenizer: { countBaseline: null, countCandidate: null, delta: null, reason: 'No exact Terra tokenizer is configured for this measurement; synthetic provider usage is not tokenization.' },
+    })}\n`)
+    expect(candidate.excludedTransportFields).toEqual(baseline.excludedTransportFields)
+    expect(candidate.bytes - baseline.bytes).toBe(0)
+    expect(candidate.equalityInput.json === baseline.equalityInput.json, 'complete first input equality apart from the listed identities/timestamp').toBe(true)
+  })
 
   it('documents why pinned Codex code-only metadata cannot replace native automation schema search', {
     timeout: TURN_TIMEOUT_MS,
@@ -10477,6 +10770,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   let requestBaseline = 0
   let requestSummaryBaseline = 0
   let providerRequestDiagnosticsEnabled = false
+  let completeProviderInputEnabled = false
 
   const server: Server = createServer(async (request, response) => {
     if (request.method !== 'POST' || request.url !== '/v1/responses') {
@@ -10495,6 +10789,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     requestSummaries.push(readScriptedProviderRequestSummary(
       requestBody,
       providerRequestDiagnosticsEnabled,
+      completeProviderInputEnabled,
     ))
     const scriptedResponseIndex = queuedResponses.findIndex((candidate) =>
       scriptedResponseMatchesRequest(candidate, requestBody)
@@ -10625,8 +10920,9 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
-    captureProviderRequestDiagnostics: () => {
+    captureProviderRequestDiagnostics: (options) => {
       providerRequestDiagnosticsEnabled = true
+      completeProviderInputEnabled = options?.completeInput === true
     },
     close: async () => {
       await new Promise<void>((resolve) => {
@@ -10638,6 +10934,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     markRequestBaseline: () => {
       completedResponseLabels.splice(0)
       providerRequestDiagnosticsEnabled = false
+      completeProviderInputEnabled = false
       requestBaseline = responsesRequestCount
       requestSummaryBaseline = requestSummaries.length
     },
@@ -10667,6 +10964,7 @@ function scriptedResponseMatchesRequest(
 function readScriptedProviderRequestSummary(
   requestBody: string,
   includeDiagnostics: boolean,
+  includeCompleteInput = false,
 ): ScriptedProviderRequestSummary {
   const body = readRecord(JSON.parse(requestBody))
   const customToolCallOutputs = Array.isArray(body?.input)
@@ -10716,7 +11014,24 @@ function readScriptedProviderRequestSummary(
       )
     : []
   const tools = [...directTools, ...additionalTools]
+  // Opt-in local fake-provider measurement only. Keep ALL request fields and
+  // values except the new thread's transport cache identity. Canonicalize JSON
+  // object order, not array order or model-visible text. No request is printed.
+  let completeProviderInput: ScriptedProviderRequestSummary['completeProviderInput']
+  if (includeCompleteInput && body) {
+    const { prompt_cache_key: _cacheIdentity, ...completeInput } = body
+    completeProviderInput = {
+      json: JSON.stringify(completeInput, (_key, value: unknown) => {
+        const record = readRecord(value)
+        return record
+          ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
+          : value
+      }),
+      excludedTransportFields: Object.hasOwn(body, 'prompt_cache_key') ? ['prompt_cache_key'] : [],
+    }
+  }
   return {
+    ...(completeProviderInput ? { completeProviderInput } : {}),
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     ...(imageWidths.length > 0 ? { imageWidths } : {}),

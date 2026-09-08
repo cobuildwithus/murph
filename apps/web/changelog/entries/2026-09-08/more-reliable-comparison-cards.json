@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "more-reliable-comparison-cards",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable comparison cards",
+    "summary": "Murph makes comparison cards more reliably and uses a complete text answer when the details do not fit.",
+    "relevanceTags": [
+      "conversations"
+    ],
+    "sourcePullRequests": [3059]
+  }
+}
