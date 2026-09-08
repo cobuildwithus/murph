@@ -59,6 +59,9 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeBucketStartedAt: wakeBucketStartedAtIso,
     wakeLimit,
     selectedDueConnections: selectedDueConnections.length,
+    orphanedDirtyRecoveryCount: selectedDueConnections.filter(
+      (connection) => connection.orphanedDirtyRecoveryKey !== undefined,
+    ).length,
   });
 
   let wakeAccepted = 0;
@@ -77,11 +80,19 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         wake = await requestWake({
           connectionId: dueConnection.connectionId,
           createdAt: nowIso,
-          eventId: buildHostedDeviceSyncScheduledReconcileWakeEventId({
-            connectionId: dueConnection.connectionId,
-            expectedConnectedAt: dueConnection.connectedAt,
-            nextReconcileAt: dueConnection.nextReconcileAt,
-          }),
+          eventId: [
+            buildHostedDeviceSyncScheduledReconcileWakeEventId({
+              connectionId: dueConnection.connectionId,
+              expectedConnectedAt: dueConnection.connectedAt,
+              nextReconcileAt: dueConnection.nextReconcileAt,
+            }),
+            // Reuse the scheduled sweep only after the durable mailbox proves
+            // no work owner remains. Bind recovery to the consumed lane
+            // frontier so unrelated checkpoints cannot create extra wakes.
+            ...(dueConnection.orphanedDirtyRecoveryKey
+              ? ["dirty-recovery", dueConnection.orphanedDirtyRecoveryKey]
+              : []),
+          ].join(":"),
           expectedConnectedAt: dueConnection.connectedAt,
           nextReconcileAt: dueConnection.nextReconcileAt,
           provider: dueConnection.provider,

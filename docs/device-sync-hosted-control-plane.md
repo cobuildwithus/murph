@@ -515,6 +515,34 @@ The current hosted runtime strategy is:
 
 This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
 
+When a checkpoint acknowledgement reports remaining dirty work after the
+observed batch drained, the connection-scoped mailbox item becomes a retained
+continuation. Its completed job hints are cleared; the next pass fetches current
+dirty work through the same authoritative connection. The continuation remains
+separate from foreground mailbox progress and is released after a clean ack.
+
+The existing bounded due-reconcile selection can also recover an orphaned dirty
+connection. It requires the system lane to be fully consumed, the workspace to
+confirm that exact handled frontier, and explicit empty continuation and pending
+projections. Only then does it append a recovery suffix derived from the consumed
+mailbox frontier to the ordinary scheduled wake identity. Repeated
+selection of that same state deduplicates; existing pending or retained owners
+keep the ordinary identity. Connection epoch, member access, consent, and signal
+admission still use their existing owners. This is not a new dirty-row scan.
+
+`device-sync.checkpoint_recorded` reports whether acknowledgements retained the
+mailbox owner and discovered new dirty work. Finished pass logs include incoming
+and outgoing retained-job counts, exact-payload acknowledgement counts, and
+member-scoped SHA-256 fingerprints of job identity and cursor metadata. Compare
+an outgoing fingerprint with the next incoming fingerprint to distinguish saved
+progress from replay; unchanged fingerprints alone do not prove a bug because
+future retries may legitimately retain the same cursor. Raw provider payloads,
+source identities, and cursor values are never emitted by these diagnostics.
+Deploy the Web log parser before the runtime that emits the new event. Both
+recovery changes otherwise use the existing wake and checkpoint contracts;
+older runtimes can process the recovery wake, but can still lose ownership in
+the acknowledgement race. No schema change or new rollback floor is introduced.
+
 The local device-sync SQLite schema is version 11. Its bounded
 `device_job.canonical_import_receipts_json` column is written atomically with
 job success from the exact normalized source/resource identities already

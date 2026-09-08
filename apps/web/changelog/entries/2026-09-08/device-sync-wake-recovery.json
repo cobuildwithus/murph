@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 110,
+  "item": {
+    "id": "device-sync-wake-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable background device sync",
+    "summary": "Device sync can recover when pending updates lose their scheduled wake.",
+    "details": "Updates that arrive as a sync finishes keep a follow-up wake so they can be processed automatically.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": []
+  }
+}
