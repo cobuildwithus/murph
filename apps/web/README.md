@@ -1514,7 +1514,16 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
 - Set `DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED=true` when admin
-  device-sync diagnostics should be available outside localhost.
+  device-sync diagnostics should be available outside localhost. Ops runtime
+  maintenance separates the shared Junction account from the selected source's
+  live status and Murph's latest data receipt. An operator can request one
+  account-wide refresh and inspect the status read performed afterward, or use
+  Check status for a provider-list read without a refresh. These narrow probes
+  skip historical-data scans. Provider-declared errors and empty refresh results
+  do not prove recovery, even inside a successful HTTP envelope. The client
+  deadline outlives Junction's requested refresh wait; timeouts report an unknown
+  outcome and never automatically replay the POST. Diagnostics do not rewrite
+  source state or data freshness; normal reconciliation and ingestion own them.
 
 ## Browser auth contract
 
