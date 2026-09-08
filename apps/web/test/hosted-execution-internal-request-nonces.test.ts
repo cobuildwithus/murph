@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -110,5 +111,53 @@ describe("hosted callback request nonce store", () => {
     expect(harness.create).not.toHaveBeenCalled();
     expect(harness.deleteMany).not.toHaveBeenCalled();
     expect(harness.transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a nonce uniqueness error during concurrent reindex without retrying", async () => {
+    const harness = createStoreHarness();
+    harness.queryRaw.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError(
+      "Synthetic nonce conflict",
+      {
+        clientVersion: "test",
+        code: "P2010",
+        meta: {
+          driverAdapterError: new Error("Synthetic adapter error", {
+            cause: {
+              originalCode: "23505",
+              kind: "UniqueConstraintViolation",
+              constraint: { fields: ["nonce_hash"] },
+            },
+          }),
+        },
+      },
+    ));
+
+    await expect(harness.store.consumeHostedCallbackRequestNonce(nonceInput))
+      .resolves.toBe(false);
+    expect(harness.queryRaw).toHaveBeenCalledTimes(1);
+    expect(harness.transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { originalCode: "23505", constraint: { fields: ["user_id"] } },
+    { originalCode: "23505", constraint: { fields: ["nonce_hash", "user_id"] } },
+    { originalCode: "23505", constraint: { fields: [] } },
+    { originalCode: "23505", constraint: { fields: "nonce_hash" } },
+    { originalCode: "23505", constraint: null },
+    { originalCode: "23505" },
+    { originalCode: "55P03", constraint: { fields: ["nonce_hash"] } },
+    null,
+  ])("propagates unproven or unrelated adapter failures: %j", async (cause) => {
+    const harness = createStoreHarness();
+    const failure = new Prisma.PrismaClientKnownRequestError("Synthetic failure", {
+      clientVersion: "test",
+      code: "P2010",
+      meta: { driverAdapterError: new Error("Synthetic adapter error", { cause }) },
+    });
+    harness.queryRaw.mockRejectedValueOnce(failure);
+
+    await expect(harness.store.consumeHostedCallbackRequestNonce(nonceInput))
+      .rejects.toBe(failure);
+    expect(harness.queryRaw).toHaveBeenCalledTimes(1);
   });
 });
