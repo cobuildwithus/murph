@@ -1,6 +1,7 @@
 ---
 title: 'Generated image live journey loses completion context on thread resume'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3078'
 ---
 
 ## Expected Behavior

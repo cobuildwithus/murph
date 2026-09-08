@@ -1,6 +1,7 @@
 ---
 title: 'Voice activity orb SVG precision mismatch warns during hydration'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3051'
 ---
 
 ## Expected Behavior
