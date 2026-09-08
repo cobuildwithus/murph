@@ -1453,6 +1453,15 @@ Last verified: 2026-09-04
   reconciliation path. An epoch-less legacy record or a replaced, missing,
   disconnected, or reauthorization-required connection has no cadence authority
   and drains without a Web write.
+  Companion upload admission permits at most 500 pending payload rows per
+  connection after insertion; exact replay at that cap remains a no-op. The
+  existing request-body, hydration-byte and 100-job execution limits remain
+  separate, so the larger buffer does not enlarge a runtime pass. Dirty-payload
+  hydration establishes the existing operation-scoped domain-root cache, so
+  payloads sharing a root perform one envelope read and KMS unwrap for that
+  user/domain/root identity. Per-payload authentication and row/byte limits still
+  apply; subsequent requests receive a fresh cache and scoped keys are wiped
+  on success or failure.
   Terminal failure uses the same replayable record. Web dirty rows separately
   remain authoritative until dirty resource/deletion jobs are terminally
   acknowledged. Because the device-sync SQLite store is intentionally excluded

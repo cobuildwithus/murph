@@ -2126,6 +2126,76 @@ test("batch private-field decrypt zeroizes invalid KMS plaintext and stops befor
   )).toBe(true);
 });
 
+test("a 500-payload dirty page unwraps each root once and preserves payload authentication", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const { sealHostedDeviceSyncDirtyPayloadJson } = await import("../src/lib/device-sync/prisma-store/dirty-payloads");
+  const { PrismaHostedDirtyConnectionStore } = await import("../src/lib/device-sync/prisma-store/dirty-connections");
+  const userId = "member-test-dirty-hydration";
+  const connectionId = "dsc_test_dirty_hydration";
+  const dirtyAt = new Date("2026-08-11T12:00:00.000Z");
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: tx.prisma,
+    reason: "test.dirty-hydration", userId });
+  const payloadRows = await runWithHostedDomainRootUnwrapCache(async () => {
+    const rows = [];
+    for (let index = 0; index < 500; index += 1) {
+      const id = `dsp_hydration_${index}`;
+      const dirtyRevision = BigInt(index + 1);
+      rows.push({ connectionId, dirtyRevision, id, provider: "junction",
+        resourceEncrypted: await sealHostedDeviceSyncDirtyPayloadJson({ connectionId, dirtyRevision,
+          payloadId: id, prisma: tx.prisma, provider: "junction", userId,
+          value: { count: 1, jobKind: "resource", payload: { webhookDataJson: JSON.stringify({ ordinal: index }) },
+            resource: "heartrate", resourceCategory: "timeseries", sourceProviderSlug: "garmin" } }),
+      });
+    }
+    return rows;
+  });
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+  const findPayloads = vi.fn(async () => payloadRows);
+  const prisma = {
+    ...counting.client,
+    $queryRaw: async (...args: Parameters<typeof tx.prisma.$queryRaw>) => {
+      const statement = args[0];
+      return "sql" in statement && statement.sql.includes('from "device_sync_dirty_connection"')
+        ? [{ connection_id: connectionId }]
+        : counting.client.$queryRaw(...args);
+    },
+    deviceSyncDirtyConnection: { findMany: async () => [{
+      connectionId, userId, provider: "junction", dirtyRevision: 500n, processedRevision: 0n,
+      createdAt: dirtyAt, updatedAt: dirtyAt, firstDirtyAt: dirtyAt, latestDirtyAt: dirtyAt,
+      dirtyResourcesJson: {}, eventCount: 500n, latestTraceId: null, latestEventType: null,
+      latestResourceCategory: null, resourceCategoryCountsJson: {}, sourceProviderCountsJson: {},
+      windowStart: null, windowEnd: null,
+    }] },
+    deviceSyncDirtyPayload: { findMany: findPayloads },
+  };
+  const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+  const readPage = () => store.listPendingDirtyConnectionsForUser({ connectionId, limit: 1, userId });
+  const expectedPayloads = payloadRows.map((_, ordinal) => JSON.stringify({ ordinal })).sort();
+  const decryptsBefore = decryptMetrics.calls.length;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const result = await readPage();
+    const resources = Object.values(result.items[0]?.dirtyResources ?? {});
+    expect(result.hasMore).toBe(false);
+    expect(resources.map((resource) => resource.payload?.webhookDataJson).sort()).toEqual(expectedPayloads);
+    expect(counting.readCount()).toBe(attempt);
+    expect(decryptMetrics.calls.length - decryptsBefore).toBe(attempt);
+    expect(decryptMetrics.returnedPlaintexts.every((key) => key.every((byte) => byte === 0))).toBe(true);
+  }
+  // Reusing a ciphertext for another row must still fail its per-payload AAD.
+  const secondCiphertext = payloadRows[1]!.resourceEncrypted;
+  payloadRows[1]!.resourceEncrypted = payloadRows[0]!.resourceEncrypted;
+  await expect(readPage()).rejects.toThrow();
+  expect(counting.readCount()).toBe(3);
+  expect(decryptMetrics.returnedPlaintexts.every((key) => key.every((byte) => byte === 0))).toBe(true);
+  payloadRows[1]!.resourceEncrypted = secondCiphertext;
+  expect(Object.values((await readPage()).items[0]?.dirtyResources ?? {})).toHaveLength(500);
+  expect(counting.readCount()).toBe(4);
+  expect(decryptMetrics.calls.length - decryptsBefore).toBe(4);
+  expect(findPayloads).toHaveBeenCalledTimes(4);
+});
+
 test("domain root unwraps are memoized inside the scoped cache and wiped at scope end", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const {
