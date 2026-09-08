@@ -29,6 +29,12 @@ production queue. PR #3070 supplies missing provider-readiness and follow-up
 diagnostics; its full runner rollout is blocked by the account quota issue
 documented in PR #3071. No private operational rows are included here.
 
+PR #3070 is merged at `631970ccd1d23c324a4ebc5a5725361ff62414ec`.
+Its final authored head passed all required CI checks and a validated full
+ReviewGPT audit. The diagnostic fields are not yet available in running member
+containers because the protected full release still needs account capacity.
+The existing hosted ops form also requires an authenticated operator session.
+
 ## Smallest correction to investigate
 
 Reuse the existing connection continuation and canonical scheduler. Derive
