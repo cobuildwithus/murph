@@ -215,6 +215,14 @@ export function createConnectCallbackNotice(
     };
   }
 
+  if (input.errorCode === "CALLBACK_PROOF_INVALID") {
+    return {
+      kind: "info",
+      title: "Check your connections",
+      message: "This return link can’t be used. Your current connections are shown below. If a device still needs connecting, start from its card.",
+    };
+  }
+
   // Error callbacks are taken straight from query params, so only a catalog
   // source and a recognizable code shape may reach the prefilled support mail.
   // Anything else is unverified text and is dropped rather than quoted back.
@@ -383,8 +391,6 @@ function describeDeviceSyncCallbackError(providerLabel: string, errorCode: strin
       return `${providerLabel} was not connected this time. You can try again whenever you're ready.`;
     case "OAUTH_STATE_INVALID":
       return `${providerLabel} gave us an expired or invalid return from the last attempt. Start a fresh connection and try again.`;
-    case "CALLBACK_PROOF_INVALID":
-      return `That return link did not match the browser you started in, so nothing was connected. Start ${providerLabel} again from this page.`;
     case "CALLBACK_SESSION_REQUIRED":
       return `You were signed out before ${providerLabel} finished connecting. Log in, then start the connection again.`;
     default:

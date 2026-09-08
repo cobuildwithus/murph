@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "device-return-link-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer device connection returns",
+    "summary": "Old device return links now show your current connections with calm guidance instead of a connection-failed warning.",
+    "details": "If a device still needs setup, start from its card on Connect. Existing connections keep their current status.",
+    "relevanceTags": ["device-sync"],
+    "sourcePullRequests": []
+  }
+}

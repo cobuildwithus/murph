@@ -17,10 +17,13 @@ import {
 } from "@/src/lib/device-sync/http";
 import {
   readHostedDeviceSyncCallbackState,
-  verifyHostedDeviceSyncCallbackProof,
+  readHostedDeviceSyncCallbackProofError,
 } from "@/src/lib/device-sync/browser-callback-proof";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
-import { reportHostedDeviceConnectFailure } from "@/src/lib/device-sync/connect-failure-alert";
+import {
+  reportHostedDeviceCallbackRejection,
+  reportHostedDeviceConnectFailure,
+} from "@/src/lib/device-sync/connect-failure-alert";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -42,28 +45,24 @@ export async function GET(
     const session = await requireActiveHostedAppSessionFromRequest(request);
     sessionMemberId = session.member.id;
     const state = readHostedDeviceSyncCallbackState(new URL(request.url));
-    if (
-      !state
-      || !verifyHostedDeviceSyncCallbackProof({
+    const proofError = readHostedDeviceSyncCallbackProofError({
+      memberId: session.member.id,
+      provider: providerName,
+      request,
+      sessionId: session.sessionId,
+      state,
+    });
+    if (proofError) {
+      reportHostedDeviceCallbackRejection({
+        errorCode: proofError,
         memberId: session.member.id,
         provider: providerName,
-        request,
-        sessionId: session.sessionId,
-        state,
-      })
-    ) {
+      });
       // Discard only this active member's still-unconsumed admission. A
       // foreign-owner URL stays non-mutating, while a consumed claim remains
       // owned by the callback that may already have completed provider work.
       await publicIngress.discardConnectionCallback(providerName, {
         expectedOwnerId: session.member.id,
-      });
-      // A discarded callback writes no connection error, so without this the
-      // member is stuck at a wall that leaves no trace anywhere.
-      await reportHostedDeviceConnectFailure({
-        errorCode: "CALLBACK_PROOF_INVALID",
-        memberId: sessionMemberId,
-        provider: providerName,
       });
       return hostedDeviceSyncCallbackFailureRedirect(
         request,
