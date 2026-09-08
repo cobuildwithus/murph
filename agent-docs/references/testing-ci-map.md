@@ -10,6 +10,18 @@ Code-mode fixtures omit deferred response, exercise-routine, and Telegram rich
 content cards from resident descriptions while requiring discovery. Both plain
 and namespaced code-mode wrappers retain an exact resident-tool inventory check.
 
+Payload webhook preparation contention is covered by
+`device-sync-webhook-preparation-contention-postgres.test.ts` with an isolated
+loopback `murph_test*` database and `MURPH_TEST_POSTGRES_CONCURRENCY=1` through
+`pnpm --dir apps/web test:prepared -- test/<file>`. It exercises the actual
+webhook retry owner, a deterministic sibling write during every preparation,
+and twelve simultaneously prepared payloads with decrypt/readback. Prepared
+root authentication and no extra KMS calls are covered in
+`hosted-crypto-domain-root-store.test.ts`; `device-sync-dirty-payload-rebinding.test.ts`
+proves rebinding does not recompress or decompress. Dirty-store, hosted-wake,
+agent-route, and webhook-batch tests cover acknowledgement/authority rejection,
+bounded diagnostic reasons, recovery, and private-data exclusion.
+
 Linq email identity remediation is covered by the focused
 `hosted-onboarding-linq-email-authority.test.ts` and
 `hosted-onboarding-linq-email-crypto.test.ts` suites, plus linked-account,

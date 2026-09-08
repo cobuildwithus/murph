@@ -29,12 +29,15 @@ describe("hosted device webhook batch admission", () => {
       provider: "oura",
       rawBody: new Uint8Array(32 * 1024),
       source: { HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS: "oura" },
-    })).toEqual({ enabled: true });
+    })).toEqual({ enabled: true, reason: "queue_enabled" });
     expect(prepareHostedDeviceWebhookQueueTransport({
       provider: "oura",
       rawBody: new Uint8Array(32 * 1024 + 1),
       source: { HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS: "oura" },
-    })).toEqual({ enabled: false });
+    })).toEqual({ enabled: false, reason: "body_too_large" });
+    expect(prepareHostedDeviceWebhookQueueTransport({
+      provider: "junction", rawBody: new Uint8Array(12), source: {},
+    })).toEqual({ enabled: false, reason: "provider_not_enabled" });
   });
 
   it("admits 100 same-account deliveries in order with one active event lease", async () => {

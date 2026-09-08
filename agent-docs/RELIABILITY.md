@@ -1741,15 +1741,40 @@ Last verified: 2026-09-04
   member/connection/source authority check, then prepares through the same
   request-local, non-serializable dirty-store capability outside every database
   lock. The final transaction reacquires the canonical member/connection locks,
-  re-reads consent and exact connection/source authority, and requires both the
-  exact dirty-marker snapshot and, when payloads exist, device-domain root
-  before inserting them.
+  re-reads consent and exact connection/source authority, and revalidates the
+  dirty-marker snapshot and, when payloads exist, device-domain root before
+  inserting them. For prepared payloads only, monotonic sibling ingress may
+  advance the marker while acknowledgement stays unchanged and the marker
+  remains pending. Under the existing dirty-row lock, the store then locally
+  opens and reseals the already-compressed envelope against the new commit
+  revision, retaining its opaque payload id and classification. Each admitted
+  webhook has at most two resources and companion admission has one; rebinding
+  is serial, adds one local authenticated open/seal per payload and no datastore,
+  KMS, provider, compression, or classification calls. A previously missing
+  marker may converge only onto an owned pending row with processed revision
+  zero. Owner, acknowledgement, deletion, clean-state, and root drift still
+  require the full replan. The stored ciphertext format and read-time AAD stay
+  unchanged, so existing readers and rollback writers remain compatible.
   A clean-to-dirty wake similarly uses an ingress-root capability prepared
   outside the locks. Drift permits one full replan with a fresh root cache;
   repeated drift fails retryably. Withdrawal may commit while ephemeral
   preparation is in flight, but the final consent re-read then rejects without
   durable dirty, receipt, signal, trace-completion, or mailbox state. The
   steady-state connection-replacement path reads no payload and uses set-based writes only.
+  Web ingress logs `device_webhook.transport_selected` once after preflight,
+  with `transport`, the finite decision reason (`provider_not_enabled`,
+  `body_too_large`, or `queue_enabled`), and raw body byte count only.
+  `device_sync.prepared_write_drift` records operation, attempt budget,
+  exhaustion, and a bounded cause (domain root, dirty marker/owner/acknowledgement,
+  contention, or admission/wake preparation); a successful replan records
+  `device_sync.prepared_write_recovered`. The store's
+  `device_sync.prepared_payload_rebound` describes an attempted rebind, not
+  transaction success. Correlate these records within the Vercel invocation
+  and its HTTP result; no event/account/member identity, headers, raw exception
+  details, or health payload enters these diagnostics. A future retryable 503
+  can therefore be attributed without reopening private payloads. After deploy,
+  inspect bounded 5xx counts and drift exhaustion alongside transport reasons;
+  rebinding followed by a successful response is expected burst convergence.
   Nullable rows from mixed-version writers are the bounded transitional
   exception: replacement classifies at most 800 rows after taking the existing
   member lock, re-reading health-data consent, and locking the dirty marker.

@@ -4,6 +4,10 @@ Last verified: 2026-09-05
 
 ## Purpose
 
+Prepared device-webhook revision rebinding and content-free transport/replan
+diagnostics are owned by `agent-docs/RELIABILITY.md`; local PostgreSQL burst and
+cryptographic-binding proof is indexed in `agent-docs/references/testing-ci-map.md`.
+
 Personal Patterns expiry and checkpoint wake diagnostics are specified in
 `agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
 
