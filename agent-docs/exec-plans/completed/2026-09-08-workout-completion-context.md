@@ -1,6 +1,6 @@
 # Preserve workout completion context and explicit repetition conventions
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -125,18 +125,32 @@ Updated: 2026-09-08
   this change preserves the distinction for new explicit clears. No production
   data was changed, and unavailable historical provider traces remain outside
   the claims of local proof.
-- PR 3068 is published. The user authorized completing verification/review and
-  merging. Complete provider-input measurement, final ReviewGPT, exact-head CI,
-  plan closure, and merge through the existing completion owner without another
-  merge approval request.
+- PR 3068 is published with authorization to complete verification, review, and
+  merge through the existing completion owner.
 - Complete first-provider-request capture through real route processing and
   pinned Codex 0.153.4, using an isolated loopback Responses recorder: individual
   input is 27,653 to 27,763 o200k_base tokens (+110, +0.3978%) and 127,744 to
   128,213 UTF-8 bytes (+469); group input is unchanged at 23,627 tokens and
   107,861 bytes with an identical normalized request hash. Base is 583cfd8fbbb3,
-  captured head is 1f6a6479d275; subsequent edits only affect proof and docs.
+  captured head is 1f6a6479d275. Later proof/docs changes and the generated CLI
+  freshness hash do not affect initial input; the hash is excluded from the
+  request path and absent from all four captures.
   Both fixtures pass at base and head. All request body fields, native tools,
   generated code-mode guidance, instructions, and messages are included;
   volatile ids, start time, and private paths are consistently normalized.
   Counts use locked gpt-tokenizer 3.4.0 with the published GPT-5 family mapping;
   transport/auth headers and unobservable provider framing/billing are excluded.
+- Final candidate review: round one passed at 95f291ff5cbc with no qualifying
+  findings. The managed capture verified gpt-6-pro, exact response identity,
+  full-snapshot scope, and the enforced minimum response duration.
+- Broad CI exposed two bounded omissions: the nullable CLI result schema
+  required regenerating its existing skill hash, and one experiment guidance
+  test still asserted the previous wording. Canonical regeneration changes only
+  the hash constant; in-memory reversal of only the nullable schema reproduces
+  the old hash. Both hash tests, the exact package-shape verifier, all 15
+  experiment guidance tests, and the two affected typechecks pass after repair.
+- Implementation and focused proof are complete. The final generated-artifact
+  correction requires a second ReviewGPT round and green required CI on the
+  pushed candidate before the authorized merge. These remain PR completion
+  gates; no deployment is performed by this task.
+Completed: 2026-09-08
