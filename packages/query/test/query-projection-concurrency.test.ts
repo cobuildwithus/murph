@@ -29,9 +29,9 @@ test("concurrent stale projection readers share one rebuild", async () => {
 
     return {
       ...actual,
-      rebuildQueryProjectionWithManifest: async (
-        ...args: Parameters<typeof actual.rebuildQueryProjectionWithManifest>
-      ): ReturnType<typeof actual.rebuildQueryProjectionWithManifest> => {
+      rebuildQueryProjectionFromCanonicalSource: async (
+        ...args: Parameters<typeof actual.rebuildQueryProjectionFromCanonicalSource>
+      ): ReturnType<typeof actual.rebuildQueryProjectionFromCanonicalSource> => {
         rebuildCallCount += 1;
         activeRebuildCount += 1;
         maxActiveRebuildCount = Math.max(maxActiveRebuildCount, activeRebuildCount);
@@ -39,7 +39,7 @@ test("concurrent stale projection readers share one rebuild", async () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
 
         try {
-          return await actual.rebuildQueryProjectionWithManifest(...args);
+          return await actual.rebuildQueryProjectionFromCanonicalSource(...args);
         } finally {
           activeRebuildCount -= 1;
         }
@@ -185,9 +185,9 @@ test("freshness phase timing follows actual scan/status/rebuild/recheck order wi
   });
   vi.doMock("../src/projection/rebuild.ts", async () => {
     const actual = await vi.importActual<typeof import("../src/projection/rebuild.ts")>("../src/projection/rebuild.ts");
-    return { ...actual, rebuildQueryProjectionWithManifest: async (...args: Parameters<typeof actual.rebuildQueryProjectionWithManifest>) => {
+    return { ...actual, rebuildQueryProjectionFromCanonicalSource: async (...args: Parameters<typeof actual.rebuildQueryProjectionFromCanonicalSource>) => {
       order.push("rebuild"); tick += 3_000_000_000n;
-      return actual.rebuildQueryProjectionWithManifest(...args);
+      return actual.rebuildQueryProjectionFromCanonicalSource(...args);
     } };
   });
   try {
@@ -200,14 +200,14 @@ test("freshness phase timing follows actual scan/status/rebuild/recheck order wi
     await withCliTiming(() => timeCliDispatch("goal list", async () => {
       rows = await query.listCanonicalEntitiesRuntime(root);
     }), (value) => { report = value; });
-    assert.deepEqual(order, ["manifest", "status", "rebuild", "status", "manifest", "status"]);
+    assert.deepEqual(order, ["manifest", "status", "rebuild", "manifest", "status", "manifest", "status"]);
     const phases = Object.fromEntries(report.commands[0]!.phases.map((p) => [p.phase, p]));
     assert.equal(phases["query-manifest"]!.count, 2);
     assert.equal(phases["query-manifest"]!.sumUs, 1_400_000);
     assert.equal(phases["query-status"]!.count, 3);
     assert.equal(phases["query-status"]!.sumUs, 600_000);
-    assert.equal(phases["query-rebuild"]!.sumUs, 3_000_000);
-    assert.equal(phases["query-freshness"]!.sumUs, 5_000_000);
+    assert.equal(phases["query-rebuild"]!.sumUs, 3_700_000);
+    assert.equal(phases["query-freshness"]!.sumUs, 5_700_000);
     assert.equal(phases["query-wait"], undefined);
     assert.deepEqual(await query.listCanonicalEntitiesRuntime(root), rows);
     assert.equal(JSON.stringify(report).includes(root), false);

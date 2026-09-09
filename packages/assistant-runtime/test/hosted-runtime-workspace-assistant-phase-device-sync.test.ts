@@ -155,6 +155,35 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     }));
   });
 
+  it.each([false, true])("quiesces concurrent ingestion after the real assistant phase lane (failed=%s)", async (failed: boolean) => {
+    const order: string[] = [];
+    const onProviderRequestStarted = vi.fn(() => { order.push("provider-start"); });
+    const quiesceConcurrentDeviceSync = vi.fn(async () => { order.push("quiesced"); });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (
+      lane: Parameters<typeof import("../src/hosted-runtime/maintenance.ts").runHostedAssistantAutomationLane>[0],
+    ) => {
+      lane.onProviderRequestStarted?.();
+      order.push("model-finished");
+      if (failed) throw new Error("Synthetic model failure");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+    const running = runHostedWorkspaceAssistantPhase({
+      ...createPhaseInput({ importedCount: 1 }),
+      onProviderRequestStarted,
+      quiesceConcurrentDeviceSync,
+    });
+    if (failed) await expect(running).rejects.toThrow("Synthetic model failure");
+    else await running;
+    expect(onProviderRequestStarted).toHaveBeenCalledTimes(1);
+    expect(quiesceConcurrentDeviceSync).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["provider-start", "model-finished", "quiesced"]);
+  }, 5_000);
+
   it("skips the assistant lane when foreground input arrives during system mailbox preparation", async () => {
     let shouldYield = false;
     let fetchSnapshotCalls = 0;

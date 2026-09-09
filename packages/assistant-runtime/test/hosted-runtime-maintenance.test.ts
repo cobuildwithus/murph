@@ -5504,6 +5504,49 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
+  it("signals concurrent ingestion from the actual provider-start hook while the model pass is held", async () => {
+    let releaseModel!: () => void;
+    const modelHeld = new Promise<void>((resolve) => { releaseModel = resolve; });
+    let signalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    let modelFinished = false;
+    const onProviderRequestStarted = vi.fn(() => signalStarted());
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input: RunAssistantAutomationPassInput) => {
+      await input.onProviderRequestStarted?.({
+        assistantInputIds: [],
+        providerRequestOrdinal: 0,
+        source: "linq",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      });
+      await modelHeld;
+      modelFinished = true;
+      return { nextWakeAt: null, progressed: false };
+    });
+    const running = runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_synthetic_concurrent_provider",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_synthetic_concurrent",
+      },
+      executionContext: { hosted: { memberId: "member_synthetic_concurrent", userEnvKeys: [] } },
+      onProviderRequestStarted,
+      requestId: "request_synthetic_concurrent",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: FIXED_MAINTENANCE_VAULT_ROOT,
+    });
+    try {
+      await started;
+      expect(modelFinished).toBe(false);
+      expect(onProviderRequestStarted).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseModel();
+      await running;
+    }
+    expect(modelFinished).toBe(true);
+  }, 5_000);
+
   it("passes the background-yield signal into hosted cron deferral", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn().mockReturnValue(true);
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({

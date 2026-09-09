@@ -514,8 +514,7 @@ export class RuntimeProcessingController {
       if (
         activeFence.processingMode === "inbox_media_retention"
         || (
-          activeFence.processingMode === "system_mailbox"
-          && requestedProcessingMode === "default"
+          cooperativeMailboxOwnerHandoff
           && triggeredByTrustedWebDirect
         )
       ) {
@@ -527,7 +526,10 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
-      if (!cooperativeMailboxOwnerHandoff) {
+      // Retention waits behind either conversational owner. Default and system
+      // work can wake the same child; only foreground promotion requests a mode
+      // handoff below. A system wake never downgrades a foreground owner.
+      if (requestedProcessingMode === "inbox_media_retention") {
         const activeRuntimeState =
           await this.readActiveRuntimeFenceLiveness({
             activeFence,

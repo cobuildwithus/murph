@@ -309,6 +309,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+  deviceSyncIngestionOnly?: boolean;
   allowedMailboxDedupeKeyPrefixes?: readonly string[] | null;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
@@ -492,6 +493,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       });
     }
     const metrics = await executePendingHostedSystemMailboxItem({
+      deviceSyncIngestionOnly: input.deviceSyncIngestionOnly,
       executionContext: input.executionContext ?? null,
       operatorHomeRoot: input.operatorHomeRoot ?? undefined,
       pendingItem: prepared,
@@ -1439,6 +1441,7 @@ export async function restoreHostedSystemMailboxCheckpointRollbackState(input: {
 }
 
 async function executePendingHostedSystemMailboxItem(input: {
+  deviceSyncIngestionOnly?: boolean;
   executionContext: AssistantExecutionContext | null;
   operatorHomeRoot?: string | null;
   pendingItem: HostedSystemMailboxPendingItem;
@@ -1495,6 +1498,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   }
 
   return executeHostedMailboxEvent({
+    deviceSyncIngestionOnly: input.deviceSyncIngestionOnly,
     executionContext,
     forceQueueOnlyAssistantNotification: true,
     operatorHomeRoot: input.operatorHomeRoot ?? undefined,

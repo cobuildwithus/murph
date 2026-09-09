@@ -822,8 +822,32 @@ foreground priority. A non-direct default request behind
 `system_mailbox` wakes the exact active child, preserves its fence, and retries
 while that child checkpoints and releases. Authenticated Web-direct foreground
 work may instead preempt that exact system child through the existing abort
-seam. A `system_mailbox` request behind an active default owner only retries; it
-does not wake or interrupt the foreground child. This adds no queue, scheduler,
+seam. A `system_mailbox` request behind an active default owner sends a normal
+wake to that exact child, preserving its default mode and fence. It sends no
+requested mode handoff and never interrupts foreground work. Wake acceptance
+is not import completion: durable mailbox and import receipts remain the
+completion authority, including when an older warm child handles the wake.
+
+An active default invocation may prepare device work after its model provider
+starts. Its existing watcher admits conversation input first, then one bounded
+system page, including when the conversation-input budget is full. The device
+pass uses the same restored workspace, fence, canonical write port, and receipt
+history. It retains the existing 100-job pass ceiling and provider-specific job
+bounds; it does not run retention or activity-automation maintenance alongside
+the model. New conversation arrivals can proceed while provider I/O is pending.
+Reply preparation cancels device work and stops mailbox staging together.
+Canonical commits already underway finish persistence or rollback before the
+runner checkpoints or releases ownership; cancellation never detaches a mutator.
+
+One completed device preparation waits for the existing durable checkpoint
+before another preparation can run. The existing recording item and exact dirty
+payload/revision acknowledgments remain recovery authority. This accelerates
+usable observations during a turn; it does not guarantee unlimited progress
+under traffic that indefinitely defers checkpointing. Query rebuilds use the
+same cross-process canonical boundary through source scanning and publication,
+so foreground queries see committed data rather than an in-flight rollback.
+
+This adds no queue, scheduler,
 feature-specific mode, persisted handoff state, or Environment-specific
 promotion rule. An already-default-owned assistant queue head may reuse the
 runtime's existing foreground phase inside a `system_mailbox` invocation,
@@ -859,8 +883,8 @@ For foreground/default work behind an `inbox_media_retention` fence, and for
 authenticated Web-direct foreground/default work behind a `system_mailbox`
 fence, the existing workspace-invocation abort seam is the sole preemption
 authority. A non-direct default request behind system-mailbox work retains the
-exact-child wake-and-checkpoint handoff. A system-mailbox request never wakes an
-active default child. A local exact-pointer abort enters the same inactive-fence
+exact-child wake-and-checkpoint handoff. A system-mailbox request may wake an
+active default child but cannot preempt or downgrade it. A local exact-pointer abort enters the same inactive-fence
 replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,

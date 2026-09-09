@@ -2606,6 +2606,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const assistantMetrics = await (async () => {
         try {
           const metrics = await runHostedAssistantAutomationLane({
+            onProviderRequestStarted: input.onProviderRequestStarted,
             assistantRuntimeState,
             ...(buildBackgroundDynamicContextPrompt
               ? { buildBackgroundDynamicContextPrompt }
@@ -2664,6 +2665,10 @@ export async function runHostedWorkspaceAssistantPhase(
             });
           }
           throw error;
+        } finally {
+          // The device pass must be quiescent before delivery or idle maintenance
+          // can take ownership of the same workspace.
+          await input.quiesceConcurrentDeviceSync?.();
         }
       })();
       assistantAutomationRedactedLogEntries.push(

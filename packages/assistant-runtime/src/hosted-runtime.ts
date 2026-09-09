@@ -108,6 +108,7 @@ import {
 import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
+import { createHostedForegroundDeviceSync } from "./hosted-runtime/foreground-device-sync.ts";
 import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
@@ -4065,6 +4066,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       runtimeOwnerHandoffRequested = true;
       return "handoff";
     };
+    const backgroundWorkSignal = options.shutdownSignal
+      ? AbortSignal.any([
+          runtimeAbortController.signal,
+          options.shutdownSignal,
+        ])
+      : runtimeAbortController.signal;
+    const foregroundDeviceSync = createHostedForegroundDeviceSync({
+      operatorHomeRoot: restored.operatorHomeRoot,
+      runtime: foregroundRuntime,
+      runtimeEnv,
+      signal: backgroundWorkSignal,
+      vaultRoot: restored.vaultRoot,
+    });
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
     let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
@@ -4170,6 +4184,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           || exactInitialConversationInputIds.has(inputId);
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
+          hasConcurrentDeviceSyncCheckpoint: foregroundDeviceSync.hasPendingCheckpoint,
+          prepareConcurrentDeviceSync: foregroundDeviceSync.prepare,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
           initialMailboxImport: passInput.initialMailboxImport,
           initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
@@ -4243,7 +4259,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     }
                   : {}),
                 foregroundCausalOnly:
-                  passInput.foregroundCausalOnly === true,
+                  passInput.foregroundCausalOnly === true
+                  || foregroundDeviceSync.hasPendingCheckpoint(),
                 currentAssistantInputId: () => currentAssistantInputId,
                 imageGenerationLauncher:
                   imageGenerationController?.launcher ?? null,
@@ -4518,12 +4535,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     if (runtimeStateDirty) {
       markIdleCheckpointTimerAfterDirtyWork();
     }
-    const imageGenerationSignal = options.shutdownSignal
-      ? AbortSignal.any([
-          runtimeAbortController.signal,
-          options.shutdownSignal,
-        ])
-      : runtimeAbortController.signal;
     const { createHostedImageGenerationController } = await import(
       "./hosted-runtime/image-generation.ts"
     );
@@ -4554,7 +4565,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           vault: restored.vaultRoot,
         });
       },
-      signal: imageGenerationSignal,
+      signal: backgroundWorkSignal,
       shutdownSignal: options.shutdownSignal ?? null,
       vaultRoot: restored.vaultRoot,
       withCanonicalWritePersistence,

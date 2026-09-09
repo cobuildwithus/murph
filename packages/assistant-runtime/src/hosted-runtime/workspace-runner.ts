@@ -262,6 +262,8 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   now?: () => string;
   platform: HostedRuntimePlatform;
   persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null;
+  onProviderRequestStarted?: (() => void) | null;
+  quiesceConcurrentDeviceSync?: (() => Promise<void>) | null;
   prepareAutoReplyDelivery?: (() => Promise<void>) | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   recordDeferredUsage?: ((
@@ -432,6 +434,11 @@ export interface HostedWorkspaceRunnerInput {
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
+  prepareConcurrentDeviceSync?: ((input: {
+    signal: AbortSignal;
+    shouldYield?: (() => boolean) | null;
+  }) => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null>) | null;
+  hasConcurrentDeviceSyncCheckpoint?: (() => boolean) | null;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -866,13 +873,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   });
   markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
 
-  const initialAssistantInputBatchHasWork =
-    hostedWorkspaceRunnerAssistantInputBatchHasWork(initialAssistantInputBatch);
-  const initialMailboxImportHasForegroundConversationWork =
-    hasHostedMailboxImportForegroundConversationWork(initialMailboxImport);
+  const initialForegroundWork =
+    hostedWorkspaceRunnerAssistantInputBatchHasWork(initialAssistantInputBatch)
+    || hasHostedMailboxImportForegroundConversationWork(initialMailboxImport);
   if (
     input.runAssistantPhase
-    && (initialAssistantInputBatchHasWork || initialMailboxImportHasForegroundConversationWork)
+    && initialForegroundWork
     && shouldImportHostedPreAssistantSystemMailbox({
       initialMailboxImport,
       now: input.now,
@@ -904,8 +910,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
   } else if (
     input.runAssistantPhase
-    && !initialAssistantInputBatchHasWork
-    && !initialMailboxImportHasForegroundConversationWork
+    && !initialForegroundWork
   ) {
     const preAssistantSystemImport = await withHostedCanonicalWritePort(
       hostedCanonicalMailboxWritePort,
@@ -1057,6 +1062,80 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   }
   const runnerStartedAtEpochMs = Date.now();
+  let concurrentDeviceSyncResult: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
+  let concurrentDeviceSyncCompletion: Promise<void> | null = null;
+  let concurrentDeviceSyncRequested = false;
+  let providerStarted = false;
+  const concurrentDeviceSyncAbort = new AbortController();
+  const concurrentDeviceSyncCancellation = composeHostedForegroundMailboxImportSignal(
+    input.signal,
+    concurrentDeviceSyncAbort.signal,
+  );
+  const concurrentDeviceSyncSignal = concurrentDeviceSyncCancellation.signal;
+  const kickConcurrentDeviceSync = (): void => {
+    if (
+      !providerStarted
+      || !input.prepareConcurrentDeviceSync
+      || concurrentDeviceSyncResult
+      || concurrentDeviceSyncSignal.aborted
+      || input.hasConcurrentDeviceSyncCheckpoint?.() === true
+      || input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return;
+    }
+    concurrentDeviceSyncRequested = true;
+    if (concurrentDeviceSyncCompletion) {
+      return;
+    }
+    const prepare = input.prepareConcurrentDeviceSync;
+    const completion = (async () => {
+      try {
+        // A wake racing an empty selection gets one more selection, never a
+        // second importer. Conversation staging only signals this loop.
+        while (concurrentDeviceSyncRequested && !concurrentDeviceSyncSignal.aborted) {
+          concurrentDeviceSyncRequested = false;
+          concurrentDeviceSyncResult = await withHostedCanonicalWritePort(
+            hostedCanonicalWritePort,
+            () => prepare({
+              signal: concurrentDeviceSyncSignal,
+              // Receipt pressure may yield between commits; a new conversation
+              // alone must not repeatedly cancel a still-useful provider fetch.
+              shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+            }),
+          );
+          if (concurrentDeviceSyncResult) {
+            checkpointRequestSession.markRuntimeStateDirty();
+            break;
+          }
+        }
+      } catch (error) {
+        checkpointRequestSession.markRuntimeStateDirty();
+        await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
+          error,
+          errorCode: "foreground_device_sync_failed",
+          input,
+        });
+      }
+    })();
+    concurrentDeviceSyncCompletion = completion;
+    input.trackLocalWorkspaceMutationCompletion?.(completion);
+    // Observe both branches: cleanup must not introduce an unhandled rejection.
+    void completion.then(() => {
+      concurrentDeviceSyncCompletion = null;
+      if (concurrentDeviceSyncRequested) {
+        kickConcurrentDeviceSync();
+      }
+    }, () => {
+      concurrentDeviceSyncCompletion = null;
+    });
+  };
+  const quiesceConcurrentDeviceSync = async (): Promise<void> => {
+    concurrentDeviceSyncAbort.abort(
+      new DOMException("Foreground device ingestion yielded to delivery.", "AbortError"),
+    );
+    // Never race/drop this promise: an in-flight commit owns rollback/receipts.
+    await concurrentDeviceSyncCompletion;
+  };
   let foregroundConversationImportsInFlight = 0;
   let foregroundConversationWorkObserved = false;
   let foregroundRuntimeWakeObservedAfterStop = false;
@@ -1090,6 +1169,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       async () => startHostedForegroundConversationMailboxImportLoop({
         checkpointRequestBuilder: checkpointRequestSession,
         input,
+        onSystemMailboxStaged: kickConcurrentDeviceSync,
         onForegroundConversationImportFinished: () => {
           foregroundConversationImportsInFlight -= 1;
         },
@@ -1115,8 +1195,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     drainPendingForegroundWake: async () =>
       await foregroundMailboxImportLoopAtBarrier.drainPendingWake(),
     foregroundConversationWorkObserved: () =>
-      initialAssistantInputBatchHasWork
-      || initialMailboxImportHasForegroundConversationWork
+      initialForegroundWork
       || foregroundConversationWorkObserved,
   });
   const stopForegroundMailboxImportLoop = async (): Promise<void> => {
@@ -1130,7 +1209,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
   };
   const shouldYieldBackgroundMaintenance = (): boolean => {
-    if (input.shouldYieldBackgroundMaintenance?.() === true) {
+    if (
+      input.shouldYieldBackgroundMaintenance?.() === true
+      || input.hasConcurrentDeviceSyncCheckpoint?.() === true
+    ) {
       return true;
     }
 
@@ -1207,8 +1289,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     now: input.now,
     platform: input.platform,
     persistGeneratedImageCapture,
+    onProviderRequestStarted: () => {
+      providerStarted = true;
+      kickConcurrentDeviceSync();
+    },
+    quiesceConcurrentDeviceSync,
     prepareAutoReplyDelivery: async () => {
-      await stopForegroundMailboxImportLoop();
+      await Promise.all([
+        stopForegroundMailboxImportLoop(),
+        quiesceConcurrentDeviceSync(),
+      ]);
       if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
         // Stopping the watcher establishes the local pre-dispatch boundary, but
         // it is not the end of foreground admission. Resume the existing
@@ -1250,6 +1340,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
+    await quiesceConcurrentDeviceSync();
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -1346,6 +1437,27 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     }
+    if (concurrentDeviceSyncResult) {
+      const deviceResult: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = concurrentDeviceSyncResult;
+      const nextWake = selectHostedRuntimeWakeCandidate([
+        createHostedRuntimeWakeCandidate(
+          assistantPhaseResult.nextWakeAt,
+          assistantPhaseResult.nextWakeReason,
+        ),
+        createHostedRuntimeWakeCandidate(deviceResult.nextWakeAt, deviceResult.nextWakeReason),
+      ]);
+      appendHostedWorkspaceDurableCheckpointEffect({
+        effects: afterDurableCheckpoint,
+        postCheckpoint: deviceResult,
+      });
+      assistantPhaseResult = {
+        ...assistantPhaseResult,
+        checkpointReason: assistantPhaseResult.checkpointReason ?? deviceResult.checkpointReason,
+        nextWakeAt: nextWake.at,
+        nextWakeReason: nextWake.reason,
+        progressed: true,
+      };
+    }
     latestAssistantInputBatch =
       await rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefixRepair({
         acceptedInitialAssistantInputBatch,
@@ -1359,8 +1471,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       });
     await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved:
-        initialAssistantInputBatchHasWork
-        || initialMailboxImportHasForegroundConversationWork
+        initialForegroundWork
         || foregroundConversationWorkObserved,
       now: input.now,
       result: assistantPhaseResult,
@@ -1392,11 +1503,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     throw error;
   } finally {
     try {
+      await quiesceConcurrentDeviceSync();
       await stopForegroundMailboxImportLoop();
     } catch (error) {
       runnerError ??= error;
       throw error;
     } finally {
+      concurrentDeviceSyncCancellation.dispose();
       input.signal?.removeEventListener("abort", abortBackgroundMaintenanceOnRunnerAbort);
       input.signal?.removeEventListener("abort", startDeferredUsageCaptureOnAbort);
       const deferredUsageCompletionForRunner = startDeferredUsageCaptureOnce();
@@ -1614,6 +1727,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   onForegroundConversationImportFinished?: (() => void) | null;
   onForegroundConversationImportStarted?: (() => void) | null;
   onForegroundConversationWorkObserved?: (() => void) | null;
+  onSystemMailboxStaged?: (() => void) | null;
 }): {
   completion: Promise<void>;
   drainPendingWake(): Promise<void>;
@@ -1642,18 +1756,25 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   let stopRequested = false;
   let activeWakeCompletion: Promise<void> | null = null;
   let activeConversationImportItemStaged = false;
+  let activeSystemMailboxImport = false;
+  const acceptsConcurrentDeviceSync = input.input.prepareConcurrentDeviceSync != null;
   const inFlightImportController = new AbortController();
+  const importCancellation = composeHostedForegroundMailboxImportSignal(
+    outerSignal,
+    inFlightImportController.signal,
+  );
   const abortInFlightImportAfterCurrentItemStaged = (): void => {
     if (
       !stopRequested
       || inFlightImportController.signal.aborted
-      || !activeConversationImportItemStaged
+      || (!activeConversationImportItemStaged
+        && !(acceptsConcurrentDeviceSync && activeSystemMailboxImport))
     ) {
       return;
     }
     inFlightImportController.abort(
       new DOMException(
-        "Foreground mailbox import stopped after conversation work was staged.",
+        "Foreground mailbox import yielded to delivery.",
         "AbortError",
       ),
     );
@@ -1669,7 +1790,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
 
   const loop = (async () => {
     while (!waitController.signal.aborted) {
-      if (input.checkpointRequestBuilder.assistantInputBatchFull()) {
+      if (input.checkpointRequestBuilder.assistantInputBatchFull() && !acceptsConcurrentDeviceSync) {
         break;
       }
       let notification: RuntimeWakeNotification;
@@ -1718,7 +1839,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       try {
         const handleForegroundImportResult = async (
           result: HostedMailboxImportCheckpointResult,
-        ): Promise<boolean> => {
+        ): Promise<void> => {
           if (shouldRecordHostedForegroundMailboxImportResult(result)) {
             input.checkpointRequestBuilder.recordCheckpointResult(result);
           }
@@ -1741,51 +1862,48 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
             result,
             signal: outerSignal,
           });
-          return input.checkpointRequestBuilder.assistantInputBatchFull();
         };
-        const conversationImportSignal =
-          composeHostedForegroundMailboxImportSignal(
-            outerSignal,
-            inFlightImportController.signal,
-          );
         const conversationResult = await (async () => {
-          try {
-            return await importHostedMailboxForWorkspaceRunner({
-              checkpointRequestBuilder: input.checkpointRequestBuilder,
-              checkpointReason: "active_turn_input",
-              deferCheckpoint: true,
-              importItem: foregroundConversationImportItem,
-              importItemContext: {
-                latencyMilestones,
-                onConversationInputStaged: observeForegroundConversationInputStaged,
-                runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
-              },
-              input: input.input,
-              lanes: ["conversation"],
-              limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
-              requestId: `${requestId}:conversation`,
-              signal: conversationImportSignal.signal,
-              checkpointCanonicalMailboxImportProgress:
-                input.checkpointCanonicalMailboxImportProgress,
-            });
-          } finally {
-            conversationImportSignal.dispose();
+          // Keep staging later device wakes during a held model, without
+          // exceeding its existing conversation-input budget.
+          if (input.checkpointRequestBuilder.assistantInputBatchFull()) {
+            return null;
           }
+          return await importHostedMailboxForWorkspaceRunner({
+            checkpointRequestBuilder: input.checkpointRequestBuilder,
+            checkpointReason: "active_turn_input",
+            deferCheckpoint: true,
+            importItem: foregroundConversationImportItem,
+            importItemContext: {
+              latencyMilestones,
+              onConversationInputStaged: observeForegroundConversationInputStaged,
+              runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
+            },
+            input: input.input,
+            lanes: ["conversation"],
+            limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
+            requestId: `${requestId}:conversation`,
+            signal: importCancellation.signal,
+            checkpointCanonicalMailboxImportProgress:
+              input.checkpointCanonicalMailboxImportProgress,
+          });
         })();
-        const conversationBatchFull = await handleForegroundImportResult(conversationResult);
-        if (conversationBatchFull) {
-          break;
+        if (conversationResult) {
+          await handleForegroundImportResult(conversationResult);
         }
-        if (hasHostedMailboxImportForegroundConversationWork(conversationResult)) {
+        if (!acceptsConcurrentDeviceSync && (
+          input.checkpointRequestBuilder.assistantInputBatchFull()
+          || (conversationResult && hasHostedMailboxImportForegroundConversationWork(conversationResult))
+        )) {
           continue;
         }
-
-        const systemImportSignal =
-          composeHostedForegroundMailboxImportSignal(
-            outerSignal,
-            inFlightImportController.signal,
-          );
+        // Notify conversation input first, then stage one bounded system page
+        // even under continuous foreground traffic. Never await device fetching.
         const systemResult = await (async () => {
+          activeSystemMailboxImport = true;
+          // Delivery may cancel retryable system staging, including a stalled
+          // fetch. Conversation staging retains its existing completion boundary.
+          abortInFlightImportAfterCurrentItemStaged();
           try {
             return await importHostedMailboxForWorkspaceRunner({
               checkpointRequestBuilder: input.checkpointRequestBuilder,
@@ -1800,20 +1918,18 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               lanes: ["system"],
               limitPerLane: input.input.limitPerLane,
               requestId: `${requestId}:system`,
-              signal: systemImportSignal.signal,
+              signal: importCancellation.signal,
               checkpointCanonicalMailboxImportProgress:
                 input.checkpointCanonicalMailboxImportProgress,
             });
           } finally {
-            systemImportSignal.dispose();
+            activeSystemMailboxImport = false;
           }
         })();
-        const systemBatchFull = await handleForegroundImportResult(systemResult);
-        if (systemBatchFull) {
-          break;
-        }
+        await handleForegroundImportResult(systemResult);
+        input.onSystemMailboxStaged?.();
       } catch (error) {
-        if (outerSignal?.aborted || inFlightImportController.signal.aborted) {
+        if (importCancellation.signal.aborted) {
           break;
         }
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
@@ -1831,7 +1947,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       }
     }
   })();
-  const completion = loop.catch(() => undefined);
+  const completion = loop.catch(() => undefined).finally(importCancellation.dispose);
   const drainPendingWake = async (): Promise<void> => {
     // A coalesced notification is delivered on a microtask. Let a wake that
     // already exists enter the import loop before deciding whether there is
@@ -1857,7 +1973,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
 }
 
 function composeHostedForegroundMailboxImportSignal(
-  outerSignal: AbortSignal | null,
+  outerSignal: AbortSignal | null | undefined,
   inFlightImportSignal: AbortSignal,
 ): {
   dispose(): void;
@@ -2534,11 +2650,11 @@ async function writeHostedMailboxImportRuntimeLog(input: {
 
 async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(context: {
   error: unknown;
-  errorCode: "assistant_after_checkpoint_checkpoint_failed" | "assistant_after_checkpoint_failed";
+  errorCode: "assistant_after_checkpoint_checkpoint_failed" | "assistant_after_checkpoint_failed" | "foreground_device_sync_failed";
   input: HostedWorkspaceRunnerInput;
 }): Promise<void> {
   const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
-  console.warn("Hosted assistant post-checkpoint cleanup failed after foreground delivery phase.", {
+  console.warn("Hosted workspace deferred work failed.", {
     errorCode: context.errorCode,
     errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
   });

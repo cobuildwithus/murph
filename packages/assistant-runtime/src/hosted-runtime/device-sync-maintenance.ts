@@ -164,6 +164,7 @@ export async function runHostedDeviceSyncPass(
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
   options: {
+    ingestionOnly?: boolean;
     onJobTimingDiagnostics?: (
       diagnostics: readonly DeviceSyncJobTimingDiagnostic[]
     ) => void;
@@ -251,6 +252,13 @@ export async function runHostedDeviceSyncPass(
     snapshot: null,
   };
   let processedJobs = 0;
+  const yieldPass = () => buildHostedDeviceSyncYieldedPassResult({
+    processedJobs,
+    retainFollowUpWakeUntilCheckpoint: options.retainFollowUpWakeUntilCheckpoint ?? false,
+    service,
+    syncState,
+    wake,
+  });
 
   try {
     options.onStage?.("retry_fence");
@@ -400,15 +408,10 @@ export async function runHostedDeviceSyncPass(
       wake,
     });
 
-    if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+    // Foreground concurrency owns only the bounded importer, not control-plane
+    // reconciliation, retention, or automation scheduling. Preserve their wake.
+    if (options.ingestionOnly === true || shouldYieldHostedDeviceSync(shouldYield)) {
+      return yieldPass();
     }
 
     options.onStage?.("source_staleness");
@@ -418,14 +421,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     syncState = await reconcileHostedDeviceSyncPassControlPlane({
@@ -445,14 +441,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     options.onStage?.("dense_raw_retention");
@@ -468,14 +457,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     const serviceNextWakeAt = resolveHostedDeviceSyncServiceNextWakeAt(service);
@@ -522,14 +504,7 @@ export async function runHostedDeviceSyncPass(
     };
   } catch (error) {
     if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
     throw error;
   } finally {
@@ -1357,6 +1332,7 @@ function errorToString(error: unknown): string {
 }
 
 export async function runHostedDeviceSyncWakeLane(input: {
+  ingestionOnly?: boolean;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   platformEnv?: Readonly<Record<string, string>>;
   retainFollowUpWakeUntilCheckpoint?: boolean;
@@ -1433,6 +1409,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
           onStage: (stage) => {
             passStage = stage;
           },
+          ingestionOnly: input.ingestionOnly,
           platformEnv: input.platformEnv ?? {},
           retainFollowUpWakeUntilCheckpoint:
             input.retainFollowUpWakeUntilCheckpoint ?? false,
