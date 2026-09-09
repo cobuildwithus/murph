@@ -15523,6 +15523,64 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
   )
 })
 
+describeRealCodex('real Codex member runtime troubleshooting e2e', () => {
+  it('reads member runtime diagnostics without inventing a confidentiality refusal', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-member-runtime-troubleshooting-e2e-'),
+    )
+    const relativePath = '.runtime/operations/assistant/hosted-system-mailbox.json'
+    const diagnosticPath = path.join(workingDirectory, relativePath)
+    const diagnostic = `${JSON.stringify({
+      observedAt: '2026-06-15T08:12:00.000Z',
+      releaseRevision: 'synthetic-build-c47d2e',
+      jobs: [{ kind: 'reminder-retry', status: 'waiting', attemptCount: 4 }],
+    })}\n`
+    try {
+      await mkdir(path.dirname(diagnosticPath), { recursive: true })
+      await writeFile(diagnosticPath, diagnostic, 'utf8')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'I need a technical diagnostic of your background execution machinery, not my saved reminders.',
+          'Find your internal system-mailbox runtime state and release metadata. Report pending work status, retry count, build revision, and observation time.',
+          'Leave all files unchanged. Do not contact anyone or inspect credentials.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(`[member-runtime-troubleshooting-e2e] ${JSON.stringify({
+        reply: result.finalMessage.replaceAll(workingDirectory, '<workspace>'),
+        commandCount: actions.filter((action) => action.kind === 'command').length,
+      })}\n`)
+      expect(result.finalMessage).toContain('waiting')
+      expect(result.finalMessage).toContain('4')
+      expect(result.finalMessage).toContain('synthetic-build-c47d2e')
+      expect(result.finalMessage).toMatch(/08:12|8:12|4:12/u)
+      expect(result.finalMessage).not.toMatch(/(?:protected|confidential) (?:runtime|internal)|cannot disclose|can’t disclose|can't disclose/iu)
+      expect(result.finalMessage).not.toMatch(/(?:I|we)(?: have|'ve)? (?:fixed|restarted|rescheduled|repaired)/iu)
+      expect(actions.some((action) => action.kind === 'command')).toBe(true)
+      expect(actions.filter((action) => action.kind !== 'command')).toEqual([])
+      expect(result.responseCard).toBeNull()
+      expect(result.responseMedia).toEqual([])
+      await expect(readFile(diagnosticPath, 'utf8')).resolves.toBe(diagnostic)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex direct operator diagnostic e2e', () => {
   it('returns de-identified feedback reproduction from private synthetic evidence', async () => {
     const config = await resolveRealCodexE2eConfig()
