@@ -1259,6 +1259,7 @@ async function writeMailboxImportStateFile(
 }
 
 function createMailboxPort(input: {
+  assistantProvider?: HostedMailboxFetchResponse["assistantProvider"];
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
@@ -1271,6 +1272,7 @@ function createMailboxPort(input: {
         input.events.push("mailbox.fetch");
         input.fetchRequests?.push(request);
         return {
+          assistantProvider: input.assistantProvider ?? "openai",
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),

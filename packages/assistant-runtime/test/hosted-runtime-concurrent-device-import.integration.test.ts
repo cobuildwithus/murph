@@ -35,7 +35,8 @@ import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgment"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+  const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment";
   const persistent = scenario === "persistent" || scenario === "cold";
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
   const controller = new AbortController();
@@ -80,7 +81,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("pr
     if (pathname.includes("/messages")) {
       events.push("reply.sent");
       assert.ok(performance.now() - modelFinishedAt < 2_000, events.join(","));
-      if (scenario === "completed" || persistent) {
+      if (completesBeforeReply || persistent) {
         if (replySent) {
           secondReply.resolve();
         } else {
@@ -136,11 +137,11 @@ test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("pr
         if (persistent) items.push(environmentItem);
         runtimeWakeSignal.notify();
         await withRealTimeout(
-          scenario === "completed" ? imported.promise : providerStarted.promise,
+          completesBeforeReply ? imported.promise : providerStarted.promise,
           10_000, () => JSON.stringify({events}),
         );
       }
-      if (scenario === "completed") {
+      if (completesBeforeReply) {
         const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
         assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
         events.push("model.reads.imported.data");
@@ -202,6 +203,17 @@ test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("pr
         assert.ok(events.includes("snapshot.completed"));
         assert.ok(checkpointRequests.some((checkpoint) => checkpoint.reason === "idle_shutdown"));
         dirtyAcks.push(request);
+        if (scenario === "acknowledgment" && dirtyAcks.length === 1) {
+          items.push(createMailboxItem({ id: "mailbox_item_during_acknowledgment", laneSeq: "3" }));
+          runtimeWakeSignal.notify();
+          assert.ok(request.signal);
+          const signal = request.signal;
+          await new Promise<void>((_resolve, reject) => {
+            const abort = () => reject(signal.reason);
+            if (signal.aborted) abort();
+            else signal.addEventListener("abort", abort, { once: true });
+          });
+        }
         return {
           connectionId, dirtyRevision: request.processedRevision,
           processedRevision: request.processedRevision, recorded: true,
@@ -230,7 +242,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("pr
       {
         vaultRoot, runtimeWakeSignal, signal: controller.signal,
         async createCheckpointSnapshot() {
-          if (scenario === "completed" || persistent) await releaseSnapshot.promise;
+          if (completesBeforeReply || persistent) await releaseSnapshot.promise;
           events.push("snapshot.completed");
           return { snapshotRef: createBundleRef({
             hash: "d".repeat(64), key: "users/bundles/member-synthetic/concurrent-import.bundle.json", size: 512,
@@ -298,7 +310,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("pr
       items.push(createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" }));
       runtimeWakeSignal.notify();
     }
-    if (scenario === "completed" || persistent) {
+    if (completesBeforeReply || persistent) {
       await withRealTimeout(Promise.race([
         secondReply.promise,
         runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
@@ -319,15 +331,17 @@ test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("pr
     }
     await withRealTimeout(runtimeCompletion, 20_000, () => events.join(","));
     assert.ok(replySent, JSON.stringify({ events, intents: await listAssistantOutboxIntents(vaultRoot) }));
-    if (scenario === "completed" || persistent) {
-      assert.equal(handledInputIds.size, 2);
-      assert.equal(events.filter((event) => event === "reply.sent").length, 2);
-      assert.equal(dirtyAcks.length, 1, JSON.stringify({events, pending: (await readHostedSystemMailboxState(vaultRoot)).pending}));
+    if (completesBeforeReply || persistent) {
+      assert.equal(handledInputIds.size, scenario === "acknowledgment" ? 3 : 2);
+      assert.equal(events.filter((event) => event === "reply.sent").length, scenario === "acknowledgment" ? 3 : 2);
+      assert.equal(dirtyAcks.length, scenario === "acknowledgment" ? 2 : 1, JSON.stringify({events, pending: (await readHostedSystemMailboxState(vaultRoot)).pending}));
       assert.equal(dirtyAcks[0]?.processedRevision, "7");
       assert.deepEqual(dirtyAcks[0]?.processedDirtyPayloadIds, ["synthetic-concurrent-payload"]);
-      assert.ok(events.lastIndexOf("reply.sent") < events.indexOf("snapshot.completed"));
+      if (scenario !== "acknowledgment") {
+        assert.ok(events.lastIndexOf("reply.sent") < events.indexOf("snapshot.completed"));
+      }
       assert.ok(events.indexOf("device.receipt.uploaded") > events.indexOf("model.started"));
-      if (scenario === "completed") {
+      if (completesBeforeReply) {
         assert.ok(events.indexOf("model.reads.imported.data") < events.indexOf("model.finished"));
       } else {
         assert.ok(events.indexOf("device.receipt.uploaded") > events.lastIndexOf("reply.sent"));

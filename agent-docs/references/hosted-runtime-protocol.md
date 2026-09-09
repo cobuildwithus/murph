@@ -96,7 +96,8 @@ provider changed. The per-user workflow coalesces duplicate wakes as one
 boolean and invokes its existing Cloudflare processing adapter even when Web
 reconciliation facts are idle. Blocked facts discard the wake; accepted
 processing clears it only when no newer wake arrived during that call. A warm
-invocation compares its invocation provider with the live Web-owned preference.
+invocation compares its invocation provider with the Web-owned provider fact
+returned by its existing mailbox fetch, including empty and usage-denied fetches.
 A mismatch stops that invocation from servicing further wakes, makes its dirty
 workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
 so Cloudflare releases the provider-specific invocation and starts a fresh one.
@@ -105,14 +106,15 @@ and drains the coalesced signal in the same synchronous turn. An already
 accepted wake becomes that same positive immediate-recheck edge; a later wake
 is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
-leaves the durable preference intact; the next invocation and the mandatory
-provider-entry consistency check remain the recovery path. This compares the
-invocation provider with the saved provider; it is not input admission or
-target/audience authorization. Handoff and unavailable settings reads preserve
-accepted work for retry. Foreground wakes use the provider-entry consistency
-check after mailbox import, preserving imported input if the provider changed.
-An empty wake checks the provider after its mailbox probe so Settings-only
-changes still hand off. Mailbox access and usage-denial bookkeeping remain
+leaves the durable preference intact; the next invocation or mailbox fetch
+recovers it. The fetch and acknowledged in-invocation provider updates set the
+existing handoff flag; provider entry checks that flag without a separate
+configuration request. This is lifecycle consistency, not input admission or
+target/audience authorization. Handoff preserves accepted work for retry.
+An empty wake fetches the same provider fact so Settings-only changes still
+hand off. Web returns semantic usage denial as an empty successful mailbox
+response after denial bookkeeping; authentication and inactive access still
+fail. Mailbox access and usage-denial bookkeeping remain
 Web-owned and independent of the invocation's provider. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
@@ -798,25 +800,42 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-`system_mailbox` runs one bounded model-free item only when that item is the
-exact first live durable system frontier. The shared classifier admits
-device-sync, member-channel reconciliation, operator maintenance, browser-vault
-refresh, Environment completion, and the narrow exact-notification cases; an
-earlier default-owned row remains a hard ordering barrier. Already committed
-Web updates remain authoritative, while an interrupted or not-yet-checkpointed
-unit stays recoverable from the durable mailbox and its existing continuation
-contract.
+`system_mailbox` admits eligible model-free work through the existing kind and
+exact-notification policy. Device, clinical, and Environment attempts belong to
+the fenced workspace and use existing mailbox claims; the invocation's policy
+still decides which families are allowed. Device and Environment work can start
+without assistant preparation. A conversation can upgrade that invocation while
+the same import continues. The default assistant and ordered controls remain
+single-writer; ordinary replies neither cancel nor join independent imports.
 
-Default and `system_mailbox` remain separate bounded owners over one ordered
-mailbox. When the runnable mailbox owner is model-free, the checkpoint
-projection does not publish a second ordinary default wake behind it. Default
-rows remain eligible inside an already-running pass and become independently
-wake-eligible whenever the model-free frontier is backed off or advances.
+Scheduling preserves per-connection ordering and the imported-watermark-bounded
+continuation projection used by handling. Invalid continuation authority cannot
+advance the handled prefix, but it does not block an unrelated connection or
+work family. Wake projection and preparation share runnable admission, including
+immediate admission of eligible deferred dirty hints through a validated owner.
+That wake does not change retained job retry deadlines. The shared coverage
+projection supplies execution-covered hints and narrower idle-covered schedules;
+dirty work requires execution and blocks idle retirement across it. Coverage
+never grants continuation authority or bypasses invocation filters. Claimed
+attempts publish completion through the workspace instead of projecting another
+immediate wake. Restoring a newly fenced workspace releases stale in-process
+claims through the existing pending state.
+
+Both assistant and model-free wake deadlines remain independently available.
+Workspace metadata publication is serialized against the latest accepted version
+and preserves locally staged canonical receipts. Full snapshots pause and join
+owned mutations before capturing state; newly arrived conversation input can
+withdraw that wait, leaving the actual child tracked until it exits. Only effects
+covered by a successful snapshot may acknowledge exact device revisions. Already
+committed Web updates remain authoritative, and interrupted attempts recover
+through the durable mailbox and existing continuation contract.
+
 After a device item records a durable follow-up deadline, that
 `device-sync.reconcile` deadline remains in the canonical model-free
 `nextWakeAt` selection; an independently due or future assistant deadline
 remains available through `nextDefaultProcessingWakeAt` instead of replacing
-the device deadline.
+the device deadline. A cold pass with assistant execution blocked also retains
+the future device deadline when no mailbox item is runnable yet.
 Current conversation work and explicitly approved continuations retain
 foreground priority. A non-direct default request behind
 `system_mailbox` wakes the exact active child, preserves its fence, and retries
@@ -1355,6 +1374,13 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+The mailbox provider fact uses the already-deployed reader's tolerance of
+additional fields: deploy Web's `assistantProvider` response and semantic
+usage-denial empty response first, then the strict Worker/runner reader. The
+new reader rejects an old response before importing input; it has no fallback
+configuration request. Keep Web at that protocol floor while a new reader is
+deployed. Old readers accept the new response and retain their former provider
+consistency check until they drain.
 Shared accepted-message targeting is a runtime-only strict outbox-shape change,
 so its reader and writer ship together in one runner bundle. Deploy Cloudflare
 and that runner with `container_rollout=immediate`, and require managed-container
@@ -1434,17 +1460,19 @@ and the runtime skips assistant admission while still draining model-free
 system work and retaining the canonical assistant wake. It is not durable
 Cloudflare state and cannot attach to default foreground processing.
 The optional workspace `systemMailboxFrontier` fact is a separate rollout seam.
-An omitted field means an older Web producer, `model_free` means the first live
-system item beyond the runtime's handled-through frontier is eligible for the
-bounded system-mailbox executor, and `default_owned` leaves that item with
-ordinary default processing. `null` means no system work is admitted by the
+An omitted field means an older Web producer. `model_free` means eligible live
+model-free work exists beyond the runtime's handled-through frontier, including
+behind a default-owned item; `default_owned` means live work remains for ordinary
+default processing with no eligible model-free item. `null` means no system work is admitted by the
 current reconciliation facts. For active access, Web derives that result from
-the durable retained frontier. For inactive access, Web emits `null` without a
+bounded ordered mailbox lookups using the shared kind and exact-notification
+policy. This scheduling fact does not advance the handled prefix. For inactive access, Web emits `null` without a
 mailbox read so Temporal can retire its pointer projection while the durable
 mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
-When an existing mailbox kind moves from `default_owned` to `model_free`, deploy
-the Cloudflare runtime allowlist before the Web classifier. Old Web remains
+When an existing mailbox kind moves from `default_owned` to `model_free`, or
+admission expands past an unrelated default-owned item, deploy the Cloudflare
+runtime consumer before the Web classifier. Old Web remains
 compatible with the expanded runtime; new Web paired with an old runtime keeps
 the item durable but cannot make progress until the runtime is upgraded. Reverse
 that order for rollback.
@@ -1743,9 +1771,13 @@ the same retry rule, including when the retry arrives through Temporal.
 Replenishment, readiness re-proving, orphan retirement, and stale-release drain
 remain outside the accepted-message path. A claimed slot is never rebound or
 returned to ready. Group chats do not own standby lifecycle; the member's
-`UserRunner` remains the allocation and stop-target owner. Slot invocation,
-provider-credential minting, withdrawal, account deletion, and retirement all
-re-read the exact durable binding; a member mismatch fails closed. A successful
+`UserRunner` remains the allocation and stop-target owner. Fenced preparation
+reuses the exact immutable binding receipt from allocation or retained resolution
+within that request, or reads it when no receipt exists. Invocation and wake
+authorize the live bound member inside the slot owner. Withdrawal and account
+deletion send that owner the exact slot/member target; the owner validates it and
+acknowledges only after native destruction and durable retirement. Callers need no
+binding readback after this acknowledgement. A member mismatch fails closed. A successful
 fresh-start acceptance records the closed standby allocation outcome, bounded
 reason, and elapsed milliseconds in the existing orchestration latency phase
 breakdown and structured log. The selection log records the same metadata
@@ -2861,10 +2893,22 @@ A retained owner wakes at the earlier of its actual job retry and a future
 provider cadence; job retry times and attempts remain unchanged. A past cadence
 left by a failed scheduler never becomes an immediate continuation timer.
 A due plain scheduled hint for the same connection epoch can admit a future
-owner, just as a webhook hint can. Admission does not consume the scheduled
-obligation: existing compaction still requires a strictly advanced carried
-cadence. When a pass cannot progress, already-due eligible schedule hints share
+owner, just as a webhook hint can, unless the owner's carried cadence already
+strictly exceeds that scheduled tick. Admission does not consume the scheduled
+obligation: compaction requires a strictly advanced carried cadence. Covered
+schedule hints retire when that advanced cadence is retained after recording.
+A cold idle pass can also checkpoint retirement of already-covered eligible
+schedule hints without running a provider job; it first gives runnable work its
+normal priority. Webhook hints still require dirty-work admission, and equal
+cadences, explicit jobs, manual requests, and connection-epoch barriers remain
+pending. When a pass cannot progress, already-due eligible schedule hints share
 the owner retry backoff so they cannot repeatedly readmit it.
+If a pristine webhook or companion dirty hint was deferred to an owner's future
+retry, an otherwise idle pass may readmit the validated owner only when the
+existing compactor proves an eligible hint can retire during that admission.
+Invocation filters and substantive-work barriers still apply. The owner fetches
+canonical dirty work before acknowledgement; exact job retry times stay intact,
+and removing the admitted hints prevents repeated idle admissions.
 Only that connection mailbox wake may fetch its exact
 Web-owned dirty row or claim its account's local jobs; a generic runtime timer
 does neither. The connection-specific encrypted system-mailbox item remains
@@ -3045,9 +3089,13 @@ upstream five-second default.
 Container readiness receives at most 15 wall-clock seconds, including time
 queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
 allows one absolute five-second fail-closed cleanup deadline shared by the
-pre-destroy state read and destroy settlement, and its caller-side guard keeps
-a separate one-second margin. If the container RPC settles
-with a timeout or transport failure, the fresh fence is compare-cleared as
+pre-destroy state read and native destruction promise, and its caller-side guard
+keeps a separate one-second margin. Native destruction completion is the stop
+receipt; cached SDK lifecycle status and a delayed `onStop` callback are not
+additional settlement gates. A definitely stopped native container skips both
+status reads and destruction during retained-target retirement. The slot's
+existing retirement fence and exact-generation checks remain authoritative.
+If the container RPC settles with a timeout or transport failure, the fresh fence is compare-cleared as
 before. If cleanup remains unsettled at its deadline or only the outer guard
 elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved
 that cleanup is safe, and the existing startup-grace convergence path remains

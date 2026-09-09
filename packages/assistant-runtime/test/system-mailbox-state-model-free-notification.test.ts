@@ -16,6 +16,7 @@ function exactNotification(input: {
   const mailboxDedupeKey = input.dedupeKey
     ?? `assistant.notification.requested:${deliveryDedupeToken}`;
   return {
+    itemId: `notification_${input.laneSeq}`,
     mailboxDedupeKey,
     mailboxLaneSeq: input.laneSeq,
     routeAction: "dispatch-assistant-notification",
@@ -35,6 +36,7 @@ function exactNotification(input: {
 
 function maintenance(laneSeq: string): PendingItem {
   return {
+    itemId: `maintenance_${laneSeq}`,
     mailboxDedupeKey: `runtime.maintenance-requested:${laneSeq}`,
     mailboxLaneSeq: laneSeq,
     routeAction: "apply-runtime-control-request",
@@ -44,6 +46,7 @@ function maintenance(laneSeq: string): PendingItem {
 
 function assistantAsk(laneSeq: string): PendingItem {
   return {
+    itemId: `assistant_ask_${laneSeq}`,
     mailboxDedupeKey: `assistant.ask.completed:${laneSeq}`,
     mailboxLaneSeq: laneSeq,
     routeAction: "run-assistant-ask",
@@ -53,6 +56,7 @@ function assistantAsk(laneSeq: string): PendingItem {
 
 function environmentInterview(laneSeq: string): PendingItem {
   return {
+    itemId: `environment_${laneSeq}`,
     mailboxDedupeKey: `environment-interview.completed:${laneSeq}`,
     mailboxLaneSeq: laneSeq,
     routeAction: "run-environment-interview",

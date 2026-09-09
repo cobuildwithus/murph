@@ -772,6 +772,9 @@ type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" 
 const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   Record<string, HostedExecutionDeviceSyncHintPayloadFieldKind>
 > = Object.freeze({
+  calendarRefreshDay: "string",
+  companionAdmissionId: "string",
+  companionObservationJson: "string",
   dataType: "string",
   emptyBackfillAttempts: "number",
   eventType: "string",
@@ -793,8 +796,11 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   sourceLifecycleEpoch: "number",
   resourceId: "string",
   resourceType: "string",
+  silentSinceAt: "isoTimestamp",
   sourceEventType: "string",
+  sourceInstanceId: "string",
   sourceProviderSlug: "string",
+  sourceType: "string",
   summaryPhaseComplete: "boolean",
   summaryResourceCursor: "string",
   temporalAuthorityTimeZone: "string",
@@ -1648,11 +1654,10 @@ function parseHostedExecutionDeviceSyncJobHintPayload(
   const next: Record<string, unknown> = {};
 
   for (const [field, rawValue] of Object.entries(record)) {
-    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
-
-    if (!kind) {
+    if (!Object.hasOwn(HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS, field)) {
       throw new TypeError(`${label}.${field} is not supported.`);
     }
+    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
 
     if (kind === "string" && rawValue === "") {
       continue;

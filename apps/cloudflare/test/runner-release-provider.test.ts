@@ -61,9 +61,22 @@ describe("inactive runner target drain admission", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     const urls = fetchImpl.mock.calls.map(([url]) => new URL(String(url)));
     expect(urls[0]?.pathname).toBe("/client/v4/accounts/fixture/containers/dash/applications/inactive-app/instances");
-    expect(urls[0]?.searchParams.get("per_page")).toBe("100");
+    expect(urls[0]?.searchParams.get("per_page")).toBe("1000");
     expect(urls[1]?.searchParams.get("page_token")).toBe("second page");
     expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("requests a bounded larger page while still requiring terminal drain evidence", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url) => {
+      const largePage = new URL(String(url)).searchParams.get("per_page") === "1000";
+      return Response.json({ success: true,
+        result: { instances: [{ current_placement: { status: { container_status: "stopped" } } }],
+          durable_objects: Array.from({ length: largePage ? 250 : 100 }, (_, index) => ({ id: `synthetic-object-${index}` })) },
+        result_info: { next_page_token: largePage ? null : "synthetic-repeating-cursor" } });
+    });
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .assertDrained("inactive-app")).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("restarts the complete drain observation when a later page is still running", async () => {
@@ -87,8 +100,25 @@ describe("inactive runner target drain admission", () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: true,
       result: { instances: [] }, result_info: { next_page_token: "same" } }));
     await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
-      .assertDrained("inactive-app")).rejects.toThrow("unavailable");
+      .assertDrained("inactive-app")).rejects.toThrow("Inactive instance pagination rejected: repeated token; page=2; nativeRows=0.");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { token: 123, reason: "non-string token" },
+    { token: false, reason: "non-string token" },
+    { token: { privateCursor: "synthetic-private-value" }, reason: "non-string token" },
+    { token: ["synthetic-private-value"], reason: "non-string token" },
+    { token: "   ", reason: "blank token" },
+    { token: "synthetic-private-value".repeat(100), reason: "oversized token (length=2300)" },
+  ])("explains $reason without exposing the provider cursor", async ({ token, reason }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: true,
+      result: { instances: [{ current_placement: { status: { container_status: "stopped" } } }] },
+      result_info: { next_page_token: token } }));
+    await expect(createRunnerReleaseProvider({ accountId: "synthetic-private-account",
+      apiToken: "synthetic-private-secret", fetchImpl }).assertDrained("synthetic-private-application"))
+      .rejects.toMatchObject({ message: `Authoritative runner release state is unavailable; deployment stopped. Inactive instance pagination rejected: ${reason}; page=1; nativeRows=1.` });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("bounds distinct pages and native rows", async () => {

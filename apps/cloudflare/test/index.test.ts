@@ -83,7 +83,9 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
@@ -3328,6 +3330,8 @@ describe("cloudflare worker routes", () => {
       );
 
       expect(response.status).toBe(200);
+      expect(response.headers.has(HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER)).toBe(false);
+      expect(response.headers.has(HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER)).toBe(false);
       await expect(response.json()).resolves.toEqual({
         action: "started",
         kind: "runtime_processing_accepted",
@@ -3450,6 +3454,8 @@ describe("cloudflare worker routes", () => {
     it("returns the real Durable Object outcome to web-plane OIDC callers", async () => {
       const infoLog = vi.spyOn(console, "info").mockImplementation(() => {});
       vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+      let nowEpochMs = Date.now();
+      const now = vi.spyOn(Date, "now").mockImplementation(() => nowEpochMs++);
       let resolveEnsure!: (value: {
         action: "woken";
         kind: "runtime_processing_accepted";
@@ -3521,6 +3527,12 @@ describe("cloudflare worker routes", () => {
       expect(directInput?.commandStartedAtEpochMs).toBe(
         directInput?.orchestration?.runtimeControlAuthStartedAtEpochMs,
       );
+      const orchestration = directInput?.orchestration;
+      expect(orchestration).toBeDefined();
+      const authDurationMs = orchestration!.runtimeControlAuthFinishedAtEpochMs!
+        - orchestration!.runtimeControlAuthStartedAtEpochMs!;
+      expect(authDurationMs).toBeGreaterThan(0);
+      now.mockReturnValue(orchestration!.cloudflareRouteReceivedAtEpochMs! + 37);
       resolveEnsure({
         action: "woken",
         kind: "runtime_processing_accepted",
@@ -3529,6 +3541,10 @@ describe("cloudflare worker routes", () => {
       });
       const response = await responsePromise;
       expect(response.status).toBe(200);
+      expect(response.headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER)).toBe(
+        String(authDurationMs),
+      );
+      expect(response.headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER)).toBe("37");
       await expect(response.json()).resolves.toEqual({
         action: "woken",
         kind: "runtime_processing_accepted",

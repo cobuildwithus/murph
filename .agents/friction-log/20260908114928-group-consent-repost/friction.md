@@ -1,6 +1,7 @@
 ---
 title: 'Group consent repost tests depend on an earlier describe block'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3067'
 ---
 
 ## Expected Behavior

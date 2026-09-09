@@ -53,6 +53,8 @@ type DirectEnsureInput = {
     & {
       directEnsureRequestStartedAtEpochMs: number;
       directEnsureResponseReceivedAtEpochMs: number;
+      directEnsureAuthDurationMs?: number;
+      directEnsureHandlerDurationMs?: number;
       orchestrationAttemptId: string;
       tokenAcquiredAtEpochMs: number;
       tokenAcquireStartedAtEpochMs: number;
@@ -124,6 +126,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       wakeOrder.push("direct");
       input.onTiming({
+        directEnsureAuthDurationMs: 0,
+        directEnsureHandlerDurationMs: 42,
         directEnsureAction: "woken",
         tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
@@ -213,6 +217,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+          directEnsureAuthDurationMs: 0,
+          directEnsureHandlerDurationMs: 42,
           directEnsureOrchestrationAttemptId: expect.stringMatching(
             /^web-ingress-[0-9a-f-]{36}$/u,
           ),

@@ -727,6 +727,7 @@ model HostedInferenceConnection {
 }
 
 model HostedProductFeedback {
+  operatorTasks               HostedOperatorTask[]
   id                          String       @id
   memberId                    String?      @map("member_id")
   kind                        String
@@ -1211,6 +1212,8 @@ model HostedMailboxPayload {
 }
 
 model HostedOperatorTask {
+  feedbackId           String? @map("feedback_id")
+  feedback             HostedProductFeedback? @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
   id                   String        @id
   memberId             String        @map("member_id")
   requestedByMemberId  String?       @map("requested_by_member_id")
@@ -1229,6 +1232,7 @@ model HostedOperatorTask {
   requestedBy          HostedMember? @relation("HostedOperatorTaskRequester", fields: [requestedByMemberId], references: [id], onDelete: SetNull)
 
   @@index([memberId, createdAt])
+  @@index([feedbackId, createdAt])
   @@index([requestedByMemberId, createdAt])
   @@index([status, expiresAt])
   @@map("hosted_operator_task")
@@ -2341,6 +2345,7 @@ model HostedLinqAlert {
 }
 
 model HostedAiUsage {
+  operatorTaskId           String? @map("operator_task_id")
   id                         String       @id
   memberId                   String       @map("member_id")
   sessionId                  String       @map("session_id")

@@ -1,3 +1,4 @@
+import { buildHostedFeedbackDiagnosticInstructions } from "@murphai/hosted-execution";
 import {
   chmod,
   mkdtemp,
@@ -272,7 +273,7 @@ export type OperatorDiagnosticInput = Omit<
   | 'developerInstructions'
   | 'groupSharedReader'
   | 'requesterParticipantId'
->
+> & { feedbackDiagnostic?: boolean }
 
 export type OperatorDiagnosticResult = Extract<
   ReadOnlyAssistantAskResult,
@@ -319,7 +320,10 @@ export async function executeOperatorDiagnostic(
   const finalMessage = await executeConfinedReadOnlyAssistantAskTurn(
     input,
     {
-      baseInstructions: OPERATOR_DIAGNOSTIC_READ_ONLY_ASSISTANT_ASK_INSTRUCTIONS,
+      baseInstructions: [
+        OPERATOR_DIAGNOSTIC_READ_ONLY_ASSISTANT_ASK_INSTRUCTIONS,
+        ...(input.feedbackDiagnostic ? [buildHostedFeedbackDiagnosticInstructions()] : []),
+      ].join('\n\n'),
       developerInstructions: null,
       groupSharedRead: false,
       outputSchema: OPERATOR_DIAGNOSTIC_OUTPUT_SCHEMA,

@@ -791,6 +791,7 @@ function createMailboxPort(input: {
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>

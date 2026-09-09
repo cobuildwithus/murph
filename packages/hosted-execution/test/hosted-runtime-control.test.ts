@@ -921,6 +921,7 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: "low",
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -930,6 +931,7 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: "low",
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -939,11 +941,13 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     });
     expect(parseHostedMailboxFetchResponse({
+      assistantProvider: "venice",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toEqual({
+      assistantProvider: "venice",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
@@ -951,12 +955,14 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: null,
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: null,
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
@@ -996,12 +1002,14 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/Hosted mailbox fetch request cursorMode/u);
     expect(() => parseHostedMailboxFetchResponse({
       conversationUsageStatus: "healthy",
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toThrow(/conversationUsageStatus/u);
     expect(() => parseHostedMailboxFetchResponse({
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [
@@ -1010,6 +1018,21 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toThrow(/non-negative base-10 integer string/u);
   });
+
+  it.each([undefined, null, "", "invalid", "OPENAI", 0, {}, ["openai"]].map(
+    (assistantProvider) => ({ assistantProvider }),
+  ))(
+    "rejects a mailbox fetch response with a missing or invalid provider: %j",
+    ({ assistantProvider }) => {
+      expect(() => parseHostedMailboxFetchResponse({
+        ...(assistantProvider === undefined ? {} : { assistantProvider }),
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      })).toThrow(/provider/iu);
+    },
+  );
 
   it("parses minimal mailbox records and payload sidecars", () => {
     const minimalItem = {
@@ -1652,6 +1675,8 @@ describe("hosted runtime control contracts", () => {
         tokenAcquiredAtEpochMs: 1_777_000_000_012,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        directEnsureAuthDurationMs: 0,
+        directEnsureHandlerDurationMs: 42,
         directEnsureOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",
         directEnsureResultKind: "runtime_processing_accepted",
@@ -1992,6 +2017,10 @@ describe("hosted runtime control contracts", () => {
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
+      { directEnsureAuthDurationMs: -1 },
+      { directEnsureAuthDurationMs: "42" },
+      { directEnsureHandlerDurationMs: Number.POSITIVE_INFINITY },
+      { directEnsureHandlerDurationMs: Number.MAX_SAFE_INTEGER + 1 },
       { directEnsureOrchestrationAttemptId: "web-ingress-not-a-uuid" }, // correlation id must be bounded
       { shellPrewarmOrchestrationAttemptId: "web-prewarm-not-a-uuid" }, // prewarm correlation ids have their own exact prefix and shape
       { shellPrewarmExpectedOrchestrationAttemptId: "web-ingress-123e4567-e89b-42d3-a456-426614174000" }, // direct-wake ids cannot enter the prewarm channel

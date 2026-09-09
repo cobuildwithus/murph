@@ -6989,7 +6989,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     ]);
   });
 
-  it("emits only the 16 slowest device-sync job timings in descending order", async () => {
+  it("totals all source reads while emitting only the 16 slowest job timings", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const elapsedMsByClaim = [
       3_000,
@@ -7025,7 +7025,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         at: "2026-04-08T00:00:45.000Z",
         attempts: 1,
         canonicalProgressCommitted: true as const,
-        connectionSourceReadCount: 0,
+        connectionSourceReadCount: elapsedMs / 1_000,
         connectionSourceReadElapsedMs: 0,
         credentialRefreshCount: 0,
         credentialRefreshElapsedMs: 0,
@@ -7095,6 +7095,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       Record<string, boolean | number | string | null>
     >;
     expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
+      deviceSyncConnectionSourceReadCount: 171,
       deviceSyncJobTimingCount: 18,
       deviceSyncJobTimingSampleLimit: 16,
       deviceSyncJobTimingTruncated: true,

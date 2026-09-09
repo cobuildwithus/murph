@@ -1,4 +1,4 @@
-import type { RuntimeWakeSignal } from "./runtime-wake.ts";
+import type { RuntimeWakeNotification, RuntimeWakeSignal } from "./runtime-wake.ts";
 import {
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   prepareHostedSystemMailboxItemForCheckpoint,
@@ -65,6 +65,7 @@ export function createHostedWorkspaceSystemWork(input: {
               const record = await recordHostedSystemMailboxItemAfterCheckpoint({
                 ...input.preparation,
                 item: preparation.item,
+                signal: context?.signal ?? input.preparation.signal,
                 ...(context?.vaultShareProjectionResult
                   ? { vaultShareProjectionResult: context.vaultShareProjectionResult }
                   : {}),
@@ -87,6 +88,7 @@ export function createHostedWorkspaceSystemWork(input: {
   const kick = (
     allowedRouteActions: readonly HostedSystemMailboxRouteAction[] =
       HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
+    shouldYield = input.runnerInput.shouldYieldBackgroundMaintenance,
   ): void => {
     if (paused || input.preparation.signal?.aborted
       || input.runnerInput.shouldYieldBackgroundMaintenance?.()) {
@@ -108,7 +110,7 @@ export function createHostedWorkspaceSystemWork(input: {
               pendingOnly: true,
               runtimeLogContext: input.runnerInput.runtimeLogContext,
               retainProcessedItemUntilRecorded: true,
-              shouldYieldBackgroundMaintenance: input.runnerInput.shouldYieldBackgroundMaintenance,
+              shouldYieldBackgroundMaintenance: shouldYield,
               signal,
             }),
           });
@@ -125,18 +127,18 @@ export function createHostedWorkspaceSystemWork(input: {
     kick,
     async waitForCompletion(
       wakeSignal: RuntimeWakeSignal | null,
-      onWake: () => Promise<boolean>,
+      onWake: (notification: RuntimeWakeNotification | null) => Promise<boolean>,
     ): Promise<boolean> {
       const completion = input.settleOwnedMutations();
       const wakeController = new AbortController();
       try {
         while (wakeSignal && !input.preparation.signal?.aborted) {
           const result = await Promise.race([
-            completion.then(() => "finished" as const),
-            wakeSignal.wait(wakeController.signal).then(() => "wake" as const),
+            completion.then(() => null),
+            wakeSignal.wait(wakeController.signal),
           ]);
-          if (result === "finished") break;
-          if (await onWake()) return true;
+          if (result === null) break;
+          if (await onWake(result)) return true;
         }
         await completion;
         return false;

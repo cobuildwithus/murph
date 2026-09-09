@@ -179,6 +179,7 @@ export type AssistantUsageTokenPricingBasis =
 export type AssistantUsageStripeMeterSource = "murph";
 
 export interface AssistantUsageRecord {
+  operatorTaskId?: string | null;
   apiKeyEnv: string | null;
   attemptCount: number;
   baseUrl: string | null;
@@ -987,6 +988,9 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
   });
 
   return {
+    ...(record.operatorTaskId === undefined ? {} : {
+      operatorTaskId: normalizeOptionalOperatorTaskId(record.operatorTaskId),
+    }),
     apiKeyEnv: normalizeOptionalString(record.apiKeyEnv, "apiKeyEnv"),
     attemptCount,
     baseUrl: normalizeOptionalString(record.baseUrl, "baseUrl"),
@@ -1652,4 +1656,12 @@ function hasNonEmptyAssistantEnvValue(
 ): boolean {
   const value = env[key];
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizeOptionalOperatorTaskId(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string" || !/^opt_[a-f0-9]{64}$/u.test(value)) {
+    throw new TypeError("Assistant usage operator task identity is invalid.");
+  }
+  return value;
 }

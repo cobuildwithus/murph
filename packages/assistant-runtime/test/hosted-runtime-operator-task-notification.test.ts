@@ -1,3 +1,4 @@
+import { parseAssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   type HostedOperatorTaskControlResponse,
@@ -36,6 +37,8 @@ beforeEach(() => {
 
 describe("hosted operator task notification", () => {
   it("revalidates before provider and outbox, then completes after one queued intent", async () => {
+    const recordUsage = vi.fn().mockResolvedValue(undefined);
+    const usageRecord = parseAssistantUsageRecord({ schema: "murph.assistant-usage.v1", usageId: "turn_synthetic.attempt-1", turnId: "turn_synthetic", sessionId: "session_synthetic", provider: "codex-cli", credentialSource: "platform", attemptCount: 1, occurredAt: "2036-08-25T18:01:00.000Z", usageExtractionVersion: "test" });
     const controlOperatorTask = vi.fn()
       .mockResolvedValueOnce({ status: "authorized" } satisfies HostedOperatorTaskControlResponse)
       .mockResolvedValueOnce({ status: "authorized" } satisfies HostedOperatorTaskControlResponse)
@@ -46,6 +49,7 @@ describe("hosted operator task notification", () => {
           acceptedInputs: [],
           turnId: "turn_operator_synthetic",
         });
+        await input.executionContext?.hosted?.usageRecorder?.recordUsage(usageRecord);
         await input.beforeDelivery?.({
           decision: {
             kind: "send_message",
@@ -73,13 +77,17 @@ describe("hosted operator task notification", () => {
 
     const outcome = await executeHostedAssistantNotificationWake({
       effectsPort: { controlOperatorTask },
-      executionContext: EXECUTION_CONTEXT,
+      executionContext: { hosted: { ...EXECUTION_CONTEXT.hosted!, usageRecorder: { recordUsage } } },
       forceQueueOnly: true,
       sourceMailboxItemId: EVENT_ID,
       vaultRoot: "/synthetic-vault",
       wake: createOperatorMessageWake(),
     });
 
+    expect(mocks.sendAssistantNotification.mock.calls[0]?.[0].assistantTargetOverride)
+      .toEqual({ model: "gpt-5.6-sol", modelProvider: "openai" });
+    expect(recordUsage).toHaveBeenCalledWith({ ...usageRecord, operatorTaskId: TASK_ID }, undefined);
+    expect(usageRecord).not.toHaveProperty("operatorTaskId");
     expect(outcome.deliveryIntentIds).toEqual(["intent_operator_synthetic"]);
     expect(controlOperatorTask.mock.calls.map(([request]) => request.action))
       .toEqual(["authorize", "authorize", "complete"]);

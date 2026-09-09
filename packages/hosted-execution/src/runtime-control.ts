@@ -861,6 +861,9 @@ export interface HostedGroupRunningBitProjection {
 }
 
 export interface HostedMailboxFetchResponse {
+  // Web supplies this invocation-lifecycle fact on every fetch, including empty
+  // batches. Deploy Web before a runner that consumes it.
+  assistantProvider: HostedAssistantProvider;
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
@@ -1071,6 +1074,7 @@ export type HostedRuntimeAssistantAskControlResponse =
   | {
       action: "prepare";
       disclosure?: HostedRuntimeAssistantAskDisclosureContext;
+      feedbackDiagnostic?: true;
       question: string;
       status: "ready";
       targetLabel: string | null;
@@ -2380,6 +2384,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     tokenAcquiredAtEpochMs?: number;
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
+    // These durations belong to this direct HTTP response; generic orchestration
+    // spans can instead describe a competing Temporal wake.
+    directEnsureAuthDurationMs?: number;
+    directEnsureHandlerDurationMs?: number;
     directEnsureOrchestrationAttemptId?: string;
     directEnsureResultKind?:
       | "legacy_accepted"
@@ -2799,6 +2807,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "tokenAcquiredAtEpochMs",
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
+    "directEnsureAuthDurationMs",
+    "directEnsureHandlerDurationMs",
     "directEnsureOrchestrationAttemptId",
     "directEnsureResultKind",
     "directEnsureAction",

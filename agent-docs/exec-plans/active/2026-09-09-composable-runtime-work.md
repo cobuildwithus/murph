@@ -265,3 +265,49 @@ service, durable queue, schema, dependency, or capability protocol was added.
 Remaining: final stable checks/readback, candidate commit and PR rewrite, exact
 pushed-head ReviewGPT and CI, mergeability, and plan closure. Production latency,
 rollout, and an old binary against a new deployment have not been measured.
+
+## Current-base integration and priority regressions
+
+The current base added validated device-hint coverage, transferred continuation
+admission, mailbox diagnostics, and provider handoff observation. The merge keeps
+those owners while deleting global execution-frontier filtering. Focused admission
+proof distinguishes runnable independent connections from authoritative handled
+progress: invalid or unimported continuation ownership cannot advance the prefix.
+
+The preemption suite exposed two missing seams in the broader refactor. Cold
+imports now use the existing device deadline cancellation predicate before waiting
+for completion. Post-snapshot acknowledgments receive the existing wake-interruption
+signal in both model-free and default paths; interrupted effects retain their exact
+recording item and can retry. A composed sixth journey reproduces a reply blocked
+by an acknowledgment before correction and passes after correction. Ordinary
+downloads remain uninterrupted by reply dispatch.
+
+The same suite exposed redundant publication when an already-due wake was derived
+again with a later clock timestamp. Equal-reason due wakes now reuse the accepted
+opportunity instead of taking another identical snapshot. No persisted state or
+retry owner was added. Host abort still cancels background work and preserves the
+canonical persistence scope through its final snapshot before surfacing the abort.
+
+Current focused runs distinguish actual safety regressions from old exclusive-mode
+fixture assumptions. Due maintenance and device work both execute; failed device
+admission retains the existing retry and retention wakes. Recovery fixtures use
+the final durable snapshot/version when failed projection changes recording state.
+The Web typecheck passed after the base integration. Final runtime checks and the
+complexity ratchet are being rerun after the last corrections; a heavily delayed
+local module-loading run also produced four pre-existing runner-fixture timeouts,
+which require focused rerun before readiness. No timeout threshold was relaxed.
+
+Candidate verification after integration: all 35 priority/preemption and composed
+import scenarios pass. Six targeted cases pass after the final acknowledgment
+queue simplification, including all four fixtures that timed out during the
+delayed run. Web readiness/store tests pass 140 cases. Runtime and Web typechecks
+pass. The final complexity ratchet passes: root debt 558 to 558, root maximum
+252 to 252, runner debt 59 to 58, and the new system-work owner remains below
+20. Fifty-one existing hotspots were reviewed across the changed source.
+
+The completed effect is removed from the existing ready queue only after its
+callback returns. An interrupted callback and remaining effects stay available
+to the same workspace if it upgrades to foreground processing. No second replay
+queue or durable state was added. Parent candidate privacy/conflict checks pass.
+The current-base merge is ready to commit; final ReviewGPT, exact-head CI, and
+plan closure remain outstanding.

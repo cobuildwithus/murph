@@ -416,6 +416,7 @@ function createProvider(input: {
   bloodPressureRecords?: readonly Record<string, unknown>[];
   includeNote?: boolean;
   noteRecords?: readonly Record<string, unknown>[];
+  onTimeseriesResponse?: () => void;
   timeseriesRecords?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   bloodPressureRequestFailure?: {
     active: boolean;
@@ -586,6 +587,7 @@ function createProvider(input: {
           : resource === "note"
             ? noteRecords
             : timeseriesRecords;
+        input.onTimeseriesResponse?.();
         return createJsonResponse(
           records.length > 0
             ? {
@@ -2182,10 +2184,10 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
 });
 
 test.each([
-  ["before provider discovery", 0, 0, 0],
+  ["before provider discovery", 1, 0, 0],
   ["after provider discovery", 1, 0, 0],
   ["after timeseries fetch", 1, 1, 0],
-] as const)("an old source epoch is fenced %s", async (
+] as const)("a remote epoch change %s is fenced before health-data fetch or import", async (
   boundary,
   expectedProviderListRequests,
   expectedTimeseriesRequests,
@@ -2204,8 +2206,8 @@ test.each([
     requests,
     timeseriesRecords: {
       caffeine: [{
-        end: "2026-06-10T08:05:00.000Z",
-        start: "2026-06-10T08:00:00.000Z",
+        end: "2025-12-13T08:05:00.000Z",
+        start: "2025-12-13T08:00:00.000Z",
         unit: "g",
         value: 0.08,
       }],
@@ -2454,7 +2456,6 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     ).find((candidate) => candidate !== undefined)),
     EXTENDED_HISTORY_EXECUTION_FIXTURE_DAYS,
   );
-  const targetSlug = String(job.payload?.sourceProviderSlug);
   const sourceReads: string[] = [];
   let importCalls = 0;
 
@@ -2475,13 +2476,7 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     toJobRecord(job, 260),
   );
 
-  assert.deepEqual(sourceReads, [
-    targetSlug,
-    "*",
-    "*",
-    "*",
-    targetSlug,
-  ]);
+  assert.deepEqual(sourceReads, ["*", "*"]);
   assert.equal(providerListRequests.count, 1);
   assert.equal(requests.length, 1);
   assert.equal(importCalls, 1);
@@ -4137,14 +4132,12 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
       message: `Temporary hosted device-sync ${boundary} failure.`,
       retryable: true,
     });
-    let sourceStateReads = 0;
     const failed = await requireValue(provider.jobExecutor).executeJob(
       createJobContext({
         ...(boundary === "source-state"
           ? {
               listConnectionSources: async () => {
-                sourceStateReads += 1;
-                if (sourceStateReads <= 3) {
+                if (requests.length === 0) {
                   return [];
                 }
                 throw failure;
@@ -4209,7 +4202,7 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
   }
 });
 
-test.each([false, true])("historical source reads follow actual import work (records: %s)", async (hasRecords) => {
+test.each([false, true])("terminal historical segments retain fresh source checks (records: %s)", async (hasRecords) => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     bloodPressureRecords: hasRecords ? [{
@@ -4248,10 +4241,181 @@ test.each([false, true])("historical source reads follow actual import work (rec
   assert.equal(result.scheduledJobs?.length ?? 0, hasRecords ? 0 : 1);
 });
 
-test("an empty successful segment retries when its post-fetch source reread fails", async () => {
+test.each([false, true])("intermediate history only reads authority for admission and import (records: %s)", async (hasRecords) => {
+  // Traverse distinct daily continuations rather than replaying a duplicate job.
+  const segmentCount = 128;
+  const records: Record<string, unknown>[] = hasRecords ? [{
+    id: "synthetic-history-reading",
+    timestamp: "2026-05-12T08:30:00.000Z",
+    systolic: 120,
+    diastolic: 78,
+  }] : [];
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ bloodPressureRecords: records, requests });
+  const original = withHistoricalFixtureDays(
+    createScheduledBloodPressureJob(provider),
+    segmentCount + 1,
+  );
+  const source = createSourceSummary("omron");
+  let sourceReads = 0;
+  let imports = 0;
+  let nextJob = original;
+  for (let index = 0; index < segmentCount; index += 1) {
+    const windowStart = String(nextJob.payload?.windowStart);
+    if (hasRecords) {
+      records[0]!.id = `synthetic-history-reading-${index}`;
+      records[0]!.timestamp = `${windowStart.slice(0, 10)}T08:30:00.000Z`;
+    }
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        account: createAccount({ sources: [source] }),
+        connectionSourceAdmissionMode: "listed_only",
+        listConnectionSources: async () => {
+          sourceReads += 1;
+          return [source];
+        },
+        importSnapshot: async (snapshot) => {
+          imports += 1;
+          return importWithRealJunctionNormalizer(snapshot);
+        },
+      }),
+      toJobRecord(nextJob, index),
+    );
+    assert.equal(result.metadataPatch, undefined);
+    nextJob = findBloodPressureJob(result.scheduledJobs ?? []);
+    assert.equal(nextJob.dedupeKey, original.dedupeKey);
+    assert.equal(nextJob.payload?.sourceLifecycleEpoch, original.payload?.sourceLifecycleEpoch);
+    assert.equal(nextJob.payload?.historicalWindowStart, original.payload?.historicalWindowStart);
+    assert.equal(nextJob.payload?.windowEnd, original.payload?.windowEnd);
+    assert.equal(nextJob.payload?.windowStart, new Date(
+      Date.parse(windowStart) + 24 * 60 * 60_000,
+    ).toISOString());
+    assert.equal(nextJob.payload?.historicalRecordsSeen, hasRecords);
+  }
+  assert.equal(requests.length, segmentCount);
+  assert.equal(imports, hasRecords ? segmentCount : 0);
+  assert.equal(sourceReads, segmentCount * (hasRecords ? 2 : 1));
+});
+
+test.each(["local", "hosted"] as const)(
+  "%s intermediate continuations survive restart but cannot cross a source fence or reconnect",
+  async (authority) => {
+    for (const hasRecords of [false, true]) {
+      for (const change of ["disconnect", "reconnect"] as const) {
+        const tempDir = await makeTempDirectory("murph-history-source-admission");
+        const databasePath = path.join(tempDir, "state.sqlite");
+        let store = new SqliteDeviceSyncStore(databasePath);
+        try {
+          const account = store.upsertAccount({
+            connectedAt: NOW,
+            credential: {
+              credentialMetadata: {},
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+            externalAccountId: "junction-user-1",
+            provider: "junction",
+            scopes: [],
+            status: "active",
+          });
+          let liveSource = store.upsertConnectionSource({
+            ...createSourceSummary("omron"),
+            connectionId: account.id,
+            sourceInstanceKey: "junction-source-omron",
+          });
+          const changeAuthority = () => {
+            liveSource = {
+              ...liveSource,
+              lifecycleEpoch: change === "reconnect" ? 2 : 1,
+              lastErrorCode: change === "disconnect"
+                ? DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+                : null,
+            };
+            if (authority === "local") store.upsertConnectionSource(liveSource);
+          };
+          const requests: TimeseriesRequest[] = [];
+          let imports = 0;
+          const provider = createProvider({
+            bloodPressureRecords: hasRecords ? [{
+              id: "synthetic-reading-before-source-change",
+              timestamp: "2026-05-12T08:30:00.000Z",
+              systolic: 120,
+              diastolic: 78,
+            }] : [],
+            onTimeseriesResponse: () => {
+              if (!hasRecords) changeAuthority();
+            },
+            requests,
+          });
+          const context = (): ProviderJobContext => ({
+            ...createJobContext({
+              account: {
+                ...createAccount({
+                  sources: requireValue(store.getAccountById(account.id)).sources,
+                }),
+                id: account.id,
+              },
+              connectionSourceAdmissionMode: authority === "hosted"
+                ? "listed_only"
+                : "discover_unlisted",
+              importSnapshot: async (snapshot) => {
+                imports += 1;
+                const receipt = await importWithRealJunctionNormalizer(snapshot);
+                changeAuthority();
+                return receipt;
+              },
+              listConnectionSources: async () => authority === "hosted"
+                ? [liveSource]
+                : store.listConnectionSources({ connectionId: account.id }),
+            }),
+            upsertConnectionSource: (input) => store.upsertConnectionSource({
+              ...input,
+              connectionId: account.id,
+            }, { preserveDisconnected: true }),
+          });
+          const original = createScheduledBloodPressureJob(provider);
+          const first = await requireValue(provider.jobExecutor).executeJob(
+            context(),
+            { ...toJobRecord(original, 0), accountId: account.id },
+          );
+          assert.equal(first.metadataPatch, undefined);
+          const continuation = findBloodPressureJob(first.scheduledJobs ?? []);
+          const queued = store.enqueueJob({
+            ...continuation,
+            accountId: account.id,
+            provider: "junction",
+          });
+          store.close();
+          store = new SqliteDeviceSyncStore(databasePath);
+          const restored = requireValue(store.getJobById(queued.id));
+          assert.deepEqual(restored.payload, continuation.payload);
+          assert.equal(restored.dedupeKey, original.dedupeKey);
+          assert.equal(restored.payload.sourceLifecycleEpoch, 1);
+          const fenced = await requireValue(provider.jobExecutor).executeJob(context(), restored);
+          assert.equal(requests.length, 1);
+          assert.equal(imports, hasRecords ? 1 : 0);
+          assert.equal(fenced.metadataPatch, undefined);
+          assert.equal(fenced.scheduledJobs, undefined);
+          if (authority === "local") {
+            const source = requireValue(store.listConnectionSources({
+              connectionId: account.id,
+            })[0]);
+            assert.equal(source.lastErrorCode, liveSource.lastErrorCode);
+            assert.equal(source.lifecycleEpoch, liveSource.lifecycleEpoch);
+          }
+        } finally {
+          store.close();
+          await rm(tempDir, { force: true, recursive: true });
+        }
+      }
+    }
+  },
+);
+
+test("an empty terminal segment retries when its post-fetch source reread fails", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({ bloodPressureRecords: [], requests });
-  const original = createScheduledBloodPressureJob(provider);
+  const original = withHistoricalFixtureDays(createScheduledBloodPressureJob(provider), 1);
   const failure = deviceSyncError({
     code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
     httpStatus: 503,
@@ -4265,7 +4429,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       createJobContext({
         listConnectionSources: async () => {
           sourceStateReads += 1;
-          if (sourceStateReads <= 3) {
+          if (requests.length === 0) {
             return [];
           }
           throw failure;
@@ -4279,7 +4443,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       && error.retryable === true,
   );
 
-  assert.equal(sourceStateReads, 4);
+  assert.equal(sourceStateReads, 2);
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
     1,
@@ -5109,7 +5273,7 @@ test.each(SOURCE_DISCONNECT_FENCE_CODES)(
         id: "bp-disconnected-source",
         provider_connection_id: "provider-omron-1",
         sourceProviderSlug: "omron",
-        timestamp: "2026-05-20T08:30:00.000Z",
+        timestamp: "2026-05-12T08:30:00.000Z",
         systolic: 120,
         diastolic: 78,
       }],

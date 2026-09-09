@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-08",
+  "order": 100,
+  "item": {
+    "id": "background-refresh-during-device-retry",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Background refreshes keep moving during device imports",
+    "summary": "Pending background refreshes can proceed while an independent device import works through older data or waits to retry.",
+    "details": "Unfinished device imports keep their retry timing after a restart, and backlogs of completed scheduled refreshes clear together without waiting for another device retry.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3082,
+      3086,
+      3099
+    ]
+  }
+}

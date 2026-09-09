@@ -383,6 +383,7 @@ export interface HostedWorkspaceDurableCheckpointEffectResult {
 }
 
 export interface HostedWorkspaceDurableCheckpointEffectContext {
+  signal?: AbortSignal | null;
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
 }
 

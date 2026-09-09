@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import * as hostedRuntime from "../src/hosted-runtime.ts";
+import { shapeHostedDeviceSyncJobHintPayload } from "../src/hosted-hints.ts";
+import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
@@ -57,6 +59,28 @@ function isDeviceSyncCredentialIndependentImportJob(input: {
       : undefined,
   );
 }
+
+describe("hosted continuation producer and reader compatibility", () => {
+  it.each([
+    ["resource", "calendarRefreshDay", "2026-04-02"],
+    ["resource", "companionAdmissionId", "admission_example"],
+    ["resource", "companionObservationJson", JSON.stringify({ schemaVersion: 1, records: [] })],
+    ["resource", "sourceInstanceId", "example-watch"],
+    ["resource", "sourceType", "watch"],
+    ["push_source_recovery", "silentSinceAt", "2026-04-02T00:00:00.000Z"],
+  ])("retains manifest-valid %s field %s across wake serialization", (kind, field, value) => {
+    const job = normalizeConfiguredDeviceSyncJobInput("junction", {
+      kind,
+      payload: { sourceProviderSlug: "garmin", [field]: value },
+    }, "continuation round trip");
+    const hint = {
+      jobs: [{ kind, payload: shapeHostedDeviceSyncJobHintPayload("junction", job) }],
+    };
+
+    expect(parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint))))
+      .toEqual(hint);
+  });
+});
 
 describe("wearable import delay buckets", () => {
   it.each([

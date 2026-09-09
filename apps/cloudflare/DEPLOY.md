@@ -37,6 +37,13 @@ redactor removes credential and personal-identifier shapes; the provider boundar
 also removes its exact token, account, requested name/image and native resource
 identifiers. Raw response details remain private. Inspect the provider explanation
 before retrying or changing capacity; transport and malformed responses stay distinct.
+Inactive-instance pagination rejection reports a fixed category (non-string, blank,
+oversized, or repeated token), page and native-row counts, and oversized token
+length. Cursor values, application identity, and provider response bodies are
+excluded. Inspection requests up to 1,000 rows per page to reduce cursor traversal over
+historical objects. All pages must still terminate normally and every native
+instance must be stopped; the 100-page, 10,000-native-row and time bounds remain.
+
 Member applications require drain evidence before namespace reuse. The dedicated
 smoke application carries no member invocation, so it proceeds directly through
 native rollout and readiness checks without member drain admission.
@@ -60,6 +67,10 @@ against the requested commit, fingerprints, configuration, and namespace. A matc
 reuses that immutable image despite rebuilt manifest timestamps, preserving its
 active identity or staged candidate inventory. Candidate promotion still requires
 successful smoke. A conflicting admitted candidate requires reconciliation.
+Public banner and health checks allow up to 30 attempts, two seconds apart, for
+the activated Worker version to propagate. Only a well-formed response from a
+different version is retried; HTTP failures and malformed responses fail
+immediately. Exhaustion still blocks candidate promotion.
 The legacy staging pointer predates immutable admission receipts. Its inactive
 application is reconciled through the existing drain/admission path, including
 when a native create committed but its response or subsequent Worker publication

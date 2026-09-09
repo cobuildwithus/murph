@@ -1218,20 +1218,20 @@ Last verified: 2026-08-31
   only bounded protocol, revision/profile, duration, status family, and safe
   error categories; never request/response bodies, full URLs or query strings,
   raw upstream errors, auth headers, or decrypted envelopes.
-- The hosted `murph.submit_product_feedback` dynamic tool is a model-controlled intake surface for product feedback only. Expose it only for hosted provider requests with accepted user-authored assistant input, and use it only after explicit product frustration, a feature request, product interest including shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. The payload must stay to allowlisted feedback kind, a concise bounded de-identified product-only summary, plus optional server-validated changelog ids. The summary must abstract private context to the least-specific product concept needed for triage and must not store health data, health values, diagnoses, medications, raw user wording, raw conversation or voice-memo content, names, handles, user or account identifiers, contact details, locations, relationships, secrets, provider payloads, tags, topics, or unrelated context. Shared parsing and web persistence must apply the shared deterministic redaction pass for high-confidence contact, identifier, network, secret-shaped, and common exact-health-value patterns before recording. That pass is best-effort defense-in-depth over recognizable shapes, not a semantic guarantee: a summary written in violation of the model-facing contract can retain a sensitive value the patterns do not recognize, and the repository owner has explicitly accepted that residual risk for anonymous free-text rows instead of requiring a fail-closed semantic boundary that would drop or truncate feedback. The primary privacy boundary for summary content is the model-facing contract above; the scrub is never permission to send raw sensitive text, and new patterns should be added only for recurring high-confidence shapes rather than chasing every natural-language spelling. Cloudflare may reach the web recording route only through the signed web-control callback allowlist. The callback-bound member authenticates and authorizes the write while Web owns linkage: an ordinary private-direct row may retain the authenticated member, a synthetic group row stays anonymous, and the model/runtime payload cannot select linkage. `member_id` remains nullable and server-controlled, and new deterministic feedback ids must not encode member identity. Response surfaces should return only opaque feedback ids plus recorded/dedup status.
+- The hosted `murph.submit_product_feedback` dynamic tool is a model-controlled intake surface for product feedback only. Expose it only for hosted provider requests with accepted user-authored assistant input, and use it only after explicit product frustration, a feature request, product interest including shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. The payload must stay to allowlisted feedback kind, a concise bounded de-identified product-only summary, plus optional server-validated changelog ids. The summary must abstract private context to the least-specific product concept needed for triage and must not store health data, health values, diagnoses, medications, raw user wording, raw conversation or voice-memo content, names, handles, user or account identifiers, contact details, locations, relationships, secrets, provider payloads, tags, topics, or unrelated context. Shared parsing and web persistence must apply the shared deterministic redaction pass for high-confidence contact, identifier, network, secret-shaped, and common exact-health-value patterns before recording. That pass is best-effort defense-in-depth over recognizable shapes, not a semantic guarantee: a summary written in violation of the model-facing contract can retain a sensitive value the patterns do not recognize, and the repository owner has explicitly accepted that residual risk for anonymous free-text rows instead of requiring a fail-closed semantic boundary that would drop or truncate feedback. The primary privacy boundary for summary content is the model-facing contract above; the scrub is never permission to send raw sensitive text, and new patterns should be added only for recurring high-confidence shapes rather than chasing every natural-language spelling. Cloudflare may reach the web recording route only through the signed web-control callback allowlist. The callback-bound member authenticates and authorizes the write while Web owns linkage: ordinary rows retain the authenticated private member or synthetic group-container member, and the model/runtime payload cannot select linkage. Group linkage identifies the container, never an individual speaker; linked rows follow the existing member deletion cascade. `member_id` remains nullable and server-controlled, and new deterministic feedback ids must not encode member identity. Response surfaces should return only opaque feedback ids plus recorded/dedup status.
 - Tool authority for the reserved support-escalation shape exists only for an explicit Murph human-support request in a verified private direct conversation. That request authorizes one account-linked call whose summary begins with the exact reserved prefix and continues with Murph's concise, bounded, de-identified product-only explanation in its own words. The model-facing contract forbids copied or quoted conversation text and every private category forbidden for ordinary feedback; shared parsing and Web persistence apply the same deterministic sanitizer before recording. The linked marker remains fixed server-authored metadata while the explanation is stored in a separate anonymous detail row. The explicit human-support request also authorizes the paired Web owner to disclose that sanitized explanation beside the internal member id to the dedicated support recipient. This intentionally accepts the same residual semantic-redaction risk described above for the explanation while never treating raw conversation text as disclosure authority. The anonymous explanation also enters the configured general product-feedback digest without the linked marker or member id and follows ordinary anonymous-feedback retention after account deletion; the linked marker is deleted with the account. Those existing audience and retention owners preserve de-identified product triage without adding another state or lifecycle path. Every value under the exact reserved prefix must enter the support owner; empty, wrong-kind, changelog-linked, group, and unverified shapes fail closed before persistence. A generic bug handoff does not authorize the reserved shape. The support address remains opt-in and appears only when explicitly requested.
 - The reserved verified-private support-escalation shape is the narrow internal-email exception to ordinary feedback disclosure. Web persists one fixed server-authored member-linked marker and one anonymous row containing only the prefix-stripped sanitized explanation, then may pair that read-back explanation with the callback-bound member id and internal feedback id in the immediate support alert. Both rows must validate before provider entry. Replay treats the first stored anonymous explanation as authority and reproduces the same body and provider idempotency key even if a later callback rewords the issue; missing, member-linked, empty, unsanitized, overlong, or still-prefixed stored detail fails before Resend. The alert remains plain text, fixed-recipient, daily-capped, and forbidden from including raw or quoted member text or any private category prohibited by the model-facing contract. The explicit request authorizes only Murph's sanitized de-identified product explanation beside identity, with the same documented residual semantic-redaction risk; it never authorizes transcript disclosure.
 - The internal product-feedback digest may disclose only the fixed
-  server-owned kind and neutral ordinal member-section labels, truthful grouped
+  server-owned kind and neutral ordinal member/group-section labels, truthful grouped
   per-kind counts, and the
   capture-scrubbed de-identified product-feedback summaries of the three
   allowlisted kinds to the dedicated configured operator recipient list
   through the existing Resend transport. The row read may use Web's existing
   server-controlled member id only as an in-memory grouping key; that id must
   not enter the email body, and the digest must not read the member relation,
-  contact data, or infer a human from a synthetic group runtime. Unlinked
-  groupchat and truly anonymous rows share one final section so the email does
-  not misattribute either to a person. The disclosure boundary for summary
+  contact data, or infer a human from a synthetic group runtime. Linked private
+  and group-container rows use neutral `Member / group` headings. Historical
+  unlinked groupchat and truly anonymous rows share one final section. The disclosure boundary for summary
   text is the capture side: the recording path stores only a bounded de-identified product-only
   summary written under the model-facing contract and passed through the
   shared deterministic redaction pass, so the digest renders stored summaries
@@ -1506,9 +1506,14 @@ locally readable.
   fact. The container's immutable binding is the sole opaque-name-to-member mapping
   for both warm and cold allocations. Legacy ENAM targets preserve their original
   region and namespace; new global targets must never be parsed as member names.
-  Before provider credential minting, invocation, wake, or cleanup, the
-  per-member owner must re-read that binding and require the exact member,
-  release, region, and slot. A claimed slot is never reusable across members;
+  Before provider credential minting, the per-member owner must verify the exact
+  member, release, region, and slot. Fenced preparation may reuse the immutable
+  binding receipt from allocation or retained-slot resolution in that same
+  request; otherwise it reads the binding. Invocation and wake still authorize
+  the live binding inside the slot owner. Cleanup sends the exact slot and member
+  to that owner, which validates them before retirement and acknowledges only
+  after native destruction and durable identity scrubbing. A successful
+  acknowledgement needs no binding readback. A claimed slot is never reusable across members;
   terminal retirement destroys the container and scrubs claim/member identity.
   Codex standby preflight uses a disposable content-free home and must not make
   a provider request or retain a resident member-configured App Server.
@@ -1649,3 +1654,22 @@ expiry owner without disclosure metadata or a review turn. A message is restrict
 route; Web reauthorizes the member-bound task immediately before model work and
 again at the normal notification/outbox boundary. Neither path creates
 first-contact or group-delivery authority.
+
+
+Feedback diagnostic admission accepts only a feedback id and bounded question
+under existing Ops authentication and same-origin mutation checks. The server
+selects and transactionally verifies existing member linkage; callers cannot
+supply another target. Unlinked and group feedback cannot infer a private
+workspace. A server-returned feedback diagnostic marker selects product-only,
+de-identified output instructions. Results pass the existing deterministic
+feedback sanitizer before encryption and at the feedback read surface; that
+sanitizer remains defense in depth, not a semantic anonymity guarantee. The
+model must omit private source wording, facts, values, and identifiers while
+retaining synthetic reproduction and technical evidence. Feedback reads omit
+member linkage and obey the existing result expiry.
+
+Operator usage identity is runtime-owned and never a model-controlled funding
+flag. Web validates the task against the callback-bound member and recorded
+occurrence window before excluding its cost from allowance. The original
+credential source and token evidence remain intact. Ordinary usage retains its
+existing accounting and provider access checks.

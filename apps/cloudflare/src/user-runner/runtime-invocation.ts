@@ -1180,8 +1180,8 @@ export class RuntimeInvocationService {
       }
       const readBinding = async () =>
         await requireHostedRunnerSlotLifecycle(namespace.getByName(runnerContainerName)).readStandbySlotBinding();
-      // Fresh allocation already checked this immutable binding. Reuse only
-      // its request-local receipt; direct and retained starts still read it.
+      // Allocation or retained-slot resolution already checked this binding.
+      // Reuse that request-local receipt; direct starts without one still read it.
       // The container independently authorizes its live binding at launch.
       const binding = input.verifiedSlotBinding ?? (input.commandBudget
         ? await runRuntimeProcessingCommandStep({

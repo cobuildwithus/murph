@@ -78,6 +78,22 @@ Local `device-syncd` remains responsible for:
 - normalization and import through `@murphai/importers`
 - all canonical vault writes for wearable data
 
+### Historical source admission
+
+An intermediate Junction precise-history segment that fetched no rows does not
+read source authority again merely to enqueue its continuation. A nonempty
+segment still reads fresh authority after the provider fetch and before canonical
+import, but does not reread it after import merely to enqueue the next segment.
+Neither path publishes terminal history coverage. Continuations preserve their
+source lifecycle epoch, dedupe identity, original window and unresolved evidence;
+they must pass source admission again before fetching the next health segment.
+This holds for local SQLite sources and hosted Web-backed source reads.
+
+Terminal segments retain post-fetch and, when an import occurs, post-import
+source checks. Hosted apply still enforces observed connection/source versions
+and disconnect fences; local completion still uses the existing fenced job/store
+transaction.
+
 ## Trust boundary
 
 ### Hosted boundary

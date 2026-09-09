@@ -764,6 +764,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(lateItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [lateItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -971,6 +972,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(lateItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [lateItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -1260,6 +1262,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(sidecarItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [sidecarItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -1349,6 +1352,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 0,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemFirstPendingDiagnostics: null,
           hostedMailboxSystemFirstPendingClassifierFailures: null,
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
@@ -3151,6 +3155,7 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: mailboxItemCount,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemFirstPendingDiagnostics: null,
           hostedMailboxSystemFirstPendingClassifierFailures: null,
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",

@@ -9,6 +9,7 @@ import { parseHostedExecutionDeviceSyncExpectedConnectedAt } from "./device-sync
 import { parseAssistantUsageRecord } from "../assistant-usage.ts";
 import { parseHostedAssistantCustomInferenceOverride } from "../assistant-inference.ts";
 import {
+  isHostedAssistantProvider,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
   parseHostedAssistantProviderOverride,
@@ -692,8 +693,12 @@ export function parseHostedMailboxFetchResponse(
   value: unknown,
 ): HostedMailboxFetchResponse {
   const record = requireObject(value, "Hosted mailbox fetch response");
+  if (!isHostedAssistantProvider(record.assistantProvider)) {
+    throw new TypeError("Hosted mailbox fetch response assistantProvider is invalid.");
+  }
 
   return {
+    assistantProvider: record.assistantProvider,
     ...(record.conversationUsageStatus === undefined
       ? {}
       : {
@@ -1135,10 +1140,15 @@ export function parseHostedRuntimeAssistantAskControlResponse(
     if (record.disclosure === undefined) {
       assertAllowedObjectKeys(
         record,
-        new Set(["action", "question", "status", "targetLabel"]),
+        new Set(["action", "question", "status", "targetLabel", "feedbackDiagnostic"]),
         label,
       );
-      return { action, question, status, targetLabel };
+      if (record.feedbackDiagnostic !== undefined && record.feedbackDiagnostic !== true) {
+        throw new TypeError("Feedback diagnostic marker must be true when present.");
+      }
+      return { action, question, status, targetLabel,
+        ...(record.feedbackDiagnostic === true ? { feedbackDiagnostic: true } : {}),
+      };
     }
     assertAllowedObjectKeys(
       record,
@@ -6821,6 +6831,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "directEnsureResponseReceivedAtEpochMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directEnsureAuthDurationMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directEnsureHandlerDurationMs",
         orchestrationLabel,
       ),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(

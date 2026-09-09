@@ -315,17 +315,11 @@ export async function readHostedRuntimeReconciliationFacts(
   });
 
   if (usageGateRequired) {
-    const [gate, selectedCustomInference] = await Promise.all([
-      resolveHostedRuntimeAiUsageGate({
-        mode: input.usageGateMode ?? "mutating",
-        now,
-        userId: input.userId,
-      }),
-      readSelectedHostedInferenceConnectionOverride({
-        memberId: input.userId,
-        prisma,
-      }),
-    ]);
+    const gate = await resolveHostedRuntimeAiUsageGate({
+      mode: input.usageGateMode ?? "mutating",
+      now,
+      userId: input.userId,
+    });
 
     if (gate.status === "health_data_consent_withdrawn") {
       reportStage?.("canonical_projection");
@@ -344,7 +338,13 @@ export async function readHostedRuntimeReconciliationFacts(
       return facts;
     }
 
-    if (gate.status === "denied" && !selectedCustomInference) {
+    if (
+      gate.status === "denied"
+      && !(await readSelectedHostedInferenceConnectionOverride({
+        memberId: input.userId,
+        prisma,
+      }))
+    ) {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
         if (freshConversationMailboxLag) {

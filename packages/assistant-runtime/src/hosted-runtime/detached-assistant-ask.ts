@@ -1,3 +1,4 @@
+import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import {
   executeConsentedReadOnlyAssistantAsk,
   executeOperatorDiagnostic,
@@ -390,7 +391,13 @@ async function runOneHostedDetachedAssistantAsk(input: {
     };
     let answer: ReadOnlyAssistantAskResult;
     if (claimed.wake.ask.target.kind === "operator_task") {
-      answer = await input.executeOperatorDiagnostic(executionInput);
+      answer = await input.executeOperatorDiagnostic({
+        ...executionInput,
+        model: HOSTED_ASSISTANT_SOL_MODEL,
+        modelProvider: "openai",
+        beforeProviderEntry: undefined,
+        feedbackDiagnostic: prepared.feedbackDiagnostic,
+      });
     } else if (claimed.wake.ask.target.kind !== "joined_group") {
       if (prepared.disclosure === undefined) {
         throw new TypeError(
@@ -481,6 +488,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
       && providerUsages.length > 0
     ) {
       const deferredUsageInput = {
+        operatorTaskId: readOperatorTaskId(claimed.wake),
         attemptCount: claimed.attemptCount,
         effectiveEnv: { ...input.env },
         memberId: input.memberId ?? claimed.wake.userId,
@@ -503,6 +511,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
 }
 
 async function recordHostedDetachedAssistantAskUsageBestEffort(input: {
+  operatorTaskId: string | null;
   attemptCount: number;
   effectiveEnv: Readonly<Record<string, string>>;
   memberId: string;
@@ -522,6 +531,7 @@ async function recordHostedDetachedAssistantAskUsageBestEffort(input: {
         userEnvKeys: input.userEnvKeys,
       });
       const record = parseAssistantUsageRecord({
+        ...(input.operatorTaskId ? { operatorTaskId: input.operatorTaskId } : {}),
         apiKeyEnv: usage.apiKeyEnv,
         attemptCount: input.attemptCount,
         baseUrl: usage.baseUrl,
@@ -623,4 +633,9 @@ function normalizeHostedDetachedAssistantAskResult(
     answer: result.answer ?? null,
     outcome: "cannot_answer",
   };
+}
+
+function readOperatorTaskId(wake: HostedSystemMailboxPendingItem["wake"]): string | null {
+  return wake.kind === "assistant.ask.requested" && wake.ask.target.kind === "operator_task"
+    ? wake.ask.target.taskId : null;
 }

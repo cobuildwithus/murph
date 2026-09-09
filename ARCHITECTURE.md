@@ -1684,10 +1684,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   6pm Eastern hour and sends one daily internal product-feedback digest through
   that existing Resend transport. Web reads its owned
   `HostedProductFeedback` rows from the prior 6pm-to-6pm window for the three
-  server-allowlisted product-feedback kinds. It uses each displayed private
-  row's server-controlled internal member id only as an in-memory grouping key,
-  renders neutral ordinal member headings with fixed kind labels nested inside,
-  and moves every unlinked groupchat or anonymous row into one final section.
+  server-allowlisted product-feedback kinds. Ordinary feedback retains the
+  callback-bound private member or group-container member in the existing nullable
+  `member_id` column; the model cannot select linkage. Linked rows follow the
+  existing member deletion cascade, while historical unlinked rows remain anonymous.
+  The digest uses each displayed row's server-controlled internal member id only
+  as an in-memory grouping key, renders neutral ordinal `Member / group` headings
+  with fixed kind labels nested inside, and moves every unlinked groupchat or
+  anonymous row into one final section.
   The member ids themselves never enter the email body. A grouped aggregate
   retains truthful per-kind totals, while the deterministically ordered row read stays capped at a fixed
   limit and reports omitted remainders by kind without trying to attribute
@@ -4107,14 +4111,21 @@ An eligible turn may receive the schema before its accepted input has video
 authority because the provider tool set freezes at turn start. Keeping the tool
 available lets the first live-steered video be drained, frozen, and authorized
 by the `beforeToolExecution` boundary in that same turn. Before provider execution,
-the turn owner reads retained input history once and freezes eligible video
+the turn owner reads indexed conversation media candidates and freezes eligible video
 metadata from the same source, account, thread, direct/group audience, and
 optional session. Direct history also matches the participant; authenticated
 group history allows other participants in that group. Unknown conversation
 identity and future input provide no historical authority. Retired message text
 grants no authority; unexpired image/video identity remains selectable through
-its separate media window. Existing input records own this lookup; it adds no
-new persisted state. The frozen record contains normalized raw path, byte count,
+its separate media window. The input store's rebuildable `state/input-media.json`
+maps conversation hashes to input references and expiry bounds, keeping file
+count constant as conversations grow. Exact canonical input records still
+supply attachment authority.
+An absent index is rebuilt once under the existing runtime write lock. Evidence
+updates add candidates before writing canonical evidence under that same lock,
+so a failed evidence write can leave only a harmless extra candidate. Retention
+and conversation checks still apply to the canonical record before it is frozen.
+The frozen record contains normalized raw path, byte count,
 SHA-256, MIME type, message ref, and ordinal. Live steering freezes new input
 before forwarding it. Existing attachment keys are never refreshed from
 model-writable files. Historical references do not become current accepted
@@ -4335,3 +4346,39 @@ removal condition are defined in
 ### Fitbit / Google Health source replacement
 
 Fitbit migration is a boundary transition inside the existing Junction connection. Importers own canonical daily/interval evidence, device-syncd owns source identities and provider calls, hosted runtime owns continuation, and Web owns the persisted connection lock and one-card projection. The public card may combine Fitbit and Pixel Watch, but stored authorities remain truthful as `fitbit` and `google_health`.
+
+
+## Feedback diagnostic tasks
+
+Web owns feedback and its nullable member linkage. The Ops-authenticated
+`/api/ops/feedback` endpoint lists product-only summaries, accepts a feedback id,
+a bounded question and an idempotency key, and lists associated diagnostic
+results. GET without `feedbackId` lists feedback; GET with it lists tasks;
+`after` follows the returned cursor. POST resolves the target only from existing
+feedback linkage and rechecks it inside task admission. Unlinked feedback
+cannot select a private workspace. Responses never include member linkage.
+
+The nullable operator-task feedback relation reuses mailbox dispatch, retry,
+status, encryption and two-day result retention. Web prepare selects the
+feedback diagnostic profile; the read-only engine composes de-identification
+instructions above untrusted evidence, and Web sanitizes the answer before
+encrypted persistence. Reads expose only sanitized answers and their expiry.
+Local investigation consumers use existing Ops authentication; this endpoint
+adds no machine credential, cron, worker or automatic repository mutation.
+
+`scripts/ops-feedback` is the local agent client. It reuses the existing
+Playwright browser dependency and an owner-only, machine-local browser profile
+outside the repository. Interactive login uses normal Ops sign-in; later calls
+share that browser session without extracting cookies. Requests pin the canonical
+production origin, reject redirects, and require explicit idempotency keys.
+The client owns no task state or automatic retries.
+
+Diagnostics use Sol on OpenAI, and operator messages use an invocation-only Sol
+provider override without changing member preferences. Both attach the exact
+operator-task id to usage. Web verifies the same-member task and occurrence
+window before marking allowance cost zero; provider pricing remains in the
+usage snapshot. The member allowance/credit ledger receives no operator debit.
+Existing provider admission still applies when member capacity is exhausted.
+Deploy the additive database migration and Web accounting before the runtime
+producer; mixed older runtimes do not carry the funding identity. This is a
+forward fix, not historical usage reclassification.

@@ -1392,6 +1392,30 @@ Last verified: 2026-09-04
   against the claimed producer count, not the corrupting hop. A match does not
   prove identical content, rule out equal-length corruption or authenticate a
   spoofed marker. No new retry or successful-body logging is introduced.
+  The existing Worker web-control response-received event for successful
+  snapshots and those existing consumer decoding/shape warnings also carry
+  `responseContentEncodingCategory` (`missing`, `identity`, `gzip`, `br`,
+  `deflate`, `other`) and `responseContentLengthCategory` (`missing`, `valid`,
+  `invalid`). These describe native Headers values at Worker header arrival
+  and consumer decode failure, not wire framing or body completion. Encoding
+  normalization examines at most eight characters; recognized single codings
+  are case-insensitive, and empty, compound, unknown or oversized values are
+  `other`. Length validation examines at most sixteen characters and accepts
+  only canonical nonnegative safe integers (no leading zeros except `0`);
+  no exact Content-Length is logged or compared to the producer byte marker.
+  Native Headers normalization precedes these checks. Missing diagnostic fields
+  mean an older emitter or an out-of-scope event, not a missing HTTP header.
+  The added cost is two finite fields (eighteen possible pairs) on existing
+  events only: no extra log events, consumer success enrichment, body access,
+  response replacement, requests, retries, sampling state or retention changes.
+  Use a fixed start/end observation window of natural authorized reads and only
+  existing private operation context to compare observations. Do not claim
+  per-request matching when that context is insufficient. Different categories
+  show different header observations; equal categories do not prove equal raw
+  headers. Neither establishes byte completeness, a losing hop, or the safety
+  of a future stream wrapper. Remove these two fields and their shared classifier
+  once the framing/encoding prerequisite is characterized, or the bounded
+  window yields no useful evidence; retained records expire under existing policy.
 - Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
   failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
   existing device-sync job owner, which requeues with its normal bounded backoff.
@@ -1576,6 +1600,10 @@ Last verified: 2026-09-04
   continuation while persisting the system mailbox, emit
   `mailbox.system_processed` with `retryable_failed`, invocation context,
   mailbox sequence, and sanitized error text before retaining the prior work.
+  The hosted wake reader accepts every manifest-owned field emitted into job
+  hints, including calendar refresh, source identity, companion admission, and
+  silent-source recovery fields. Producer-to-reader round trips must preserve
+  those fields; rejecting valid continuation data replays the preceding wake.
   For `JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE`, the existing failed-attempt
   event may also carry `junctionEcgBindingReason`, checked against the same
   finite service-owned reason set before generic log sanitization. Missing,
@@ -1986,11 +2014,21 @@ Last verified: 2026-09-04
   new successors never write the envelope or consult its completed-resource
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
+- Extended historical Junction resource jobs reject locally known stale source
+  epochs before provider inventory discovery. Inventory discovery reads connection
+  capabilities, not health samples. One fresh post-discovery source snapshot
+  governs both local projection and admission before the health-data request;
+  it also catches revocations newer than the hydrated local state. Import and
+  terminal progress retain their existing fresh source checks. Intermediate
+  precise-history segments omit reads used only to queue an epoch-bound
+  continuation: empty segments skip the post-fetch read, while imported segments
+  skip the post-import read. Each continuation must pass fresh admission before
+  fetching health data; see `../docs/device-sync-hosted-control-plane.md`.
 - Junction summary and workout import preparation share their fresh post-provider
   source read with historical evidence evaluation through pure admission helpers.
-  Empty historical segments retain their post-fetch authority without a second
-  read; actual canonical imports still recheck authority afterward. Reads are
-  never reused across provider fetches, stream candidates, or job executions.
+  Terminal historical segments retain post-fetch authority and recheck after an
+  actual canonical import. Reads are never reused across provider fetches,
+  stream candidates, or job executions.
 - Junction workout streams stay inside that existing resource/day continuation
   owner. Before the workout index, the existing control-plane current-import
   admission predicate intersects with the current Junction provider inventory
@@ -3168,3 +3206,14 @@ the existing pre-delivery hook, then mark the task complete only after exactly
 one queue-only delivery intent exists. The existing notification identity,
 route check, transcript commit, outbox dedupe, line-health, and provider retry
 owners remain the delivery state machine.
+
+
+Feedback questions reuse operator-task idempotency, with the nullable feedback
+relation included in replay conflict checks. There is no feedback queue or
+second task status. Follow-up questions use a new idempotency key; an unchanged
+retry reuses its key. Both diagnostic and operator-message turns select Sol at
+execution and attach task identity to every recorded provider attempt, including
+failed or preempted attempts. Verified operator usage records zero allowance
+cost while retaining provider pricing evidence; ordinary retries and usage
+idempotency remain unchanged. The feedback API reports result expiry explicitly
+and never decrypts results after the existing two-day retention boundary.

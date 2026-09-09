@@ -198,6 +198,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && entry.eventCode === "runtime.invocation_finished"
         ).map((entry) => entry.redactedJson),
         [{
+          hostedMailboxSystemFirstPendingDiagnostics: null,
           hostedMailboxSystemFirstPendingClassifierFailures: null,
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",

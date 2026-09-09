@@ -437,7 +437,9 @@ describe("hosted orchestration reconciliation facts", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(consoleInfoSpy).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy.mock.calls.filter(
+      ([message]: readonly unknown[]) => message === "Hosted runtime reconciliation facts.",
+    )).toHaveLength(1);
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "Hosted runtime reconciliation facts.",
       {
@@ -1022,6 +1024,55 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(response.status).toBe(200);
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it.each(["allowed", "health_data_consent_withdrawn"] as const)(
+    "does not depend on custom inference lookup when usage admission is %s",
+    async (status) => {
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "1" },
+      ]);
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status });
+      mocks.readSelectedHostedInferenceConnectionOverride.mockRejectedValue(
+        new Error("Unavailable custom inference selection."),
+      );
+
+      const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+      const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+      expect(response.status).toBe(200);
+      expect(facts.blocked?.reason ?? null).toBe(
+        status === "allowed" ? null : "health_data_consent_withdrawn",
+      );
+      expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+        mode: "mutating",
+        now: new Date(FIXED_NOW),
+        userId: MEMBER_ID,
+      });
+      expect(mocks.readSelectedHostedInferenceConnectionOverride).not.toHaveBeenCalled();
+      expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed without issuing a usage notice when a denied override lookup fails", async () => {
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "1" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+    mocks.readSelectedHostedInferenceConnectionOverride.mockRejectedValue(
+      new Error("Unavailable custom inference selection."),
+    );
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(500);
+    expect(mocks.readSelectedHostedInferenceConnectionOverride).toHaveBeenCalledOnce();
+    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
   it("admits member-funded custom core inference when managed usage is denied", async () => {

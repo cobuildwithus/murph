@@ -412,6 +412,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           hostedMailboxImportedCount: 1,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemFirstPendingDiagnostics: null,
           hostedMailboxSystemFirstPendingClassifierFailures: null,
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
@@ -951,7 +952,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 };
               },
             },
-            mailboxPort: createMailboxPort({ events: [], items: mailboxItems }),
+            mailboxPort: createMailboxPort({ assistantProvider: "venice", events: [], items: mailboxItems }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               checkpointWorkspace: (request) => {
@@ -1013,7 +1014,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("defers provider egress when live provider authority is unavailable", async () => {
+  test("uses an empty mailbox's provider fact without rereading unavailable settings", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TEST_NOW));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-authority-"));
@@ -1071,7 +1072,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         },
       );
 
-      assert.equal(providerEgressCount, 0);
+      assert.equal(providerEgressCount, 1);
       assert.equal(result.status, "idle");
       assert.equal(checkpointRequests.length, 0);
     } finally {
@@ -1080,7 +1081,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("hands a detached ask to a fresh invocation when the live provider changes", async () => {
+  test("hands a detached ask to a fresh invocation after an acknowledged provider update", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-detached-provider-handoff-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -1161,8 +1162,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               assistantConfigurationToolPort: {
                 async request() {
                   return {
-                    action: "read",
+                    action: "update",
                     result: {
+                      appliesAt: "next_turn",
                       availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
                       availableProviders: ["openai", "venice"],
                       availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
@@ -1171,7 +1173,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                       model: "gpt-5.6-terra",
                       provider: "venice",
                       reasoningEffort: "low",
+                      requiredPlan: null,
                       solAvailable: false,
+                      status: "updated",
                     },
                   };
                 },
@@ -1183,9 +1187,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 workspace: createWorkspaceState({ version: "0" }),
               }),
             }),
-            async runAssistantPhase() {
+            async runAssistantPhase(input) {
               events.push("foreground");
               await prepareStarted.promise;
+              await input.runtime.platform.assistantConfigurationToolPort?.request({
+                action: "update",
+                assistantInputId: "ain_synthetic_provider_update",
+                provider: "venice",
+              });
               prepareRelease.resolve();
               return { progressed: false };
             },

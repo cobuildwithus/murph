@@ -29,6 +29,14 @@ const HOSTED_RUNTIME_RECONCILIATION_FAILURE_LOG_MESSAGE =
   "Hosted runtime reconciliation facts failed.";
 const HOSTED_RUNTIME_RECONCILIATION_FAILURE_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.failure.v1";
+const HOSTED_RUNTIME_RECONCILIATION_TIMING_LOG_SCHEMA =
+  "murph.hosted-runtime.reconciliation-facts.timing.v1";
+
+type HostedRuntimeReconciliationTimingStage =
+  | HostedRuntimeReconciliationFactsProcessingStage
+  | "authentication"
+  | "request_validation"
+  | "response_projection";
 
 type HostedRuntimeReconciliationFailureErrorClass =
   | "hosted_onboarding"
@@ -40,40 +48,69 @@ export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ userId: string }> },
 ) => {
-  const authenticatedUserId = await requireHostedCloudflareCallbackRequest(request, {
-    maxBodyBytes: HOSTED_ORCHESTRATION_RECONCILIATION_FACTS_CALLBACK_BODY_LIMIT_BYTES,
-  });
-  const routeUserId = await resolveDecodedRouteParam(context.params, "userId");
-  assertHostedOrchestrationUserMatches({
-    authenticatedUserId,
-    routeUserId,
-  });
+  const startedAt = Math.round(performance.now());
+  let stageStartedAt = startedAt;
+  let timingStage: HostedRuntimeReconciliationTimingStage = "authentication";
+  const stageDurationsMs: Partial<Record<HostedRuntimeReconciliationTimingStage, number>> = {};
+  const reportStage = (stage: HostedRuntimeReconciliationTimingStage): void => {
+    const now = Math.round(performance.now());
+    stageDurationsMs[timingStage] = (stageDurationsMs[timingStage] ?? 0)
+      + now - stageStartedAt;
+    timingStage = stage;
+    stageStartedAt = now;
+  };
 
-  const factsRequest = parseHostedRuntimeReconciliationFactsRequest({
-    userId: routeUserId,
-  });
-
-  let failureStage: HostedRuntimeReconciliationFactsProcessingStage =
-    "canonical_access_workspace";
-  let facts: Awaited<
-    ReturnType<typeof readHostedRuntimeReconciliationFactsWithVisibleAccess>
-  >;
   try {
-    facts = await readHostedRuntimeReconciliationFactsWithVisibleAccess(
-      factsRequest,
-      (stage) => {
-        failureStage = stage;
-      },
-    );
-  } catch (error) {
-    emitHostedRuntimeReconciliationFailure({
-      error,
-      stage: failureStage,
+    const authenticatedUserId = await requireHostedCloudflareCallbackRequest(request, {
+      maxBodyBytes: HOSTED_ORCHESTRATION_RECONCILIATION_FACTS_CALLBACK_BODY_LIMIT_BYTES,
     });
-    throw error;
-  }
+    reportStage("request_validation");
+    const routeUserId = await resolveDecodedRouteParam(context.params, "userId");
+    assertHostedOrchestrationUserMatches({
+      authenticatedUserId,
+      routeUserId,
+    });
 
-  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(facts));
+    const factsRequest = parseHostedRuntimeReconciliationFactsRequest({
+      userId: routeUserId,
+    });
+
+    let failureStage: HostedRuntimeReconciliationFactsProcessingStage =
+      "canonical_access_workspace";
+    reportStage(failureStage);
+    let facts: Awaited<
+      ReturnType<typeof readHostedRuntimeReconciliationFactsWithVisibleAccess>
+    >;
+    try {
+      facts = await readHostedRuntimeReconciliationFactsWithVisibleAccess(
+        factsRequest,
+        (stage) => {
+          failureStage = stage;
+          reportStage(stage);
+        },
+      );
+    } catch (error) {
+      emitHostedRuntimeReconciliationFailure({
+        error,
+        stage: failureStage,
+      });
+      throw error;
+    }
+
+    reportStage("response_projection");
+    return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(facts));
+  } finally {
+    try {
+      reportStage(timingStage);
+      console.info("Hosted runtime reconciliation facts timing.", {
+        durationMs: stageStartedAt - startedAt,
+        schema: HOSTED_RUNTIME_RECONCILIATION_TIMING_LOG_SCHEMA,
+        stageDurationsMs,
+      });
+    } catch {
+      // Timing telemetry must never replace the reconciliation result or failure.
+    }
+  }
 });
 
 function assertHostedOrchestrationUserMatches(input: {

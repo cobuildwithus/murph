@@ -20,6 +20,7 @@ import {
   isHostedMemberSolModelEligible,
   readHostedMemberAssistantModelPreference,
   resolveAvailableHostedAssistantProvider,
+  resolveHostedMemberAssistantProvider,
   updateHostedMemberAssistantConfigurationTx,
   updateHostedMemberAssistantModelPreferenceTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
@@ -46,6 +47,100 @@ describe("hosted member assistant model preference", () => {
     expect(resolveAvailableHostedAssistantProvider(null, {
       HOSTED_VENICE_ENABLED: "1",
     })).toBe("openai");
+  });
+
+  const activePersonalMember = {
+    accountGroupMemberships: [],
+    assistantProviderPreference: "venice",
+    billingStatus: HostedBillingStatus.active,
+    suspendedAt: null,
+    threadContainer: null,
+  };
+  const activeFamilyMembership = {
+    group: {
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    },
+    status: "active",
+  };
+  const familySponsoredMember = {
+    ...activePersonalMember,
+    accountGroupMemberships: [activeFamilyMembership],
+    billingStatus: HostedBillingStatus.not_started,
+  };
+
+  it.each([
+    { name: "active personal access", member: activePersonalMember, enabledProvider: "venice" },
+    {
+      name: "inactive personal access",
+      member: { ...activePersonalMember, billingStatus: HostedBillingStatus.unpaid },
+      enabledProvider: "openai",
+    },
+    {
+      name: "suspended personal access",
+      member: { ...activePersonalMember, suspendedAt: new Date("2026-09-01T00:00:00Z") },
+      enabledProvider: "openai",
+    },
+    { name: "active Family sponsorship", member: familySponsoredMember, enabledProvider: "venice" },
+    {
+      name: "removed Family membership",
+      member: {
+        ...familySponsoredMember,
+        accountGroupMemberships: [{ ...activeFamilyMembership, status: "removed" }],
+      },
+      enabledProvider: "openai",
+    },
+    {
+      name: "inactive Family sponsorship",
+      member: {
+        ...familySponsoredMember,
+        accountGroupMemberships: [{
+          ...activeFamilyMembership,
+          group: { billingStatus: HostedBillingStatus.unpaid, suspendedAt: null },
+        }],
+      },
+      enabledProvider: "openai",
+    },
+    {
+      name: "suspended Family sponsorship",
+      member: {
+        ...familySponsoredMember,
+        accountGroupMemberships: [{
+          ...activeFamilyMembership,
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: new Date("2026-09-01T00:00:00Z"),
+          },
+        }],
+      },
+      enabledProvider: "openai",
+    },
+    {
+      name: "group room with an active owner",
+      member: { ...activePersonalMember, threadContainer: { owner: activePersonalMember } },
+      enabledProvider: "openai",
+    },
+    {
+      name: "default provider preference",
+      member: { ...activePersonalMember, assistantProviderPreference: null },
+      enabledProvider: "openai",
+    },
+    {
+      name: "explicit OpenAI preference",
+      member: { ...activePersonalMember, assistantProviderPreference: "openai" },
+      enabledProvider: "openai",
+    },
+    {
+      name: "retired provider preference",
+      member: { ...activePersonalMember, assistantProviderPreference: "retired-provider" },
+      enabledProvider: "openai",
+    },
+  ])("resolves the provider for $name with Venice enabled or disabled", ({ member, enabledProvider }) => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    expect(resolveHostedMemberAssistantProvider(member)).toBe(enabledProvider);
+
+    process.env.HOSTED_VENICE_ENABLED = "0";
+    expect(resolveHostedMemberAssistantProvider(member)).toBe("openai");
   });
 
   it("limits Sol eligibility to direct premium or active Family premium members", () => {
