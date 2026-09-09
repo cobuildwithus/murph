@@ -108,8 +108,9 @@ it.each([false, true])("preserves accepted device continuations and reports reje
   });
   const retryAt = "2026-04-27T00:05:00.000Z";
   const jobs = Array.from({ length: 127 }, (_, index) => ({
-    kind: "reconcile", dedupeKey: `synthetic-child-${index}`, availableAt: retryAt,
+    kind: index === 126 ? "resource" : "reconcile", dedupeKey: `synthetic-child-${index}`, availableAt: retryAt,
     payload: { windowStart: FIXED_NOW, windowEnd: retryAt,
+      ...(index === 126 ? { calendarRefreshDay: "2026-04-27" } : {}),
       ...(invalid && index === 126 ? { unsupportedSyntheticField: "private-fixture-value" } : {}) },
   }));
   try {
