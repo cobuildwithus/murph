@@ -1,6 +1,6 @@
 # Retire completed idle previous-release runners
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -31,4 +31,13 @@ Unknown health or racing work continues to retain the shell. Active/candidate an
 
 ## Verification
 
-Pending focused reproduction, lifecycle tests, typecheck, complexity guard, final ReviewGPT, and exact-head CI. Production recovery remains separate from local proof.
+The initial two real-completion-path regression cases failed before the change and passed afterward. Final focused proof covers both bank directions, overdue/immediate wakes, matching completion acknowledgement, active/candidate/legacy release preservation, active children, recent conversation warmth, missing metadata, and unavailable health.
+
+- Container, runtime-callback, and release suites: 260 tests pass.
+- Cloudflare and Web typechecks: pass.
+- Changelog archive component: 10 tests pass.
+- Complexity diff: pass, unchanged debt 75 and maximum 74; existing unrelated hotspots retained.
+- Parent review: four source lines derive release role; no state, protocol, endpoint, or provider-input changes. Product UX patch evidence is Ready for review.
+
+This implementation plan records local proof only. PR 3079 still requires final ReviewGPT and green exact-head CI before merge; the protected Worker-only release must then prove signed smoke, convergence, and actual runtime recovery. No production handoff success is claimed here.
+Completed: 2026-09-08
