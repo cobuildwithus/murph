@@ -13,11 +13,6 @@ export function TogetherSection() {
           <h2 className="font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
             Do it with your people.
           </h2>
-          <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
-            Habits stick when someone else is watching. Start a challenge with
-            friends, or set up a weekly newsletter so the whole family knows
-            how everyone is doing.
-          </p>
         </div>
 
         <div className="mt-10 space-y-5 sm:mt-12 sm:space-y-6">
@@ -25,7 +20,6 @@ export function TogetherSection() {
             tint="sage"
             artifactSide="right"
             headline="I referee health challenges with your friends."
-            body="Murph is the referee. It sets fair baselines across different devices, keeps score, nudges the slackers, and calls the winner at the end."
             bubble="no shot you guys are keeping up with me this week 😤"
             artifact={
               <div className="mx-auto w-full max-w-[340px]">
@@ -52,7 +46,6 @@ export function TogetherSection() {
             tint="gold"
             artifactSide="left"
             headline="I send the whole family a weekly health newsletter."
-            body="Every Sunday the group gets an email recap of the week. Wins, trends, and gentle callouts. Grandparents included."
             bubble="can you send grandpa our weekly wins?"
             artifactAlign="center"
             artifact={

@@ -14,7 +14,6 @@ test("WideFeature keeps the phone treatment compact and restores the desktop sca
     createElement(WideFeature, {
       artifact: createElement("div", null, "Artifact"),
       artifactSide: "right",
-      body: "Body",
       bubble: "Bubble",
       headline: "Headline",
       tint: "sage",

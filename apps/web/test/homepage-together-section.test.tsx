@@ -11,10 +11,6 @@ test("TogetherSection renders the static social feature reframe", () => {
 
   assert.doesNotMatch(markup, /Better together/);
   assert.match(markup, /Do it with your people\./);
-  assert.match(
-    markup,
-    /Habits stick when someone else is watching\. Start a challenge with friends/,
-  );
   assert.doesNotMatch(markup, /Group challenges/);
   assert.match(markup, /I referee health challenges with your friends\./);
   assert.match(markup, /no shot you guys are keeping up with me this week/);
@@ -24,15 +20,7 @@ test("TogetherSection renders the static social feature reframe", () => {
   );
   assert.match(
     markup,
-    /Murph is the referee\. It sets fair baselines across different devices/,
-  );
-  assert.match(
-    markup,
     /I send the whole family a weekly health newsletter\./,
-  );
-  assert.match(
-    markup,
-    /Every Sunday the group gets an email recap of the week\. Wins, trends, and gentle callouts\. Grandparents included\./,
   );
   assert.match(markup, /so proud of you kids/);
   assert.match(markup, /Grandpa/);

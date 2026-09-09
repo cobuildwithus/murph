@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "homepage-feature-headings",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "A shorter homepage tour",
+    "summary": "The group and personal feature sections now pair their headings directly with examples.",
+    "details": "Removed the supporting paragraphs so the challenges, family newsletter, and personal assistant demos are easier to scan.",
+    "relevanceTags": ["website"],
+    "sourcePullRequests": []
+  }
+}

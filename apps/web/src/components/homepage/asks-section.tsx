@@ -35,7 +35,6 @@ const TINTS: Record<
 export function WideFeature({
   artifactAlign = "end",
   artifactSide,
-  body,
   bubble,
   headline,
   tint,
@@ -45,7 +44,6 @@ export function WideFeature({
   // anchor to the bottom edge.
   artifactAlign?: "center" | "end";
   artifactSide: "left" | "right";
-  body: string;
   bubble: string;
   headline: string;
   tint: Tint;
@@ -53,13 +51,10 @@ export function WideFeature({
 }) {
   const t = TINTS[tint];
   const copy = (
-    <div className="flex flex-col justify-center gap-4 px-5 pt-8 pb-1 sm:gap-5 sm:px-10 sm:pt-12 sm:pb-2 lg:col-span-5 lg:py-16 lg:px-12">
+    <div className="flex flex-col justify-center px-5 pt-8 pb-1 sm:px-10 sm:pt-12 sm:pb-2 lg:col-span-5 lg:py-16 lg:px-12">
       <h3 className="font-serif text-[1.5rem] font-semibold leading-[1.08] tracking-[-0.03em] text-balance text-[#1f1c18] sm:text-[clamp(1.75rem,2.8vw,2.625rem)] sm:leading-[1.02] sm:tracking-[-0.035em]">
         {headline}
       </h3>
-      <p className="text-[0.875rem] leading-[1.6] text-pretty text-[#635a48] sm:text-[0.9375rem] sm:leading-[1.65] lg:max-w-[34ch]">
-        {body}
-      </p>
     </div>
   );
 
@@ -119,24 +114,17 @@ export function WideFeature({
 }
 
 function CompactCard({
-  body,
   headline,
   artifact,
 }: {
-  body: string;
   headline: string;
   artifact: React.ReactNode;
 }) {
   return (
     <article className="flex min-w-0 flex-col gap-5 rounded-[1.5rem] bg-[#fffcf6] p-5 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:gap-6 sm:rounded-[1.75rem] sm:p-9">
-      <div className="flex flex-col gap-2.5 sm:gap-3">
-        <h3 className="font-serif text-[1.25rem] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-[#1f1c18] sm:text-[clamp(1.375rem,2vw,1.75rem)] sm:leading-[1.05] sm:tracking-[-0.03em]">
-          {headline}
-        </h3>
-        <p className="text-[0.875rem] leading-[1.55] text-pretty text-[#635a48] sm:leading-[1.6]">
-          {body}
-        </p>
-      </div>
+      <h3 className="font-serif text-[1.25rem] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-[#1f1c18] sm:text-[clamp(1.375rem,2vw,1.75rem)] sm:leading-[1.05] sm:tracking-[-0.03em]">
+        {headline}
+      </h3>
       <div className="mt-auto rounded-2xl bg-[#f5f0e8]/60 p-2.5 ring-1 ring-black/[0.03] sm:rounded-[1.25rem] sm:p-3">
         {artifact}
       </div>
@@ -424,18 +412,12 @@ export function AsksGridSection() {
           <h2 className="font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
             No group? You’re still not doing this alone.
           </h2>
-          <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
-            Outside the group chat, Murph is all yours. Experiments, bloodwork,
-            habits, bookings, and daily readouts, in a private one on one
-            thread.
-          </p>
         </div>
         <div className="space-y-5 sm:space-y-6">
           <WideFeature
             tint="gold"
             artifactSide="right"
             headline="I run experiments so you know what actually works for you."
-            body="Pick a protocol. Murph baselines you for two weeks, runs the active phase, then texts the before-and-after. No more guessing whether anything moved."
             bubble="Did the magnesium actually work?"
             artifact={<ExperimentArtifact />}
           />
@@ -443,12 +425,10 @@ export function AsksGridSection() {
           <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
             <CompactCard
               headline="I find insights in your bloodwork over time."
-              body="Drop in your latest panel. Murph flags what crept up or down and turns it into the questions worth asking your doctor."
               artifact={<BloodworkArtifact />}
             />
             <CompactCard
               headline="I make it easy to build healthy habits."
-              body="A version small enough for bad days, anchored to something you already do. Reminders ease off as it takes hold."
               artifact={<HabitArtifact />}
             />
           </div>
@@ -457,7 +437,6 @@ export function AsksGridSection() {
             tint="bronze"
             artifactSide="left"
             headline="I order the supplements and book the scans."
-            body="Murph finds the DEXA scan nearby, drafts the supplement re-up, and queues the doctor recap on your calendar. You give the final tap. The errands stop slipping."
             bubble="Order me Omega-3, find me a DEXA scan, and confirm my doctor's appointment."
             artifact={<ErrandsArtifact />}
           />
@@ -465,12 +444,10 @@ export function AsksGridSection() {
           <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
             <CompactCard
               headline="I call the dentist and book the appointment."
-              body="Dentist, dermatologist, vet, mechanic. Murph dials, waits on hold, picks a slot that fits your week."
               artifact={<CallArtifact />}
             />
             <CompactCard
               headline="I read your wearables and tell you what actually matters."
-              body="Murph pulls Oura, WHOOP, Garmin, or Apple Health overnight. Wake up to a one-line readout."
               artifact={<RecoveryArtifact />}
             />
           </div>
