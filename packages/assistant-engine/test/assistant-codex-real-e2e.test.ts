@@ -381,6 +381,9 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   ],
   minimal_identity_answer: [],
   minimal_identity_prompt: [],
+  wearable_source_awareness: [
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
+  ],
   wearable_connection_offer: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
@@ -1676,6 +1679,158 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(reply).not.toMatch(/bank\/|memory\.md|memory_document_invalid|\b(?:canonical|field|line \d+|invalid id)\b/iu)
         expect(reply).not.toMatch(/(?:you(?:['’]ll| will| need to| should)?|please) (?:fix|repair|edit)|\b(?:i|we)(?:['’]ll| will| have|['’]ve) (?:fix|repair|retry|escalate|contact|report|flag)|\b(?:support|team) (?:has been|was) (?:notified|contacted)/iu)
         expect(reply).not.toMatch(/what should i call you|how old|gender/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it.each([
+    { name: 'Apple Health with unknown wearable use', source: 'apple', knownNone: false, failure: false },
+    { name: 'Apple Health with wearable use already answered', source: 'apple', knownNone: true, failure: false },
+    { name: 'an identified wearable', source: 'oura', knownNone: false, failure: false },
+    { name: 'no connected sources', source: 'none', knownNone: false, failure: false },
+    { name: 'an unavailable account lookup', source: 'none', knownNone: false, failure: true },
+  ] as const)(
+    'onboarding source awareness: $name',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+      const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        const resume = buildRealCodexOnboardingResumeContext('ordinary_records')
+        if (resume.memory.status !== 'ok') {
+          throw new Error('Expected available synthetic onboarding memory.')
+        }
+        const records = resume.memory.records.filter((record) =>
+          typeof record !== 'object' || record === null || !('id' in record)
+          || record.id !== 'ordinary_health_context'
+        )
+        const empty = { count: 0, items: [], status: 'ok', truncated: false } as const
+        await writeFile(
+          path.join(workingDirectory, 'onboarding-resume-context.json'),
+          `${JSON.stringify({
+            ...resume,
+            allergies: empty,
+            conditions: empty,
+            deviceAccounts: {
+              status: 'error',
+              code: 'invalid_option',
+              message: 'This onboarding context surface could not be read.',
+              retryable: false,
+            },
+            experiments: empty,
+            regimens: empty,
+            supplements: empty,
+            memory: { ...resume.memory, recordCount: records.length, records },
+          })}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const deviceTool: NonNullable<AssistantHostedToolContext['deviceTool']> = {
+          async request(request) {
+            deviceRequests.push(request)
+            if (request.action !== 'list_accounts') {
+              throw new Error('Onboarding discovery must not change a connection.')
+            }
+            if (scenario.failure) {
+              throw new Error('Synthetic account lookup unavailable.')
+            }
+            return {
+              action: 'list_accounts',
+              provider: null,
+              sourceProvider: null,
+              accounts: scenario.source === 'none' ? [] : [{
+                accountId: 'synthetic-connected-source',
+                displayName: scenario.source === 'apple' ? 'Apple Health' : 'Oura',
+                provider: scenario.source === 'apple' ? 'junction' : 'oura',
+                status: 'active',
+                lastErrorCode: null,
+                lastSyncCompletedAt: null,
+              }],
+            }
+          },
+        }
+        const result = await executeRealCodexOnboardingProbe({
+          ...buildRealCodexOnboardingTurnInput({ config, workingDirectory }),
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome, minimal identity, aspiration readiness, save, reflection, and park are complete. The visible conversation is at the data-source checkpoint. Movement, protocols, supplements, medical context, and recent labs are unresolved.',
+              'The last Murph message parked the saved sleep aspiration and explained that learning the health context comes next.',
+              ...(scenario.knownNone ? [
+                'Current operational evidence: Apple Health has an active connection. No completed sync is reported.',
+                'Earlier in this conversation, the member explicitly said they do not use a wearable.',
+              ] : []),
+            ].join('\n'),
+            [{ label: 'Oura', provider: 'oura' }],
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentInvocationScope: () => ({
+              conversationScope: 'direct',
+              origin: {
+                assistantInputId: 'ain_00000000000000000000000000000028',
+                kind: 'accepted_input',
+                sessionId: 'session-onboarding-source-awareness',
+              },
+              originSessionId: 'session-onboarding-source-awareness',
+            }),
+            deviceTool,
+            sendVaultFile: async () => {
+              throw new Error('File delivery is unavailable in this discovery journey.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt: 'Yes, let’s keep going.',
+          scenario: 'wearable_source_awareness',
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(`[onboarding-source-awareness-e2e] ${JSON.stringify({
+          scenario: scenario.name, deviceRequests, reply,
+        })}\n`)
+        expect(deviceRequests).toEqual(scenario.knownNone ? [] : [{ action: 'list_accounts' }])
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).not.toMatch(/https?:\/\/|\bjunction\b|list_accounts|vault-cli/iu)
+        expect(reply).not.toMatch(/(?:your|the) (?:steps|sleep|workouts|data) (?:are|is) (?:syncing|coming in|up to date)/iu)
+        expect(result.actions.filter((action) => action.kind === 'dynamic')).toHaveLength(
+          scenario.knownNone ? 0 : 1,
+        )
+        expect(result.actions.filter((action) =>
+          action.kind === 'command' && /vault-cli\s+device\b/iu.test(action.command)
+        )).toEqual([])
+        if (scenario.source === 'apple') {
+          expect(reply).toMatch(/apple health/iu)
+          expect(reply).toMatch(/connected|linked/iu)
+          expect(reply).not.toMatch(/do you use (?:a |any )?wearable or health app/iu)
+          expect(reply).not.toMatch(/(?:want|need|like|help)[^.!?\n]{0,40}(?:connect|app link)|reconnect/iu)
+          if (!scenario.knownNone) {
+            expect(reply).toMatch(/\bwatch\b/iu)
+            expect(reply).toMatch(/\bring\b/iu)
+            expect(reply).not.toMatch(/your (?:watch|ring)|voice memo|supplements|medical basics/iu)
+          }
+        }
+        if (scenario.knownNone || scenario.source === 'oura') {
+          expect(reply).toMatch(/voice memo|how you move|movement/iu)
+          expect(reply).not.toMatch(/do you (?:also )?(?:use|wear|have)|which (?:watch|ring|wearable)/iu)
+        }
+        if (scenario.source === 'oura') {
+          expect(reply).toMatch(/oura/iu)
+          expect(reply).toMatch(/connected|linked|I can see your Oura connection/iu)
+        }
+        if (scenario.source === 'none') {
+          expect(reply).toMatch(/wearable|watch|ring|health app/iu)
+          if (scenario.failure) {
+            expect(reply).toMatch(/couldn[’']t|can[’']t|unable|unavailable|trouble|could not/iu)
+            expect(reply).not.toMatch(/no (?:device|wearable|account|source|connection)|nothing connected|reconnect/iu)
+          }
+        }
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
       }
