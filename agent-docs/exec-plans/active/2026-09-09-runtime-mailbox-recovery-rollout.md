@@ -43,3 +43,20 @@ with the fix, 353 passing runtime tests, runtime and Web typechecks, ten passing
 changelog tests, and a passing complexity guard with unchanged file debt.
 The new live readback still shows the original failure pattern. Exact-head CI,
 ReviewGPT, deployment, and production convergence remain pending.
+
+## Reviewed rollout and follow-up
+
+PR #3082 passed exact-head ReviewGPT and required CI, merged, and entered the
+protected production deployment. The compatible Web reader from PR #3084 was
+verified Ready on the canonical alias before runner activation. Live telemetry
+from PR #3080 confirmed a valid retained-job field was rejected by the old reader.
+The original cohort remains the recovery boundary; deployment alone is not closure.
+
+A composed cold-restore regression then proved a second gap: three strictly
+covered schedule hints retired only one hint and parked the others behind the
+future retained retry. The follow-up derives invocation eligibility from the full
+admitted mailbox, while selecting runnable work from the existing frontier. Idle
+compaction can therefore retire every eligible covered hint in one checkpoint.
+Route, wake-kind, and dedupe-prefix restrictions still apply, and the retained
+owner and its jobs remain unchanged. The regression failed before this change
+and passes after it, including a second restore without another checkpoint.

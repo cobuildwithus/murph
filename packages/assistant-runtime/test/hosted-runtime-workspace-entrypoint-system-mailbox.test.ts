@@ -1301,9 +1301,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test.each(["maintenance", "covered-schedule"])("checkpoints independent work behind a future transferred device retry (%s)", async (kind) => {
+  test.each(["maintenance", "covered-schedule", "covered-schedules"])("checkpoints independent work behind a future transferred device retry (%s)", async (kind) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-independent-maintenance-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const handledThrough = kind === "covered-schedules" ? "4" : "2";
     const events: string[] = [];
     const retryAt = new Date(Date.parse(TEST_NOW) + 86_400_000).toISOString();
     const deviceItem = createMailboxItem({
@@ -1342,8 +1343,34 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID,
             hint: { nextReconcileAt: TEST_NOW } },
       });
+      if (kind === "covered-schedules") {
+        for (const seq of ["3", "4"]) {
+          const hint = createMailboxItem({
+            dedupeKey: `device-sync.wake:covered-${seq}`,
+            id: `covered_schedule_${seq}`,
+            kind: "device-sync.wake",
+            lane: "system",
+            laneSeq: seq,
+          });
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncSystemMailboxItem(hint),
+            vaultRoot,
+            wake: {
+              connectionId: "device_connection_independent",
+              eventId: hint.dedupeKey,
+              expectedConnectedAt: TEST_NOW,
+              kind: "device-sync.wake",
+              occurredAt: TEST_NOW,
+              provider: "whoop",
+              reason: "reconcile_due",
+              userId: TEST_USER_ID,
+              hint: { nextReconcileAt: TEST_NOW },
+            },
+          });
+        }
+      }
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "2";
+      importState.watermarks.system = handledThrough;
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restored = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/independent-maintenance.bundle.json", vaultRoot,
@@ -1379,13 +1406,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const result = await runPass();
       assert.equal(result.nextWakeAt, retryAt);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, [retainedBefore]);
-      assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "2");
+      assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, handledThrough);
       assert.deepEqual(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["1"]);
       const checkpointCount = checkpointRequests.length;
       const restoredResult = await runPass();
       assert.equal(restoredResult.nextWakeAt, retryAt);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, [retainedBefore]);
-      assert.equal(currentWorkspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "2");
+      assert.equal(currentWorkspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, handledThrough);
       assert.equal(checkpointRequests.length, checkpointCount);
     } finally {
       vi.useRealTimers();

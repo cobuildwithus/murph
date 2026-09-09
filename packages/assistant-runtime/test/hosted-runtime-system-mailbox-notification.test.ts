@@ -4460,6 +4460,64 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it.each(["all", "route", "wake", "prefix", "selected-prefixes", "unimported"])(
+    "retires covered schedules only within the idle invocation filters (%s)", async (filter) => {
+      const workspace = await createHostedRuntimeWorkspace("murph-covered-schedule-filters-");
+      const retryAt = "2026-04-28T00:00:00.000Z";
+      const owner = buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_synthetic_filtered_schedules",
+        eventId: "device-sync.wake:owner", expectedConnectedAt: FIXED_NOW,
+        occurredAt: FIXED_NOW, provider: "junction", reason: "reconcile_due",
+        userId: "member_123", hint: { nextReconcileAt: retryAt, jobs: [{
+          availableAt: retryAt, dedupeKey: "synthetic-filtered-retry", kind: "resource",
+        }] },
+      });
+      try {
+        for (const index of [0, 1, 2, 3]) {
+          const wake = index === 0 ? owner : buildHostedExecutionDeviceSyncWake({
+            ...owner, eventId: `device-sync.wake:hint-${index}`,
+            hint: { nextReconcileAt: FIXED_NOW },
+          });
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncItem({ dedupeKey: wake.eventId,
+              id: `synthetic_filtered_schedule_${index}`, laneSeq: String(index + 1) }),
+            vaultRoot: workspace.vaultRoot, wake,
+          });
+        }
+        await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+          pending: state.pending.map((item, index) => index === 0 ? {
+            ...item, deviceSyncContinuationOwner: true, attemptCount: 1,
+            lastAttemptAt: FIXED_NOW, nextAttemptAt: retryAt,
+          } : item),
+        }));
+        await writeHostedMailboxImportState({
+          state: { ...createEmptyHostedMailboxImportState(),
+            watermarks: { conversation: "0", system: filter === "unimported" ? "0" : "4" } },
+          vaultRoot: workspace.vaultRoot,
+        });
+        const before = await readHostedSystemMailboxState(workspace.vaultRoot);
+        const result = await prepareHostedSystemMailboxItemForCheckpoint({
+          ...(filter === "route" ? { allowedRouteActions: ["apply-runtime-control-request" as const] } : {}),
+          ...(filter === "wake" ? { allowedWakeKinds: ["runtime.maintenance-requested" as const] } : {}),
+          ...(filter === "prefix" ? { allowedMailboxDedupeKeyPrefixes: ["unrelated:"] } : {}),
+          ...(filter === "selected-prefixes" ? { allowedMailboxDedupeKeyPrefixes: [
+            "device-sync.wake:owner", "device-sync.wake:hint-1", "device-sync.wake:hint-3",
+          ] } : {}),
+          now: () => FIXED_NOW, runtime: createRuntime({}), runtimeEnv: {},
+          retainProcessedItemUntilRecorded: true, vaultRoot: workspace.vaultRoot,
+        });
+        const expectedIndexes = filter === "all" ? [0]
+          : filter === "selected-prefixes" ? [0, 2] : [0, 1, 2, 3];
+        expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+          .toEqual(expectedIndexes.map((index) => before.pending[index]));
+        expect(result?.status ?? null).toBe(expectedIndexes.length < 4 ? "processed" : null);
+        expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      } finally {
+        await workspace.cleanup();
+      }
+    },
+  );
+
   it.each(["due", "epoch", "future", "manual", "unbound"])(
     "admits a queued schedule through the same future cadence owner (%s)", async (boundary) => {
       const workspace = await createHostedRuntimeWorkspace("murph-scheduled-admission-");

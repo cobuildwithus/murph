@@ -360,33 +360,36 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           : input.allowedRouteActions == null
             ? projectHostedSystemMailboxWakeOwnerFrontier(admissionState, continuationItemIds)
             : admissionState;
+      const eligibleItemIds = new Set(admissionState.pending.filter((item) =>
+        (
+          input.allowedRouteActions?.includes(item.routeAction)
+          ?? item.routeAction !== "run-assistant-ask"
+        )
+        && (
+          input.allowedMailboxDedupeKeyPrefixes == null
+          || input.allowedMailboxDedupeKeyPrefixes.some((prefix) =>
+            item.mailboxDedupeKey.startsWith(prefix)
+          )
+        )
+        && (
+          input.allowedWakeKinds == null
+          || input.allowedWakeKinds.includes(item.wake.kind)
+        )
+        && (
+          item.wake.kind !== "assistant.ask.completed"
+          || !hasAssistantAskCompletionCutoff
+          || (
+            assistantAskCompletionOccurredBefore !== null
+            && hostedSystemMailboxTimestampPrecedes(
+              item.occurredAt,
+              assistantAskCompletionOccurredBefore,
+            )
+          )
+        )
+      ).map((item) => item.itemId));
       const selectionState = {
         pending: modelFreeProjectedState.pending.filter((item) =>
-          (
-            input.allowedRouteActions != null
-            || item.routeAction !== "run-assistant-ask"
-          )
-          && (
-            input.allowedMailboxDedupeKeyPrefixes == null
-            || input.allowedMailboxDedupeKeyPrefixes.some((prefix) =>
-              item.mailboxDedupeKey.startsWith(prefix)
-            )
-          )
-          && (
-            input.allowedWakeKinds == null
-            || input.allowedWakeKinds.includes(item.wake.kind)
-          )
-          && (
-            item.wake.kind !== "assistant.ask.completed"
-            || !hasAssistantAskCompletionCutoff
-            || (
-              assistantAskCompletionOccurredBefore !== null
-              && hostedSystemMailboxTimestampPrecedes(
-                item.occurredAt,
-                assistantAskCompletionOccurredBefore,
-              )
-            )
-          )
+          eligibleItemIds.has(item.itemId)
         ),
       };
       const pending = findNextHostedSystemMailboxQueueItem({
@@ -397,7 +400,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       if (!pending) {
         const compacted = retireHostedCoveredDeviceScheduleHints({
           continuationItemIds,
-          eligibleItemIds: new Set(selectionState.pending.map((item) => item.itemId)),
+          eligibleItemIds,
           now: startedAt,
           state,
         });
