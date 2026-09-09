@@ -1,4 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+
+import {
+  compactTableCardV1Bounds,
+  IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
+  IMESSAGE_APP_CARD_URL_MAX_LENGTH,
+  IMESSAGE_APP_CARD_URL_PREFIX,
+} from '@murphai/contracts'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
@@ -656,5 +666,141 @@ describe('response-card validation feedback', () => {
     expect(feedback).not.toContain('generic_or_workout_shape')
     expect(feedback).not.toContain(oversizedCard.title)
     expect(Buffer.byteLength(feedback, 'utf8')).toBeLessThanOrEqual(60_000)
+  })
+})
+
+describe('compact-table debug: argument admission', () => {
+  it.each([
+    {
+      name: '33-character cell',
+      rows: [{ label: 'A', values: ['x'.repeat(33)] }],
+      issue: {
+        path: 'card.rows[].values[]',
+        expected: 'string.max_32',
+        modelPath: ['card', 'rows', 0, 'values', 0],
+        maximum: 32,
+      },
+    },
+    {
+      name: 'nine short rows',
+      rows: Array.from({ length: 9 }, (_, index) => ({
+        label: `R${index + 1}`,
+        values: ['1 min'],
+      })),
+      issue: {
+        path: 'card.rows',
+        expected: 'array.max_8',
+        modelPath: ['card', 'rows'],
+        maximum: 8,
+      },
+    },
+    {
+      name: 'valid small table',
+      rows: [{ label: 'A', values: ['1 min'] }],
+      issue: null,
+    },
+  ])('$name', async ({ rows, issue }) => {
+    expect(compactTableCardV1Bounds).toMatchObject({
+      cellValue: 32,
+      columns: 4,
+      rows: 8,
+    })
+    const card = {
+      ...INVALID_TABLE,
+      title: 'Synthetic comparison',
+      rowHeader: 'Option',
+      columns: ['Duration'],
+      rows,
+    }
+    // Isolate authoring bounds from the separate encoded-envelope limit.
+    const { tracking: _tracking, ...presentationCard } = card
+    const encoded = Buffer.from(JSON.stringify({
+      schemaVersion: 3,
+      card: presentationCard,
+    })).toString('base64url')
+    expect(IMESSAGE_APP_CARD_URL_PREFIX.length + encoded.length).toBeLessThan(
+      IMESSAGE_APP_CARD_URL_MAX_LENGTH,
+    )
+    expect(encoded.length).toBeLessThan(IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH)
+
+    // The existing helper supplies RPC identity only; both owners are real.
+    const request = readCardToolRequest(card)
+    if (!request) throw new Error('Expected a synthetic response-card request.')
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-table-admission-'))
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(
+      new Error('Unexpected network effect'),
+    )
+    const sendVaultFile = vi.fn(async () => {
+      throw new Error('Unexpected file delivery')
+    })
+    const nextUsageOrdinal = vi.fn(() => 0)
+    try {
+      const result = await executeMurphDynamicToolRequest({
+        currentResponseCard: null,
+        currentResponseMedia: [],
+        env: {},
+        fetchImpl,
+        groupChallengeResponseCardAllowed: false,
+        groupSharedReadTurnState: null,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile,
+          vaultFileSendAvailable: false,
+        },
+        knowledgePageReadTextFile: null,
+        nextUsageOrdinal,
+        privateDirectResponseCardAllowed: true,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      })
+      expect(fetchImpl).not.toHaveBeenCalled()
+      expect(sendVaultFile).not.toHaveBeenCalled()
+      expect(nextUsageOrdinal).not.toHaveBeenCalled()
+      expect(await readdir(vaultRoot, { recursive: true })).toEqual([])
+      expect(result.responseCardTextFallbackPatch).toBeUndefined()
+      expect(result.usageDraft ?? null).toBeNull()
+      if (issue) {
+        expect(request.kind).toBe('invalid-response-card-arguments')
+        if (request.kind !== 'invalid-response-card-arguments') {
+          throw new Error('Expected argument rejection, not envelope recovery.')
+        }
+        expect(request.validationDigest.pathIssues).toEqual([
+          expect.objectContaining({
+            path: issue.path,
+            code: 'too_big',
+            expected: issue.expected,
+          }),
+        ])
+        expect(result.rpcResult.success).toBe(false)
+        expect(result.responseCardPatch).toBeUndefined()
+        expect(Object.keys(result).filter((key) => key.endsWith('Patch'))).toEqual([])
+        expect(result.failureDiagnostic).toEqual({
+          failureStage: 'validation',
+          failureReason: 'invalid_input',
+        })
+        expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toMatchObject({
+          error: 'invalid_response_card_arguments',
+          validationIssues: [{
+            code: 'too_big',
+            path: issue.modelPath,
+            maximum: issue.maximum,
+          }],
+        })
+      } else {
+        expect(request.kind).toBe('attach-response-card')
+        expect(result).toEqual({
+          rpcResult: {
+            success: true,
+            contentItems: [{ type: 'inputText', text: 'response card attached' }],
+          },
+          responseCardPatch: { card },
+        })
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
   })
 })
