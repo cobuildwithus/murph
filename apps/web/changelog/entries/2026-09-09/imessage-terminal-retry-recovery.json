@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "imessage-terminal-retry-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable recovery for failed iMessage replies",
+    "summary": "Some replies that failed to send can now receive their automatic retry instead of being skipped because delivery details are incomplete.",
+    "details": "Recovery stays in the same conversation and is limited to one retry after a confirmed send failure. Messages that might still arrive are not resent.",
+    "relevanceTags": [
+      "imessage",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3108
+    ]
+  }
+}

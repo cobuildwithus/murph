@@ -9,9 +9,16 @@ Last verified: 2026-08-31
   access, and current line/chat egress policy. The existing runtime access owner
   must allow recovery both before content retrieval and at attempt claiming;
   explicit health-data consent withdrawal denies it at either checkpoint.
-  Provider retrieval must match the original
-  message, chat, outbound direction, failed status, iMessage service, and
-  sender. Never use provider content to select a recipient or line. The retry
+  Provider retrieval must match the original message, chat, outbound direction,
+  failed status, and sender. Retrieved service must be exactly `iMessage`, or
+  null/omitted with exact `iMessage` evidence on the matching failed-message
+  receipt. Use the matching child when children exist; only a parent-only
+  candidate may use its scalar receipt. Recheck that same authority under the
+  existing parent lock before consuming the attempt. Explicit non-iMessage or
+  unknown retrieved service and any non-null/non-omitted `preferred_service`
+  other than `iMessage` deny recovery; preferred service alone is not evidence.
+  The resend explicitly requests `iMessage`, never transport fallback. Never
+  use provider content to select a recipient or line. The retry
   stores only its timestamp and blinded original-message correlation on
   the existing delivery-message row. Retrieved bodies and attachment URLs stay
   request-local and never enter logs, mailbox input, or another content store.
