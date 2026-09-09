@@ -996,6 +996,48 @@ describe("hosted runtime system mailbox state", () => {
     },
   );
 
+  it.each([false, true])("keeps deferred dirty admission separate from default wake priority (approved: %s)", async (approved) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-deferred-default-wake-"));
+    const now = "2026-04-27T00:00:00.000Z";
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const retained = buildRetainedDeviceSyncMailboxItem({
+      connectionId: "synthetic_connection", itemId: "retained", mailboxLaneSeq: "1", retryAt,
+    });
+    const dirty = buildPendingDeviceSyncMailboxItem({ itemId: "dirty", mailboxLaneSeq: "2" });
+    dirty.nextAttemptAt = retryAt;
+    dirty.wake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "synthetic_connection", eventId: dirty.mailboxDedupeKey,
+      expectedConnectedAt: "2026-04-01T00:00:00.000Z", occurredAt: now,
+      provider: "junction", reason: "webhook_hint", userId: "member_123",
+      hint: { reason: "companion_hrv_rmssd" },
+    });
+    const foreground = approved
+      ? buildPendingApprovalContinuationMailboxItem({ effectId: "synthetic_effect", itemId: "foreground", mailboxLaneSeq: "3" })
+      : buildPendingRuntimeControlMailboxItem({ itemId: "foreground", mailboxLaneSeq: "3",
+        mailboxDedupeKey: "runtime-control:synthetic-auth", wakeKind: "runtime.codex-auth-requested" });
+    try {
+      await writeHostedMailboxImportState({ vaultRoot, state: {
+        ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "3" },
+      } });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [retained, dirty, foreground] }));
+      const before = await readHostedSystemMailboxState(vaultRoot);
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        allowedRouteActions: ["run-device-sync-wake", "apply-runtime-control-request", "dispatch-assistant-notification"],
+        allowedWakeKinds: ["device-sync.wake", "runtime.maintenance-requested", "assistant.notification.requested"],
+        now: () => now, vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: approved ? { at: now, reason: "assistant" } : { at: null, reason: null },
+        next: { at: now, executionClass: "model_free", reason: "device-sync.reconcile" },
+      });
+      // An already-running default pass keeps its ordinary foreground choice.
+      await expect(resolveHostedSystemMailboxWakeCandidates({ now: () => now, vaultRoot }))
+        .resolves.toMatchObject({ next: { at: now, executionClass: "default_owned", reason: "assistant" } });
+      expect(await readHostedSystemMailboxState(vaultRoot)).toEqual(before);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each(["independent", "same-connection", "untransferred", "duplicate-owner", "unimported"] as const)(
     "preserves continuation admission boundaries (%s)", async (boundary) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-continuation-boundary-"));
