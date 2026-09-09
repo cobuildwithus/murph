@@ -1,6 +1,6 @@
 # Check runtime admission once per session
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -28,7 +28,7 @@ Patch. Active messages avoid one serial callback. New and replacement sessions
 retain admission. Revoked, missing, or suspended members cannot create sessions;
 a missing legacy consent grant remains allowed. Expired commands cannot launch
 late after waiting behind withdrawal. Legacy prewarm hints have no effects.
-Result Ready after focused proof; external review and CI pending. No prompt, tool, or reply-input
+Result Ready after focused proof and ReviewGPT; final-head CI remains the handoff gate. No prompt, tool, or reply-input
 surface changes for either private or group conversations.
 
 ## Tasks and verification
@@ -55,4 +55,20 @@ surface changes for either private or group conversations.
 - Parent review: 96 net runtime source lines removed; existing callback, write
   fence, revocation lock, and command budget remain the sole owners. No new
   dependencies, state, cache, services, or alternate admission authority.
-- Web typecheck passes. Exact-head CI and ReviewGPT pending.
+- Web typecheck passes. Changelog source-PR linkage rerun: 10 rendering tests pass.
+- ReviewGPT Round 1 PASS on 9aa708faa9e862c4944dc536237696d8b5d9b854.
+  Full nine-file snapshot review, Vonneumann lane, concrete response model slug
+  gpt-6-pro, 366 seconds from response-wait start to capture. Exact response hash
+  fc5bfadb977e6a9dde2556e594b76c5607cfd47ac324e98d8d7773b3837f377a
+  matches the model-verification sidecar and exact committed-user-turn capture.
+  The substantive static review checked startup/replacement, warm invocation
+  identity, withdrawal/renewal ordering, cleanup failure, and command deadlines.
+  It reported no qualifying findings; local tests/typechecks supply execution proof.
+- Candidate CI caught two route fixtures still expecting removed warm admission
+  timestamps. Delete those four expectations; all 131 route tests and the
+  Cloudflare typecheck pass afterward. This isolated test correction changes no
+  production code from the reviewed head and requires no new substantive audit.
+- Parent final review: only the isolated route proof and this historical closure
+  follow the reviewed production head. Current-base merge-tree check was clean.
+  Final-head CI and a fresh mergeability check remain required before handoff.
+Completed: 2026-09-09
