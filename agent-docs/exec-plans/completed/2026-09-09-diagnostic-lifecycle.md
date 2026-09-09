@@ -26,9 +26,13 @@ Proof: Full-runtime idle-boundary regression; controller deadline/retry/log priv
 
 Focused runtime and Web tests and typechecks, complexity diff, docs checks, parent review, scoped commit and PR. Runtime concurrency and Web status span owners, so final ReviewGPT is required on the stable candidate alongside CI. Deploy the runtime and Web independently: no wire or schema changes; old runtimes retain old cancellation behavior until replaced. No local production mutation or duplicate diagnostic submission is needed for proof.
 
-## Progress
+## Completion evidence
 
-- Investigation and synthetic checkpoint cancellation reproduction completed before implementation.
-- Implemented deadline-bound execution, routine checkpoint deferral, shared expiry status, and bounded attempt logging.
-- New lifecycle, deadline, and log-parser/privacy assertions passed; Web focused tests (12), runtime/Web typechecks, complexity guard, and docs drift passed.
-- A loaded-host runtime run hit existing polling/cleanup failures; focused rerun and docs gardening are pending. Live Sol proof, exact-head CI, and final ReviewGPT remain completion gates.
+- Implemented within the existing controller, checkpoint, logging, and Web status owners. No prompt, model, wire, schema, or dependency changes.
+- Focused runtime tests: 54 passed with one worker. Focused Web tests: 12 passed. Runtime/Web typechecks, complexity guard, docs drift, and docs gardening passed. Earlier loaded-host polling/cleanup failures cleared in the single-worker run.
+- Real-Codex diagnostic journey passed on Sol using a local subscription: one provider request, expected synthetic runtime/session evidence, canonical files unchanged, 40.61 seconds of test execution. Diagnostic effect verdict: Ready.
+- Parent review completed. ReviewGPT round 1 passed on f1201abf9bba00541e7a52e440bc7ea6b6733ca8 with zero qualifying findings. Full snapshot and all 11 changed-file hashes were checked; captured response hash matches verified gpt-6-pro model evidence. Eragon lane, approximately six minutes after submission; substantive lifecycle, authority, privacy, and status review accepted.
+- PR #3123 tracks final CI, merge, and rollout. This final plan closure changes documentation only and does not require another model review. Production is not yet changed by this PR.
+Status: completed
+Updated: 2026-09-09
+Completed: 2026-09-09
