@@ -6593,6 +6593,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const url = new URL(request.url);
       if (url.pathname.endsWith("/api/internal/hosted-mailbox/fetch")) {
         return new Response(JSON.stringify({
+          assistantProvider: "openai",
           fetchedAt: "2026-04-26T00:00:02.000Z",
           items: [],
           maxSeqByLane: [],
@@ -8543,6 +8544,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("routes hosted mailbox fetches through the worker proxy without run adoption fields", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [
         {
@@ -8614,6 +8616,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
 
       return new Response(JSON.stringify({
+        assistantProvider: "openai",
         fetchedAt: "2026-04-26T00:00:02.000Z",
         items: [],
         maxSeqByLane: [],
@@ -8688,6 +8691,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
 
       return new Response(JSON.stringify({
+        assistantProvider: "openai",
         fetchedAt: "2026-04-26T00:00:02.000Z",
         items: [],
         maxSeqByLane: [],
@@ -8746,6 +8750,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
 
       return new Response(JSON.stringify({
+        assistantProvider: "openai",
         fetchedAt: "2026-04-26T00:00:02.000Z",
         items: [],
         maxSeqByLane: [],
@@ -8814,6 +8819,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
 
       return new Response(JSON.stringify({
+        assistantProvider: "openai",
         fetchedAt: "2026-04-26T00:00:02.000Z",
         items: [],
         maxSeqByLane: [],

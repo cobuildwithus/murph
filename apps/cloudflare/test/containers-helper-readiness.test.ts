@@ -33,6 +33,26 @@ describe("patched Cloudflare container readiness probes", () => {
     vi.useRealTimers();
   });
 
+  it("uses native destruction completion independently of cached SDK status", async () => {
+    let finishNativeDestroy: () => void = () => { throw new Error("Destroy not started"); };
+    const nativeDestroy = vi.fn(() => new Promise<void>((resolve) => {
+      finishNativeDestroy = resolve;
+    }));
+    const runner: Container = Object.create(Container.prototype);
+    Object.defineProperty(runner, "container", { value: { destroy: nativeDestroy } });
+    const cachedStatus = vi.spyOn(runner, "getState")
+      .mockRejectedValue(new Error("Cached state unavailable"));
+    let completed = false;
+    const destruction = runner.destroy().then(() => { completed = true; });
+    await Promise.resolve();
+    expect(nativeDestroy).toHaveBeenCalledOnce();
+    expect(completed).toBe(false);
+    finishNativeDestroy();
+    await destruction;
+    expect(completed).toBe(true);
+    expect(cachedStatus).not.toHaveBeenCalled();
+  });
+
   it("cuts the production-shaped sticky-probe path by more than two seconds", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:00:00.000Z"));

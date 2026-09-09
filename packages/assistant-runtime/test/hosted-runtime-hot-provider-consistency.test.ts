@@ -27,8 +27,7 @@ import type { RuntimeWakeSignal } from '../src/hosted-runtime/runtime-wake.ts';
 test.each([
   { provider: 'openai' as const, providerAllowed: true, handoff: false },
   { provider: 'venice' as const, providerAllowed: false, handoff: true },
-  { provider: 'unavailable' as const, providerAllowed: false, handoff: false },
-])('checks the $provider provider once after importing a hot conversation wake', async ({ provider, providerAllowed, handoff }) => {
+])('uses the $provider mailbox fact without a settings request on a hot wake', async ({ provider, providerAllowed, handoff }) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-hot-provider-probe-'));
   const idleWaitStarted = createDeferred<void>();
   const providerReached = createDeferred<void>();
@@ -36,6 +35,7 @@ test.each([
   const phases: string[] = [];
   let phaseCount = 0;
   let providerReads = 0;
+  let mailboxProvider: 'openai' | 'venice' = 'openai';
   let gatedInputId: string | null = null;
   let providerEntryCount = 0;
   let checkpointInputStatus: string | null = null;
@@ -99,26 +99,14 @@ test.each([
         assistantConfigurationToolPort: {
           async request() {
             providerReads += 1;
-            phases.push('provider.read');
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            if (provider === 'unavailable') throw new Error('Synthetic control plane unavailable');
-            return {
-              action: 'read',
-              result: {
-                availableModels: ['gpt-5.6-terra'],
-                availableProviders: ['openai', 'venice'],
-                availableReasoningEfforts: ['low'],
-                configurationAvailable: true,
-                dormantSolPreference: false,
-                model: 'gpt-5.6-terra',
-                provider,
-                reasoningEffort: 'low',
-                solAvailable: false,
-              },
-            };
+            throw new Error('Provider entry must use the mailbox response.');
           },
         },
-        mailboxPort: createMailboxPort({ events: [], items: mailboxItems }),
+        mailboxPort: createMailboxPort({
+          get assistantProvider() { return mailboxProvider; },
+          events: [],
+          items: mailboxItems,
+        }),
         workspacePort: createWorkspacePort({
           checkpointRequests: [], events: [],
           workspace: createWorkspaceState({ version: '0' }),
@@ -154,21 +142,20 @@ test.each([
     });
     await withRealTimeout(idleWaitStarted.promise, 3000, () => 'Idle wait unavailable');
     mailboxItems.push(createMailboxItem({ id: 'mailbox_synthetic_hot_provider_probe', laneSeq: '1' }));
-    const startedAt = performance.now();
+    mailboxProvider = provider;
     wakeSignal.notify();
-    await withRealTimeout(providerReached.promise, 3000, () => JSON.stringify({ phases, providerReads }));
-    const elapsedMs = Math.round(performance.now() - startedAt);
-    assert.equal(providerReads, 1);
-    assert.equal(providerEntryCount, providerAllowed ? 1 : 0);
-    assert.deepEqual(phases, ['import', 'provider.read', providerAllowed ? 'provider.entry' : 'provider.deferred']);
-    assert.ok(elapsedMs >= 100);
-    const result = await withRealTimeout(job, 3000, () => 'Runtime did not settle');
-    if (handoff) assert.equal(result.immediateRecheckRequested, true);
-    assert.equal(checkpointInputStatus, 'pending');
-    if (!providerAllowed) {
-      assert.equal(result.status, 'scheduled');
-      assert.equal(result.nextWakeReason, 'assistant');
+    if (providerAllowed) {
+      await withRealTimeout(providerReached.promise, 3000, () => JSON.stringify({ phases, providerReads }));
     }
+    const result = await withRealTimeout(job, 3000, () => 'Runtime did not settle');
+    assert.equal(providerReads, 0);
+    assert.equal(providerEntryCount, providerAllowed ? 1 : 0);
+    if (providerAllowed) assert.deepEqual(phases, ['import', 'provider.entry']);
+    if (handoff) assert.equal(result.immediateRecheckRequested, true);
+    if (gatedInputId !== null) assert.equal(checkpointInputStatus, 'pending');
+    // A changed provider may stop before import; its original durable mailbox
+    // item remains available to the replacement invocation in either case.
+    assert.equal(mailboxItems.length, 1);
   } finally {
     await removeTempRoot(vaultRoot);
   }

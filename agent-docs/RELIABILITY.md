@@ -2001,11 +2001,21 @@ Last verified: 2026-09-04
   new successors never write the envelope or consult its completed-resource
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
+- Extended historical Junction resource jobs reject locally known stale source
+  epochs before provider inventory discovery. Inventory discovery reads connection
+  capabilities, not health samples. One fresh post-discovery source snapshot
+  governs both local projection and admission before the health-data request;
+  it also catches revocations newer than the hydrated local state. Import and
+  terminal progress retain their existing fresh source checks. Intermediate
+  precise-history segments omit reads used only to queue an epoch-bound
+  continuation: empty segments skip the post-fetch read, while imported segments
+  skip the post-import read. Each continuation must pass fresh admission before
+  fetching health data; see `../docs/device-sync-hosted-control-plane.md`.
 - Junction summary and workout import preparation share their fresh post-provider
   source read with historical evidence evaluation through pure admission helpers.
-  Empty historical segments retain their post-fetch authority without a second
-  read; actual canonical imports still recheck authority afterward. Reads are
-  never reused across provider fetches, stream candidates, or job executions.
+  Terminal historical segments retain post-fetch authority and recheck after an
+  actual canonical import. Reads are never reused across provider fetches,
+  stream candidates, or job executions.
 - Junction workout streams stay inside that existing resource/day continuation
   owner. Before the workout index, the existing control-plane current-import
   admission predicate intersects with the current Junction provider inventory

@@ -78,7 +78,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")>()),
   isHostedVeniceAssistantEnabled: () =>
     process.env.HOSTED_VENICE_ENABLED === "1",
   readHostedMemberAssistantModelPreference:
@@ -410,6 +411,10 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({ assistantProviderPreference: "venice" }),
+    );
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "11",
@@ -490,7 +495,14 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
+    expect(payload.assistantProvider).toBe("venice");
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({ assistantProviderPreference: true }),
+      where: { id: "member_routes_1" },
+    });
+    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
       cursorMode: "imported_seq",
       lanes: [
@@ -538,6 +550,11 @@ describe("hosted runtime internal web routes", () => {
     { scenario: "missing payload", item: { payloadInlineCiphertext: null }, consumedSeq: "0", eligible: false },
     { scenario: "fresh conversation work", item: {}, consumedSeq: "0", eligible: true },
   ])("only loads sponsorship for usable conversation input: $scenario", async ({ item, consumedSeq, eligible }) => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({
+        threadContainer: { owner: buildRuntimeMailboxAccessRecord() },
+      }),
+    );
     const runningBit = {
       expiresAt: "2026-04-27T00:00:00.000Z",
       publicAlias: null,
@@ -590,6 +607,11 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("returns ordinary mailbox work when the optional sponsorship bit is unavailable", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({
+        threadContainer: { owner: buildRuntimeMailboxAccessRecord() },
+      }),
+    );
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "11",
@@ -650,6 +672,75 @@ describe("hosted runtime internal web routes", () => {
       lane: "conversation",
       laneSeq: "12",
     });
+  });
+
+  it.each(["conversation", "system"] as const)("returns changed provider preferences with empty %s fetches", async (lane) => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValue({
+      consumedSeqByLane: [{ lane, consumedSeq: "3" }],
+      items: [],
+      maxSeqByLane: [{ lane, maxSeq: "3" }],
+    });
+
+    for (const provider of ["venice", "openai"] as const) {
+      mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+        buildRuntimeMailboxAccessRecord({ assistantProviderPreference: provider }),
+      );
+      const response = await mailboxFetchRoute.POST(jsonRequest(
+        "/api/internal/hosted-mailbox/fetch",
+        {
+          lanes: [{ importedSeq: "3", lane }],
+          limitPerLane: 10,
+          requestId: `request_empty_provider_${provider}`,
+        },
+      ));
+      expect(response.status).toBe(200);
+      expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
+        assistantProvider: provider,
+        items: [],
+      });
+    }
+
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
+  });
+
+  it("keeps participant-backed group access while using the group provider", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({
+        assistantProviderPreference: "venice",
+        threadContainer: {
+          owner: buildRuntimeMailboxAccessRecord({ billingStatus: "paused" }),
+        },
+      }),
+    );
+    mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValueOnce({
+      participantMemberId: "member_participant",
+    });
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [{ lane: "conversation", consumedSeq: "3" }],
+      items: [],
+      maxSeqByLane: [{ lane: "conversation", maxSeq: "3" }],
+    });
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [{ importedSeq: "3", lane: "conversation" }],
+        limitPerLane: 10,
+        requestId: "request_group_provider",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedMailboxFetchResponse(await response.json()).assistantProvider)
+      .toBe("openai");
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
   });
 
   it("fetches after the local imported watermark while returning the consumed floor", async () => {
@@ -1245,7 +1336,11 @@ describe("hosted runtime internal web routes", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("rejects conversation mailbox items when the AI usage gate denies runtime consumption", async () => {
+  it("returns the current provider and unchanged cursor when AI usage denies mailbox consumption", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({ assistantProviderPreference: "venice" }),
+    );
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "11",
@@ -1296,7 +1391,15 @@ describe("hosted runtime internal web routes", () => {
       },
     ));
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
+    expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
+      assistantProvider: "venice",
+      consumedSeqByLane: [{ lane: "conversation", consumedSeq: "11" }],
+      items: [],
+      maxSeqByLane: [{ lane: "conversation", maxSeq: "11" }],
+      userId: "member_routes_1",
+    });
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
       userId: "member_routes_1",
@@ -1482,9 +1585,21 @@ describe("hosted runtime internal web routes", () => {
       },
     ));
 
-    // One gated conversation item denies the whole batch, including the
-    // non-gated system item: all-or-nothing watermark semantics.
-    expect(response.status).toBe(403);
+    // One gated conversation item defers the whole batch, including system
+    // work, without advancing either cursor.
+    expect(response.status).toBe(200);
+    expect(parseHostedMailboxFetchResponse(await response.json())).toMatchObject({
+      assistantProvider: "openai",
+      consumedSeqByLane: [
+        { lane: "system", consumedSeq: "11" },
+        { lane: "conversation", consumedSeq: "11" },
+      ],
+      items: [],
+      maxSeqByLane: [
+        { lane: "system", maxSeq: "11" },
+        { lane: "conversation", maxSeq: "11" },
+      ],
+    });
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
       userId: "member_routes_1",
@@ -3820,6 +3935,7 @@ function createPrismaClientStub() {
 
 function buildRuntimeMailboxAccessRecord(overrides: Partial<{
   id: string;
+  assistantProviderPreference: string | null;
   accountGroupMemberships: Array<{
     group: { billingStatus: string; suspendedAt: Date | null };
     status: string;
@@ -3839,6 +3955,7 @@ function buildRuntimeMailboxAccessRecord(overrides: Partial<{
 }> = {}) {
   return {
     id: "member_routes_1",
+    assistantProviderPreference: null,
     accountGroupMemberships: [],
     billingStatus: "active",
     suspendedAt: null,

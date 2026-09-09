@@ -1513,9 +1513,14 @@ locally readable.
   fact. The container's immutable binding is the sole opaque-name-to-member mapping
   for both warm and cold allocations. Legacy ENAM targets preserve their original
   region and namespace; new global targets must never be parsed as member names.
-  Before provider credential minting, invocation, wake, or cleanup, the
-  per-member owner must re-read that binding and require the exact member,
-  release, region, and slot. A claimed slot is never reusable across members;
+  Before provider credential minting, the per-member owner must verify the exact
+  member, release, region, and slot. Fenced preparation may reuse the immutable
+  binding receipt from allocation or retained-slot resolution in that same
+  request; otherwise it reads the binding. Invocation and wake still authorize
+  the live binding inside the slot owner. Cleanup sends the exact slot and member
+  to that owner, which validates them before retirement and acknowledges only
+  after native destruction and durable identity scrubbing. A successful
+  acknowledgement needs no binding readback. A claimed slot is never reusable across members;
   terminal retirement destroys the container and scrubs claim/member identity.
   Codex standby preflight uses a disposable content-free home and must not make
   a provider request or retain a resident member-configured App Server.

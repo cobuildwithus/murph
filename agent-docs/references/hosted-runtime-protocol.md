@@ -96,7 +96,8 @@ provider changed. The per-user workflow coalesces duplicate wakes as one
 boolean and invokes its existing Cloudflare processing adapter even when Web
 reconciliation facts are idle. Blocked facts discard the wake; accepted
 processing clears it only when no newer wake arrived during that call. A warm
-invocation compares its invocation provider with the live Web-owned preference.
+invocation compares its invocation provider with the Web-owned provider fact
+returned by its existing mailbox fetch, including empty and usage-denied fetches.
 A mismatch stops that invocation from servicing further wakes, makes its dirty
 workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
 so Cloudflare releases the provider-specific invocation and starts a fresh one.
@@ -105,14 +106,15 @@ and drains the coalesced signal in the same synchronous turn. An already
 accepted wake becomes that same positive immediate-recheck edge; a later wake
 is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
-leaves the durable preference intact; the next invocation and the mandatory
-provider-entry consistency check remain the recovery path. This compares the
-invocation provider with the saved provider; it is not input admission or
-target/audience authorization. Handoff and unavailable settings reads preserve
-accepted work for retry. Foreground wakes use the provider-entry consistency
-check after mailbox import, preserving imported input if the provider changed.
-An empty wake checks the provider after its mailbox probe so Settings-only
-changes still hand off. Mailbox access and usage-denial bookkeeping remain
+leaves the durable preference intact; the next invocation or mailbox fetch
+recovers it. The fetch and acknowledged in-invocation provider updates set the
+existing handoff flag; provider entry checks that flag without a separate
+configuration request. This is lifecycle consistency, not input admission or
+target/audience authorization. Handoff preserves accepted work for retry.
+An empty wake fetches the same provider fact so Settings-only changes still
+hand off. Web returns semantic usage denial as an empty successful mailbox
+response after denial bookkeeping; authentication and inactive access still
+fail. Mailbox access and usage-denial bookkeeping remain
 Web-owned and independent of the invocation's provider. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
@@ -807,7 +809,14 @@ invalid continuation projections remain ordering barriers. If the ordinary selec
 chooses a pending transferred device owner, eligible non-device work takes the
 pass first. Recording owners keep their existing priority, and device successors
 still run through their connection owner. This prevents continuously due device
-jobs from starving the independent durable frontier. The shared classifier admits
+jobs from starving the independent durable frontier. Wake projection and
+preparation share the runnable admission decision, including immediate admission
+of eligible deferred dirty hints through a validated owner. That immediate wake
+does not change the retained jobs' retry deadlines. A single pure coverage
+projection supplies execution-covered hints and the narrower idle-covered
+schedules; dirty work requires execution and blocks idle retirement across it.
+Coverage alone never grants imported continuation authority or bypasses the
+invocation's filters. The shared classifier admits
 device-sync, member-channel reconciliation, operator maintenance, browser-vault
 refresh, Environment completion, and the narrow exact-notification cases; an
 earlier default-owned row remains a hard ordering barrier. Already committed
@@ -1339,6 +1348,13 @@ order:
 Do not add a deploy orchestrator or generic capability system by default. Use
 this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
+The mailbox provider fact uses the already-deployed reader's tolerance of
+additional fields: deploy Web's `assistantProvider` response and semantic
+usage-denial empty response first, then the strict Worker/runner reader. The
+new reader rejects an old response before importing input; it has no fallback
+configuration request. Keep Web at that protocol floor while a new reader is
+deployed. Old readers accept the new response and retain their former provider
+consistency check until they drain.
 Shared accepted-message targeting is a runtime-only strict outbox-shape change,
 so its reader and writer ship together in one runner bundle. Deploy Cloudflare
 and that runner with `container_rollout=immediate`, and require managed-container
@@ -1727,9 +1743,13 @@ the same retry rule, including when the retry arrives through Temporal.
 Replenishment, readiness re-proving, orphan retirement, and stale-release drain
 remain outside the accepted-message path. A claimed slot is never rebound or
 returned to ready. Group chats do not own standby lifecycle; the member's
-`UserRunner` remains the allocation and stop-target owner. Slot invocation,
-provider-credential minting, withdrawal, account deletion, and retirement all
-re-read the exact durable binding; a member mismatch fails closed. A successful
+`UserRunner` remains the allocation and stop-target owner. Fenced preparation
+reuses the exact immutable binding receipt from allocation or retained resolution
+within that request, or reads it when no receipt exists. Invocation and wake
+authorize the live bound member inside the slot owner. Withdrawal and account
+deletion send that owner the exact slot/member target; the owner validates it and
+acknowledges only after native destruction and durable retirement. Callers need no
+binding readback after this acknowledgement. A member mismatch fails closed. A successful
 fresh-start acceptance records the closed standby allocation outcome, bounded
 reason, and elapsed milliseconds in the existing orchestration latency phase
 breakdown and structured log. The selection log records the same metadata
@@ -3041,9 +3061,13 @@ upstream five-second default.
 Container readiness receives at most 15 wall-clock seconds, including time
 queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
 allows one absolute five-second fail-closed cleanup deadline shared by the
-pre-destroy state read and destroy settlement, and its caller-side guard keeps
-a separate one-second margin. If the container RPC settles
-with a timeout or transport failure, the fresh fence is compare-cleared as
+pre-destroy state read and native destruction promise, and its caller-side guard
+keeps a separate one-second margin. Native destruction completion is the stop
+receipt; cached SDK lifecycle status and a delayed `onStop` callback are not
+additional settlement gates. A definitely stopped native container skips both
+status reads and destruction during retained-target retirement. The slot's
+existing retirement fence and exact-generation checks remain authoritative.
+If the container RPC settles with a timeout or transport failure, the fresh fence is compare-cleared as
 before. If cleanup remains unsettled at its deadline or only the outer guard
 elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved
 that cleanup is safe, and the existing startup-grace convergence path remains

@@ -1616,6 +1616,10 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
               pendingRunningJobCountBefore: queueSnapshotBefore?.runningJobCount ?? null,
               queueSnapshotAfterPresent: queueSnapshotAfter !== null,
               queueSnapshotBeforePresent: queueSnapshotBefore !== null,
+              deviceSyncConnectionSourceReadCount: input.jobTimingDiagnostics.reduce(
+                (total, diagnostic) => total + diagnostic.connectionSourceReadCount,
+                0,
+              ),
               deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
               deviceSyncJobTimingSampleLimit: HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
               deviceSyncJobTimingSummaries: jobTimingSummary.summaries,
