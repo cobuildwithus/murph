@@ -70,8 +70,48 @@ describe("mailbox blocker diagnostics", () => {
     },
   );
 
-  it.each(["device", "non-device", "empty"])("passes the production wire parsers (%s)", (kind) => {
+  it.each(["plain", "jobs", "scopes", "revoke", "reason", "record"])(
+    "identifies non-scheduled hint shape without exposing values (%s)", (condition) => {
+      const head = device("2");
+      if (head.wake.kind !== "device-sync.wake") throw new Error("Invalid synthetic fixture");
+      head.wake.reason = "webhook_hint";
+      head.wake.hint = { reason: "webhook_dirty_transition" };
+      if (condition === "jobs") head.wake.hint.jobs = [{ kind: "synthetic-private-job" }];
+      if (condition === "scopes") head.wake.hint.scopes = [];
+      if (condition === "revoke") head.wake.hint.revokeWarning = {
+        code: "synthetic-private-code", message: "synthetic-private-message",
+      };
+      if (condition === "reason") head.wake.hint.reason = "synthetic-private-reason";
+      if (condition === "record") head.postCheckpointRecord = {
+        kind: "device-sync.dirty-processed", connectionId: "synthetic_connection", processedRevision: "1",
+      };
+      const state = { pending: [head] };
+      const before = JSON.stringify(state);
+      const result = resolveHostedSystemMailboxFirstPendingDiagnostics({
+        continuationSeqs: [], firstPendingSeq: "2", now: NOW, state,
+      });
+      expect(result).toEqual(expect.arrayContaining([
+        `headPlainHint=${condition === "plain"}`,
+        `headHasJobs=${condition === "jobs"}`,
+        `headScopesPresent=${condition === "scopes"}`,
+        `headRevokeWarningPresent=${condition === "revoke"}`,
+        `headHintReasonSupported=${condition !== "reason"}`,
+        `headRecordPresent=${condition === "record"}`,
+      ]));
+      expect(result).toHaveLength(16);
+      expect(result?.some((entry) => entry.startsWith("headCadence"))).toBe(false);
+      expect(readHostedSystemMailboxFirstPendingDiagnostics(result)).toEqual(result);
+      expect(JSON.stringify(result)).not.toContain("synthetic");
+      expect(JSON.stringify(state)).toBe(before);
+    },
+  );
+
+  it.each(["device", "webhook", "non-device", "empty"])("passes the production wire parsers (%s)", (kind) => {
     const head = device("2");
+    if (kind === "webhook" && head.wake.kind === "device-sync.wake") {
+      head.wake.reason = "webhook_hint";
+      head.wake.hint = { scopes: [], reason: "synthetic-private-reason" };
+    }
     if (kind === "non-device") {
       head.routeAction = "apply-runtime-control-request";
       head.wake = { kind: "runtime.maintenance-requested", eventId: "synthetic_maintenance",
