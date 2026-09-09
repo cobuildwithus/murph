@@ -4,6 +4,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createAssistantAskRequestedWake,
+  createOperatorTaskAssistantAskRequestedWake,
   createAssistantProviderUsageDraft,
   createBundleRef,
   createDeferred,
@@ -1482,6 +1483,149 @@ describe("hosted workspace runtime entrypoint", () => {
           item.status,
         ]),
         [[askItem.id, "pending"]],
+      );
+    } finally {
+      foregroundRelease.resolve();
+      childExitRelease.resolve();
+      shutdownController.abort(new Error("Test cleanup."));
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
+  test("lets an operator diagnostic finish beyond the idle checkpoint window while foreground proceeds", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const askStarted = createDeferred<void>();
+    const childExitRelease = createDeferred<void>();
+    const foregroundStarted = createDeferred<void>();
+    const foregroundRelease = createDeferred<void>();
+    const shutdownController = new AbortController();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let snapshotStarted = false;
+
+    mocks.executeOperatorDiagnostic.mockImplementationOnce(async (askInput) => {
+      events.push("ask.started");
+      askStarted.resolve();
+      askInput.abortSignal?.addEventListener("abort", () => events.push("ask.aborted"), { once: true });
+      await childExitRelease.promise;
+      if (askInput.abortSignal?.aborted) throw askInput.abortSignal.reason;
+      events.push("ask.exited");
+      return { answer: "Synthetic diagnostic completed.", outcome: "answered" };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const askItem = createMailboxItem({
+        dedupeKey: "ask_event_entrypoint_concurrent",
+        id: "mailbox_item_entrypoint_concurrent_ask",
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: "1",
+      });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_detached_ask_concurrency",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            snapshotStarted = true;
+            events.push("snapshot.started");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/detached-ask-concurrency.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            assert.equal(item.route.action, "run-assistant-ask");
+            const wake = createOperatorTaskAssistantAskRequestedWake({ eventId: askItem.dedupeKey });
+            wake.occurredAt = new Date().toISOString();
+            wake.ask.expiresAt = new Date(Date.parse(wake.occurredAt) + 600_000).toISOString();
+            return await enqueueHostedSystemMailboxItem({
+              item,
+              vaultRoot,
+              wake,
+            });
+          },
+          platform: {
+            ...createPlatform({
+              assistantAskPort: {
+                async request(request) {
+                  if (request.action === "complete") {
+                    events.push("ask.completed");
+                    shutdownController.abort(new Error("Synthetic shutdown after diagnostic completion."));
+                    return { action: "complete", status: "completed" };
+                  }
+                  events.push("ask.prepared");
+                  return {
+                    action: "prepare",
+                    question: "Inspect the synthetic runtime state.",
+                    status: "ready",
+                    targetLabel: "Synthetic runtime",
+                  };
+                },
+              },
+              mailboxPort: createMailboxPort({ events, items: [askItem] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record) {
+                events.push("usage.record");
+                return { platformAiUsageAllowedAfter: true, recorded: true, usageId: record.usageId };
+              },
+            },
+          },
+          async runAssistantPhase() {
+            events.push("foreground.started");
+            foregroundStarted.resolve();
+            await foregroundRelease.promise;
+            events.push("foreground.finished");
+
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(Promise.all([askStarted.promise, foregroundStarted.promise]), 10_000, () => events.join(","));
+      assert.equal(snapshotStarted, false);
+      foregroundRelease.resolve();
+      await waitUntil(() => assert.ok(events.includes("foreground.finished")));
+      // Cross the configured idle deadline with an unfinished child.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(events.includes("ask.aborted"), false);
+      assert.equal(snapshotStarted, false);
+
+      childExitRelease.resolve();
+      const result = await withRealTimeout(resultPromise, 30_000, () => events.join(","));
+      assert.equal(mocks.executeOperatorDiagnostic.mock.calls.length, 1);
+      assert.ok(requireEventIndex(events, "foreground.finished") < requireEventIndex(events, "ask.completed"));
+      assert.ok(requireEventIndex(events, "ask.completed") < requireEventIndex(events, "snapshot.started"));
+      assert.equal(result.status, "idle");
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+          item.itemId,
+          item.status,
+        ]),
+        [],
       );
     } finally {
       foregroundRelease.resolve();

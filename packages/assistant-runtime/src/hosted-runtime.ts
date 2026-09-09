@@ -4560,6 +4560,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
       },
       codexHome: hostedCodexRuntime.codexHome,
+      logPort: runtime.platform.logPort,
+      runtimeLogContext,
       deferUsageUntilAfterDurableCheckpoint(effect) {
         pendingDurableCheckpointEffects.push(effect);
       },
@@ -6568,6 +6570,29 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
       };
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
+      const deferIdleCheckpointForBackgroundWork = (): boolean => {
+        if (options.shutdownSignal?.aborted) return false;
+        const diagnosticDeadline = detachedAssistantAskController?.activeDiagnosticDeadline() ?? null;
+        if (
+          !runtimeOwnerHandoffRequested
+          && !runtimeAbortController.signal.aborted
+          && diagnosticDeadline !== null
+          && diagnosticDeadline > Date.now()
+        ) {
+          setIdleCheckpointStartBy(diagnosticDeadline);
+          return true;
+        }
+        if (imageGenerationController?.hasCompleted()) return true;
+        if (
+          imageGenerationController?.hasWork()
+          && pendingDurableCheckpointEffects.length === 0
+          && !durableCheckpointFollowUpPending
+        ) {
+          markIdleCheckpointTimerAfterDirtyWork();
+          return true;
+        }
+        return false;
+      };
       const prepareDirtyRuntimeCheckpointAttempt = async (
         initialCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null,
       ): Promise<{
@@ -6662,19 +6687,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           return null;
         }
-        if (
-          options.shutdownSignal?.aborted !== true
-          && imageGenerationController?.hasCompleted()
-        ) {
-          return null;
-        }
-        if (
-          options.shutdownSignal?.aborted !== true
-          && imageGenerationController?.hasWork()
-          && pendingDurableCheckpointEffects.length === 0
-          && !durableCheckpointFollowUpPending
-        ) {
-          markIdleCheckpointTimerAfterDirtyWork();
+        if (deferIdleCheckpointForBackgroundWork()) {
           return null;
         }
         return {

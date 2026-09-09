@@ -981,6 +981,16 @@ operator child uses `murph-operator-diagnostic-read`, always returns a concrete
 diagnostic, and skips the member disclosure reviewer. The existing authenticated,
 encrypted, expiring Ops completion owner receives the result.
 
+An executing operator diagnostic defers routine idle checkpoints until it settles
+or reaches the admitted request expiry. Its existing controller aborts execution
+at that deadline; the ordinary requeue and Web prepare path settles expired work.
+Shutdown, owner handoff, fence loss, and workspace boundaries still drain the
+owned child before snapshot or release. Attempts emit buffered
+`assistant.pass_finished` logs with `executionKind: operator_diagnostic`, stage,
+outcome, elapsed time, attempt count, and a classified error code, without raw
+questions, answers, or errors. Ops and feedback readers derive expired queued or
+running tasks as failed from Web-owned expiry, without mutating rows on reads.
+
 Every child starts in an empty temporary directory with approval policy `never`,
 no inherited model-run environment, and no write, network, project
 configuration, effect, or delivery authority. Joined-group asks alone receive
