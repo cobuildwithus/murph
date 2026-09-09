@@ -52,7 +52,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |
 | `agent-docs/strategy.md` | Current product strategy. | Current product strategy | High | 2026-07-15 |
-| `agent-docs/PRODUCT_SENSE.md` | Current product posture for a broad personal health assistant. | Current product behavior | High | 2026-08-13 |
+| `agent-docs/PRODUCT_SENSE.md` | Product posture, scope, and member workspace troubleshooting. | Current product behavior | High | 2026-09-09 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-07-15 |
 | `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`. | Current frontend implementation guidance | Medium | 2026-08-31 |
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
