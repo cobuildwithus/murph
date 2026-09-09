@@ -9,6 +9,6 @@
     "summary": "The group and personal feature sections now pair their headings directly with examples.",
     "details": "Removed the supporting paragraphs so the challenges, family newsletter, and personal assistant demos are easier to scan.",
     "relevanceTags": ["website"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3113]
   }
 }
