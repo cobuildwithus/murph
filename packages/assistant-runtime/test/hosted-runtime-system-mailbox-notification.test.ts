@@ -4460,7 +4460,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it.each(["all", "route", "wake", "prefix", "selected-prefixes"])(
+  it.each(["all", "route", "wake", "prefix", "selected-prefixes", "unimported"])(
     "retires covered schedules only within the idle invocation filters (%s)", async (filter) => {
       const workspace = await createHostedRuntimeWorkspace("murph-covered-schedule-filters-");
       const retryAt = "2026-04-28T00:00:00.000Z";
@@ -4490,6 +4490,11 @@ describe("hosted system mailbox notification execution context", () => {
             lastAttemptAt: FIXED_NOW, nextAttemptAt: retryAt,
           } : item),
         }));
+        await writeHostedMailboxImportState({
+          state: { ...createEmptyHostedMailboxImportState(),
+            watermarks: { conversation: "0", system: filter === "unimported" ? "0" : "4" } },
+          vaultRoot: workspace.vaultRoot,
+        });
         const before = await readHostedSystemMailboxState(workspace.vaultRoot);
         const result = await prepareHostedSystemMailboxItemForCheckpoint({
           ...(filter === "route" ? { allowedRouteActions: ["apply-runtime-control-request" as const] } : {}),
