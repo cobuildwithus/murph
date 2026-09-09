@@ -1,6 +1,6 @@
 # Import device data during foreground conversation
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -172,3 +172,18 @@ Use existing assistant-runtime workspace/entrypoint suites, Cloudflare runtime a
   All 69 tests in that file and runtime typecheck pass. Retention behavior and
   selection assertions are unchanged. This reuses the wall-clock fixture
   friction already documented in issue #2971; no duplicate entry is needed.
+
+## Completion evidence
+
+- Final full-snapshot review round two passed on the corrected production head;
+  the prior foreground-priority finding is resolved with no remaining accepted
+  finding. Parent final review confirms the deletion and held-checkpoint proof.
+- Subsequent changes only pin two existing fixture clocks. They preserve runtime
+  behavior and require focused verification and CI, not another source review.
+- Local proof: 303 runtime concurrency/foreground/recovery tests, 69 mailbox
+  import tests, 803 query tests, 200 core tests, 177 controller tests, 10 changelog
+  tests, focused real-assistant readback, affected typechecks, and complexity.
+- The implementation and local review work are complete. The PR remains the
+  authority for final-head CI and current-base mergeability before handoff.
+  No production deployment, rollback, or member message was performed.
+Completed: 2026-09-09
