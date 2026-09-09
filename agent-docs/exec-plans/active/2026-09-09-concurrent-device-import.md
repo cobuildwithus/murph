@@ -161,3 +161,14 @@ Use existing assistant-runtime workspace/entrypoint suites, Cloudflare runtime a
   pass. The existing live assistant readback evidence remains applicable because
   its engine/importer/CLI path and production provider input are unchanged.
 - Round-two final review and CI will run against the corrected pushed head.
+
+## Fixed-date CI fixtures
+
+- Broad runtime CI reached two unchanged attachment-selection fixtures after
+  their fixed dates crossed the existing fourteen-day content-retention cutoff.
+  Focused local runs reproduced both failures; the selector, retention, and
+  conversation-import production owners match the original task baseline.
+- Pin only Date in those two scenarios and restore real time after each test.
+  All 69 tests in that file and runtime typecheck pass. Retention behavior and
+  selection assertions are unchanged. This reuses the wall-clock fixture
+  friction already documented in issue #2971; no duplicate entry is needed.
