@@ -3,7 +3,7 @@ import "server-only";
 import { sanitizeHostedProductFeedbackSummary } from "@murphai/hosted-execution/runtime-control";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { admitHostedOperatorTask, decryptOperatorTaskResult } from "./operator-task";
+import { admitHostedOperatorTask, decryptOperatorTaskResult, resolveHostedOperatorTaskStatus } from "./operator-task";
 import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "./operator-task-retention";
 
 const PAGE_SIZE = 20;
@@ -49,8 +49,7 @@ export async function listHostedFeedbackDiagnostics(input: {
       : null;
     return {
       id: row.id,
-      status: row.expiresAt <= now && ["queued", "running"].includes(row.status)
-        ? "failed" : row.status,
+      status: resolveHostedOperatorTaskStatus(row, now),
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
       resultExpiresAt: resultExpiresAt?.toISOString() ?? null,
