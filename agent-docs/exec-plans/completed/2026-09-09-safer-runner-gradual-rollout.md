@@ -1,6 +1,6 @@
 # Safer single-pool gradual runner deployments
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -54,3 +54,8 @@ Run focused deploy CLI, preflight/settings, signed smoke route/client, provider,
 - Parent read-only inspection of the recent successful protected release resolved a public source with runner schema 19. This is baseline context, not fresh proof of every current process or permission to deploy. No private deployment rows, identities, or credentials were persisted.
 - Current-base mergeability found an isolated test conflict with an upstream correction to the previously aging audio fixture. Retain upstream's stronger clock-controlled proof and reconcile before final review.
 - Final ReviewGPT and exact-head CI remain pending.
+
+## Final authored candidate
+
+The follow-up implementation is complete. Current-main reconciliation retained the upstream audio fixture and native cleanup changes; the only content conflict was the already-fixed test timestamp. After reconciliation, all 772 focused Cloudflare tests and all 27 runtime shutdown/audio tests passed. Cloudflare typecheck and the complexity ratchet passed again. Parent review found no remaining local correction in the scoped change. The final ReviewGPT round and exact-head CI are the remaining PR gates; the PR description records their eventual result. No live deployment or capacity setting changed.
+Completed: 2026-09-09
