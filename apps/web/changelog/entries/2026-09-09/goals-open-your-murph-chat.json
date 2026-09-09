@@ -9,7 +9,7 @@
     "summary": "When you’re signed in, homepage goal cards and the goal input open your Murph conversation with the goal prefilled.",
     "details": "If your conversation cannot be opened, you can retry from the same page without losing your draft. Nothing is sent until you send it in your messaging app.",
     "relevanceTags": ["goals", "messaging"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3117],
     "tryIt": { "label": "Start with a goal", "href": "/goals" }
   }
 }
