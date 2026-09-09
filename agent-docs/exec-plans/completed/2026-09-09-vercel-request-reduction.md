@@ -1,6 +1,6 @@
 # Remove unnecessary hosted control-plane requests
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -35,7 +35,11 @@ Production request reduction must be distinguished from synthetic call counts.
   maintenance debt remains 105. Other changed-file hotspots are unchanged.
 - [x] Parent candidate review: privacy, source ownership, terminal boundaries,
   scalar-resource equivalence, restart fencing, and current wire compatibility.
-- [ ] Final exact-head ReviewGPT, required CI, final parent review, and merge.
+- [x] Final ReviewGPT PASS on `b5f0be51ac68b2ed47f3c69a2071ce28490891b0`;
+  model attestation and exact-turn capture verified. No qualifying findings.
+- [x] Final parent review confirms the scoped implementation and verification.
+- Release gate: required CI on the final documentation-completion head and an
+  authorized merge remain pending at plan closure. No runtime edits follow review.
 
 ## Limits and release
 
@@ -57,3 +61,10 @@ sole artifact before downloading. No prompt was resent.
 
 Changelog: internal request overhead and diagnostic accuracy; no new member-facing
 feature, action, or promised sync freshness change.
+
+The optional viewport check failed twice during dependency bootstrap because an
+unrelated third-party APT index was inconsistent. Tests did not start. Required
+release checks remain the merge gate; the bootstrap defect is recorded in Frog.
+The production bucket-level request target remains an external measurement gap,
+not a passing result of this implementation plan.
+Completed: 2026-09-09
