@@ -2415,7 +2415,7 @@ describe("hosted runtime internal web routes", () => {
     await signalTask;
   });
 
-  it("does not fail checkpointing when the wake recheck signal is unavailable", async () => {
+  it("retries an unchanged checkpoint wake after its first recheck signal fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -2464,6 +2464,32 @@ describe("hosted runtime internal web routes", () => {
           errorName: "Error",
         },
       );
+      mocks.checkpointHostedWorkspace.mockResolvedValue({
+        status: "updated",
+        workspace: buildWorkspaceRecord({
+          checkpointedAt: "2026-04-26T00:01:30.000Z",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          version: "6",
+        }),
+      });
+      const retryResponse = await workspaceCheckpointRoute.POST(jsonRequest(
+        "/api/internal/hosted-workspace/checkpoint",
+        {
+          attemptId: "attempt_future_wake_signal_failure_1",
+          expectedWorkspaceVersion: "5",
+          leaseGeneration: "2",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          reason: "canonical_runtime_commit",
+          snapshotRef: createBundleRef("snapshot_future_wake_signal_failure"),
+        },
+      ));
+      expect(retryResponse.status).toBe(200);
+      expect(mocks.after).toHaveBeenCalledTimes(2);
+      await mocks.after.mock.calls[1]?.[0]();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
     } finally {
       warnSpy.mockRestore();
       vi.useRealTimers();

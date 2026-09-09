@@ -954,12 +954,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode runs already-imported pending device-sync without new mailbox rows", async () => {
+  test.each(["current", "source_changed", "expired", "old_generation"] as const)(
+    "system mailbox device-sync respects %s Browser Vault freshness without new mailbox rows",
+    async (replicaState) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const deviceSyncPort = createEmptyDeviceSyncPort();
+    const refreshImplementation =
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
     const staleAssistantWakeAt = "2026-04-26T23:59:59.000Z";
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:already-imported",
@@ -976,7 +980,44 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
       mocks.cancelPendingWarmCodexPreinitialization.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      assert.ok(mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime);
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+        mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime,
+      );
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } = await import(
+        "@murphai/contracts/browser-vault"
+      );
+      const { hashHostedBrowserVaultReplicaSources } = await import(
+        "../src/hosted-runtime/browser-vault-replica.ts"
+      );
+      const source = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      const publishedReplicaRef = {
+        byteLength: 128,
+        dataVersion: "browser-data-current",
+        generatedAt: TEST_NOW,
+        generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+        keyId: "browser-vault-replica:synthetic",
+        objectKey: "users/browser-vault-replicas/member-synthetic/current.json",
+        replicaSchema: "murph.browser-vault-replica" as const,
+        runtimeRootKeyId: "udrk:runtime:synthetic",
+        schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
+        sourceBundleHash: source.hash,
+      };
+      const browserVaultReplicaRef = {
+        ...publishedReplicaRef,
+        generatedAt: replicaState === "expired" ? "2026-04-25T00:00:00.000Z" : TEST_NOW,
+        generation: replicaState === "old_generation" ? 1 : publishedReplicaRef.generation,
+        sourceBundleHash: replicaState === "source_changed" ? "a".repeat(64) : source.hash,
+      };
+      const writeReplica = vi.fn(async ({ replica }: { replica: unknown }) => ({
+        ...publishedReplicaRef,
+        byteLength: Buffer.byteLength(JSON.stringify(replica), "utf8"),
+      }));
+      const publishReplica = vi.fn(async () => ({
+        published: true as const,
+        workspace: createWorkspaceState({ browserVaultReplicaRef: publishedReplicaRef }),
+      }));
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
         vaultRoot,
@@ -1014,6 +1055,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           },
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            browserVaultReplicaPort: { write: writeReplica, publishRef: publishReplica },
             deviceSyncPort,
             mailboxPort: createMailboxPort({
               events,
@@ -1023,7 +1065,19 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
+              checkpointWorkspace: (request) => createWorkspaceState({
+                browserVaultReplicaRef,
+                nextWakeAt: request.nextWakeAt ?? null,
+                nextWakeReason: request.nextWakeReason ?? null,
+                nextDefaultProcessingWakeAt: request.nextDefaultProcessingWakeAt ?? null,
+                nextDefaultProcessingWakeReason: request.nextDefaultProcessingWakeReason ?? null,
+                redactedStatus: request.redactedStatus ?? null,
+                snapshotRef: request.snapshotRef,
+                systemMailboxProgressGeneration: request.systemMailboxProgressGeneration,
+                version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              }),
               workspace: createWorkspaceState({
+                browserVaultReplicaRef,
                 nextWakeAt: staleAssistantWakeAt,
                 nextWakeReason: "assistant",
                 snapshotRef: restoredWorkspace.snapshotRef,
@@ -1069,13 +1123,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(result.nextWakeReason ?? null, null);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
-      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledWith(
-        expect.objectContaining({
-          force: true,
-          vaultRoot,
-        }),
-      );
+      const expectedPublications = replicaState === "current" ? 0 : 1;
+      expect(writeReplica).toHaveBeenCalledTimes(expectedPublications);
+      expect(publishReplica).toHaveBeenCalledTimes(expectedPublications);
+      await expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime.mock.results[0]?.value)
+        .resolves.toMatchObject({
+          status: replicaState === "current" ? "skipped_current" : "published",
+        });
     } finally {
+      if (refreshImplementation) {
+        mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(refreshImplementation);
+      }
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -3580,7 +3638,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
 
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async (input) => {
-      assert.equal(input.force, true);
+      assert.equal(input.force, false);
       runtimeWakeSignal.notify();
       return {
         source: { fileCount: 0, totalBytes: 0 },

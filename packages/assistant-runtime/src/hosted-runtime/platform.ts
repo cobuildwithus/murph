@@ -811,6 +811,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
   }): Promise<HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | void>;
   startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
+    replacedSnapshotRef?: HostedWorkspaceSnapshotV2Ref | null;
     inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
