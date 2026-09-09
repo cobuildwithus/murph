@@ -32,7 +32,6 @@ import {
   buildHostedRunnerContainerCaEnv,
 } from "./runner-container-ca-env.ts";
 import {
-  hostedRunnerSlotBindingMatchesTarget,
   isHostedRunnerSlotName,
   isHostedRunnerTargetName,
   isHostedStandbySlotName,
@@ -677,7 +676,6 @@ export class RunnerContainer extends Container {
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
   private stopGeneration = 0;
-  private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
   private pointerlessWakeBlockingLifecycleCount = 0;
   private pendingCompletionCleanup: RunnerContainerPendingCompletionCleanup | null = null;
@@ -1758,8 +1756,9 @@ export class RunnerContainer extends Container {
     // Keep the native status proof and activity renewal under one lifecycle
     // lock so idle expiry cannot stop the container between them.
     return await this.withLifecycleLock(async () => {
+      if (this.isPlatformContainerDefinitelyStopped()) return "stopped";
       const status = await readRunnerContainerStatus(this);
-      if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {
+      if (isRunnerContainerStopped(status)) {
         return "stopped";
       }
       if (
@@ -3167,6 +3166,12 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<boolean> {
+    if (this.isPlatformContainerDefinitelyStopped()) {
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "current") {
+        this.recordCurrentContainerStopped();
+      }
+      return true;
+    }
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
     const statusDeadlineAtMs = input.cleanupDeadlineAtMs
@@ -3219,16 +3224,7 @@ export class RunnerContainer extends Container {
     ) {
       return true;
     }
-    const ownershipBeforeRequest = this.readContainerCleanupOwnership(
-      input.expectedStart,
-      stateBeforeDestroy,
-    );
-    if (ownershipBeforeRequest !== "current") {
-      return ownershipBeforeRequest === "superseded";
-    }
-
     const destroyStartedAt = Date.now();
-    const stopGenerationBeforeDestroy = this.stopGeneration;
     this.lastDestroyRequest = {
       failClosed,
       reason: input.reason,
@@ -3248,95 +3244,30 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
 
-    if (
-      input.expectedInteractionGeneration !== undefined
-      && this.containerInteractionGeneration !== input.expectedInteractionGeneration
-    ) {
-      return true;
-    }
-    const ownershipBeforeDestroy = this.readContainerCleanupOwnership(
-      input.expectedStart,
-      stateBeforeDestroy,
-    );
-    if (ownershipBeforeDestroy !== "current") {
-      return ownershipBeforeDestroy === "superseded";
-    }
     this.pointerlessWakeBlockingLifecycleCount += 1;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const destroyRequest = this.destroy().then(
-        () => ({ kind: "destroy-resolved" as const }),
-        (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
-      );
-      const destroySettle = this.waitForDestroyedContainerStopped({
-        ...(input.cleanupDeadlineAtMs === undefined
-          ? {}
-          : { cleanupDeadlineAtMs: input.cleanupDeadlineAtMs }),
-        destroyStartedAt,
-        expectedStart: input.expectedStart,
-        failClosed,
-        statusBeforeDestroy,
-        stopGenerationBeforeDestroy,
-      }).then(
-        (settled) => ({ kind: "settle-finished" as const, settled }),
-        (error: unknown) => ({ error, kind: "settle-rejected" as const }),
-      );
-      const firstDestroyOutcome = await Promise.race([
-        destroyRequest,
-        destroySettle,
+      // The SDK delegates to native destroy(), whose promise is the stop receipt.
+      // Cached getState()/onStop bookkeeping may lag it and is not a second gate.
+      await Promise.race([
+        this.destroy(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            reject(new Error("Hosted runner container destruction timed out."));
+          }, Math.max(1, (input.cleanupDeadlineAtMs
+            ?? destroyStartedAt + RUNNER_DESTROY_SETTLE_TIMEOUT_MS) - Date.now()));
+        }),
       ]);
-
-      if (firstDestroyOutcome.kind === "destroy-rejected") {
-        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-          return true;
-        }
-        const error = firstDestroyOutcome.error;
-        if (isSettledRunnerContainerDestroyRaceError(error)) {
-          return true;
-        }
-        emitRunnerContainerLifecycleFailure({
-          destroyLatencyMs: Date.now() - destroyStartedAt,
-          error,
-          failClosed,
-          context,
-          message: "Hosted execution container destroy request failed.",
-          statusBeforeDestroy,
-          stage: "destroy",
-        });
-        if (failClosed) {
-          throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
-        }
-        return false;
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
+        return true;
       }
-
-      const settledOutcome = firstDestroyOutcome.kind === "destroy-resolved"
-        ? await destroySettle
-        : firstDestroyOutcome;
-      if (settledOutcome.kind === "settle-rejected") {
-        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-          return true;
-        }
-        if (failClosed) {
-          throw settledOutcome.error;
-        }
-        return false;
-      }
-
-      const settled = settledOutcome.settled;
-      if (!settled.ok) {
-        return false;
-      }
+      this.recordCurrentContainerStopped();
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
           destroyLatencyMs: Date.now() - destroyStartedAt,
-          destroySettleLatencyMs: settled.settleLatencyMs,
-          destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
           failClosed,
           lifecycleStage: "destroyed",
-          observedStatusesAfterDestroy: settled.observedStatuses,
-          settleReason: settled.settleReason,
-          statusAfterDestroy: settled.statusAfterDestroy,
-          stopObservedAfterDestroy: settled.stopObservedAfterDestroy,
           statusBeforeDestroy,
         },
         message: "Hosted execution container destroy completed.",
@@ -3344,138 +3275,30 @@ export class RunnerContainer extends Container {
         userId: context?.userId,
       });
       return true;
-    } finally {
-      this.pointerlessWakeBlockingLifecycleCount -= 1;
-    }
-  }
-
-  private async waitForDestroyedContainerStopped(input: {
-    cleanupDeadlineAtMs?: number;
-    destroyStartedAt: number;
-    expectedStart?: RunnerContainerCurrentStart | null;
-    failClosed: boolean;
-    statusBeforeDestroy: string | null;
-    stopGenerationBeforeDestroy: number;
-  }): Promise<
-    | {
-        ok: true;
-        observedStatuses: string[];
-        settleReason: "onStop" | "status" | "superseded";
-        settleLatencyMs: number;
-        statusAfterDestroy: string | null;
-        stopObservedAfterDestroy: boolean;
-      }
-    | {
-        ok: false;
-      }
-  > {
-    const context = this.currentLogContext;
-    const cleanupDeadlineAtMs = input.cleanupDeadlineAtMs
-      ?? Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
-    const observedStatuses: string[] = [];
-    let lastError: unknown = null;
-    let statusAfterDestroy: string | null = null;
-    const supersededResult = () => ({
-      ok: true as const,
-      observedStatuses,
-      settleLatencyMs: Date.now() - input.destroyStartedAt,
-      settleReason: "superseded" as const,
-      statusAfterDestroy,
-      stopObservedAfterDestroy: false,
-    });
-
-    while (true) {
+    } catch (error) {
       if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-        return supersededResult();
+        return true;
       }
-      if (this.stopGeneration > input.stopGenerationBeforeDestroy) {
-        return {
-          ok: true,
-          observedStatuses,
-          settleLatencyMs: Date.now() - input.destroyStartedAt,
-          settleReason: "onStop",
-          statusAfterDestroy,
-          stopObservedAfterDestroy: true,
-        };
+      if (isMissingRunnerContainerError(error)) {
+        this.recordCurrentContainerStopped();
+        return true;
       }
-
-      let remainingMs = cleanupDeadlineAtMs - Date.now();
-      if (remainingMs <= 0) {
-        const error = lastError
-          ? new Error("Hosted runner container did not report stopped after destroy.", {
-              cause: lastError,
-            })
-          : new Error("Hosted runner container did not report stopped after destroy.");
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            destroyLatencyMs: Date.now() - input.destroyStartedAt,
-            destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
-            failClosed: input.failClosed,
-            lifecycleStage: "destroy-settle",
-            observedStatusesAfterDestroy: observedStatuses,
-            statusAfterDestroy,
-            statusBeforeDestroy: input.statusBeforeDestroy,
-          },
-          error,
-          level: input.failClosed ? "error" : "warn",
-          message: "Hosted execution container destroy did not settle to stopped.",
-          phase: "failed",
-          userId: context?.userId,
-        });
-        if (input.failClosed) {
-          throw error;
-        }
-        return { ok: false };
+      emitRunnerContainerLifecycleFailure({
+        destroyLatencyMs: Date.now() - destroyStartedAt,
+        error,
+        failClosed,
+        context,
+        message: "Hosted execution container destroy request failed.",
+        statusBeforeDestroy,
+        stage: "destroy",
+      });
+      if (failClosed) {
+        throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
       }
-
-      try {
-        const stateAfterDestroy = await readRunnerContainerStateWithTimeout(
-          this,
-          Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
-        );
-        statusAfterDestroy = readContainerStatus(stateAfterDestroy);
-        appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
-        const ownershipAfterDestroy = this.readContainerCleanupOwnership(
-          input.expectedStart,
-          stateAfterDestroy,
-        );
-        if (ownershipAfterDestroy === "superseded") {
-          return supersededResult();
-        }
-        if (ownershipAfterDestroy === "ambiguous") {
-          return { ok: false };
-        }
-        if (
-          isRunnerContainerStopped(statusAfterDestroy)
-          && !this.isPlatformContainerDefinitelyRunning()
-        ) {
-          this.recordCurrentContainerStopped();
-          return {
-            ok: true,
-            observedStatuses,
-            settleReason: "status",
-            settleLatencyMs: Date.now() - input.destroyStartedAt,
-            statusAfterDestroy,
-            stopObservedAfterDestroy: this.stopGeneration > input.stopGenerationBeforeDestroy,
-          };
-        }
-      } catch (error) {
-        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-          return supersededResult();
-        }
-        lastError = error;
-        appendObservedRunnerContainerStatus(observedStatuses, "status_error");
-      }
-
-      remainingMs = cleanupDeadlineAtMs - Date.now();
-      if (remainingMs <= 0) {
-        continue;
-      }
-      await this.waitForStopOrDelay(
-        input.stopGenerationBeforeDestroy,
-        Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
-      );
+      return false;
+    } finally {
+      clearTimeout(timeout);
+      this.pointerlessWakeBlockingLifecycleCount -= 1;
     }
   }
 
@@ -3549,44 +3372,6 @@ export class RunnerContainer extends Container {
       throw new RunnerContainerCleanupUnsettledError(error);
     }
     throw new RunnerContainerCleanupUnsettledError(input.cause);
-  }
-
-  private async waitForStopOrDelay(
-    observedStopGeneration: number,
-    delayMs: number,
-  ): Promise<void> {
-    if (this.stopGeneration > observedStopGeneration) {
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      let timeout: ReturnType<typeof setTimeout> | null = null;
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (timeout) {
-          clearTimeout(timeout);
-        }
-        this.stopObservers.delete(finish);
-        resolve();
-      };
-      this.stopObservers.add(finish);
-      timeout = setTimeout(finish, delayMs);
-      if (this.stopGeneration > observedStopGeneration) {
-        finish();
-      }
-    });
-  }
-
-  private resolveStopObservers(): void {
-    const observers = [...this.stopObservers];
-    this.stopObservers.clear();
-    for (const observer of observers) {
-      observer();
-    }
   }
 
   private startRunnerActivityRenewal(): () => void {
@@ -3783,8 +3568,7 @@ export class RunnerContainer extends Container {
   private recordCurrentContainerStopped(): boolean {
     const currentGenerationObserved = this.currentContainerStart !== null
       || this.recentReadinessProof !== null
-      || this.lastDestroyRequest !== null
-      || this.stopObservers.size > 0;
+      || this.lastDestroyRequest !== null;
     if (!currentGenerationObserved) {
       return false;
     }
@@ -3796,7 +3580,6 @@ export class RunnerContainer extends Container {
     this.lastActivityObservedAtMs = null;
     this.lastActivityObservedStage = null;
     this.lastDestroyRequest = null;
-    this.resolveStopObservers();
     return true;
   }
 
@@ -4763,19 +4546,16 @@ export async function destroyHostedExecutionContainer(input: {
     const runnerContainerName = input.runnerContainerName ?? input.userId;
     const container = input.runnerContainerNamespace.getByName(runnerContainerName);
     if (isHostedRunnerTargetName(runnerContainerName)) {
-      if (!container.readStandbySlotBinding || !container.retireStandbySlot) {
+      if (!container.retireStandbySlot) {
         throw new Error("Hosted standby runner cleanup RPC is unavailable.");
       }
-      await container.retireStandbySlot({
+      // The addressed owner validates member/slot authority and acknowledges
+      // only after native destruction and durable retirement have completed.
+      const receipt = await container.retireStandbySlot({
         target: { slotName: runnerContainerName, userId: input.userId },
       });
-      const retired = await container.readStandbySlotBinding();
-      if (
-        !hostedRunnerSlotBindingMatchesTarget(retired, runnerContainerName)
-        || retired.state !== "retired"
-        || retired.claimId !== null || retired.userId !== null
-      ) {
-        throw new Error("Hosted runner cleanup did not prove exact terminal retirement.");
+      if (receipt?.retired !== true) {
+        throw new Error("Hosted runner cleanup did not acknowledge terminal retirement.");
       }
     } else {
       await container.destroyInstance();
@@ -5568,10 +5348,6 @@ function readStrictPositiveIntegerEnv(raw: string): number {
 function isMissingRunnerContainerError(error: unknown): boolean {
   const message = readErrorMessage(error);
   return message !== null && message.includes("No such container");
-}
-
-function isSettledRunnerContainerDestroyRaceError(error: unknown): boolean {
-  return isMissingRunnerContainerError(error);
 }
 
 function readErrorMessage(error: unknown): string | null {

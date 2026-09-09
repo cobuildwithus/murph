@@ -676,17 +676,29 @@ binding workspace facts. It also overlaps immutable slot-binding verification
 with runner-secret and snapshot-restore preparation. Launch still requires the
 exact active write fence, verified member binding, usage admission and container
 readiness. Warm active-runtime wakes do not start these fresh preparation reads.
-Fresh allocation carries its verified immutable binding result into that same
-request's fenced preparation, avoiding a second binding RPC. The receipt is
+Fresh allocation and retained-slot resolution carry their verified immutable
+binding result into that same request's fenced preparation, avoiding a second
+binding RPC. The receipt is
 validated against the selected slot, member, claim format, region and release;
-it is neither persisted nor sent to the container. Retained/direct preparation
-still reads binding evidence, and the container still checks its live bound
-member at launch. Exact bind-response recovery can reuse its verified result.
+it is neither persisted nor sent to the container. Direct preparation without a
+receipt still reads binding evidence, and the container still checks its live
+bound member at launch. Exact bind-response recovery can reuse its verified result.
+Retirement validates the exact target inside the slot owner and acknowledges only
+after destruction and durable identity scrubbing; callers do not reread the binding
+after that acknowledgement. Ambiguous failed binding still requires recovery evidence.
 The individual read timings overlap allocation and each other; they are not
 additive slices of `runtimeInvocationPreparationElapsedMs`, which measures the
 remaining fenced preparation call.
 
 ## Runner Container Lifecycle
+
+Native `destroy()` completion is the destruction receipt. Cleanup keeps its
+existing timeout and exact-generation checks, but does not poll cached SDK status
+or wait for a later `onStop` hook after that promise resolves. A native
+`running === false` observation lets retained-slot reconciliation retire an
+already-stopped target without another status read or destruction request.
+The immutable slot still enters retirement before cleanup and is scrubbed only
+after stop proof; ambiguous or failed cleanup keeps the existing target pinned.
 
 The native Cloudflare container is a warm per-user shell. Startup readiness is
 allowed up to 15 wall-clock seconds, including lifecycle-lock queue time. Once

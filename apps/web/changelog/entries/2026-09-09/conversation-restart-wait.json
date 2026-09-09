@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "conversation-restart-wait",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting when a conversation restarts",
+    "summary": "Murph can begin processing your next message sooner after a previous session has stopped.",
+    "details": "Removes an extra wait during session cleanup while preserving recovery when a session cannot close safely.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

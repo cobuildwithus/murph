@@ -1003,7 +1003,41 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
-  it("releases consent withdrawal after retained standby invocation binding exhausts the command budget", async () => {
+  it("invokes a retained slot using its verified resolution without another binding RPC", async () => {
+    const slotName = `runner--v-release_1--${"d".repeat(32)}`;
+    const binding: HostedStandbySlotBinding = {
+      claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
+      releaseId: "release_1", region: "GLOBAL", slotName,
+      state: "bound", userId: TEST_USER_ID,
+    };
+    const readBinding = vi.fn(async () => { throw new Error("Redundant binding RPC"); });
+    const resolveRetained = vi.fn(async () => binding);
+    const harness = createRunnerHarness({
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "release_1" },
+      },
+      runnerContainerStubForName(name, defaultStub) {
+        expect(name).toBe(slotName);
+        defaultStub.readStandbySlotBinding = readBinding;
+        defaultStub.resolveRetainedStandbySlot = resolveRetained;
+        return defaultStub;
+      },
+    });
+    await harness.runner.bindUser(TEST_USER_ID);
+    harness.sql.exec(
+      "UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1", slotName,
+    );
+    await expect(harness.runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "retained-start",
+    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    await harness.flushWaitUntil();
+    expect(resolveRetained).toHaveBeenCalledOnce();
+    expect(readBinding).not.toHaveBeenCalled();
+    expect(harness.invoke).toHaveBeenCalledOnce();
+  });
+
+  it("releases consent withdrawal after retained standby resolution exhausts the command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     let consentState: "granted" | "revoked" = "granted";
@@ -1030,11 +1064,11 @@ describe("HostedUserRunner execution coordination", () => {
       binding = { ...input, state: "bound" };
       return { ...input, bound: true as const };
     });
-    const resolveRetainedStandbySlot = vi.fn(async () => binding);
-    const invocationBindingRead = vi.fn(async () => {
+    const resolveRetainedStandbySlot = vi.fn(async () => {
       bindingReadStarted.resolve(undefined);
       return await new Promise<HostedStandbySlotBinding>(() => {});
     });
+    const invocationBindingRead = vi.fn(async () => binding);
     const retireStandbySlot = vi.fn(async (input: Parameters<NonNullable<HostedExecutionContainerStubLike["retireStandbySlot"]>>[0]) => {
       expect(input).toEqual({ target: { slotName, userId: TEST_USER_ID } });
       retirementStarted.resolve(undefined);
@@ -1107,7 +1141,7 @@ describe("HostedUserRunner execution coordination", () => {
       standbyCoordinatorNamespace,
     });
     await harness.runner.bindUser(TEST_USER_ID);
-    // Retained targets still require a fresh binding read during preparation.
+    // The required retained-owner resolution shares the command budget.
     harness.sql.exec(
       "UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1",
       slotName,
@@ -1157,8 +1191,8 @@ describe("HostedUserRunner execution coordination", () => {
     expect(claimReadyStandby).not.toHaveBeenCalled();
     expect(bindStandbySlot).not.toHaveBeenCalled();
     expect(resolveRetainedStandbySlot).toHaveBeenCalledOnce();
-    expect(invocationBindingRead).toHaveBeenCalledOnce();
-    expect(cleanupBindingRead).toHaveBeenCalledOnce();
+    expect(invocationBindingRead).not.toHaveBeenCalled();
+    expect(cleanupBindingRead).not.toHaveBeenCalled();
     expect(retireStandbySlot).toHaveBeenCalledOnce();
     expect(readActiveRunnerContainerNameForTest(harness.sql)).toBeNull();
   });
@@ -1270,7 +1304,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(harness.runnerContainerNames).toEqual([slotName]);
-    expect(readStandbySlotBinding).toHaveBeenCalledOnce();
+    expect(readStandbySlotBinding).not.toHaveBeenCalled();
     expect(retireStandbySlot).toHaveBeenCalledOnce();
     expect(destroyInstance).not.toHaveBeenCalled();
     expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();

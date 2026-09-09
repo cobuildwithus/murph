@@ -312,11 +312,22 @@ describe("native warm retention and terminal retirement", () => {
     assert.equal(calls.start, 0);
   });
 
-  it("never accepts a boolean retirement response in place of an exact terminal receipt", async () => {
-    const { container } = runnerHarness();
+  it("awaits native stop and durable retirement without a binding readback", async () => {
+    const stopped = deferred<void>();
+    const { container, sql } = runnerHarness({ running: true, destroy: () => stopped.promise });
     await container.bindStandbySlot(claimInput());
-    Object.assign(container, { async retireStandbySlot() { return { retired: true }; } });
-    assert.equal((await destroyHostedExecutionContainer({ runnerContainerNamespace: { getByName: () => container }, runnerContainerName: GLOBAL_SLOT, userId: MEMBER })).ok, false);
+    const readBinding = vi.spyOn(container, "readStandbySlotBinding");
+    const store = new RunnerSlotBindingStore(sql);
+    let settled = false;
+    const cleanup = destroyHostedExecutionContainer({ runnerContainerNamespace: { getByName: () => container }, runnerContainerName: GLOBAL_SLOT, userId: MEMBER });
+    void cleanup.then(() => { settled = true; });
+    await vi.waitFor(() => assert.equal(store.read().state, "retiring"));
+    assert.equal(settled, false);
+    stopped.resolve();
+    assert.equal((await cleanup).ok, true);
+    assert.equal(store.read().state, "retired");
+    assert.equal(store.read().userId, null);
+    assert.equal(readBinding.mock.calls.length, 0);
   });
 
   it("rejects new inventory preparation and new binding in the legacy class", async () => {
@@ -730,6 +741,7 @@ describe("fleet allocation policy and ambiguous-outcome recovery", () => {
     assert.equal(first.kind, "ready");
     if (first.kind !== "ready") throw new Error("expected allocation");
     const slot = h.slots.get(first.runnerContainerName)!;
+    slot.setNative(true);
     Object.assign(slot.container, { async getState() { throw new Error("native provider unavailable"); } });
     assert.equal((await h.resolve()).kind, "retry");
     assert.equal((await h.store.readState()).pendingRunnerContainerName, first.runnerContainerName);
@@ -786,6 +798,29 @@ describe("fleet allocation policy and ambiguous-outcome recovery", () => {
     if (replacement.kind !== "ready") throw new Error("expected replacement");
     assert.notEqual(replacement.runnerContainerName, pending);
     assert.equal((await h.slots.get(pending)!.container.readStandbySlotBinding()).state, "retired");
+  });
+
+  it("clears an unbound rejected allocation after retirement without a second binding RPC", async () => {
+    let reads = 0;
+    const h = allocationHarness({
+      mode: "off",
+      async bind(input) {
+        const slot = h.slots.get(input.slotName)!;
+        new RunnerSlotBindingStore(slot.sql).initialize(input);
+        throw new Error("Bind rejected before member assignment");
+      },
+      async read(_input, original) {
+        reads++;
+        if (reads > 1) throw new Error("Redundant retirement readback");
+        return original();
+      },
+    });
+    assert.equal((await h.resolve()).kind, "retry");
+    assert.equal(reads, 1);
+    assert.equal((await h.store.readState()).pendingRunnerContainerName, null);
+    assert.equal(h.slots.size, 1);
+    const slot = [...h.slots.values()][0]!;
+    assert.equal(new RunnerSlotBindingStore(slot.sql).read().state, "retired");
   });
 
   it("requires exact terminal identity before clearing rejected-bind recovery", async () => {

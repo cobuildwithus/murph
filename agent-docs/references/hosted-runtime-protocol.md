@@ -1727,9 +1727,13 @@ the same retry rule, including when the retry arrives through Temporal.
 Replenishment, readiness re-proving, orphan retirement, and stale-release drain
 remain outside the accepted-message path. A claimed slot is never rebound or
 returned to ready. Group chats do not own standby lifecycle; the member's
-`UserRunner` remains the allocation and stop-target owner. Slot invocation,
-provider-credential minting, withdrawal, account deletion, and retirement all
-re-read the exact durable binding; a member mismatch fails closed. A successful
+`UserRunner` remains the allocation and stop-target owner. Fenced preparation
+reuses the exact immutable binding receipt from allocation or retained resolution
+within that request, or reads it when no receipt exists. Invocation and wake
+authorize the live bound member inside the slot owner. Withdrawal and account
+deletion send that owner the exact slot/member target; the owner validates it and
+acknowledges only after native destruction and durable retirement. Callers need no
+binding readback after this acknowledgement. A member mismatch fails closed. A successful
 fresh-start acceptance records the closed standby allocation outcome, bounded
 reason, and elapsed milliseconds in the existing orchestration latency phase
 breakdown and structured log. The selection log records the same metadata
@@ -3041,9 +3045,13 @@ upstream five-second default.
 Container readiness receives at most 15 wall-clock seconds, including time
 queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
 allows one absolute five-second fail-closed cleanup deadline shared by the
-pre-destroy state read and destroy settlement, and its caller-side guard keeps
-a separate one-second margin. If the container RPC settles
-with a timeout or transport failure, the fresh fence is compare-cleared as
+pre-destroy state read and native destruction promise, and its caller-side guard
+keeps a separate one-second margin. Native destruction completion is the stop
+receipt; cached SDK lifecycle status and a delayed `onStop` callback are not
+additional settlement gates. A definitely stopped native container skips both
+status reads and destruction during retained-target retirement. The slot's
+existing retirement fence and exact-generation checks remain authoritative.
+If the container RPC settles with a timeout or transport failure, the fresh fence is compare-cleared as
 before. If cleanup remains unsettled at its deadline or only the outer guard
 elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved
 that cleanup is safe, and the existing startup-grace convergence path remains
