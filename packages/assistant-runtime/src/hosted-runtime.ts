@@ -4258,9 +4258,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                         providerStartAtAssistantPhaseCallback,
                     }
                   : {}),
-                foregroundCausalOnly:
-                  passInput.foregroundCausalOnly === true
-                  || foregroundDeviceSync.hasPendingCheckpoint(),
+                foregroundCausalOnly: passInput.foregroundCausalOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
                 imageGenerationLauncher:
                   imageGenerationController?.launcher ?? null,

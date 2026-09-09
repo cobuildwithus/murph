@@ -143,3 +143,21 @@ Use existing assistant-runtime workspace/entrypoint suites, Cloudflare runtime a
 - All 90 tests now pass on the candidate; assistant-runtime typecheck passes.
   This follow-up changes only tests and this plan. The 213-test final runner,
   composed delivery, and phase run also passed before the first push.
+
+## Foreground follow-up correction
+
+- Final review found that pending device-checkpoint state was incorrectly ORed
+  into completion-only foreground routing. Accepted on source-path evidence;
+  the user resumed and authorized the correction.
+- Extended the existing composed entrypoint journey with a second member input
+  and reply while snapshot completion is held. The regression failed before
+  correction: the first reply completed but the second model turn never began.
+- Removed the extra routing condition. Existing duplicate-preparation and
+  background-maintenance guards remain the only checkpoint-dependent gates.
+  Both replies now precede snapshot completion; only one import receipt exists,
+  and the exact dirty revision/payload is acknowledged once afterward.
+- All 303 tests across the composed, runner, device-phase, conversation-import,
+  restore, and scheduling suites pass. Runtime typecheck and complexity guard
+  pass. The existing live assistant readback evidence remains applicable because
+  its engine/importer/CLI path and production provider input are unchanged.
+- Round-two final review and CI will run against the corrected pushed head.

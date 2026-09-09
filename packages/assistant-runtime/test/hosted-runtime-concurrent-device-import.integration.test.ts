@@ -28,8 +28,10 @@ import { listCanonicalEntities } from "@murphai/query";
 import { createAssistantOutboxIntent, listAssistantOutboxIntents, type RunAssistantAutomationPassInput } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
 import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
+import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
+import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
 test.each(["completed", "stalled", "absent"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
@@ -40,9 +42,11 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   const imported = createDeferred<void>();
   const providerStarted = createDeferred<void>();
+  const secondReply = createDeferred<void>();
+  const releaseSnapshot = createDeferred<void>();
+  const dirtyAcks: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0][] = [];
   let replySent = false;
   let modelFinishedAt = 0;
-  let replySentAt = 0;
   const connectionId = "synthetic-concurrent-connection";
   const deviceItem = createMailboxItem({
     id: "mailbox_item_concurrent_device",
@@ -56,14 +60,22 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
   });
   const originalAutomation = mocks.runAssistantAutomationPass.getMockImplementation();
   let inputId: string | null = null;
-  let modelStarted = false;
+  const handledInputIds = new Set<string>();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(TEST_NOW));
   vi.stubGlobal("fetch", vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
     const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
     if (pathname.includes("/messages")) {
       events.push("reply.sent");
-      replySentAt = performance.now();
+      assert.ok(performance.now() - modelFinishedAt < 2_000, events.join(","));
+      if (scenario === "completed") {
+        if (replySent) {
+          secondReply.resolve();
+        } else {
+          items.push(createMailboxItem({ id: "mailbox_item_concurrent_followup", laneSeq: "2" }));
+          runtimeWakeSignal.notify();
+        }
+      }
       replySent = true;
       return new Response(JSON.stringify({ message: { id: "synthetic-concurrent-reply" } }), {
         headers: { "content-type": "application/json" }, status: 200,
@@ -92,16 +104,16 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
     } : { records: [] }), { headers: { "content-type": "application/json" }, status: 200 });
   }));
   try {
-    await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     mocks.runAssistantAutomationPass.mockImplementation(async (input: RunAssistantAutomationPassInput) => {
-      if (!inputId || modelStarted) return { currentTurnDeliveryIntentIds: [], nextWakeAt: null, progressed: false };
-      modelStarted = true;
+      const currentInputId = inputId;
+      if (!currentInputId || handledInputIds.has(currentInputId)) return { currentTurnDeliveryIntentIds: [], nextWakeAt: null, progressed: false };
+      handledInputIds.add(currentInputId);
       events.push("model.started");
       await input.onProviderRequestStarted?.({
-        assistantInputIds: [inputId], providerRequestOrdinal: 0,
+        assistantInputIds: [currentInputId], providerRequestOrdinal: 0,
         source: "linq", startedAt: TEST_NOW,
       });
-      if (scenario !== "absent") {
+      if (scenario !== "absent" && handledInputIds.size === 1) {
         items.push(deviceItem);
         runtimeWakeSignal.notify();
         await withRealTimeout(
@@ -113,17 +125,24 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
         const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
         assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
         events.push("model.reads.imported.data");
+        if (handledInputIds.size === 2) {
+          assert.equal(dirtyAcks.length, 0);
+          assert.equal(events.includes("snapshot.completed"), false);
+          assert.ok((await readHostedSystemMailboxState(vaultRoot)).pending.some(
+            (item) => item.itemId === deviceItem.id && item.status === "recording",
+          ));
+        }
       }
       const intent = await createAssistantOutboxIntent({
         channel: "linq", createdAt: TEST_NOW,
-        dedupeToken: `synthetic-concurrent-reply:${inputId}`,
+        dedupeToken: `synthetic-concurrent-reply:${currentInputId}`,
         explicitTarget: "thread_1", identityId: "synthetic-member",
         message: "Your message is received.", sessionId: "synthetic-concurrent-session",
         threadId: "thread_1", threadIsDirect: true,
-        turnId: `turn_${inputId}`, turnTrigger: "automation-auto-reply", vault: vaultRoot,
+        turnId: `turn_${currentInputId}`, turnTrigger: "automation-auto-reply", vault: vaultRoot,
       });
       await writeAssistantAutoReplyReplyTerminalEvidence({
-        captureIds: [], deliveryIntentId: intent.intentId, inputIds: [inputId],
+        captureIds: [], deliveryIntentId: intent.intentId, inputIds: [currentInputId],
         outcome: "deferred", recordedAt: TEST_NOW, sessionId: intent.sessionId,
         terminalKind: "reply_intent_committed", vault: vaultRoot,
       });
@@ -131,10 +150,40 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
       modelFinishedAt = performance.now();
       return { currentTurnDeliveryIntentIds: [intent.intentId], nextWakeAt: null, progressed: true };
     });
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDevicePort,
+      async fetchDirtyStates() {
+        return {
+          hasMore: false, nextWakeAt: null, userId: TEST_USER_ID,
+          items: dirtyAcks.length ? [] : [{
+            connectionId, dirtyRevision: "7", processedRevision: "0",
+            dirtyResources: [{
+              count: 1, dirtyPayloadId: "synthetic-concurrent-payload", jobKind: "resource",
+              payload: { resourceType: "sleep", resourceId: "synthetic-concurrent-sleep" },
+              resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
+              windowEnd: null, windowStart: null,
+            }],
+            eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+            resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
+            userId: TEST_USER_ID, windowEnd: null, windowStart: null,
+          }],
+        };
+      },
+      async ackDirtyStateProcessed(request) {
+        assert.ok(events.includes("snapshot.completed"));
+        assert.ok(checkpointRequests.some((checkpoint) => checkpoint.reason === "idle_shutdown"));
+        dirtyAcks.push(request);
+        return {
+          connectionId, dirtyRevision: request.processedRevision,
+          processedRevision: request.processedRevision, recorded: true,
+          stillDirty: false, nextWakeAt: null, userId: TEST_USER_ID,
+        };
+      },
+    };
     const basePlatform = createPlatform({
       mailboxPort: createMailboxPort({ events, items }),
       workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
-      deviceSyncPort: baseDevicePort,
+      deviceSyncPort,
     });
     runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({
@@ -148,13 +197,15 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
       {
         vaultRoot, runtimeWakeSignal, signal: controller.signal,
         async createCheckpointSnapshot() {
+          if (scenario === "completed") await releaseSnapshot.promise;
+          events.push("snapshot.completed");
           return { snapshotRef: createBundleRef({
             hash: "d".repeat(64), key: "users/bundles/member-synthetic/concurrent-import.bundle.json", size: 512,
           }) };
         },
         async importItem(item) {
           if (item.item.lane === "conversation") {
-            await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            if (!inputId) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
           }
@@ -162,10 +213,7 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
             item: createResolvedDeviceSyncSystemMailboxItem(item.item), vaultRoot,
             wake: {
               connectionId, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
-              hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition", jobs: [{
-                availableAt: TEST_NOW, dedupeKey: "synthetic-concurrent-resource", kind: "resource", maxAttempts: 1, priority: 30,
-                payload: { resourceType: "sleep", resourceId: "synthetic-concurrent-sleep" },
-              }] },
+              hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
               kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop", reason: "webhook_hint", userId: TEST_USER_ID,
             },
           });
@@ -202,10 +250,24 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
         },
       },
     );
+    if (scenario === "completed") {
+      await withRealTimeout(Promise.race([
+        secondReply.promise,
+        runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
+      ]), 5_000, () => events.join(","));
+      assert.equal(dirtyAcks.length, 0);
+      assert.equal(events.filter((event) => event === "device.receipt.uploaded").length, 1);
+      releaseSnapshot.resolve();
+    }
     await withRealTimeout(runtimeCompletion, 20_000, () => events.join(","));
     assert.ok(replySent, JSON.stringify({ events, intents: await listAssistantOutboxIntents(vaultRoot) }));
-    assert.ok(replySentAt - modelFinishedAt < 2_000, events.join(","));
     if (scenario === "completed") {
+      assert.equal(handledInputIds.size, 2);
+      assert.equal(events.filter((event) => event === "reply.sent").length, 2);
+      assert.equal(dirtyAcks.length, 1);
+      assert.equal(dirtyAcks[0]?.processedRevision, "7");
+      assert.deepEqual(dirtyAcks[0]?.processedDirtyPayloadIds, ["synthetic-concurrent-payload"]);
+      assert.ok(events.lastIndexOf("reply.sent") < events.indexOf("snapshot.completed"));
       assert.ok(events.indexOf("device.receipt.uploaded") > events.indexOf("model.started"));
       assert.ok(events.indexOf("model.reads.imported.data") < events.indexOf("model.finished"));
     } else if (scenario === "stalled") {
@@ -214,6 +276,7 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
         || events.indexOf("reply.sent") < events.indexOf("device.receipt.uploaded"), events.join(","));
     }
   } finally {
+    releaseSnapshot.resolve();
     controller.abort();
     await runtimeCompletion?.catch(() => undefined);
     if (originalAutomation) mocks.runAssistantAutomationPass.mockImplementation(originalAutomation);

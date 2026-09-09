@@ -840,9 +840,10 @@ Canonical commits already underway finish persistence or rollback before the
 runner checkpoints or releases ownership; cancellation never detaches a mutator.
 
 One completed device preparation waits for the existing durable checkpoint
-before another preparation can run. The existing recording item and exact dirty
-payload/revision acknowledgments remain recovery authority. This accelerates
-usable observations during a turn; it does not guarantee unlimited progress
+before another preparation can run. This pending state only yields background
+maintenance; it never changes a fresh conversation into a completion-only pass.
+The existing recording item and exact dirty payload/revision acknowledgments
+remain recovery authority. This accelerates usable observations during a turn; it does not guarantee unlimited progress
 under traffic that indefinitely defers checkpointing. Query rebuilds use the
 same cross-process canonical boundary through source scanning and publication,
 so foreground queries see committed data rather than an in-flight rollback.
