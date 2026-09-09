@@ -20,7 +20,10 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../runner-outbound/headers.ts";
-import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
+import {
+  fetchHostedExecutionWebControlPlaneResponse,
+  readHostedSnapshotResponseHeaderMetadata,
+} from "../web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
@@ -517,7 +520,7 @@ function decodeHostedWebControlPlaneResponseJson({
           }),
           responseStatus: response.status,
           ...(snapshotBodyMetrics
-            ? describeHostedSnapshotResponseBody(response.headers, snapshotBodyMetrics.bytesRead, "invalid_json")
+            ? describeHostedSnapshotResponseBody(response, snapshotBodyMetrics.bytesRead, "invalid_json")
             : { responseBodyBytes: new TextEncoder().encode(text).byteLength }),
         },
         level: "warn",
@@ -543,7 +546,7 @@ function decodeHostedWebControlPlaneResponseJson({
         durationMs: Date.now() - requestStartedAt,
         responseStatus: response.status,
         ...describeHostedSnapshotResponseBody(
-          response.headers,
+          response,
           snapshotBodyMetrics.bytesRead,
           empty ? "empty" : payload === null ? "null" : Array.isArray(payload) ? "array" : "scalar",
         ),
@@ -559,10 +562,11 @@ function decodeHostedWebControlPlaneResponseJson({
 
 // Never return raw header values, body text, or parser messages from this boundary.
 function describeHostedSnapshotResponseBody(
-  headers: Headers,
+  response: Response,
   responseBodyBytes: number,
   responseBodyShape: "empty" | "invalid_json" | "null" | "array" | "scalar",
 ): HostedExecutionStructuredLogDetails {
+  const { headers } = response;
   const marker = headers.get(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER);
   const expectedBytes = marker !== null && /^(?:0|[1-9]\d{0,15})$/u.test(marker)
     && Number.isSafeInteger(Number(marker))
@@ -572,6 +576,7 @@ function describeHostedSnapshotResponseBody(
   return {
     responseBodyBytes,
     responseBodyShape,
+    ...readHostedSnapshotResponseHeaderMetadata(response, true),
     responseMimeCategory: mime === undefined ? "missing"
       : mime === "application/json" || (mime.startsWith("application/") && mime.endsWith("+json")) ? "json"
       : mime === "text/html" ? "html"
