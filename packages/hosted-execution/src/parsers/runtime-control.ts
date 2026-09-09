@@ -6823,6 +6823,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "directEnsureResponseReceivedAtEpochMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directEnsureAuthDurationMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directEnsureHandlerDurationMs",
+        orchestrationLabel,
+      ),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(
         orchestration,
         "directEnsureOrchestrationAttemptId",

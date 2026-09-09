@@ -193,6 +193,12 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
         timingRecord.timing.directEnsureRequestStartedAtEpochMs,
       directEnsureResponseReceivedAtEpochMs:
         timingRecord.timing.directEnsureResponseReceivedAtEpochMs,
+      ...(timingRecord.timing.directEnsureAuthDurationMs === undefined ? {} : {
+        directEnsureAuthDurationMs: timingRecord.timing.directEnsureAuthDurationMs,
+      }),
+      ...(timingRecord.timing.directEnsureHandlerDurationMs === undefined ? {} : {
+        directEnsureHandlerDurationMs: timingRecord.timing.directEnsureHandlerDurationMs,
+      }),
       directEnsureOrchestrationAttemptId:
         timingRecord.timing.orchestrationAttemptId,
       directEnsureResultKind: timingRecord.timing.directEnsureResultKind,

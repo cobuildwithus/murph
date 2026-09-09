@@ -5,7 +5,9 @@ import {
   HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
   HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
@@ -302,6 +304,11 @@ describe("createCloudflareHostedControlClient", () => {
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
       runtimeAttemptId: "runtime-attempt-test",
+    }, {
+      headers: {
+        [HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER]: "13",
+        [HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER]: "42",
+      },
     })) as typeof fetch;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
@@ -356,6 +363,8 @@ describe("createCloudflareHostedControlClient", () => {
     expect(init.signal).toBe(abortController.signal);
     expect(onTiming).toHaveBeenCalledWith({
       directEnsureAction: "woken",
+      directEnsureAuthDurationMs: 13,
+      directEnsureHandlerDurationMs: 42,
       directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResultKind: "runtime_processing_accepted",
@@ -514,6 +523,88 @@ describe("createCloudflareHostedControlClient", () => {
     });
   });
 
+  it("accepts zero and the largest safe integer as direct ensure durations", async () => {
+    const onTiming = vi.fn();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl: vi.fn(async () => createJsonResponse({ accepted: true }, {
+        headers: {
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER]: "0",
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER]:
+            String(Number.MAX_SAFE_INTEGER),
+        },
+        status: 202,
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.ensureRuntimeProcessing({
+      onTiming,
+      orchestrationAttemptId: "web-ingress-attempt-test",
+      userId: "user_123",
+    })).resolves.toEqual({ accepted: true });
+
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      directEnsureAuthDurationMs: 0,
+      directEnsureHandlerDurationMs: Number.MAX_SAFE_INTEGER,
+      directEnsureResultKind: "legacy_accepted",
+    }));
+  });
+
+  it.each([
+    null,
+    "",
+    "-1",
+    "1.5",
+    "NaN",
+    "Infinity",
+    "1e3",
+    "+1",
+    "0x10",
+    "9007199254740992",
+    "12ms",
+  ])("ignores an invalid or absent direct ensure duration independently: %s", async (invalidValue) => {
+    const durationHeaders = [
+      [HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER, "directEnsureAuthDurationMs"],
+      [HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER, "directEnsureHandlerDurationMs"],
+    ] as const;
+
+    for (const [invalidHeader, invalidField] of durationHeaders) {
+      const onTiming = vi.fn();
+      const headers = new Headers();
+      for (const [header] of durationHeaders) {
+        if (header !== invalidHeader) {
+          headers.set(header, "17");
+        } else if (invalidValue !== null) {
+          headers.set(header, invalidValue);
+        }
+      }
+      const client = createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test",
+        fetchImpl: vi.fn(async () => createJsonResponse({ accepted: true }, {
+          headers,
+          status: 202,
+        })) as typeof fetch,
+        getBearerToken: async () => "token-123",
+      });
+
+      await expect(client.ensureRuntimeProcessing({
+        onTiming,
+        orchestrationAttemptId: "web-ingress-attempt-test",
+        userId: "user_123",
+      })).resolves.toEqual({ accepted: true });
+
+      expect(onTiming).toHaveBeenCalledOnce();
+      const timing = onTiming.mock.calls[0]?.[0];
+      expect(timing?.[invalidField]).toBeUndefined();
+      for (const [header, field] of durationHeaders) {
+        if (header !== invalidHeader) {
+          expect(timing).toHaveProperty(field, 17);
+        }
+      }
+    }
+  });
+
   it("reports retry_later timing only after the response parses", async () => {
     const onTiming = vi.fn();
     const client = createCloudflareHostedControlClient({
@@ -547,6 +638,11 @@ describe("createCloudflareHostedControlClient", () => {
       baseUrl: "https://runner.example.test",
       fetchImpl: vi.fn(async () => createJsonResponse({
         error: "payload-shaped diagnostic must not be recorded",
+      }, {
+        headers: {
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER]: "13",
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER]: "42",
+        },
       })) as typeof fetch,
       getBearerToken: async () => "token-123",
     });

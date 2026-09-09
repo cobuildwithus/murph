@@ -13,7 +13,9 @@ import {
 import {
   assertHostedRuntimeProcessingTimeoutMs,
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
@@ -236,7 +238,23 @@ export async function handleRuntimeEnsureProcessingRoute(
           phase: "runtime.starting",
           userId,
         });
-        return json(result);
+        const response = json(result);
+        const authTiming = context.runtimeControlAuthTiming;
+        if (authTiming) {
+          response.headers.set(
+            HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER,
+            String(Math.max(
+              0,
+              authTiming.runtimeControlAuthFinishedAtEpochMs
+                - authTiming.runtimeControlAuthStartedAtEpochMs,
+            )),
+          );
+        }
+        response.headers.set(
+          HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER,
+          String(Math.max(0, Date.now() - cloudflareRouteReceivedAtEpochMs)),
+        );
+        return response;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "worker",

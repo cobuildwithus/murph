@@ -1652,6 +1652,8 @@ describe("hosted runtime control contracts", () => {
         tokenAcquiredAtEpochMs: 1_777_000_000_012,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        directEnsureAuthDurationMs: 0,
+        directEnsureHandlerDurationMs: 42,
         directEnsureOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",
         directEnsureResultKind: "runtime_processing_accepted",
@@ -1992,6 +1994,10 @@ describe("hosted runtime control contracts", () => {
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
+      { directEnsureAuthDurationMs: -1 },
+      { directEnsureAuthDurationMs: "42" },
+      { directEnsureHandlerDurationMs: Number.POSITIVE_INFINITY },
+      { directEnsureHandlerDurationMs: Number.MAX_SAFE_INTEGER + 1 },
       { directEnsureOrchestrationAttemptId: "web-ingress-not-a-uuid" }, // correlation id must be bounded
       { shellPrewarmOrchestrationAttemptId: "web-prewarm-not-a-uuid" }, // prewarm correlation ids have their own exact prefix and shape
       { shellPrewarmExpectedOrchestrationAttemptId: "web-ingress-123e4567-e89b-42d3-a456-426614174000" }, // direct-wake ids cannot enter the prewarm channel

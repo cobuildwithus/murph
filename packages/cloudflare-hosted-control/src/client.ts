@@ -13,7 +13,9 @@ import {
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   type HostedExecutionEnvironmentVoiceContentType,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
@@ -326,6 +328,8 @@ export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
   | CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck;
 
 interface CloudflareHostedControlRuntimeEnsureProcessingTimingBase {
+  directEnsureAuthDurationMs?: number;
+  directEnsureHandlerDurationMs?: number;
   directEnsureRequestStartedAtEpochMs: number;
   directEnsureResponseReceivedAtEpochMs: number;
   orchestrationAttemptId: string;
@@ -2412,8 +2416,18 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     && input.runtimeEnsureProcessingOrchestrationAttemptId !== undefined
     && input.readRuntimeEnsureProcessingTimingResult !== undefined
   ) {
+    const directEnsureAuthDurationMs = readRuntimeEnsureProcessingDurationHeader(
+      response.headers,
+      HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER,
+    );
+    const directEnsureHandlerDurationMs = readRuntimeEnsureProcessingDurationHeader(
+      response.headers,
+      HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER,
+    );
     try {
       input.onRuntimeEnsureProcessingTiming?.({
+        directEnsureAuthDurationMs,
+        directEnsureHandlerDurationMs,
         directEnsureRequestStartedAtEpochMs,
         directEnsureResponseReceivedAtEpochMs,
         orchestrationAttemptId:
@@ -2428,6 +2442,18 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   return parsed;
+}
+
+function readRuntimeEnsureProcessingDurationHeader(
+  headers: Headers,
+  name: string,
+): number | undefined {
+  const value = headers.get(name);
+  if (value === null || !/^\d{1,16}$/u.test(value)) {
+    return undefined;
+  }
+  const durationMs = Number(value);
+  return Number.isSafeInteger(durationMs) ? durationMs : undefined;
 }
 
 function createHostedExecutionRequestSignal(input: {
