@@ -8,7 +8,12 @@
     "title": "Less waiting when a conversation restarts",
     "summary": "Murph can begin processing your next message sooner after a previous session has stopped.",
     "details": "Removes an extra wait during session cleanup while preserving recovery when a session cannot close safely.",
-    "relevanceTags": ["messaging", "reliability"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3104
+    ]
   }
 }

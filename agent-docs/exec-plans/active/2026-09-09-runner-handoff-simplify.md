@@ -59,7 +59,8 @@ tests pass. Cloudflare typecheck and complexity diff pass (complexity debt 75 to
 69; existing unrelated hotspots unchanged). Ten changelog rendering tests pass.
 Web typecheck passes. The network-call pass also passes 270 composed fleet,
 consent, cleanup, and UserRunner tests; the final lifecycle/recovery run passes 359 tests. Cloudflare typecheck passes
-after the final TypeScript edit. PR metadata, ReviewGPT, and required CI remain.
+after the final TypeScript edit. PR #3104 is open with complete evidence and a linked changelog entry.
+ReviewGPT and required CI remain.
 
 Product UX: Ready at the adapter boundary. Warm retention, native stopped-slot
 retirement, immutable binding, delayed destroy, failed destroy, cleanup deadlines,
