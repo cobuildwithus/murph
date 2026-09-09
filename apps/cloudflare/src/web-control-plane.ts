@@ -114,6 +114,35 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   });
 }
 
+// Diagnostic categories only, after native Headers normalization. Never retain raw values.
+export function readHostedSnapshotResponseHeaderMetadata(
+  response: Response,
+  isSnapshot: boolean,
+): {
+  responseContentEncodingCategory?: "missing" | "identity" | "gzip" | "br" | "deflate" | "other";
+  responseContentLengthCategory?: "missing" | "valid" | "invalid";
+} {
+  if (!isSnapshot || !response.ok) {
+    return {};
+  }
+  const { headers } = response;
+  const rawEncoding = headers.get("content-encoding");
+  // Bound normalization before examining untrusted strings; compound codings are "other".
+  const encoding = rawEncoding !== null && rawEncoding.length <= 8
+    ? rawEncoding.toLowerCase()
+    : "";
+  const length = headers.get("content-length");
+  const parsedLength = length !== null && length.length <= 16 ? Number(length) : NaN;
+  return {
+    responseContentEncodingCategory: rawEncoding === null ? "missing"
+      : encoding === "identity" || encoding === "gzip" || encoding === "br" || encoding === "deflate"
+      ? encoding : "other",
+    responseContentLengthCategory: length === null ? "missing"
+      : Number.isSafeInteger(parsedLength) && parsedLength >= 0
+        && String(parsedLength) === length ? "valid" : "invalid",
+  };
+}
+
 function createHostedWebControlForwardHeaders(
   inputHeaders: Headers | undefined,
 ): Headers {

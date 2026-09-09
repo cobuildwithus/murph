@@ -78,6 +78,10 @@ function failureLogs() {
 }
 
 function expectFailureMetadata(details: Record<string, unknown>) {
+  details = {
+    responseContentEncodingCategory: "missing", responseContentLengthCategory: "missing", ...details,
+  };
+  expect(mocks.log).toHaveBeenCalledTimes(3);
   const entries = failureLogs();
   expect(entries).toHaveLength(1);
   const entry = entries[0]!;
@@ -161,6 +165,37 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
     });
   });
 
+  it.each([
+    { body: "{", encoding: "GZIP", length: "01", encodingCategory: "gzip", lengthCategory: "invalid" },
+    { body: "", encoding: "identity", length: "0", encodingCategory: "identity", lengthCategory: "valid" },
+    { body: "null", encoding: "br", length: "9007199254740991", encodingCategory: "br", lengthCategory: "valid" },
+    { body: "[]", encoding: "deflate", length: "2", encodingCategory: "deflate", lengthCategory: "valid" },
+    { body: "42", encoding: "synthetic-private-header", length: "synthetic-private-header", encodingCategory: "other", lengthCategory: "invalid" },
+    { body: "{", encoding: "x".repeat(4096), length: "9".repeat(4096), encodingCategory: "other", lengthCategory: "invalid" },
+  ])("enriches existing snapshot failures with finite header categories (case %#)", async ({
+    body, encoding, length, encodingCategory, lengthCategory,
+  }) => {
+    const { port, fetchImpl } = harness((response) => {
+      response.headers.set("content-encoding", encoding);
+      response.headers.set("content-length", length);
+      return new Response(body, { headers: response.headers });
+    });
+    const result = port.fetchSnapshot();
+    if (body === "{") await expect(result).rejects.toMatchObject({
+      message: "Hosted device-sync runtime snapshot returned invalid JSON.", cause: expect.any(SyntaxError),
+    });
+    else await expect(result).rejects.toThrow("Hosted device-sync runtime snapshot response must be an object.");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expectFailureMetadata({
+      responseContentEncodingCategory: encodingCategory, responseContentLengthCategory: lengthCategory,
+      responseBodyBytes: new TextEncoder().encode(body).byteLength,
+    });
+    const logs = JSON.stringify(mocks.log.mock.calls);
+    for (const sentinel of ["synthetic-private-header", "x".repeat(64), "9".repeat(64), "9007199254740991"]) {
+      expect(logs).not.toContain(sentinel);
+    }
+  });
+
   it("counts original bytes even when TextDecoder strips a BOM and replaces incomplete UTF-8", async () => {
     const bytes = Uint8Array.of(0xef, 0xbb, 0xbf, 0x7b, 0xc3);
     const { port } = harness((response) => {
@@ -213,11 +248,18 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
       const { port, fetchImpl } = harness((response) => {
         if (marker === null) response.headers.delete(bytesHeader);
         else response.headers.set(bytesHeader, marker);
+        response.headers.set("content-encoding", "GZIP");
+        response.headers.set("content-length", privateMarker);
         return response;
       });
       await expect(port.fetchSnapshot()).resolves.toEqual(expectedSnapshot);
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(failureLogs()).toEqual([]);
+      expect(mocks.log).toHaveBeenCalledTimes(2);
+      for (const [entry] of mocks.log.mock.calls) {
+        expect(entry.details).not.toHaveProperty("responseContentEncodingCategory");
+        expect(entry.details).not.toHaveProperty("responseContentLengthCategory");
+      }
     },
   );
 
@@ -303,6 +345,25 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
     expect(failureLogs()).toEqual([]);
   });
 
+  it.each([false, true])("does not enrich non-OK snapshot diagnostics (accepted=%s)", async (accepted) => {
+    const { input } = harness();
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{", { status: 503, headers: {
+      "content-encoding": "gzip", "content-length": "1", [bytesHeader]: "1",
+    } }));
+    const result = fetchHostedWebControlPlaneJson({ ...input, fetchImpl,
+      ...(accepted ? { acceptedStatuses: [503] } : {}),
+      description: "Hosted device-sync runtime snapshot", route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncRuntimeSnapshot,
+    });
+    if (accepted) await expect(result).rejects.toMatchObject({ cause: expect.any(SyntaxError) });
+    else await expect(result).rejects.toMatchObject({ status: 503 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(mocks.log).toHaveBeenCalledTimes(3);
+    for (const [entry] of mocks.log.mock.calls) {
+      expect(entry.details).not.toHaveProperty("responseContentEncodingCategory");
+      expect(entry.details).not.toHaveProperty("responseContentLengthCategory");
+    }
+  });
+
   it.each(["", "null", "[]", "invalid"])("does not add snapshot metadata or shape rejection on unrelated reads: %s", async (body) => {
     const { input } = harness();
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response(body, { headers: { [bytesHeader]: "0" } }));
@@ -315,6 +376,8 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
       expect(entry.details).not.toHaveProperty("responseByteCountComparison");
       expect(entry.details).not.toHaveProperty("responseBodyShape");
       expect(entry.details).not.toHaveProperty("responseMimeCategory");
+      expect(entry.details).not.toHaveProperty("responseContentEncodingCategory");
+      expect(entry.details).not.toHaveProperty("responseContentLengthCategory");
     }
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });

@@ -1392,6 +1392,30 @@ Last verified: 2026-09-04
   against the claimed producer count, not the corrupting hop. A match does not
   prove identical content, rule out equal-length corruption or authenticate a
   spoofed marker. No new retry or successful-body logging is introduced.
+  The existing Worker web-control response-received event for successful
+  snapshots and those existing consumer decoding/shape warnings also carry
+  `responseContentEncodingCategory` (`missing`, `identity`, `gzip`, `br`,
+  `deflate`, `other`) and `responseContentLengthCategory` (`missing`, `valid`,
+  `invalid`). These describe native Headers values at Worker header arrival
+  and consumer decode failure, not wire framing or body completion. Encoding
+  normalization examines at most eight characters; recognized single codings
+  are case-insensitive, and empty, compound, unknown or oversized values are
+  `other`. Length validation examines at most sixteen characters and accepts
+  only canonical nonnegative safe integers (no leading zeros except `0`);
+  no exact Content-Length is logged or compared to the producer byte marker.
+  Native Headers normalization precedes these checks. Missing diagnostic fields
+  mean an older emitter or an out-of-scope event, not a missing HTTP header.
+  The added cost is two finite fields (eighteen possible pairs) on existing
+  events only: no extra log events, consumer success enrichment, body access,
+  response replacement, requests, retries, sampling state or retention changes.
+  Use a fixed start/end observation window of natural authorized reads and only
+  existing private operation context to compare observations. Do not claim
+  per-request matching when that context is insufficient. Different categories
+  show different header observations; equal categories do not prove equal raw
+  headers. Neither establishes byte completeness, a losing hop, or the safety
+  of a future stream wrapper. Remove these two fields and their shared classifier
+  once the framing/encoding prerequisite is characterized, or the bounded
+  window yields no useful evidence; retained records expire under existing policy.
 - Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
   failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
   existing device-sync job owner, which requeues with its normal bounded backoff.
