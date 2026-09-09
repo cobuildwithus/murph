@@ -41,6 +41,7 @@ import {
 import {
   type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
+import { isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
@@ -402,6 +403,9 @@ async function createHostedWorkspaceV2Snapshot(
       key: "snapshotSessionStartElapsedMs",
       run: async () => await workspaceSnapshotPort.startSnapshotSession({
         expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
+        ...(input.currentSnapshotRef === null || isHostedWorkspaceSnapshotV2Ref(input.currentSnapshotRef)
+          ? { replacedSnapshotRef: input.currentSnapshotRef }
+          : {}),
         inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
         nextWakeAt: input.request.nextWakeAt,
         nextWakeReason: input.request.nextWakeReason,

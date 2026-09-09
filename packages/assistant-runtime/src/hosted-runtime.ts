@@ -3776,7 +3776,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
               attempt: browserVaultRefreshAttempt,
               deadlineMs: assistantCronDeadlineMs,
-              force: true,
+              force: recordItem.wake.kind === "runtime.browser-vault-refresh-requested",
               generatedAt: new Date().toISOString(),
               platform: foregroundRuntime.platform,
               runtimeWakeSignal: options.runtimeWakeSignal ?? null,
