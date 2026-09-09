@@ -66,7 +66,7 @@ test("concurrent stale projection readers share one rebuild", async () => {
     ]);
     const phases = reports.flatMap((r) => r.commands.flatMap((c) => c.phases));
     assert.equal(phases.filter((p) => p.phase === "query-rebuild").length, 1);
-    assert.equal(phases.filter((p) => p.phase === "query-wait").length, 1);
+    assert.equal(phases.filter((p) => p.phase === "query-wait").length, 2);
     assert.equal(phases.filter((p) => p.phase === "query-freshness").length, 2);
     assert.deepEqual(reports.flatMap((r) => r.commands.map((c) => c.command)).sort(),
       ["vault show", "wearables sources list"]);
@@ -180,7 +180,7 @@ test("freshness phase timing follows actual scan/status/rebuild/recheck order wi
       order.push("status"); tick += 200_000_000n; statusCalls += 1;
       const status = await actual.readProjectionStatus(...args);
       // Force the existing post-rebuild recheck path, without adding a new rebuild.
-      return statusCalls === 2 && status ? { ...status, fresh: false } : status;
+      return statusCalls === 3 && status ? { ...status, fresh: false } : status;
     } };
   });
   vi.doMock("../src/projection/rebuild.ts", async () => {
@@ -200,15 +200,16 @@ test("freshness phase timing follows actual scan/status/rebuild/recheck order wi
     await withCliTiming(() => timeCliDispatch("goal list", async () => {
       rows = await query.listCanonicalEntitiesRuntime(root);
     }), (value) => { report = value; });
-    assert.deepEqual(order, ["manifest", "status", "rebuild", "manifest", "status", "manifest", "status"]);
+    assert.deepEqual(order, ["manifest", "status", "manifest", "status", "rebuild", "manifest", "status", "manifest", "status"]);
     const phases = Object.fromEntries(report.commands[0]!.phases.map((p) => [p.phase, p]));
-    assert.equal(phases["query-manifest"]!.count, 2);
-    assert.equal(phases["query-manifest"]!.sumUs, 1_400_000);
-    assert.equal(phases["query-status"]!.count, 3);
-    assert.equal(phases["query-status"]!.sumUs, 600_000);
+    assert.equal(phases["query-manifest"]!.count, 3);
+    assert.equal(phases["query-manifest"]!.sumUs, 2_100_000);
+    assert.equal(phases["query-status"]!.count, 4);
+    assert.equal(phases["query-status"]!.sumUs, 800_000);
     assert.equal(phases["query-rebuild"]!.sumUs, 3_700_000);
-    assert.equal(phases["query-freshness"]!.sumUs, 5_700_000);
-    assert.equal(phases["query-wait"], undefined);
+    assert.equal(phases["query-freshness"]!.sumUs, 6_600_000);
+    assert.equal(phases["query-wait"]!.count, 1);
+    assert.equal(phases["query-wait"]!.sumUs, 0);
     assert.deepEqual(await query.listCanonicalEntitiesRuntime(root), rows);
     assert.equal(JSON.stringify(report).includes(root), false);
   } finally {

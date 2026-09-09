@@ -7,8 +7,9 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { test } from "vitest";
-import { initializeVault } from "@murphai/core";
+import { test, vi } from "vitest";
+import { initializeVault, withCanonicalWriteLock } from "@murphai/core";
+import * as core from "@murphai/core";
 import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.js";
 import { listCanonicalEntitiesRuntime, getQueryProjectionStatus } from "../src/query-projection.ts";
 
@@ -77,3 +78,41 @@ for (const outcome of ["commit", "rollback"] as const) {
     }
   });
 }
+
+
+test("a canonical lock owner can query while another reader waits to rebuild", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-reentrant-"));
+  await initializeVault({ vaultRoot });
+  let markHeld!: () => void;
+  const held = new Promise<void>((resolve) => { markHeld = resolve; });
+  let markRebuilding!: () => void;
+  const rebuilding = new Promise<void>((resolve) => { markRebuilding = resolve; });
+  let nestedRead: ReturnType<typeof listCanonicalEntitiesRuntime> | undefined;
+  const owner = withCanonicalWriteLock(vaultRoot, async () => {
+    markHeld();
+    await rebuilding;
+    nestedRead = listCanonicalEntitiesRuntime(vaultRoot);
+    const result = await Promise.race([
+      nestedRead.then(() => "read"),
+      delay(1000).then(() => "blocked"),
+    ]);
+    assert.equal(result, "read", "The owner must not join a rebuild waiting for its lock.");
+  });
+  await held;
+  const originalLock = core.withCanonicalWriteLock;
+  const spy = vi.spyOn(core, "withCanonicalWriteLock").mockImplementation((...args) => {
+    markRebuilding();
+    return originalLock(...args);
+  });
+  const reader = listCanonicalEntitiesRuntime(vaultRoot);
+  try {
+    await owner;
+    await reader;
+    assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
+  } finally {
+    await Promise.allSettled([owner, reader]);
+    await nestedRead?.catch(() => undefined);
+    spy.mockRestore();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
