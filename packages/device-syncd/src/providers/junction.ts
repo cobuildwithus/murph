@@ -2961,10 +2961,11 @@ export function createJunctionDeviceSyncProvider(
             && sourceProviderSlug
             && sourceLifecycleEpoch !== null
           ) {
-            currentSourceAdmission = await resolveJunctionCurrentSourceAdmission(
-              context,
+            currentSourceAdmission = resolveJunctionCurrentSourceAdmissionFromSources(
+              context.account.sources ?? [],
               sourceProviderSlug,
-              sourceLifecycleEpoch ?? undefined,
+              context.connectionSourceAdmissionMode !== "listed_only",
+              sourceLifecycleEpoch,
             );
             if (currentSourceAdmission === "fenced") {
               return {};
