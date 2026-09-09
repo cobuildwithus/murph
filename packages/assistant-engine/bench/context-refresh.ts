@@ -198,10 +198,13 @@ async function measureVisitorPreemption() {
     if (timer) clearTimeout(timer)
   }
   if (process.env.MURPH_CONTEXT_REQUIRE_PREEMPTION === '1') assert.ok(preempted)
+  const returnedAt = performance.now()
   console.log(JSON.stringify({
     stage: 'timer-preemption', variant, preempted, visitsBeforeReturn: visits,
-    wallMs: performance.now() - started,
+    wallMs: returnedAt - started,
+    beforeTimerArmedMs: scheduledAt === 0 ? null : scheduledAt - started,
     timerLagMs: firedAt === null ? null : firedAt - scheduledAt,
+    abortToReturnMs: firedAt === null ? null : returnedAt - firedAt,
   }))
 }
 

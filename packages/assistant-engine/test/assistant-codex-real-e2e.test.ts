@@ -30,6 +30,8 @@ import {
 } from '@murphai/contracts'
 import {
   addMeal,
+  appendBloodTest,
+  appendJsonlRecord,
   initializeVault,
   listGoals,
   listAutomations,
@@ -91,6 +93,11 @@ import {
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it } from 'vitest'
 import { upsertKnowledgePage } from '../src/knowledge/service.ts'
+import {
+  markAssistantContextSnapshotDirty,
+  readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshot,
+} from '../src/assistant/context-snapshot.ts'
 import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { upsertAssistantInputEvent, updateAssistantInputAttachmentEvidence } from '../src/assistant/input-store.js'
@@ -539,6 +546,83 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
+
+async function prepareCorrectedAvailabilityContext(vaultRoot: string): Promise<string> {
+  const now = () => '2026-09-01T12:00:00.000Z'
+  await initializeVault({ vaultRoot, createdAt: now(), timezone: 'UTC' })
+  await appendBloodTest({
+    vaultRoot, occurredAt: '2026-08-01T12:00:00.000Z',
+    testName: 'synthetic-panel', title: 'Synthetic panel',
+  })
+  const observation = {
+    schemaVersion: 'murph.event.v1', id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F7',
+    kind: 'observation', source: 'device', title: 'Synthetic observation',
+    occurredAt: '2026-08-01T12:00:00.000Z', recordedAt: '2026-08-01T12:00:00.000Z',
+    dayKey: '2026-08-01', value: 72,
+    externalRef: { system: 'synthetic', resourceType: 'metric', resourceId: 'sample' },
+  }
+  const appendRevision = async (metric: string, revision: number) => {
+    await appendJsonlRecord({
+      vaultRoot, relativePath: 'ledger/events/2026/2026-08.jsonl',
+      record: { ...observation, metric, unit: metric === 'weight' ? 'kg' : 'count', lifecycle: { revision } },
+    })
+    await markAssistantContextSnapshotDirty({ vaultRoot, domains: ['blood_tests', 'health_context'] })
+    await refreshAssistantContextSnapshot({ vaultRoot, now })
+    const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+    expect(prompt).toContain('Blood test records are present (latest 2026-08-01)')
+    expect(prompt).not.toContain('currently unavailable in the snapshot')
+    return prompt!
+  }
+  expect(await appendRevision('weight', 1)).toContain('Body/scale measurement history is present')
+  const corrected = await appendRevision('daily-steps', 2)
+  expect(corrected).not.toContain('Body/scale measurement history is present')
+  return corrected
+}
+
+it('assembles corrected availability context for the focused real Codex journey', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-availability-context-'))
+  try {
+    await prepareCorrectedAvailabilityContext(root)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+describeRealCodex('real Codex canonical availability e2e', () => {
+  it('reports corrected canonical availability without reviving a superseded body measurement', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-availability-e2e-'))
+    try {
+      const context = await prepareCorrectedAvailabilityContext(workingDirectory)
+      const before = await snapshotRealCodexCanonicalVault(workingDirectory)
+      const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, context, [], '2026-09-01T12:00:00.000Z'),
+        dynamicTools: [], env: config.env, excludeResumeTurns: true,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'From your saved-context summary alone, which records are confirmed present: blood tests and body measurements? If a category is not listed, say it is not confirmed by the summary. Do not fetch or change anything.',
+        reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(`[canonical-availability-e2e] ${JSON.stringify({
+        model: config.model, actions: actions.length, reply: result.finalMessage,
+      })}\n`)
+      expect(result.finalMessage).toMatch(/blood[^\n]*(?:present|confirmed|yes)/iu)
+      expect(result.finalMessage).toMatch(/body[^\n]*(?:not confirmed|not listed|not shown|unconfirmed)/iu)
+      expect(actions).toEqual([])
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
 
 describeRealCodex('real Codex retained image e2e', () => {
   it('finds and views an earlier image through the conversation media index', async () => {

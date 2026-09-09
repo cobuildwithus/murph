@@ -7861,46 +7861,28 @@ timing: DeviceBatchImportTiming,
   const sessionVaultState = requiresEventIdentityContext
     ? readDeviceBatchImportSessionVaultState(options.session, vaultRoot)
     : undefined;
-  const currentEventLedgerFingerprint = sessionVaultState
-    ? await tryBuildDeviceEventLedgerFingerprint(vaultRoot)
-    : undefined;
-  const sessionFingerprintMatches = sessionVaultState
-    && currentEventLedgerFingerprint !== undefined
-    ? sessionVaultState.eventLedgerFingerprint
-      === currentEventLedgerFingerprint
-    : false;
   const cachedEventIdentityContext = sessionVaultState
-    && sessionFingerprintMatches
+    && sessionVaultState.eventLedgerFingerprint
+      === await tryBuildDeviceEventLedgerFingerprint(vaultRoot)
     && sessionVaultState.dependencyChanges.every((dependencyChange) =>
       !deviceEventIdentityDependenciesOverlap(eventIdentityDependency, dependencyChange)
     )
+    && !deviceBatchPlan.preparedEvents.some((entry) =>
+      resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+        entry,
+        sessionVaultState.eventIdentityContext.index,
+      ) !== null
+    )
     ? sessionVaultState.eventIdentityContext
     : undefined;
-  let initialEventIdentityContext = cachedEventIdentityContext
+  const initialEventIdentityContext = cachedEventIdentityContext
     ?? await buildDeviceEventIdentityContext(
       vaultRoot,
       deviceBatchPlan.preparedEvents,
       deviceBatchPlan.authoritativeEventSets,
       options.signal,
     );
-  if (
-    cachedEventIdentityContext
-    && deviceBatchPlan.preparedEvents.some((entry) =>
-      resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
-        entry,
-        cachedEventIdentityContext.index,
-      ) !== null
-    )
-  ) {
-    initialEventIdentityContext = await buildDeviceEventIdentityContext(
-      vaultRoot,
-      deviceBatchPlan.preparedEvents,
-      deviceBatchPlan.authoritativeEventSets,
-      options.signal,
-    );
-  } else if (cachedEventIdentityContext) {
-    timing.eventIdentityIndexCacheHit = true;
-  }
+  timing.eventIdentityIndexCacheHit = cachedEventIdentityContext !== undefined;
   options.signal?.throwIfAborted();
   timing.eventIdentityIndexElapsedMs = Math.max(0, performance.now() - indexStartedAt);
   if (options.session && requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
@@ -8572,11 +8554,11 @@ timing: DeviceBatchImportTiming,
           sampleIds: new Set(sampleRecords.map((record) => record.id)),
         })
       : { parts: [], receiptIsNovel: false };
+    const hasNovelEvidence = novelty.parts.length > 0 || novelty.receiptIsNovel;
     const partialMarkerNeedsEvidenceRepair = partialStoredDelivery() !== undefined
-      && (novelty.parts.length > 0 || novelty.receiptIsNovel);
+      && hasNovelEvidence;
     const shouldPersistDelivery = hasAppendedOutputs
-      || novelty.parts.length > 0
-      || novelty.receiptIsNovel
+      || hasNovelEvidence
       || evidenceRepairRequired;
     const acceptedEvidenceRoles = new Set(
       [...persistenceEvidenceRolesByPreparedRecordId.values()].flat(),

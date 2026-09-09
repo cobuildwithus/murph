@@ -4,6 +4,115 @@ Synthetic evidence collected September 9, 2026. Baseline source: `58acfe349f`.
 This record describes local measurements and their limits; it is not a production
 sizing approval or a message-latency guarantee.
 
+## Follow-up candidate for PR #3116
+
+The follow-up starts from the initial candidate reconciled with main
+`954546eb0e`. It retains the original allocation, archive-pipe, automation and
+cancellation changes, and adds the measured changes below. Final source and
+verification are reviewed with the PR. No container sizing change is included.
+
+### Availability context
+
+Keep every event revision spine, but do not retain or schema-parse payloads of
+observations that cannot contribute to blood/body/pressure availability. History
+records retain their existing validation. Corrections, actual deletion state,
+equal revisions, malformed relevant records and newer irrelevant observations
+must preserve the old reader's result and errors.
+
+Two alternating 1-vCPU / 3-GiB pairs used the final source with only the previous
+availability owner substituted for the baseline. The large shard contains 16,000
+synthetic observations and large irrelevant payloads.
+
+| Median | Previous availability reader | Candidate |
+| --- | ---: | ---: |
+| Full refresh CPU | 525 ms | 144 ms |
+| Full refresh wall | 542 ms | 181 ms |
+| Full refresh endpoint heap delta | 96.8 MB | 37.7 MB |
+| Full refresh sampled maximum loop delay | 254 ms | 33 ms |
+| Repeat refresh CPU | 646 ms | 331 ms |
+| Repeat refresh wall | 683 ms | 337 ms |
+
+Heap deltas use decimal MB and are phase endpoints, not peaks. Whole-container
+peaks still include fixture preparation and do not show a comparable reduction.
+Final timer probes stopped after 512 visits: timer dispatch lag 2.49–4.26 ms and
+abort-to-return 1.23–1.71 ms, following about 29.5 ms of pre-timer source reading.
+The native yield cadence remains 256 lines. These are local scan measurements,
+not a hosted foreground deadline.
+
+A focused real-Codex journey uses the production context refresh and system-prompt
+builder after a weight observation is corrected to an unrelated metric. It
+confirms blood-test presence without claiming an unlisted body measurement exists
+or proving its absence. The `gpt-5.6-terra` local-subscription run passed with one
+provider request, no tool/command actions, and no canonical writes. Three prior
+subscription attempts failed before provider action; no auth material was copied.
+Thirteen focused tests pass. Fourteen baseline/candidate differential cases,
+including actual `lifecycle.state: "deleted"` records, match availability, errors,
+context refresh results and complete assembled context-prompt hashes exactly.
+
+### Interrupted restore
+
+On failed download/decryption, clear only the archive collector's initialized
+prefix. This erases every plaintext byte written by that collector without
+dirtying uninitialized pages. Successful restore still authenticates the complete
+archive before extraction and clears the complete populated buffer.
+
+Three alternating fresh-container pairs at 1 vCPU / 3 GiB advertised a 480-MiB
+compressed archive and failed transport after 64 KiB. Median rejection CPU fell
+from 224 to 99 ms, wall time from 234 to 100 ms, and RSS increase from 484 to
+4.34 MiB. Three new tests prove zero/partial-prefix wiping, untouched suffix,
+original-error preservation, unchanged durable root and temporary cleanup.
+
+A separate warmed 640-MiB plain restore repeated at 2,973.92 MiB cgroup peak,
+98.08 MiB below the limit, without memory-limit or OOM events. The highest 50-ms
+sample, within 7.4 MiB of that peak, contained approximately 773 MiB anonymous,
+2,105 MiB file-cache and 86 MiB kernel memory. The synthetic fixture retains its
+source, encrypted archive, old root and restored root. Neither this peak nor the
+earlier 333-MiB margin is a production headroom estimate; resident Codex children
+remain outside this proof.
+
+### Rejected follow-up candidates
+
+- Skipping duplicate import preparation: correction and disjoint-import runs
+  improved, but replay medians varied substantially. Five alternating replay-only
+  pairs against one immutable 50,000-event fixture still measured CPU 2.53 to
+  2.94 seconds and wall 2.54 to 2.95 seconds. Most of that difference was in the
+  unchanged identity-index path, before the proposed optimization executes.
+  This does not establish a causal regression or a reliable overall win; defer
+  the optimization. Only behavior-preserving cache-admission and shared-novelty
+  simplifications remain, with no throughput claim.
+- Query visitor conversion: inconsistent CPU/RAM results and changed precedence
+  between a later malformed JSON row and an earlier schema error. Original reader
+  retained.
+- Two-limb FNV hash: exact IDs in all six 50,000-point comparisons, but median
+  rebuild CPU increased 12.22 to 13.81 seconds and wall 12.41 to 14.07 seconds
+  across three alternating pairs. Original BigInt implementation retained.
+- Compression `-T1` and `--single-thread`: no CPU/wall improvement across paired
+  1-vCPU and 2-vCPU creation/verified-restore runs. Existing `-T2` retained.
+- Skipping per-row awaits or increasing the native yield interval did not
+  establish a consistent benefit. Existing callback and cancellation semantics
+  remain unchanged.
+
+### Follow-up verification status
+
+Focused proof covers the final core import/session/preemption paths
+(194 tests), canonical availability (13 tests), archive restoration (37 tests), importer
+forwarding/alias repair (45 tests), service yielding/retry (6 tests), and changelog
+rendering (10 tests). Core and assistant-engine typechecks pass after integration;
+Cloudflare typecheck passes for the snapshot change. The live context journey and
+its deterministic production-derived fixture pass.
+
+The complexity guard now passes: core mutation debt falls from 371 to 370 and its maximum
+remains 135. Cache admission is decided once, with one full-index fallback, and
+evidence novelty is derived once for its two consumers. All cancellation checks
+are preserved. Required PR CI and final external review are separate gates;
+the historical results below are not their substitutes.
+
+Follow-up Docker ownership inventories record 15 context containers (14 successful
+and one corrected harness discovery failure), 11 successful snapshot containers,
+three successful query containers, and eight successful import/control containers.
+None reported an OOM kill and none remain. Heavy Docker comparisons were serialized;
+the shared host and emulation still introduce measurement variation.
+
 ## Question and method
 
 Compare the current custom 2-vCPU / 6-GiB runner with 1 vCPU / 3 GiB while
@@ -418,14 +527,14 @@ Core, assistant-engine, Cloudflare, importers, device-syncd, and query typecheck
 passed. Scoped core/query benchmark typechecks also passed. Documentation drift,
 diff whitespace, and task-file privacy checks passed.
 
-`pnpm complexity:diff` remains a **reported failure**: core mutation complexity
+For the initial pre-PR candidate, `pnpm complexity:diff` was a **reported failure**: core mutation complexity
 debt increases from 371 to 376 while its pre-existing maximum remains 135. The
 added branches expose cancellation, original-error preservation, and the atomic
 publication boundary in an existing large function. Parent review retained
 those checks; no threshold, waiver, or helper introduced merely to relocate the
 score. All other changed source files pass this guard, including the new
-benchmarks. The candidate has not completed PR CI, external review, or hosted
-canary verification.
+benchmarks. That initial candidate had not completed PR CI, external review, or hosted
+canary verification. The follow-up above supersedes its complexity disposition.
 
 ## Remaining proof
 

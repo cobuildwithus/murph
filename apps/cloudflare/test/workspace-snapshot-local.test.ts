@@ -1285,6 +1285,66 @@ while :; do sleep 0.01; done
     }
   });
 
+  it.each([0, 127, 4095])(
+    "erases all received plaintext after an early stream failure (%i bytes)", async (receivedBytes) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "snapshot-restore-partial-clear-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const archiveBytes = 65_537;
+    const dataKey = Buffer.alloc(32, 7);
+    const ivBase64 = "AQIDBAUGBwgJCgsM";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_partial.snapshot.enc";
+    const snapshotId = "snapshot_partial";
+    const userId = "member_synthetic";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+    const ref = createHostedWorkspaceSnapshotTestRef({
+      aad, objectKey, snapshotId, userId,
+      encrypted: {
+        compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+        encryptedByteSize: archiveBytes + 16, encryptedFilePath: "unused.snapshot.enc",
+        encryptedObjectSha256: "0".repeat(64), fileCount: 1, ivBase64,
+        plaintextArchiveSha256: "0".repeat(64), temporaryDirectoryPath: "unused",
+        totalPlainBytes: archiveBytes,
+      },
+    });
+    const cipher = createCipheriv("aes-256-gcm", dataKey, Buffer.from(ivBase64, "base64url"));
+    cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(aad)));
+    const plaintext = Buffer.alloc(receivedBytes, 0x3a);
+    const ciphertext = cipher.update(plaintext);
+    const streamFailure = new Error("synthetic object download interrupted");
+    const allocate = Buffer.allocUnsafe;
+    let archive: ReturnType<typeof Buffer.allocUnsafe> | undefined;
+    const allocation = vi.spyOn(Buffer, "allocUnsafe").mockImplementation((size) => {
+      if (size !== archiveBytes) return allocate(size);
+      // Observe plaintext erasure without reading uninitialized memory.
+      archive = Buffer.alloc(size, 0x7d);
+      return archive;
+    });
+    async function* interruptedStream() {
+      yield ciphertext;
+      expect(archive?.subarray(0, receivedBytes).equals(plaintext)).toBe(true);
+      throw streamFailure;
+    }
+    try {
+      await mkdir(durableRoot);
+      await writeFile(path.join(durableRoot, "existing.txt"), "existing workspace");
+      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey), durableRoot,
+        encryptedStream: interruptedStream(), ref,
+      })).rejects.toBe(streamFailure);
+      expect(archive?.subarray(0, receivedBytes).equals(Buffer.alloc(receivedBytes))).toBe(true);
+      // The unwritten suffix never held snapshot plaintext. Failed downloads
+      // must not dirty pages proportional to the advertised full archive size.
+      expect(archive?.subarray(receivedBytes).every((byte) => byte === 0x7d)).toBe(true);
+      await expect(readFile(path.join(durableRoot, "existing.txt"), "utf8"))
+        .resolves.toBe("existing workspace");
+      await expect(readdir(tempRoot)).resolves.toEqual(["durable"]);
+    } finally {
+      allocation.mockRestore();
+      dataKey.fill(0);
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("rejects selected archive entries that traverse symlink parents or path aliases", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const durableRoot = path.join(tempRoot, "durable");

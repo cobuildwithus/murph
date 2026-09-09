@@ -1041,7 +1041,9 @@ function createFixedSizeArchiveBufferCollector(input: {
       offset = nextOffset;
     },
     clear: () => {
-      buffer.fill(0);
+      // An interrupted download may have initialized only a small prefix.
+      // Erase its plaintext without dirtying the untouched archive pages.
+      buffer.fill(0, 0, offset);
     },
     readBuffer: () => {
       if (offset !== buffer.byteLength) {
