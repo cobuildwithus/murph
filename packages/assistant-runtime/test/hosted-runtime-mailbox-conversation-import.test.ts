@@ -106,6 +106,7 @@ if (!TEST_ASSISTANT_TARGET) {
 const tempRoots: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(
     tempRoots.splice(0).map((root) =>
       rm(root, {
@@ -775,6 +776,8 @@ describe("hosted mailbox conversation import adapter", () => {
   });
 
   test("admits an audio attachment exactly once after its parser retry settles", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-26T12:00:00.000Z"));
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-audio-parser-retry-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -5280,6 +5283,8 @@ describe("hosted mailbox conversation import adapter", () => {
   });
 
   test("keeps projection-exempt group email attachments restart-replyable", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-26T12:00:00.000Z"));
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-group-raw-sweep-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");

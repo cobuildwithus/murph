@@ -1,6 +1,6 @@
 # Remove unnecessary historical source-authority requests
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -30,7 +30,7 @@ Reduce hosted source-authority requests during extended historical Junction jobs
 2. [x] Remove the remote pre-discovery read and duplicate post-discovery read.
 3. [x] Update the reliability owner and regression assertions.
 4. [x] Run focused verification and parent candidate review.
-5. [ ] Complete the scoped commit, PR checks, final review, and plan closure.
+5. [x] Complete parent and final review, prepare the scoped closure commit, and route final-head CI.
 
 ## Verification
 
@@ -39,3 +39,11 @@ Reduce hosted source-authority requests during extended historical Junction jobs
 - Device-syncd typecheck and diff whitespace checks passed.
 - Complexity guard passed: aggregate debt unchanged at 406, maximum score reduced from 145 to 143. Changed hotspots are resource execution at 143 and source projection at 47; broader provider restructuring is outside scope.
 - Parent review confirmed the existing authority owner and fresh external-boundary checks remain intact. No Web, Worker, or persisted protocol changes.
+
+## Completion evidence
+
+- Final ReviewGPT: PASS on runtime candidate `610a0914608d`, no qualifying findings. Recovered the exact submitted turn after a temporary conversation-URL capture failure; package model attestation passed with GPT-6 Pro DOM metadata and the browser-reported 8m 27s duration. Reviewer verified snapshot hashes and source-admission boundaries.
+- CI exposed two unchanged attachment fixtures whose fixed timestamps crossed retention. Pinning only their Date clock preserves the production policy; all 69 mailbox import tests and assistant-runtime typecheck pass. This isolated test correction and completion documentation do not change the reviewed runtime candidate.
+- Recorded the review capture defect through Frog, including same-thread recovery.
+- Final-head CI remains a separate PR gate; no merge or deployment is claimed by plan closure.
+Completed: 2026-09-09
