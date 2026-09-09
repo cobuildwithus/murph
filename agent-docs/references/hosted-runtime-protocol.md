@@ -2851,6 +2851,12 @@ normal priority. Webhook hints still require dirty-work admission, and equal
 cadences, explicit jobs, manual requests, and connection-epoch barriers remain
 pending. When a pass cannot progress, already-due eligible schedule hints share
 the owner retry backoff so they cannot repeatedly readmit it.
+If a pristine webhook or companion dirty hint was deferred to an owner's future
+retry, an otherwise idle pass may readmit the validated owner only when the
+existing compactor proves an eligible hint can retire during that admission.
+Invocation filters and substantive-work barriers still apply. The owner fetches
+canonical dirty work before acknowledgement; exact job retry times stay intact,
+and removing the admitted hints prevents repeated idle admissions.
 Only that connection mailbox wake may fetch its exact
 Web-owned dirty row or claim its account's local jobs; a generic runtime timer
 does neither. The connection-specific encrypted system-mailbox item remains

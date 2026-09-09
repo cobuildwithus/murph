@@ -1427,14 +1427,14 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test.each(["none", "superseded", "equal"])("system mailbox retains only necessary device work across restore (schedule: %s)", async (schedule) => {
+  test.each(["none", "superseded", "equal", "deferred"])("system mailbox retains only necessary device work across restore (schedule: %s)", async (schedule) => {
     const retainedRetry = schedule !== "none";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const connectionId = "device_sync_connection_webhook_dirty";
     const retryAt = new Date(Date.parse(TEST_NOW) + 24 * 60 * 60_000).toISOString();
-    const scheduledAt = schedule === "superseded"
+    const scheduledAt = schedule === "superseded" || schedule === "deferred"
       ? new Date(Date.parse(TEST_NOW) - 60_000).toISOString()
       : TEST_NOW;
     let canonicalNextReconcileAt = TEST_NOW;
@@ -1550,6 +1550,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const importState = createEmptyHostedMailboxImportState();
       importState.watermarks.system = retainedRetry ? "3" : "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
+      if (schedule === "deferred") {
+        await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+          pending: state.pending.map((item) => ({ ...item, nextAttemptAt: retryAt })),
+        }));
+      }
       const runPass = async () => {
         const restoredWorkspace = await createVaultSnapshotBundle({
           key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty-before.bundle.json",
@@ -1625,8 +1630,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        schedule === "superseded" ? "3" : schedule === "equal" ? "2" : "1",
+        schedule === "superseded" || schedule === "deferred" ? "3" : schedule === "equal" ? "2" : "1",
       );
+      if (schedule === "deferred") {
+        const continued = await runPass();
+        assert.equal(continued.nextWakeAt, result.nextWakeAt);
+        assert.equal(providerPaths.length, 3);
+        assert.equal(fetchDirtyStatesCalls, 1);
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
+      }
       if (schedule === "equal") {
         assert.equal(pending[1]?.wake.kind === "device-sync.wake" ? pending[1].wake.reason : null, "webhook_hint");
         assert.equal(canonicalNextReconcileAt, TEST_NOW);

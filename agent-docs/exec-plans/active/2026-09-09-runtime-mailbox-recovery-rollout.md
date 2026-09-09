@@ -128,3 +128,20 @@ warnings, unknown reasons, epoch barriers, active retry work, and checkpoint
 acknowledgement. Do not infer incident recovery from this synthetic proof: verify
 the diagnostic release against the original cohort and then verify the reviewed
 fix after its protected deployment. The overall recovery plan remains active.
+
+## Deferred-hint admission
+
+The companion reason correction passed review and required CI. Cold-restore
+proof then showed that previously deferred plain hints still wait for the old
+owner retry time. Six otherwise-identical deferred cases fail against that
+correction while their non-deferred controls pass.
+
+After normal runnable-work selection, reuse the existing compactor as a pure
+eligibility proof before readmitting a validated retained owner. Admit only an
+owner already inside the invocation selection whose admission can retire an
+eligible webhook hint. Preserve explicit-work barriers and job availability;
+do not retire idle dirty hints without owner execution. The composed cold
+restore fetches dirty state once, preserves the future history job, and its
+second restore adds no provider calls. Filter, invalid-projection, substantive
+barrier, checkpoint retry, newer-revision, and foreground-preemption proof
+remain required before review and deployment.
