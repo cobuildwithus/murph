@@ -89,3 +89,12 @@ Recorded task-owned Frog friction: the ordinary Web runner silently excludes an
 explicitly requested database test, so database proof used its correct dedicated
 configuration. Required hosted/device qualification remains an activation gate,
 not a claim made by local synthetic evidence.
+
+
+PR 1 review round 1 found a WebAuthn challenge encoding mismatch. The parent
+confirmed SimpleWebAuthn encodes string inputs as UTF-8 bytes, corrected both
+options builders to pass digest bytes, and changed proof fixtures to use the
+actual generated registration/authentication challenges. The privacy schema
+inventory now explicitly includes the encrypted approval aggregate. Focused
+cryptographic/schema tests, PostgreSQL journeys, typecheck and lint pass; the
+remediated candidate still requires resolved final review and exact-head CI.

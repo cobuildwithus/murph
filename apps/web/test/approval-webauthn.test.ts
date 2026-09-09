@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   approvalPasskeyAuthenticationOptions,
+  approvalWebAuthnChallenge,
   approvalPasskeyRegistrationOptions,
   parseApprovalPasskeys,
   verifyApprovalPasskeyAssertion,
@@ -27,13 +28,17 @@ describe("WebAuthn action approval cryptographic boundary", () => {
     expect(registration.authenticatorSelection?.userVerification).toBe("required");
     expect(registration.excludeCredentials).toMatchObject([{ id: credential.id }]);
     expect(registration.user.name).toBe("Murph");
+    expect(options.challenge).toBe(approvalWebAuthnChallenge(message));
+    expect(registration.challenge).toBe(approvalWebAuthnChallenge(message));
   });
 
   it("verifies a real registration and signed assertion, retaining the counter", async () => {
     const fixture = authenticator();
-    const credential = await verifyApprovalPasskeyRegistration({ response: fixture.registration(), message, origin });
+    const registration = await approvalPasskeyRegistrationOptions({ credentials: [], memberId: "synthetic-member", message, origin });
+    const credential = await verifyApprovalPasskeyRegistration({ response: fixture.registration(true, registration.challenge), message, origin });
     expect(credential).toEqual(fixture.credential);
-    await expect(verifyApprovalPasskeyAssertion({ credentials: [credential], response: fixture.assertion(), message, origin }))
+    const authentication = await approvalPasskeyAuthenticationOptions({ credentials: [credential], message, origin });
+    await expect(verifyApprovalPasskeyAssertion({ credentials: [credential], response: fixture.assertion({ challenge: authentication.challenge }), message, origin }))
       .resolves.toEqual([{ ...credential, counter: 1 }]);
   });
 

@@ -11,7 +11,7 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({ resolveHostedPublicOrigin: (
 import { POST as authenticationOptionsRoute } from "../app/api/settings/approval-passkeys/authenticate/route";
 import { getPrisma } from "@/src/lib/prisma";
 import { issueHostedAppSession, requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import { registerApprovalPasskey } from "@/src/lib/sensitive-actions/passkey-enrollment";
+import { createApprovalPasskeyRegistrationOptions, registerApprovalPasskey } from "@/src/lib/sensitive-actions/passkey-enrollment";
 import { readApprovalPasskeyState, prepareApprovalPasskeyWrite } from "@/src/lib/sensitive-actions/passkey-store";
 import {
   buildSettingsSensitiveActionBinding, createSensitiveActionChallenge,
@@ -68,12 +68,11 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     async function enrollment() {
       const material = await challenge();
       const key = authenticator(material.message);
+      const authorization = { token: material.token, signature: await account.signMessage({ message: material.message }) };
+      const options = await createApprovalPasskeyRegistrationOptions({ authorization, prisma, session });
       return {
         key,
-        input: {
-          authorization: { token: material.token, signature: await account.signMessage({ message: material.message }) },
-          prisma, request, response: key.registration(), session,
-        },
+        input: { authorization, prisma, request, response: key.registration(true, options.challenge), session },
       };
     }
     return { challenge, enrollment, memberId, prisma, request, session };
@@ -93,7 +92,12 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     }
     const valid = await options(headers);
     expect(valid.status).toBe(200);
-    await expect(valid.json()).resolves.toMatchObject({ method: "passkey", options: { userVerification: "required" } });
+    const body: { method: string; options: { challenge: string; userVerification: string } } = await valid.json();
+    expect(body).toMatchObject({ method: "passkey", options: { userVerification: "required" } });
+    await expect(verifySensitiveActionChallenge({
+      ...f, ...challenge, privyUserId,
+      authorization: { method: "passkey", token: challenge.token, assertion: initial.key.assertion({ challenge: body.options.challenge }) },
+    })).resolves.toMatchObject({ passkeys: [{ counter: 1 }] });
     expect((await options({ ...headers, cookie: other.cookie.split(";")[0] ?? "" })).status).toBe(410);
     expect((await options({ ...headers, cookie: "" })).status).toBe(401);
     expect((await options({ ...headers, origin: "https://untrusted.example" })).status).toBe(403);
@@ -101,8 +105,9 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
   }));
 
   it("keeps enrollment closed before compatible readers deploy", () => withMember(async (f) => {
-    vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
     const enrollment = await f.enrollment();
+    vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
+    await expect(createApprovalPasskeyRegistrationOptions(enrollment.input)).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
     await expect(registerApprovalPasskey(enrollment.input)).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
     expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
   }));

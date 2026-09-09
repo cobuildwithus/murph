@@ -15,9 +15,9 @@ export function authenticator(message = "Synthetic member/session/action-bound a
   const id = randomBytes(32).toString("base64url");
   const credential: ApprovalPasskey = { id, publicKey: Buffer.from(cose).toString("base64url"), counter: 0 };
 
-  function clientData(type: string, customMessage = message, customOrigin = origin) {
+  function clientData(type: string, customMessage = message, customOrigin = origin, challenge = approvalWebAuthnChallenge(customMessage)) {
     return Buffer.from(JSON.stringify({
-      type, challenge: approvalWebAuthnChallenge(customMessage), origin: customOrigin, crossOrigin: false,
+      type, challenge, origin: customOrigin, crossOrigin: false,
     }));
   }
   function authData(flags: number, counter: number) {
@@ -27,8 +27,8 @@ export function authenticator(message = "Synthetic member/session/action-bound a
       createHash("sha256").update(new URL(origin).hostname).digest(), Buffer.from([flags]), count,
     ]);
   }
-  function assertion(options: { uv?: boolean; counter?: number; customMessage?: string; customOrigin?: string } = {}): AuthenticationResponseJSON {
-    const data = clientData("webauthn.get", options.customMessage, options.customOrigin);
+  function assertion(options: { uv?: boolean; counter?: number; customMessage?: string; customOrigin?: string; challenge?: string } = {}): AuthenticationResponseJSON {
+    const data = clientData("webauthn.get", options.customMessage, options.customOrigin, options.challenge);
     const auth = authData(options.uv === false ? 1 : 5, options.counter ?? 1);
     const signature = sign("sha256", Buffer.concat([
       auth, createHash("sha256").update(data).digest(),
@@ -42,7 +42,7 @@ export function authenticator(message = "Synthetic member/session/action-bound a
       },
     };
   }
-  function registration(uv = true): RegistrationResponseJSON {
+  function registration(uv = true, challenge?: string): RegistrationResponseJSON {
     const idBytes = Buffer.from(id, "base64url");
     const length = Buffer.alloc(2);
     length.writeUInt16BE(idBytes.length);
@@ -56,7 +56,7 @@ export function authenticator(message = "Synthetic member/session/action-bound a
       id, rawId: id, type: "public-key", clientExtensionResults: {},
       response: {
         attestationObject: Buffer.from(attestation).toString("base64url"),
-        clientDataJSON: clientData("webauthn.create").toString("base64url"),
+        clientDataJSON: clientData("webauthn.create", message, origin, challenge).toString("base64url"),
       },
     };
   }

@@ -43,7 +43,7 @@ export function approvalPasskeyRegistrationOptions(input: {
     userID: createHash("sha256").update(input.memberId).digest(),
     userName: "Murph",
     userDisplayName: "Murph",
-    challenge: approvalWebAuthnChallenge(input.message),
+    challenge: Buffer.from(approvalWebAuthnChallenge(input.message), "base64url"),
     attestationType: "none",
     authenticatorSelection: {
       residentKey: "required",
@@ -86,7 +86,7 @@ export function approvalPasskeyAuthenticationOptions(input: {
   }
   return generateAuthenticationOptions({
     rpID: new URL(input.origin).hostname,
-    challenge: approvalWebAuthnChallenge(input.message),
+    challenge: Buffer.from(approvalWebAuthnChallenge(input.message), "base64url"),
     userVerification: "required",
     allowCredentials: input.credentials.map(({ id }) => ({ id })),
   });
