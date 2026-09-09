@@ -2038,6 +2038,28 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it.each([RunnerContainer, NextRunnerContainer])("rechecks the actual process image when native rollout replaces a warm generation", async containerClass => {
+    const bank = containerClass === NextRunnerContainer ? "next" : "primary";
+    const active = { bank, id: `${bank}-permanent`, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const candidate = { ...active, bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64), image: `registry.example.test/runner@sha256:${"e".repeat(64)}` };
+    let actual = active;
+    const { container, destroy, containerFetch } = createContainerDouble({
+      containerClass, initialStatus: "running",
+      env: { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, candidate, previous: null }) },
+      containerFetch: vi.fn(async () => new Response(JSON.stringify({ ...createRunnerHealthResult(), runnerBundle: { bundleFingerprint: actual.bundleFingerprint, sourceFingerprint: actual.sourceFingerprint } }), { headers: { "content-type": "application/json" } })),
+    });
+    await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" })).resolves.toMatchObject({ kind: "ready" });
+    actual = candidate;
+    container.onStart();
+    await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" })).resolves.toMatchObject({ kind: "ready" });
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(destroy).not.toHaveBeenCalled();
+    actual = { ...candidate, sourceFingerprint: active.sourceFingerprint };
+    container.onStart();
+    await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" })).rejects.toThrow("bundle fingerprint mismatch");
+    expect(destroy).toHaveBeenCalled();
+  });
+
   it("rejects a stale cold image without retrying deployment convergence on the member path", async () => {
     let healthChecks = 0;
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({

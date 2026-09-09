@@ -1,4 +1,4 @@
-import { readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
+import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
 import type {
   CloudflareHostedControlRuntimeShellPrewarmSource,
@@ -4750,10 +4750,7 @@ async function assertRunnerHealthy(
   const runnerBundle = readRunnerContainerMetadataRecordProperty(payload.runnerBundle);
   if (
     expectedBundleIdentity
-    && (
-      runnerBundle.bundleFingerprint !== expectedBundleIdentity.bundleFingerprint
-      || runnerBundle.sourceFingerprint !== expectedBundleIdentity.sourceFingerprint
-    )
+    && !hostedRunnerImageMatches(environment, runnerBundle.bundleFingerprint, runnerBundle.sourceFingerprint)
   ) {
     throw new HostedRunnerContainerBundleMismatchError();
   }

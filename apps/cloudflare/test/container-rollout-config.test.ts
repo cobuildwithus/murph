@@ -32,7 +32,7 @@ describe("Cloudflare container rollout config", () => {
     { total: "3", legacy: "1", expectedMain: 2, expectedLegacy: 1 },
     { total: "5", legacy: "2", expectedMain: 3, expectedLegacy: 2 },
     { total: "7", legacy: "3", expectedMain: 4, expectedLegacy: 3 },
-  ])("gives each release the member budget while retaining legacy identity: %j", ({
+  ])("declares one member budget while retaining legacy identity: %j", ({
     total, legacy, expectedMain, expectedLegacy,
   }) => {
     const source = {
@@ -52,12 +52,12 @@ describe("Cloudflare container rollout config", () => {
     }>;
     expect(containers.map(({ class_name, max_instances }) => ({ class_name, max_instances }))).toEqual([
       { class_name: "RunnerContainer", max_instances: expectedMain },
-      { class_name: "NextRunnerContainer", max_instances: expectedMain },
+      { class_name: "NextRunnerContainer", max_instances: 0 },
       { class_name: "DeploySmokeRunnerContainer", max_instances: 1 },
       { class_name: "StandbyRunnerContainer", max_instances: expectedLegacy },
     ]);
     expect(containers.reduce((sum, container) => sum + container.max_instances, 0))
-      .toBe(Number(total ?? "1000") + expectedMain + 1);
+      .toBe(Number(total ?? "1000") + 1);
     expect(containers[0]).not.toHaveProperty("constraints");
     expect(config.vars).toMatchObject({
       HOSTED_EXECUTION_STANDBY_MODE: "off",
@@ -153,7 +153,6 @@ describe("Cloudflare container rollout config", () => {
     });
     expect(checkedInConfig.containers[1]).toMatchObject({
       rollout_active_grace_period: renderedConfig.containers[1]?.rollout_active_grace_period,
-      rollout_step_percentage: renderedConfig.containers[1]?.rollout_step_percentage,
     });
     expect(checkedInConfig.containers[3]).toMatchObject({
       rollout_active_grace_period: renderedConfig.containers[3]?.rollout_active_grace_period,

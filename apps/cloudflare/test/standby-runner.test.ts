@@ -351,6 +351,30 @@ describe("RunnerContainer slot lifecycle", () => {
 });
 
 describe("StandbyRunnerCoordinatorDurableObject", () => {
+  it("drains unbound inventory during an image transition while preserving exact claim replay", async () => {
+    const h = createCoordinatorHarness({ target: "2" });
+    h.ensure();
+    await h.flush();
+    const claimId = createHostedStandbyClaimId();
+    const claimed = h.claim(claimId);
+    expect(claimed.outcome).toBe("claimed");
+    await h.flush();
+    const prepared = prepareCount(h);
+    const active = { bank: "primary", id: RELEASE_ID, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const candidate = { ...active, bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64), image: `registry.example.test/runner@sha256:${"e".repeat(64)}` };
+    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active, candidate, previous: null });
+    expect(h.claim(claimId)).toEqual(claimed);
+    expect(h.claim()).toEqual({ outcome: "no_ready_slot" });
+    await h.flush();
+    expect(prepareCount(h)).toBe(prepared);
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toEqual([]);
+    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active: candidate, candidate: null, previous: null });
+    h.ensure();
+    await h.flush();
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toHaveLength(2);
+    expect(h.claim(claimId)).toEqual(claimed);
+  });
+
   it("warms a candidate without making it claimable, then reuses that inventory on promotion", async () => {
     const h = createCoordinatorHarness({ target: "2" });
     const active = { bank: "primary", id: RELEASE_ID, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };

@@ -70,6 +70,15 @@ export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] 
   },
   {
     authorization: "web-callback-signature",
+    handle: (context) => handleDeployContainerSmokeRoute(context, true),
+    match: matchExactPath("/internal/deploy/artifact-smoke"),
+    methods: ["POST"],
+    name: "deploy-artifact-smoke",
+    signatureBodyLimitBytes: DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorization: "web-callback-signature",
     async handle(context) {
       return handleDeployContainerSmokeRoute(context);
     },
@@ -99,6 +108,7 @@ export function handleTemporalWorkerBindingAdmissionRoute(
 
 export async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
+  artifactOnly = false,
 ): Promise<Response> {
   const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
   let liveModelTurnModel: string | null;
@@ -121,7 +131,8 @@ export async function handleDeployContainerSmokeRoute(
   }
   // The initial smoke proves inventory before running the separate live-model
   // phase. A later foreground claim must not invalidate that model-only probe.
-  const standbyInventory = liveModelTurnModel === null
+  const checkServing = !artifactOnly && liveModelTurnModel === null;
+  const standbyInventory = checkServing
     ? await readDeployStandbyInventory(scopeHostedRunnerReleaseEnvironment(context.env, "candidate"))
     : null;
   if (standbyInventory && !standbyInventory.ready) {
@@ -136,7 +147,7 @@ export async function handleDeployContainerSmokeRoute(
   let primaryError: unknown = null;
 
   try {
-    if (liveModelTurnModel === null && (!standbyInventory || standbyInventory.readyCount === 0)) {
+    if (checkServing && (!standbyInventory || standbyInventory.readyCount === 0)) {
       await proveDeployRunnerTarget(context.env);
     }
     result = await container.smokeHealth({
