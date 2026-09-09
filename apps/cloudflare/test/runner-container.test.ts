@@ -9861,6 +9861,80 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it.each([
+    ["primary", "overdue"], ["primary", "immediate"],
+    ["next", "overdue"], ["next", "immediate"],
+  ] as const)(
+    "retires completed idle previous bank %s despite an %s wake",
+    async (bank, wake) => {
+      const previous = { bank, id: `${bank}-old`, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+      const active = { bank: bank === "primary" ? "next" : "primary", id: bank === "primary" ? "next-current" : "primary-current", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
+      const result = {
+        ...createRunnerResult(),
+        ...(wake === "immediate"
+          ? { immediateRecheckRequested: true }
+          : { nextWakeAt: "2026-01-01T00:00:00.000Z" }),
+      };
+      const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+        containerClass: bank === "primary" ? RunnerContainer : NextRunnerContainer,
+        initialStatus: "running",
+        env: { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, candidate: null, previous }) },
+        containerFetch: vi.fn(async (url: string) => new Response(JSON.stringify(
+          url.endsWith("/health")
+            ? { ...createRunnerHealthResult(), runnerBundle: { bundleFingerprint: previous.bundleFingerprint, sourceFingerprint: previous.sourceFingerprint } }
+            : result,
+        ), { headers: { "content-type": "application/json" } })),
+      });
+      const request = createRunnerRequest("evt_previous_release_completion");
+      await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 30_000, userId: request.userId });
+      expect(destroy).not.toHaveBeenCalled();
+      await container.onRuntimeCompletionRecorded({ attemptId: "attempt_unrelated", leaseGeneration: request.leaseGeneration, userId: request.userId });
+      expect(destroy).not.toHaveBeenCalled();
+      await container.onRuntimeCompletionRecorded({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId });
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "active-release", "candidate-release", "legacy-release", "active-child",
+    "conversation-warm", "missing-warmth", "unknown-health",
+  ] as const)("preserves %s after previous-release completion checks", async (protection) => {
+    const previous = { bank: "primary", id: "primary-old", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const active = { bank: "next", id: "next-current", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
+    const currentBank = protection === "active-release" || protection === "candidate-release";
+    const release = currentBank ? active : previous;
+    const deployment = protection === "candidate-release"
+      ? { active: previous, candidate: active, previous: null }
+      : { active, candidate: null, previous };
+    let completionRecorded = false;
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerClass: currentBank ? NextRunnerContainer : RunnerContainer,
+      initialStatus: "running",
+      env: protection === "legacy-release" ? {} : { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment) },
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          return Response.json({ ...createRunnerResult(), nextWakeAt: "2026-01-01T00:00:00.000Z" });
+        }
+        if (completionRecorded && protection === "unknown-health") return new Response(null, { status: 503 });
+        const health: Record<string, unknown> = {
+          ...createRunnerHealthResult(),
+          runnerBundle: { bundleFingerprint: release.bundleFingerprint, sourceFingerprint: release.sourceFingerprint },
+        };
+        if (completionRecorded && protection === "active-child") health.activeJobCount = 1;
+        if (completionRecorded && protection === "conversation-warm") health.conversationWarmActivityCompletedAtEpochMs = Date.now();
+        if (completionRecorded && protection === "missing-warmth") delete health.conversationWarmActivityCompletedAtEpochMs;
+        return Response.json(health);
+      }),
+    });
+    const request = createRunnerRequest("evt_protected_completion");
+    await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 30_000, userId: request.userId });
+    completionRecorded = true;
+    await container.onRuntimeCompletionRecorded({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId });
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
   it("rejects runner lifecycle env values with trailing junk", async () => {
     expect(() =>
       createContainerDouble({
