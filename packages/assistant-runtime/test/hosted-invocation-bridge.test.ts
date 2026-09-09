@@ -1347,6 +1347,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       legacySnapshotRef,
       acceptedCheckpoint.workspace.snapshotRef,
     ]);
+    expect(calls.startSnapshotSession.mock.calls[0]?.[0]).not.toHaveProperty("replacedSnapshotRef");
+    expect(calls.startSnapshotSession.mock.lastCall?.[0]).toMatchObject({
+      expectedWorkspaceVersion: acceptedCheckpoint.workspace.version,
+      replacedSnapshotRef: acceptedCheckpoint.workspace.snapshotRef,
+    });
   });
 
   it("redacts snapshot lifecycle safe error messages before writing runtime logs", async () => {
