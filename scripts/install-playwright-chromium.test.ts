@@ -51,6 +51,9 @@ function runWrapper(input: { aptConfig?: string; pnpmExit?: number } = {}) {
     [
       "#!/usr/bin/env bash",
       'printf \'%s\\n\' "$*" >> "$MURPH_TEST_STATE_DIR/sudo-calls"',
+      'if [[ "$*" == "rm -f /etc/apt/sources.list.d/google-chrome.sources" ]]; then',
+      '  exit 0',
+      'fi',
       'if [[ "$1" != "tee" ]]; then exit 2; fi',
       'cat > "$MURPH_TEST_STATE_DIR/apt-policy"',
     ].join("\n"),
@@ -96,7 +99,7 @@ describe("install-playwright-chromium.sh", () => {
     expect(spawnSync("bash", ["-n", scriptPath]).status).toBe(0);
   });
 
-  it("loads the bounded apt policy before invoking Playwright once", () => {
+  it("removes only the unused Chrome source and loads the apt policy before Playwright", () => {
     const { result, root } = runWrapper();
 
     expect(result.status).toBe(0);
@@ -108,9 +111,11 @@ describe("install-playwright-chromium.sh", () => {
         "",
       ].join("\n"),
     );
-    expect(readFileSync(path.join(root, "sudo-calls"), "utf8").trim()).toBe(
-      "tee /etc/apt/apt.conf.d/99murph-playwright",
-    );
+    expect(readFileSync(path.join(root, "sudo-calls"), "utf8").trim().split("\n"))
+      .toEqual([
+        "rm -f /etc/apt/sources.list.d/google-chrome.sources",
+        "tee /etc/apt/apt.conf.d/99murph-playwright",
+      ]);
     expect(readFileSync(path.join(root, "apt-config-calls"), "utf8").trim()).toBe(
       "dump",
     );

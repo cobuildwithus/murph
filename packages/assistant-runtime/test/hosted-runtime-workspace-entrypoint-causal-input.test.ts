@@ -291,48 +291,54 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
+      failWakeMailboxFetch: false,
       futureWakeReason: null,
       label: "keeps the idle window when the provider still matches",
-      providerReadOutcome: "openai" as const,
+      providerAfterWake: "openai" as const,
       slug: "matching_provider",
     },
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
+      failWakeMailboxFetch: false,
       futureWakeReason: null,
       label: "hands off immediately when the provider changed",
-      providerReadOutcome: "venice" as const,
+      providerAfterWake: "venice" as const,
       slug: "changed_provider",
     },
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
+      failWakeMailboxFetch: false,
       futureWakeReason: "mailbox" as const,
       label: "hands off immediately with a future mailbox continuation",
-      providerReadOutcome: "venice" as const,
+      providerAfterWake: "venice" as const,
       slug: "changed_provider_future_mailbox",
     },
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
+      failWakeMailboxFetch: false,
       futureWakeReason: "assistant" as const,
       label: "hands off immediately with a future assistant continuation",
-      providerReadOutcome: "venice" as const,
+      providerAfterWake: "venice" as const,
       slug: "changed_provider_future_assistant",
     },
     {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
+      failWakeMailboxFetch: true,
       futureWakeReason: null,
-      label: "keeps the idle window when provider authority is unavailable",
-      providerReadOutcome: "unavailable" as const,
-      slug: "provider_unavailable",
+      label: "fails without a settings fallback when mailbox provider authority is unavailable",
+      providerAfterWake: "openai" as const,
+      slug: "mailbox_provider_unavailable",
     },
   ])("$label after an external runtime wake", async ({
     expectImmediateRecheck,
     expectedElapsedBoundaryMs,
+    failWakeMailboxFetch,
     futureWakeReason,
-    providerReadOutcome,
+    providerAfterWake,
     slug,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -344,9 +350,18 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     let assistantPhaseFinished = false;
     let assistantPhaseCount = 0;
     let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let externalWakeNotified = false;
     let importedItemCount = 0;
     let providerReadCount = 0;
     let snapshotCount = 0;
+    let wakeMailboxFetchCount = 0;
+    const mailboxPort = createMailboxPort({
+      get assistantProvider() {
+        return externalWakeNotified ? providerAfterWake : "openai";
+      },
+      events: [],
+      items: mailboxItems,
+    });
     const runtimeWakeSignal: RuntimeWakeSignal = {
       consumePending() {
         return null;
@@ -423,29 +438,21 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           assistantConfigurationToolPort: {
             async request() {
               providerReadCount += 1;
-              if (providerReadOutcome === "unavailable") {
-                throw new Error("control plane unavailable");
-              }
-              return {
-                action: "read",
-                result: {
-                  availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-                  availableProviders: ["openai", "venice"],
-                  availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                  configurationAvailable: true,
-                  dormantSolPreference: false,
-                  model: "gpt-5.6-terra",
-                  provider: providerReadOutcome,
-                  reasoningEffort: "low",
-                  solAvailable: false,
-                },
-              };
+              throw new Error("Provider consistency must use mailbox facts.");
             },
           },
-          mailboxPort: createMailboxPort({
-            events: [],
-            items: mailboxItems,
-          }),
+          mailboxPort: {
+            ...mailboxPort,
+            async fetch(request, context) {
+              if (externalWakeNotified) {
+                wakeMailboxFetchCount += 1;
+                if (failWakeMailboxFetch) {
+                  throw new Error("Mailbox provider refresh unavailable.");
+                }
+              }
+              return await mailboxPort.fetch(request, context);
+            },
+          },
           workspacePort: createWorkspacePort({
             checkpointRequests,
             events: [],
@@ -478,7 +485,19 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         () => "Dirty checkpoint wait did not arm.",
       );
       const wakeNotifiedAt = Date.now();
+      externalWakeNotified = true;
       runtimeWakeSignal.notify();
+
+      if (failWakeMailboxFetch) {
+        await assert.rejects(resultPromise, /Mailbox provider refresh unavailable\./);
+        assert.ok(wakeMailboxFetchCount > 0);
+        assert.equal(providerReadCount, 0);
+        assert.equal(assistantPhaseCount, 1);
+        assert.equal(importedItemCount, 0);
+        assert.equal(snapshotCount, 0);
+        assert.equal(checkpointRequests.length, 0);
+        return;
+      }
 
       const result = await resultPromise;
       const elapsedAfterWakeMs = Date.now() - wakeNotifiedAt;
@@ -497,7 +516,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         runtimeWakePendingAtCheckpoint: true,
       }));
       assert.equal(snapshotCount, 1);
-      assert.equal(providerReadCount, 1);
+      assert.equal(providerReadCount, 0);
+      assert.ok(wakeMailboxFetchCount > 0);
       assert.equal(importedItemCount, 0);
       assert.equal(assistantPhaseCount, 1);
       if (expectImmediateRecheck) {

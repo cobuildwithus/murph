@@ -305,29 +305,41 @@ export async function readActiveHostedMemberAccess(input: {
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
+  return await readActiveHostedMemberAccessState(input) !== null;
+}
+
+export async function readActiveHostedMemberAccessState(input: {
+  memberId: string;
+  now?: Date;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<(HostedMemberAccessState & {
+  assistantProviderPreference: string | null;
+}) | null> {
   const prisma = input.prisma ?? getPrisma();
   const member = await prisma.hostedMember.findUnique({
-    select: hostedMemberAccessSelect,
+    select: {
+      ...hostedMemberAccessSelect,
+      assistantProviderPreference: true,
+    },
     where: {
       id: input.memberId,
     },
   });
 
   if (!member) {
-    return false;
+    return null;
   }
 
-  if (member.threadContainer) {
-    return await hasActiveHostedThreadContainerAccessWithParticipants({
+  const active = member.threadContainer
+    ? await hasActiveHostedThreadContainerAccessWithParticipants({
       container: member,
       containerMemberId: input.memberId,
       now: input.now,
       owner: member.threadContainer.owner,
       prisma,
-    });
-  }
-
-  return hasActiveHostedMemberAccess(member);
+    })
+    : hasActiveHostedMemberAccess(member);
+  return active ? member : null;
 }
 
 /**

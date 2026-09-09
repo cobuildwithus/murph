@@ -861,6 +861,9 @@ export interface HostedGroupRunningBitProjection {
 }
 
 export interface HostedMailboxFetchResponse {
+  // Web supplies this invocation-lifecycle fact on every fetch, including empty
+  // batches. Deploy Web before a runner that consumes it.
+  assistantProvider: HostedAssistantProvider;
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
@@ -1071,6 +1074,7 @@ export type HostedRuntimeAssistantAskControlResponse =
   | {
       action: "prepare";
       disclosure?: HostedRuntimeAssistantAskDisclosureContext;
+      feedbackDiagnostic?: true;
       question: string;
       status: "ready";
       targetLabel: string | null;

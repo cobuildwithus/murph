@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-08-11
+Last verified: 2026-09-09
 
 ## Current Posture
 
@@ -12,7 +12,8 @@ Last verified: 2026-08-11
   A professional subject does not turn study into professional work. Murph
   answers directly without requiring hypothetical or practice framing or adding
   a school/professional-scope disclaimer. Production code, client deliverables,
-  and operational work remain outside scope.
+  and unrelated operational work remain outside scope. Read-only troubleshooting
+  of Murph using non-secret diagnostics in the current member workspace is in scope.
 - General model capability is the substrate. Murph's compounding advantage is
   longitudinal member context: relevant history, evidence, preferences,
   constraints, goals, actions, and outcomes that it can retrieve when they

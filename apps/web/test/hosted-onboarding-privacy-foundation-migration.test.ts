@@ -1190,6 +1190,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260904190000_linq_email_handle_identity",
       "20260905000000_clinical_record_reader_cleanup",
       "20260905010000_linq_terminal_message_retry",
+      "20260908190000_feedback_operator_tasks",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

@@ -622,13 +622,13 @@ describe('assistant execution prompt contract', () => {
       'Answer assignments and educational code directly in professional subjects; no hypothetical/practice or scope disclaimer.',
     )
     expect(prompt).toContain(
-      'Decline only actual professional work—production code, client deliverables, or operations—in one plain sentence',
+      'Decline unrelated professional work—production code, client deliverables, or operations—in one plain sentence',
     )
     expect(prompt).toContain(
       'tools do not expand scope',
     )
     expect(prompt).toContain(
-      'Own health, schoolwork, Murph setup, records, routines, and context.',
+      'Own health, schoolwork, Murph setup and troubleshooting, records, routines, and context.',
     )
     expect(prompt).not.toContain('unrelated work/school tasks')
   })
@@ -2561,7 +2561,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '342590e44e893ca097ebc908bf949d1bf4fcfea408107cd9f0edbc4fa327fd79',
+      '917dbe9fa7eef01764f01d66e7a43914cdf0b943b8c76d89f6e51ccb7e8b7a0b',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

@@ -1046,6 +1046,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
 }): Promise<HostedAiUsageAllowanceSettlement> {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
+  const operatorFunded = await isVerifiedOperatorTaskUsage(input);
   await lockHostedAiUsageAllowanceBeneficiaryTx({
     memberId: input.memberId,
     tx: input.tx,
@@ -1153,7 +1154,18 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
       tx: input.tx,
     });
   }
-  const priced = pricingDecision.priced;
+  const priced = operatorFunded
+    ? {
+        ...pricingDecision.priced,
+        costUsdMicros: 0n,
+        counted: false,
+        pricingSnapshot: {
+          ...pricingDecision.priced.pricingSnapshot,
+          fundingSource: "operator_task",
+          providerCostUsdMicros: pricingDecision.priced.costUsdMicros.toString(),
+        },
+      }
+    : pricingDecision.priced;
 
   const accounted = await input.tx.hostedAiUsage.updateMany({
     where: {
@@ -3888,4 +3900,25 @@ function buildUtcCalendarMonthPeriod(at: Date): {
     periodEnd,
     periodStart,
   };
+}
+
+/** The runtime's label alone cannot exempt member usage. */
+export async function isVerifiedOperatorTaskUsage(input: {
+  memberId: string;
+  record: AssistantUsageRecord;
+  tx: Pick<Prisma.TransactionClient, "hostedOperatorTask">;
+}): Promise<boolean> {
+  if (!input.record.operatorTaskId) return false;
+  const task = await input.tx.hostedOperatorTask.findUnique({
+    where: { id: input.record.operatorTaskId },
+    select: { memberId: true, createdAt: true, expiresAt: true, status: true, kind: true },
+  });
+  const occurredAt = new Date(input.record.occurredAt);
+  if (!task || task.memberId !== input.memberId
+    || !["diagnostic", "member_message"].includes(task.kind)
+    || !["running", "completed", "failed"].includes(task.status)
+    || occurredAt < task.createdAt || occurredAt > task.expiresAt) {
+    throw new TypeError("Operator-funded usage does not match an authorized task.");
+  }
+  return true;
 }

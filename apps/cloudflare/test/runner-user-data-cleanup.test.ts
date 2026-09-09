@@ -293,7 +293,7 @@ describe("hosted runner user data cleanup", () => {
       ok: true,
     });
     expect(requestedRunnerContainerNames).toEqual([slotName, slotName]);
-    expect(readStandbySlotBinding).toHaveBeenCalledOnce();
+    expect(readStandbySlotBinding).not.toHaveBeenCalled();
     expect(retireStandbySlot).toHaveBeenCalledTimes(2);
     expect(destroyInstance).not.toHaveBeenCalled();
     expect(stateStore.runnerContainerName).toBeNull();

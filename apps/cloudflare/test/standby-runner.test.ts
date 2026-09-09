@@ -221,10 +221,17 @@ describe("RunnerContainer slot lifecycle", () => {
     expect(harness.renewActivityTimeout).toHaveBeenCalledTimes(2);
 
     harness.setNativeStatus("stopped");
+    const cachedStatus = vi.spyOn(harness.container, "getState").mockClear()
+      .mockRejectedValue(new Error("cached status is unavailable"));
     await expect(harness.container.resolveRetainedStandbySlot(resolution))
       .resolves.toMatchObject({ claimId: null, state: "retired", userId: null });
     await expect(harness.container.readStandbySlotBinding()).resolves
       .toMatchObject({ claimId: null, state: "retired", userId: null });
+    expect(cachedStatus).not.toHaveBeenCalled();
+    expect(harness.destroy).not.toHaveBeenCalled();
+    await expect(harness.container.bindStandbySlot({
+      claimId, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName, userId: "member_123",
+    })).rejects.toThrow();
   });
 
   it("keeps a claimed slot assigned for foreign users or ambiguous liveness", async () => {
@@ -1233,7 +1240,11 @@ function createStandbyContainerHarness(input: {
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
   const slotName = createHostedRunnerSlotName(RELEASE_ID);
-  const container = new RunnerContainer({ ...state, id: { name: slotName } }, {
+  const container = new RunnerContainer({
+    ...state,
+    id: { name: slotName },
+    container: { get running() { return nativeStatus !== "stopped"; } },
+  }, {
     CF_VERSION_METADATA: { id: RELEASE_ID },
     HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: BUNDLE_FINGERPRINT,
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,

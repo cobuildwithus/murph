@@ -8,9 +8,6 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  hostedOnboardingError,
-} from "@/src/lib/hosted-onboarding/errors";
-import {
   readHostedActiveGroupRunningBit,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
 import {
@@ -38,7 +35,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeMailboxActiveAccess(userId);
+  const access = await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const prisma = getPrisma();
   const fetchedAt = new Date();
@@ -63,18 +60,34 @@ export const POST = withJsonError(async (request: Request) => {
     })),
     lanes: body.lanes,
   });
-  const usageRunningLow = conversationWorkPresent
-    ? await requireHostedRuntimeMailboxAiUsageAccess({
+  const usage = conversationWorkPresent
+    ? await readHostedRuntimeMailboxAiUsageAccess({
         consumedSeqByLane: projection.consumedSeqByLane,
         lanes: body.lanes,
         maxSeqByLane: projection.maxSeqByLane,
         prisma,
         userId,
       })
-    : false;
+    : { allowed: true, runningLow: false };
+  if (!usage.allowed) {
+    return jsonOk(parseHostedMailboxFetchResponse({
+      assistantProvider: access.assistantProvider,
+      consumedSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
+        consumedSeq: importedSeq,
+        lane,
+      })),
+      fetchedAt: fetchedAt.toISOString(),
+      items: [],
+      maxSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
+        lane,
+        maxSeq: importedSeq,
+      })),
+      userId,
+    }));
+  }
   // Sponsorship color is presentation for conversation imports only. An
   // empty, consumed-replay, or system-only batch cannot consume it.
-  const groupRunningBit = conversationWorkPresent
+  const groupRunningBit = conversationWorkPresent && access.isThreadContainer
     ? await readHostedActiveGroupRunningBit({
         now: fetchedAt,
         prisma,
@@ -83,7 +96,8 @@ export const POST = withJsonError(async (request: Request) => {
     : null;
 
   return jsonOk(parseHostedMailboxFetchResponse({
-    ...(usageRunningLow ? { conversationUsageStatus: "low" as const } : {}),
+    assistantProvider: access.assistantProvider,
+    ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
     ...(groupRunningBit ? { groupRunningBit } : {}),
     consumedSeqByLane: projection.consumedSeqByLane,
     fetchedAt: fetchedAt.toISOString(),
@@ -93,7 +107,7 @@ export const POST = withJsonError(async (request: Request) => {
   }));
 });
 
-async function requireHostedRuntimeMailboxAiUsageAccess(input: {
+async function readHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
   maxSeqByLane: Parameters<
@@ -101,14 +115,14 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   >[0]["lanes"];
   prisma: PrismaClient;
   userId: string;
-}): Promise<boolean> {
+}): Promise<{ allowed: boolean; runningLow: boolean }> {
   const gate = await resolveHostedRuntimeAiUsageGate({
     mode: "read_first",
     userId: input.userId,
   });
 
   if (gate.status === "allowed") {
-    return gate.usageRunningLow === true;
+    return { allowed: true, runningLow: gate.usageRunningLow === true };
   }
 
   await tryMarkHostedMailboxConversationAiUsageDenied({
@@ -122,9 +136,5 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
     userId: input.userId,
   });
 
-  throw hostedOnboardingError({
-    code: "HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED",
-    httpStatus: 403,
-    message: "Hosted runtime mailbox AI usage is denied.",
-  });
+  return { allowed: false, runningLow: false };
 }

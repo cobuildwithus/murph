@@ -80,6 +80,7 @@ import {
   readHostedSystemMailboxState,
   resolveHostedSystemMailboxHandledThroughSeq,
   resolveHostedSystemMailboxProgress,
+  resolveHostedSystemMailboxWakeCandidates,
   type HostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -4487,6 +4488,23 @@ describe("hosted system mailbox notification execution context", () => {
           retainMailboxItemUntil: retryAt, retainedWake,
         }, redactedLogEntries: [],
       });
+      if (allDeferred) {
+        const checkpoint = await readHostedSystemMailboxState(workspace.vaultRoot);
+        await restoreHostedSystemMailboxCheckpointRollbackState({ state: checkpoint, vaultRoot: workspace.vaultRoot });
+        for (const scope of [{ allowedRouteActions: ["run-device-sync-wake"] as const }, {
+          allowedRouteActions: ["run-device-sync-wake", "apply-runtime-control-request", "dispatch-assistant-notification"] as const,
+          allowedWakeKinds: ["device-sync.wake", "runtime.maintenance-requested", "assistant.notification.requested"] as const,
+        }]) {
+          const wake = await resolveHostedSystemMailboxWakeCandidates({
+            ...scope, now: () => admittedAt, vaultRoot: workspace.vaultRoot,
+          });
+          expect(wake).toMatchObject({
+            defaultOwned: { at: null, reason: null },
+            next: { at: admittedAt, executionClass: "model_free", reason: "device-sync.reconcile" },
+          });
+          expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(checkpoint);
+        }
+      }
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["run-device-sync-wake"], executionContext: null,
         now: () => admittedAt, retainProcessedItemUntilRecorded: true,
@@ -4801,6 +4819,13 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       });
       const before = await readHostedSystemMailboxState(workspace.vaultRoot);
+      if (deferred) {
+        const wake = await resolveHostedSystemMailboxWakeCandidates({
+          allowedRouteActions: ["run-device-sync-wake"], now: () => FIXED_NOW, vaultRoot: workspace.vaultRoot,
+        });
+        expect(wake.next.at).toBe(boundary === "other_connection" ? FIXED_NOW : "2026-04-28T00:00:00.000Z");
+        expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(before);
+      }
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["run-device-sync-wake"], executionContext: null,
         now: () => FIXED_NOW, retainProcessedItemUntilRecorded: true,
@@ -4856,6 +4881,15 @@ describe("hosted system mailbox notification execution context", () => {
           } }, vaultRoot: workspace.vaultRoot,
         });
         const before = await readHostedSystemMailboxState(workspace.vaultRoot);
+        if (!boundary.endsWith("prefix")) {
+          const wake = await resolveHostedSystemMailboxWakeCandidates({
+            ...(boundary === "route" ? { allowedRouteActions: ["apply-runtime-control-request" as const] } : {}),
+            ...(boundary === "wake" ? { allowedWakeKinds: ["runtime.maintenance-requested" as const] } : {}),
+            now: () => FIXED_NOW, vaultRoot: workspace.vaultRoot,
+          });
+          expect(wake.next.at).toBe(boundary === "route" || boundary === "wake" ? null : retryAt);
+          expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(before);
+        }
         const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
           ...(boundary === "route" ? { allowedRouteActions: ["apply-runtime-control-request" as const] } : {}),
           ...(boundary === "wake" ? { allowedWakeKinds: ["runtime.maintenance-requested" as const] } : {}),

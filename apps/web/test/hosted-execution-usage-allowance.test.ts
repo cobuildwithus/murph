@@ -5279,3 +5279,36 @@ function createGatePrisma(input: {
     },
   };
 }
+
+
+describe("operator-funded allowance accounting", () => {
+  it.each(["diagnostic", "member_message"])("records %s provider cost without spending allowance or credits, including replay", async (kind) => {
+    const updateMany = vi.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 });
+    const base = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: updateMany,
+      spentUsdMicros: 5000n,
+    });
+    const tx = { ...base, hostedOperatorTask: { findUnique: vi.fn().mockResolvedValue({
+      memberId: "member_123", kind, status: "completed",
+      createdAt: new Date("2026-03-29T11:59:00Z"), expiresAt: new Date("2026-03-29T12:09:00Z"),
+    }) } };
+    const input = { memberId: "member_123", now: new Date("2026-03-29T12:01:00Z"),
+      record: { ...BASE_USAGE_RECORD, requestedModel: "gpt-5.6-sol", servedModel: "gpt-5.6-sol", operatorTaskId: `opt_${"a".repeat(64)}` }, tx: tx as never };
+    await settleHostedAiUsageForAllowanceTx(input);
+    await settleHostedAiUsageForAllowanceTx(input);
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      allowanceCostUsdMicros: 0n, allowanceCounted: false,
+      allowancePricingSnapshotJson: expect.objectContaining({ fundingSource: "operator_task", providerCostUsdMicros: expect.any(String) }),
+    }) }));
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).not.toHaveBeenCalled();
+    expect(base.hostedAiUsagePeriod.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ spentUsdMicros: expect.anything() }) }));
+  });
+
+  it("rejects a task belonging to another member before allowance mutation", async () => {
+    const tx = { hostedOperatorTask: { findUnique: vi.fn().mockResolvedValue({ memberId: "member_other" }) } };
+    await expect(settleHostedAiUsageForAllowanceTx({
+      memberId: "member_123", record: { ...BASE_USAGE_RECORD, operatorTaskId: `opt_${"a".repeat(64)}` }, tx: tx as never,
+    })).rejects.toThrow("authorized task");
+  });
+});
