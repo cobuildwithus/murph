@@ -5,14 +5,14 @@ import {
 import { ingestCompanionMealPhoto } from "@/src/lib/device-sync/meal-photo-ingestion";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import {
-  requireActivePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   await assertHostedHistoricalLaunchConsentGranted({
     memberId: auth.member.id,
     prisma,
@@ -25,8 +25,7 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(await ingestCompanionMealPhoto({
     assertCurrentAuthorityTx: async (tx) =>
       await assertCurrentManualMealPhotoUploadAuthorityTx({
-        identityUserId: auth.identity.userId,
-        memberId: auth.member.id,
+        auth,
         prisma: tx,
       }),
     directRouteRequiredMessage:

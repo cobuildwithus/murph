@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => ({
   findAgentSession: vi.fn(),
   readJsonObject: vi.fn(async (request: Request) => await request.json()),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
-  requirePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
@@ -63,8 +63,8 @@ vi.mock("@/src/lib/http", async (importOriginal) => ({
   readJsonObject: mocks.readJsonObject,
 }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuthFromBearerToken:
-    mocks.requirePrivyMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken:
+    mocks.requireHostedMemberAuthFromBearerToken,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
@@ -120,7 +120,7 @@ describe("iMessage mini-app routes", () => {
     mocks.readJsonObject.mockImplementation(async (request: Request) =>
       await request.json()
     );
-    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member-1" },
     });
     mocks.upsertAgentSession.mockImplementation(async (input) => ({
@@ -167,7 +167,7 @@ describe("iMessage mini-app routes", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       prisma,
     );
@@ -216,7 +216,7 @@ describe("iMessage mini-app routes", () => {
     const responsePromise = enrollmentRoute.POST(request);
     await Promise.resolve();
 
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
 
     body.resolve({ schemaVersion: 1 });
@@ -341,7 +341,7 @@ describe("iMessage mini-app routes", () => {
         },
       });
       expect(readCredentialToken(body)).not.toBe(originalToken);
-      expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledTimes(1);
+      expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledTimes(1);
       expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenLastCalledWith({
         memberId: "member-1",
         prisma: transactionClient,
@@ -448,7 +448,7 @@ describe("iMessage mini-app routes", () => {
     ));
 
     expect(response.status).toBe(400);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 

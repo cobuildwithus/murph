@@ -12,6 +12,7 @@ import {
 } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
+import { assertHostedLegacyCredentialWriterTx } from "../better-auth/legacy-writer";
 import {
   HostedDomainRootPreparationMismatchError,
   type PreparedHostedDomainRootForWeb,
@@ -954,6 +955,7 @@ async function upsertHostedPrivyMemberIdentity(
   input: HostedMemberIdentityWriteInput,
 ): Promise<void> {
   try {
+    await assertHostedLegacyCredentialWriterTx(input.prisma, input.memberId);
     await upsertHostedMemberIdentity(input);
   } catch (error) {
     throw mapHostedMemberIdentityUniqueConstraintError(error);

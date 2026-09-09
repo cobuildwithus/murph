@@ -6,7 +6,7 @@ import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 import { assertBrowserVaultMemberAuthority } from "@/src/lib/browser-vault/authority";
 import { decodeReadyBrowserVaultSession, parseBrowserVaultSessionResponse } from "@/src/lib/browser-vault/loader";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActiveHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
@@ -16,7 +16,7 @@ import { getPrisma } from "@/src/lib/prisma";
 // persistence, or other vault data in the native response.
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
   const workspace = await readHostedWorkspace({ userId: auth.member.id });
   const replicaRef = parseHostedBrowserVaultReplicaRef(

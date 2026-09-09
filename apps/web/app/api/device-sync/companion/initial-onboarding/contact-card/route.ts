@@ -4,7 +4,7 @@ import {
 import { hostedOnboardingError } from
   "@/src/lib/hosted-onboarding/errors";
 import {
-  requireActivePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   jsonOk,
@@ -22,7 +22,7 @@ const CONTACT_CARD_REQUEST_FIELDS = new Set(["avatarId"]);
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   const body = await readJsonObject(request, {
     limitBytes: CONTACT_CARD_BODY_LIMIT_BYTES,
   });

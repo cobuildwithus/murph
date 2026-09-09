@@ -311,6 +311,7 @@ function makePrisma(input: {
   const prisma = {} as Prisma.TransactionClient;
 
   return Object.assign(prisma, {
+    hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
     $executeRaw: vi.fn().mockResolvedValue(1),
     hostedMemberEmailAuthorization: {
       findUnique: vi.fn().mockResolvedValue(input.authorization ?? null),

@@ -590,6 +590,7 @@ enum HostedPhysicalNoteFailureReason {
 }
 
 model HostedMember {
+  authRecords                    HostedAuthRecord[]
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
   usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
@@ -2525,4 +2526,33 @@ model HostedLinqContactCardShare {
   @@index([memberId])
   @@index([lastContactCardShareAttemptedAt])
   @@map("hosted_linq_contact_card_share")
+}
+
+/// Closed storage for the four enabled Better Auth models. Member truth remains
+/// in the canonical member/contact owners; selectors contain only blinded values.
+enum HostedAuthModel {
+  user
+  session
+  account
+  verification
+}
+
+model HostedAuthRecord {
+  model              HostedAuthModel
+  id                 String
+  memberId           String?         @map("member_id")
+  lookupKey          String?         @map("lookup_key")
+  secondaryLookupKey String?         @map("secondary_lookup_key")
+  payloadEncrypted   String          @map("payload_encrypted")
+  expiresAt          DateTime?       @map("expires_at")
+  createdAt          DateTime        @map("created_at")
+  updatedAt          DateTime        @map("updated_at")
+  member             HostedMember?   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([model, id])
+  @@unique([model, lookupKey])
+  @@unique([model, secondaryLookupKey])
+  @@index([model, memberId, id])
+  @@index([model, expiresAt, id])
+  @@map("hosted_auth_record")
 }

@@ -3058,6 +3058,9 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   prisma: T,
 ): T & CompleteHostedPrivyVerificationPrisma {
   const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
+  if (!("hostedAuthRecord" in prismaWithQueryRaw)) Object.defineProperty(prismaWithQueryRaw, "hostedAuthRecord", {
+    configurable: true, value: { findUnique: vi.fn().mockResolvedValue(null) },
+  });
   const routingRecordsByMemberId = new Map<string, Record<string, unknown>>();
   const hostedInvite = readHostedInviteDelegate(prismaWithQueryRaw.hostedInvite);
   const hostedMember = readHostedMemberDelegate(prismaWithQueryRaw.hostedMember);

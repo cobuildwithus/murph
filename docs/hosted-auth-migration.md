@@ -15,11 +15,53 @@ Use no planned service outage. Prefer natural compatibility drain over elaborate
 | PR | Usable result | Activation prerequisite | Temporary ownership |
 | --- | --- | --- | --- |
 | 1. Approval migration | Protected members enroll Murph passkeys and approve actions without wallet signatures | Real WebAuthn, storage, concurrency and enrollment proof; production RP qualified; compatible readers deployed before enrollment is enabled | Existing approved factor authorizes transition; old proof reader remains for unmigrated members |
-| 2. Better Auth and compatibility | Complete email/SMS/Telegram login for reconciled cohorts; new native protocol accepts requests | Adapter/privacy proof, same-member completion, delivery qualification, import reconciliation | Per-member monotonic handoff, local old-session reader, exact-route native bridge |
-| 3. Client adoption | New web defaults and native releases use Better Auth | New backend protocol works before any dependent app is distributed | Valid old browser sessions drain; supported old native clients retain bounded admission |
+| 2. Better Auth and compatibility | Email/SMS login and same-member session compatibility; new native protocol accepts requests | Adapter/privacy and same-member proof; deploy readers with issuance off until PR 3 is ready | Per-member monotonic handoff, local old-session reader, exact-route native bridge |
+| 3. Client adoption | Web/native clients, Telegram login and credential controls use Better Auth | All login methods and credential controls qualified; new backend works before dependent apps are distributed | Valid old browser sessions drain; supported old native clients retain bounded admission |
 | 4. Retirement | No supported client, live service or cleanup job needs Privy | All retirement gates below met | Remove temporary code, mappings, vendor configuration and obsolete schema |
 
 Four Murph PRs are integration boundaries. iOS and Android changes are reviewed in their own repositories and pinned to the corresponding backend protocol; native store publication is a separate event from merging code.
+
+## Backend configuration and deployment
+
+PR 2 is an additive compatibility release. Apply both additive schema migrations
+before its Web build reaches requests; old builds tolerate the new tables. Keep
+new issuance off while all current routes, historical executable deployments and
+recovery builds acquire the new readers and per-member writer guards. Do not
+activate PR 2 alone: PR 3 supplies the new login/settings clients, Telegram login,
+and credential-change/recovery journeys. Those must be usable before importing
+members or distributing a dependent native release.
+
+| Configuration | Purpose | Pause behavior |
+| --- | --- | --- |
+| `HOSTED_BETTER_AUTH_ENABLED=true` | Enable OTP send/verify, native exchange and importer apply; stop old full Privy completion | Unset/false pauses new issuance. Existing Better Auth sessions still read, renew and sign out. Handed-off members retain legacy-write guards. |
+| `HOSTED_PRIVY_NATIVE_ENABLED` | Default allows verified, already-bound legacy native principals | Exact `false` rejects old native tokens with an upgrade response; replacement tokens still work. Disable only after native recovery/adoption gates. |
+| `HOSTED_BETTER_AUTH_SECRET` | Independent canonical 32-byte base64url Better Auth signing secret | Retain while any replacement session exists. |
+| `HOSTED_AUTH_STORAGE_KEY` | Independent canonical 32-byte base64url pre-auth encryption and separated blind-lookup/rate-limit domains | Retain while auth records exist. Rotation needs a reviewed reindex/re-encryption procedure; do not replace it as a rollout toggle. |
+| `HOSTED_AUTH_EMAIL_FROM`, existing `RESEND_API_KEY` | OTP email delivery through the existing email owner | Qualify sender/delivery in hosted staging. |
+| `HOSTED_AUTH_TWILIO_ACCOUNT_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SECRET`, `HOSTED_AUTH_TWILIO_MESSAGING_SERVICE_SID` | Dedicated SMS sender credentials/configuration | Qualify service, destination coverage and fraud controls before exposing phone login. |
+
+All secret provisioning occurs through the reviewed hosted configuration path.
+Use the same stable values across compatible builds in one environment. The
+existing public base URL owns the auth origin. Production serves HTTPS and uses
+host-only Secure/HttpOnly/SameSite=Lax cookies; native endpoints reject Cookie
+headers. Vercel ingress supplies the client address for authentication budgets.
+No production secret is downloaded for local tests or previews.
+
+The closed route surface is `/api/auth/otp/send`, `/api/auth/otp/verify`,
+`/api/auth/session`, `/api/auth/logout` and `/api/auth/complete`. Native equivalents
+live below `/api/device-sync/companion/auth`, with an additional `/exchange` and
+existing companion admission for product bootstrap. No Better Auth catch-all
+handler is exposed. A successful browser OTP response sets only its cookie;
+native completion returns the prefixed bearer and sets no cookies. Session GET
+reads; POST renews. Renewal preserves the token and primary-auth time. Login
+commits before retryable product bootstrap, so billing/runtime projection errors
+do not lose a completed login.
+
+Before widening, prove hosted email/SMS delivery, same-member login, consent and
+billing continuations, settings recovery, cross-format logout and background
+native renewal. Issuance pause and legacy-admission disable have separate tests.
+These local proofs do not qualify actual KMS, provider deliverability, app-store
+upgrades or dormant devices.
 
 ## Approval migration
 
@@ -51,9 +93,32 @@ Use a bounded, resumable hosted importer with keyset pagination and explicit per
 
 Prepare provider reads and crypto outside transactions. Under existing contact/member locks, recheck the source fingerprints, current member and migration generation; atomically write the login projection and handoff outcome. The handoff is monotonic. No stale importer, completion handler, old settings route or operational helper may overwrite new credentials.
 
+The authenticated Ops endpoint `POST /api/ops/auth-migration` defaults to
+`{"mode":"dry-run"}`. It requires the existing operator allowlist, active
+browser session and mutation origin. Each request inspects at most five
+canonical members using one six-row keyset probe. Send the returned `next` as
+`after` for the next page; `{"mode":"apply"}` uses the same bounded scan and
+requires issuance enabled. Provider evidence and crypto preparation happen
+outside each short member/contact transaction. Applying twice is safe.
+
+Responses are private operator data: member IDs, a continuation and closed
+outcomes, never contacts or provider messages. `ready` is an inspection result;
+`imported` and `already_owned` are committed ownership. `conflict`, `unbound`,
+`suspended` and `unavailable` remain unresolved. A null continuation means only
+that this scan ended. Aggregate every page and repeat inspection after repairs;
+zero unresolved retained members and separately inventoried provider orphans
+are retirement gates. Do not copy response rows into PRs, docs or logs.
+
 Old settings code can mutate Privy before its Murph request succeeds. Database timestamps alone cannot detect this. Refresh exact provider evidence before handoff and reconcile remaining legacy-owned principals. If provider mutation cannot be reliably fenced, disputed credentials need account-bound proof before activation. Other users and existing sessions continue.
 
-Canonical deletion writes its migration tombstone atomically and removes authentication records. Tombstones refer to the old identity/import generation, not a permanent prohibition on future legitimate contact registration.
+Canonical deletion already establishes the FK-free encrypted provider-cleanup
+receipt before removing the member. Reuse that owner as the legacy-principal
+deletion fence; do not add another tombstone table. Auth user/account/session
+rows cascade with the canonical member. Import and native exchange recheck the
+receipt and member under commit locks, so a stale preparation cannot recreate
+a deleted member. Expired pre-auth OTP/rate-limit records drain through bounded
+hourly retention. A later independently verified new signup receives a new
+canonical member; it cannot resurrect the deleted one.
 
 ## Recovery and observation
 
@@ -85,3 +150,17 @@ Remove live Privy SDKs, verifiers, hooks, wallet code, native dependencies, CSP/
 Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. Native proof uses actual apps/devices, including skipped-version upgrades.
 
 Final completion also inspects dependency graphs/bundles, schema/catalog, deployed configuration, operational jobs and durable cleanup outcomes. Startup without Privy configuration and cold/warm login must work. Static source review or a grep result alone does not establish vendor retirement.
+
+## Source contracts
+
+The implementation is pinned to Better Auth 1.7.3 and exercises its installed
+adapter, OTP and session code. Public contracts: [adapter factory](https://better-auth.com/docs/guides/create-a-db-adapter),
+[email OTP](https://better-auth.com/docs/plugins/email-otp),
+[phone OTP](https://better-auth.com/docs/plugins/phone-number), and
+[sessions](https://better-auth.com/docs/concepts/session-management).
+SMS transport follows the [Twilio Message resource](https://www.twilio.com/docs/messaging/api/message-resource):
+bounded validity, discarded message content, obfuscated retained addresses and
+fraud checking. IP admission uses [Vercel request headers](https://vercel.com/docs/headers/request-headers).
+PR 3 must qualify [Telegram's current login contract](https://core.telegram.org/bots/telegram-login),
+including verified numeric user identity, nonce binding and one-use completion;
+the OIDC subject must not be assumed to equal the existing numeric bot user ID.

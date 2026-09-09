@@ -2859,6 +2859,25 @@ order.
 
 Hosted app-session cookies use a strict v2 session-id plus bearer format. The existing token-hash field stores a dedicated web-key HMAC over the session id, bearer, member id, Privy identity, and expiry, so Postgres write access alone cannot mint or retarget browser authority; legacy unsigned cookies are rejected.
 
+Better Auth owns the replacement primary-login/session protocol through
+`apps/web/src/lib/better-auth`. A closed adapter stores four library models in
+one encrypted table: member-bound users, accounts and sessions; independently
+encrypted pre-member verifications and rate limits. Blind selectors route reads,
+then the full authenticated record guards authority, including partial/count,
+transaction and bulk operations. Canonical member/contact writers compose with
+OTP consumption and session creation in one database-only transaction. Wrong
+codes commit their attempt budget; failures after proof roll back all writes.
+External delivery, provider reconciliation and crypto preparation precede locks.
+
+The auth-user row is the one-way writer handoff. Legacy completions cannot
+change handed-off credentials or issue old browser sessions. Existing valid v2
+browser cookies retain their local verifier and original expiry. Native routes
+classify the token before verification and never fall back from a failed new
+token; a temporary bridge exchanges only a verified, already-bound principal for
+the same member. Protected commits compare authenticated snapshots under locks.
+Current signup, consent, billing and admission owners remain shared. The rollout
+and eventual deletion of compatibility code belong to `docs/hosted-auth-migration.md`.
+
 Approval passkeys live with the sensitive-action owner. One encrypted aggregate
 per canonical member holds at most eight WebAuthn credentials; the existing
 member crypto owner binds its confidentiality and integrity. Browser options

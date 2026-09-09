@@ -168,6 +168,7 @@ describe("hosted signup timezone handoff", () => {
       });
 
     const prisma = {
+      hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
         memberResolutionTransactionOpen = true;
         sequence.push("member-resolution:start");
@@ -243,6 +244,7 @@ describe("hosted signup timezone handoff", () => {
   it("leaves inactive signup notification context empty when request capture is omitted", async () => {
     let signupNotificationContextEncrypted: string | null = null;
     const prisma = {
+      hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback(prisma)),
       hostedMember: {
@@ -310,6 +312,7 @@ describe("hosted signup timezone handoff", () => {
       member: MEMBER,
     });
     const prisma = {
+      hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback(prisma)),
       hostedMember: {

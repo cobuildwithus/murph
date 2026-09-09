@@ -29,9 +29,9 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
   requireActiveMealPhotoCaptureEnrollment: vi.fn(),
-  requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireActiveHostedMemberAuthFromBearerToken: vi.fn(),
   requireMealPhotoCaptureScopedToken: vi.fn(),
-  requirePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
   revokeMealPhotoCaptureEnrollmentForMember: vi.fn(),
   revokeMealPhotoCaptureEnrollmentForScopedToken: vi.fn(),
   runWithHostedDomainRootProviderCallsDisabled: vi.fn(),
@@ -70,9 +70,9 @@ vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuthFromBearerToken:
-    mocks.requireActivePrivyMemberAuthFromBearerToken,
-  requirePrivyMemberAuthFromBearerToken: mocks.requirePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken:
+    mocks.requireActiveHostedMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken: mocks.requireHostedMemberAuthFromBearerToken,
 }));
 
 vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
@@ -178,11 +178,11 @@ describe("meal photo companion routes", () => {
     mocks.runWithFreshHostedDomainRootUnwrapCache.mockImplementation(
       async (operation: () => unknown) => operation(),
     );
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockResolvedValue({
       identity: { userId: "privy_member_1" },
       member: { id: MEMBER_ID },
     });
-    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: MEMBER_ID },
     });
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
@@ -290,7 +290,7 @@ describe("meal photo companion routes", () => {
       idempotencySecret: "idempotency-secret",
       uploadToken: "scoped-upload-token",
     });
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       expect.anything(),
     );
@@ -452,7 +452,7 @@ describe("meal photo companion routes", () => {
       prisma: expect.anything(),
       token: "scoped-upload-token",
     });
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
   });
 
   it("activates a prepared credential through an exact bodyless scoped PUT", async () => {
@@ -469,7 +469,7 @@ describe("meal photo companion routes", () => {
       prisma: expect.anything(),
       token: "scoped-upload-token",
     });
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
   });
 
   it("keeps identity-authenticated revocation available without active billing", async () => {
@@ -482,11 +482,11 @@ describe("meal photo companion routes", () => {
     const response = await enrollmentRoute.DELETE(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       expect.anything(),
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.revokeMealPhotoCaptureEnrollmentForMember).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.anything(),
@@ -593,7 +593,7 @@ describe("meal photo companion routes", () => {
     });
   });
 
-  it("accepts manual photos with Privy identity authority independent of enrollment", async () => {
+  it("accepts manual photos with current member login authority independent of enrollment", async () => {
     const request = new Request("https://app.example.test/meal-photos", {
       body: requestBody(JPEG),
       method: "POST",
@@ -602,7 +602,7 @@ describe("meal photo companion routes", () => {
 
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({ accepted: true, duplicate: false });
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       expect.anything(),
     );
@@ -622,8 +622,7 @@ describe("meal photo companion routes", () => {
       }),
     );
     expect(mocks.assertCurrentManualMealPhotoUploadAuthorityTx).toHaveBeenCalledWith({
-      identityUserId: "privy_member_1",
-      memberId: MEMBER_ID,
+      auth: { identity: { userId: "privy_member_1" }, member: { id: MEMBER_ID } },
       prisma: { label: "tx" },
     });
     expect(

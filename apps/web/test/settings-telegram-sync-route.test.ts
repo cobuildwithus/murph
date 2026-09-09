@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   prismaClient: {
     label: "test-prisma",
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn(),
   },
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
