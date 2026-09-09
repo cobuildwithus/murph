@@ -772,6 +772,9 @@ type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" 
 const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   Record<string, HostedExecutionDeviceSyncHintPayloadFieldKind>
 > = Object.freeze({
+  calendarRefreshDay: "string",
+  companionAdmissionId: "string",
+  companionObservationJson: "string",
   dataType: "string",
   emptyBackfillAttempts: "number",
   eventType: "string",
@@ -793,8 +796,11 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   sourceLifecycleEpoch: "number",
   resourceId: "string",
   resourceType: "string",
+  silentSinceAt: "isoTimestamp",
   sourceEventType: "string",
+  sourceInstanceId: "string",
   sourceProviderSlug: "string",
+  sourceType: "string",
   summaryPhaseComplete: "boolean",
   summaryResourceCursor: "string",
   temporalAuthorityTimeZone: "string",

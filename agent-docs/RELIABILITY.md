@@ -1576,6 +1576,10 @@ Last verified: 2026-09-04
   continuation while persisting the system mailbox, emit
   `mailbox.system_processed` with `retryable_failed`, invocation context,
   mailbox sequence, and sanitized error text before retaining the prior work.
+  The hosted wake reader accepts every manifest-owned field emitted into job
+  hints, including calendar refresh, source identity, companion admission, and
+  silent-source recovery fields. Producer-to-reader round trips must preserve
+  those fields; rejecting valid continuation data replays the preceding wake.
   For `JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE`, the existing failed-attempt
   event may also carry `junctionEcgBindingReason`, checked against the same
   finite service-owned reason set before generic log sanitization. Missing,
