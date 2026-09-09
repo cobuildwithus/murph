@@ -131,3 +131,15 @@ Use existing assistant-runtime workspace/entrypoint suites, Cloudflare runtime a
   requires the updated worker and runtime. Old warm consumers keep default
   ownership and durable queued recovery. Deployment and rollback are separate
   authorized operations, not part of this task.
+
+## Exact-head CI fixture follow-up
+
+- The first CI runtime coverage pass exposed lane-agnostic fetch assertions and
+  a scheduling fixture that depended on uncancelled system staging after its
+  model phase returned. All 90 tests in those three files pass on the baseline.
+- Reused the existing conversation-cursor helper, bounded added system fetches,
+  and held the retry scenario until its required staging event. Original cursor,
+  retry-before-checkpoint, and quiet-window assertions remain intact.
+- All 90 tests now pass on the candidate; assistant-runtime typecheck passes.
+  This follow-up changes only tests and this plan. The 213-test final runner,
+  composed delivery, and phase run also passed before the first push.

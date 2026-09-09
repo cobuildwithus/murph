@@ -2446,6 +2446,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                   laneSeq: "1",
                 }));
                 runtimeWakeSignal.notify(Date.now());
+                // This scenario requires a staged retry before checkpointing.
+                // Hold the model phase until staging; delivery may now cancel it.
+                await trustedCompletionRetryFailed.promise;
               }
               if (checkpointAssistantInputRetry) {
                 mailboxItems.push(createMailboxItem({
