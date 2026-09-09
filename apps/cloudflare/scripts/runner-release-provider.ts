@@ -201,7 +201,7 @@ export function createRunnerReleaseProvider(input: {
       await request("Start application rollout", `${pathname}/rollouts`, "POST", {
         description: "Update runner image", strategy: "rolling", kind: "full_auto",
         ...(typeof steps === "number" ? { step_percentage: steps }
-          : { steps: steps.map(percentage => ({ step_size: { percentage } })) }),
+          : { steps: steps.map(percentage => ({ step_size: { percentage }, description: `Roll out to ${percentage}% of instances` })) }),
         target_configuration: input.specification.configuration,
       });
       return "modified";

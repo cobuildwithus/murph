@@ -304,7 +304,7 @@ describe("single-fleet rollout recovery", () => {
       ? { ...live, configuration: { ...configuration, image: "old-image" } } : {}));
     await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, rolloutStepPercentage: [10, 25, 50, 100] });
     expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PATCH", "POST"]);
-    expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ strategy: "rolling", kind: "full_auto", steps: [10, 25, 50, 100].map(percentage => ({ step_size: { percentage } })) });
+    expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ strategy: "rolling", kind: "full_auto", steps: [10, 25, 50, 100].map(percentage => ({ step_size: { percentage }, description: expect.any(String) })) });
   });
 
   it.each([0, 1, 2])("accounts for smoke and every other application before expansion (other=%s)", async others => {
