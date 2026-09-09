@@ -59,9 +59,7 @@ export async function recordHostedProductFeedback(input: {
     return await persistHostedProductFeedback({
       feedback,
       feedbackId,
-      memberId: await resolveOrdinaryHostedProductFeedbackMemberId(
-        input.memberId,
-      ),
+      memberId: input.memberId?.trim() || null,
     });
   }
   if (!isHostedProductSupportEscalationFeedback(feedback)) {
@@ -270,25 +268,6 @@ export function buildHostedProductFeedbackId(input: {
     .digest("hex")
     .slice(0, 32);
   return `product_feedback_${digest}`;
-}
-
-async function resolveOrdinaryHostedProductFeedbackMemberId(
-  memberId: string | null | undefined,
-): Promise<string | null> {
-  const normalizedMemberId = memberId?.trim();
-  if (!normalizedMemberId) {
-    return null;
-  }
-
-  // Group callbacks are bound to a synthetic hosted member row, not the human
-  // speaker who expressed the feedback. Keep those rows anonymous rather than
-  // making the synthetic runtime look like a messageable person.
-  const threadContainer = await getPrisma().hostedThreadContainer.findUnique({
-    select: { memberId: true },
-    where: { memberId: normalizedMemberId },
-  });
-
-  return threadContainer ? null : normalizedMemberId;
 }
 
 async function persistHostedProductFeedback(input: {

@@ -1677,10 +1677,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   6pm Eastern hour and sends one daily internal product-feedback digest through
   that existing Resend transport. Web reads its owned
   `HostedProductFeedback` rows from the prior 6pm-to-6pm window for the three
-  server-allowlisted product-feedback kinds. It uses each displayed private
-  row's server-controlled internal member id only as an in-memory grouping key,
-  renders neutral ordinal member headings with fixed kind labels nested inside,
-  and moves every unlinked groupchat or anonymous row into one final section.
+  server-allowlisted product-feedback kinds. Ordinary feedback retains the
+  callback-bound private member or group-container member in the existing nullable
+  `member_id` column; the model cannot select linkage. Linked rows follow the
+  existing member deletion cascade, while historical unlinked rows remain anonymous.
+  The digest uses each displayed row's server-controlled internal member id only
+  as an in-memory grouping key, renders neutral ordinal `Member / group` headings
+  with fixed kind labels nested inside, and moves every unlinked groupchat or
+  anonymous row into one final section.
   The member ids themselves never enter the email body. A grouped aggregate
   retains truthful per-kind totals, while the deterministically ordered row read stays capped at a fixed
   limit and reports omitted remainders by kind without trying to attribute
