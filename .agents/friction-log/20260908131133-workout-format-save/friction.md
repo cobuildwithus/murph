@@ -1,6 +1,7 @@
 ---
 title: 'Workout format save help advertises an invalid type and omits allowed modes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3072'
 ---
 
 ## Expected Behavior

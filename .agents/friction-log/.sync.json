@@ -727,6 +727,14 @@
     {
       "issue": "cobuildwithus/murph#3001",
       "path": ".agents/friction-log/20260906122612-package-test-argument/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3011",
+      "path": ".agents/friction-log/20260906123909-health-screenshot-studies/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3012",
+      "path": ".agents/friction-log/20260906154117-design-catalog-date/friction.md"
     }
   ],
   "version": 1

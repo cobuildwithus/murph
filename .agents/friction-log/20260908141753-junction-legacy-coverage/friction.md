@@ -1,6 +1,7 @@
 ---
 title: 'Junction legacy coverage test omits historical introspection fixture'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3073'
 ---
 
 ## Expected Behavior
