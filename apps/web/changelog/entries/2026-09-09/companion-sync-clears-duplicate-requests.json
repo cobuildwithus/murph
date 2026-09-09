@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Companion sync clears duplicate requests",
     "summary": "Companion health updates no longer leave duplicate sync requests waiting behind older device retries.",
-    "details": "Duplicate requests can resume even when an older device retry is scheduled for later. Pending device jobs keep their retry history, and newer health updates stay queued until they are safely processed.",
+    "details": "Duplicate requests can resume after a restart even when an older device retry is scheduled for later. Pending device jobs keep their retry history, and newer health updates stay queued until they are safely processed.",
     "relevanceTags": ["device-sync", "reliability"],
     "sourcePullRequests": [3095, 3096]
   }

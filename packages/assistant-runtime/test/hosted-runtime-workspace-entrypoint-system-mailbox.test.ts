@@ -1612,7 +1612,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(result.status, retainedRetry ? "scheduled" : "idle");
       if (retainedRetry) {
         assert.ok(result.nextWakeAt);
-        assert.ok(Date.parse(result.nextWakeAt) > Date.parse(TEST_NOW));
+        if (schedule === "equal") assert.equal(result.nextWakeAt, TEST_NOW);
+        else assert.ok(Date.parse(result.nextWakeAt) > Date.parse(TEST_NOW));
         assert.ok(Date.parse(result.nextWakeAt) < Date.parse(retryAt));
         assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 0);
       } else {
@@ -1624,7 +1625,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(pending.length, schedule === "equal" ? 2 : 1);
         assert.equal(pending[0]?.itemId, deviceItem.id);
         assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
-        assert.equal(pending[0]?.nextAttemptAt, result.nextWakeAt);
+        if (schedule === "equal") {
+          assert.ok(Date.parse(pending[0]?.nextAttemptAt ?? "") > Date.parse(TEST_NOW));
+        } else assert.equal(pending[0]?.nextAttemptAt, result.nextWakeAt);
         assert.deepEqual(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.jobs : null, futureJobs);
         assert.deepEqual(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["1"]);
       } else {
@@ -1646,7 +1649,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(canonicalNextReconcileAt, TEST_NOW);
         assert.ok(result.nextWakeAt);
         vi.setSystemTime(new Date(result.nextWakeAt));
-        await runPass();
+        const drained = await runPass();
         // The schedule was retired at acknowledgement. The next cold admission
         // fetches the retained webhook and leaves the history retry untouched.
         const continued = (await readHostedSystemMailboxState(vaultRoot)).pending;
@@ -1656,6 +1659,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 0);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
         assert.equal(canonicalNextReconcileAt, TEST_NOW);
+        assert.ok(Date.parse(drained.nextWakeAt ?? "") > Date.parse(TEST_NOW));
+        const drainedFetchCount = fetchDirtyStatesCalls;
+        await runPass();
+        assert.equal(fetchDirtyStatesCalls, drainedFetchCount);
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, continued);
         vi.setSystemTime(new Date(retryAt));
         await runPass();
         assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
