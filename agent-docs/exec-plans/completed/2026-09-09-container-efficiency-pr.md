@@ -1,6 +1,6 @@
 # Prepare measured runtime efficiency improvements for merge
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -104,5 +104,23 @@ Follow-up commands/results, accepted changes, and final gates will be recorded h
   `packages/core/bench/container-sizing.md`. All task benchmark containers removed;
   no OOM kills. Large restore fixture leaves insufficient evidence for production
   headroom with resident Codex children, so fleet downsizing remains unapproved.
-- PR #3116 is draft until the final candidate is committed and its body updated.
-  ReviewGPT, final exact-head required CI, plan closure and mergeability are pending.
+- PR #3116 candidate `da1688134d` completed the full GPT-6 Pro review with PASS,
+  no findings, verified exact turn/model/hash, and approximately 645 seconds to
+  capture. Three user-requested foreground context, foreground-over-sync and
+  snapshot/query audits completed with no introduced defect; each identified a
+  direct latency-evidence gap, not a code finding. Production downsizing and a
+  zero-added-tail-latency claim remain unsupported.
+- Initial PR CI: native 1-vCPU / 6-GiB runner comparison, all release test/coverage
+  shards, Cloudflare, hosted Web, host matrix, billing and foreground cardinality
+  passed. Build/typecheck's logging guard flagged only the benchmark's inline
+  prompt hash; all typechecks themselves passed. Hoisting that digest outside the
+  log call changes no output, measurement or production source. Guard/typecheck
+  and one additional 1-vCPU / 3-GiB six-phase context proof pass after correction;
+  that container exited without OOM and was removed.
+- Parent triage found no accepted review findings and no justified production
+  remediation. The final follow-up is limited to benchmark logging and explanatory
+  evidence/plan closure, which use the review loop's non-runtime exemption.
+- Final exact-head CI and current-base mergeability remain the PR handoff gates;
+  results will be recorded in the PR after this completion commit. No merge or
+  production deployment is part of this task.
+Completed: 2026-09-09

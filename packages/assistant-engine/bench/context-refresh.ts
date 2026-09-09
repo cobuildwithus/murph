@@ -149,6 +149,7 @@ async function measureRefresh(
   await delay(10)
   loop.disable()
   const { state, prompt, degraded } = await readVerifiedSnapshot(budget, domains, result)
+  const semanticSha256 = createHash('sha256').update(prompt ?? '').digest('hex')
   console.log(JSON.stringify({
     stage, variant, budget, continuationChecks, wallMs,
     cpuMs: (used.user + used.system) / 1000,
@@ -161,7 +162,7 @@ async function measureRefresh(
     lastCompletedSourceDirtySequence: state?.lastCompleted?.sourceDirtySequence ?? null,
     dirtySequence: state?.dirtySequence ?? null,
     refreshAttemptErrorCode: state?.lastRefreshAttempt?.errorCode ?? null,
-    semanticSha256: createHash('sha256').update(prompt ?? '').digest('hex'),
+    semanticSha256,
   }))
 }
 

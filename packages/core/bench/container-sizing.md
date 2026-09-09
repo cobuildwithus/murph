@@ -113,6 +113,67 @@ three successful query containers, and eight successful import/control container
 None reported an OOM kill and none remain. Heavy Docker comparisons were serialized;
 the shared host and emulation still introduce measurement variation.
 
+### Native PR CI and external review
+
+The native runner budget job passed three alternating samples per revision on
+Linux x86_64 with 1 vCPU / 6 GiB, network disabled. It compared base
+`6730a3d6776b5799bb741a3604d8bddc7b950957` with merge candidate
+`358f215cb59cae1369295f102f98ad7ec3cc07e8`, whose proven second parent is PR head
+`da1688134d7cb83bbb9a29db4b696197bb6f55ff`.
+
+| Median | Base | Merge candidate |
+| --- | ---: | ---: |
+| Boot CPU | 989.505 ms | 981.039 ms |
+| Boot wall | 898 ms | 931 ms |
+| 8,000-event seed CPU | 1,011.543 ms | 972.060 ms |
+| 8,000-event seed wall | 1,049.130 ms | 961.290 ms |
+| New import CPU | 307.474 ms | 273.314 ms |
+| New import wall | 322.940 ms | 293.498 ms |
+
+All six runs passed canonical readback and identical semantic hashes for new,
+disjoint, replay and correction scenarios. Boot wall increased 33 ms (3.7%) while
+its CPU decreased slightly; a passing regression budget is not zero added latency.
+Base boot wall samples were 852, 898 and 907 ms; corresponding candidate samples
+were 931, 887 and 949 ms. The candidate ran second in the two slower pairs and
+first in the faster pair. These overlapping ranges suggest an order effect but
+do not establish its cause or clear the latency uncertainty.
+Boot covers packaged hydration and `/health`. Every import sample used
+`liveSignal: false`. This lane does not prove foreground service interruption,
+context refresh, provider start/delivery, or 3-GiB memory headroom.
+
+The full GPT-6 Pro PR review of that authored head returned PASS with no qualifying
+findings. Exact-turn and response-model metadata matched the requested model;
+the response file was captured about 645 seconds after waiting began, after the
+waiter's ten-minute refresh. The reviewer inspected all
+40 changed files, ran nine bounded archive probes and the four resource-probe
+tests, and did not rerun the full workspace suites. Three additional GPT-6 Pro
+audits covered foreground context, foreground-over-sync, and snapshot/query work.
+All completed with matching model/turn/hash evidence and no qualifying introduced
+defect. Each returned `LATENCY_REVIEW_OUTCOME: EVIDENCE_GAP`: the code review was
+complete, but accepted-message-to-provider and durable-reply latency at the
+smaller shape was not established. This is not a missing-snapshot review failure
+or approval of downsizing.
+
+The context audit confirmed that the 64-check foreground refresh cannot reach
+the new yield before physical line 257; group turns skip this private refresh.
+The changed owners add no database or provider operation. They do add synchronous
+observation-relevance checks, an async text-reader wrapper, and scheduling points
+in full/background scans and import preparation. Those points allow cancellation
+to run while the canonical lock is still held; they do not release the lock.
+Full-file read/decompression, normalization and entered canonical publication
+remain latency boundaries. No speculative production fix was justified by these
+reviews. A fixed-arrival native/hosted base/head comparison must cover actual
+mailbox demand, service cancellation, lock release, provider request and durable
+reply handoff before claiming unchanged foreground tail latency.
+
+Initial CI found one independent failure: the logging guard could not recognize
+an inline hash of the synthetic context prompt. Computing the digest before the
+log call preserves emitted bytes and timing while making the metadata boundary
+explicit. The corrected guard and assistant-engine typecheck pass. One additional
+1-vCPU / 3-GiB small-context container completed all six phases with identical
+context hashes, exited successfully without OOM and was removed. This proof-only
+correction changes no production source; its final exact-head CI remains pending.
+
 ## Question and method
 
 Compare the current custom 2-vCPU / 6-GiB runner with 1 vCPU / 3 GiB while
