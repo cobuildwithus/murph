@@ -396,6 +396,8 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         allowedRouteActions: input.allowedRouteActions ?? null,
         now: startedAt,
         state: selectionState,
+      }) ?? findHostedDeferredDirtyHintOwner({
+        continuationItemIds, eligibleItemIds, now: startedAt, selectionState, state,
       });
       if (!pending) {
         const compacted = retireHostedCoveredDeviceScheduleHints({
@@ -763,6 +765,30 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
     itemId: input.prepared.itemId,
     status: "preempted",
   };
+}
+
+function findHostedDeferredDirtyHintOwner(input: {
+  continuationItemIds: ReadonlySet<string>;
+  eligibleItemIds: ReadonlySet<string>;
+  now: string;
+  selectionState: HostedSystemMailboxState;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxPendingItem | null {
+  for (const owner of input.selectionState.pending) {
+    if (!input.continuationItemIds.has(owner.itemId)
+      || owner.nextAttemptAt === null
+      || systemMailboxItemIsDue(owner, input.now)
+      || Date.parse(owner.occurredAt) > Date.parse(input.now)) continue;
+    const remainingIds = new Set(collapseHostedRetainedDeviceSyncWakeHints({
+      now: input.now, pending: input.state.pending, selected: owner,
+    }).map((item) => item.itemId));
+    // An old owner deferral must not strand a now-retirable dirty hint. Admit
+    // its existing owner to fetch canonical work, preserving exact job retries.
+    if (input.state.pending.some((item) => input.eligibleItemIds.has(item.itemId)
+      && item.wake.kind === "device-sync.wake" && item.wake.reason === "webhook_hint"
+      && !remainingIds.has(item.itemId))) return owner;
+  }
+  return null;
 }
 
 function retireHostedCoveredDeviceScheduleHints(input: {
