@@ -4348,7 +4348,11 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it.each([false, true])("drains admitted wake hints across checkpoint restore (new dirty revision: %s)", async (newerDirtyRevision) => {
+  it.each([false, true].flatMap((newerDirtyRevision) =>
+    [undefined, "companion_health_metadata", "companion_hrv_rmssd"].map((hintReason) =>
+      ({ newerDirtyRevision, hintReason })
+    )
+  ))("drains admitted wake hints across checkpoint restore (new dirty revision: $newerDirtyRevision, reason: $hintReason)", async ({ newerDirtyRevision, hintReason }) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_synthetic_retained_drain";
     const retryAt = "2026-04-28T00:00:00.000Z";
@@ -4382,7 +4386,8 @@ describe("hosted system mailbox notification execution context", () => {
           connectionId, eventId: `device-sync.wake:synthetic-hint-${index}`,
           expectedConnectedAt, occurredAt: FIXED_NOW, provider: "junction",
           reason, userId: "member_123",
-          ...(reason === "reconcile_due" ? { hint: { nextReconcileAt: FIXED_NOW } } : {}),
+          hint: reason === "reconcile_due" ? { nextReconcileAt: FIXED_NOW }
+            : { reason: hintReason },
         });
         await enqueueHostedSystemMailboxItem({
           item: createResolvedDeviceSyncItem({ dedupeKey: wake.eventId,
@@ -4661,7 +4666,7 @@ describe("hosted system mailbox notification execution context", () => {
   });
 
   it.each([
-    "epoch", "manual", "jobs", "attempted", "recording", "disconnect",
+    "epoch", "manual", "jobs", "scopes", "revoke", "unknown_reason", "attempted", "recording", "disconnect",
     "reauthorization", "connected", "future_schedule", "equal_schedule", "undated_schedule", "unbound_owner", "other_connection",
   ])("preserves %s work when a retained device owner admits hints", async (boundary) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
@@ -4679,6 +4684,9 @@ describe("hosted system mailbox notification execution context", () => {
     if (boundary === "epoch") candidate.expectedConnectedAt = "2026-04-02T00:00:00.000Z";
     if (boundary === "manual") { candidate.reason = "reconcile_due"; candidate.hint = { reason: "manual_reconcile" }; }
     if (boundary === "jobs") candidate.hint = { jobs: [{ kind: "resource", dedupeKey: "synthetic-distinct-job" }] };
+    if (boundary === "scopes") candidate.hint = { reason: "companion_health_metadata", scopes: [] };
+    if (boundary === "revoke") candidate.hint = { reason: "companion_hrv_rmssd", revokeWarning: { code: "synthetic_warning", message: "Synthetic warning" } };
+    if (boundary === "unknown_reason") candidate.hint = { reason: "synthetic_unrecognized_reason" };
     if (boundary === "disconnect") candidate.reason = "disconnected";
     if (boundary === "reauthorization") candidate.reason = "reauthorization_required";
     if (boundary === "connected") candidate.reason = "connected";

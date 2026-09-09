@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 200,
+  "item": {
+    "id": "companion-sync-clears-duplicate-requests",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Companion sync clears duplicate requests",
+    "summary": "Companion health updates no longer leave duplicate sync requests waiting behind older device retries.",
+    "details": "Pending device jobs keep their retry history, and newer health updates stay queued until they are safely processed.",
+    "relevanceTags": ["device-sync", "reliability"],
+    "sourcePullRequests": [3095]
+  }
+}

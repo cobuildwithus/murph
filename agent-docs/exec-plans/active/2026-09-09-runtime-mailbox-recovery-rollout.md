@@ -111,3 +111,20 @@ Keep the same sixteen-value limit and fixed-value allowlist; disclose no payload
 values and change no scheduling or acknowledgement behavior. Six synthetic
 shape cases fail before this addition. Direct checkpoint, invocation, and log
 wire-parser coverage must pass before exact-head review, CI, and deployment.
+
+## Companion dirty-hint recovery
+
+The companion metadata and RMSSD producers persist work through the same dirty
+state and payload owner as webhook imports, but label their hints with two
+distinct reasons. The mailbox plain-hint predicate accepts neither reason, so
+an admitted retained owner leaves these otherwise redundant hints queued behind
+its next retry. Four checkpoint/restore regressions reproduce that difference
+with the two canonical producer reasons, acknowledgement retry, and a newer
+dirty revision; the ordinary hint controls pass.
+
+Recognize those two existing reasons in the shared plain-hint reason predicate
+and use that predicate in diagnostics. Preserve explicit jobs, scopes, revoke
+warnings, unknown reasons, epoch barriers, active retry work, and checkpoint
+acknowledgement. Do not infer incident recovery from this synthetic proof: verify
+the diagnostic release against the original cohort and then verify the reviewed
+fix after its protected deployment. The overall recovery plan remains active.

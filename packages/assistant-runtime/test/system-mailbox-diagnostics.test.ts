@@ -70,12 +70,14 @@ describe("mailbox blocker diagnostics", () => {
     },
   );
 
-  it.each(["plain", "jobs", "scopes", "revoke", "reason", "record"])(
+  it.each(["plain", "companion-metadata", "companion-hrv", "jobs", "scopes", "revoke", "reason", "record"])(
     "identifies non-scheduled hint shape without exposing values (%s)", (condition) => {
       const head = device("2");
       if (head.wake.kind !== "device-sync.wake") throw new Error("Invalid synthetic fixture");
       head.wake.reason = "webhook_hint";
       head.wake.hint = { reason: "webhook_dirty_transition" };
+      if (condition === "companion-metadata") head.wake.hint.reason = "companion_health_metadata";
+      if (condition === "companion-hrv") head.wake.hint.reason = "companion_hrv_rmssd";
       if (condition === "jobs") head.wake.hint.jobs = [{ kind: "synthetic-private-job" }];
       if (condition === "scopes") head.wake.hint.scopes = [];
       if (condition === "revoke") head.wake.hint.revokeWarning = {
@@ -91,7 +93,7 @@ describe("mailbox blocker diagnostics", () => {
         continuationSeqs: [], firstPendingSeq: "2", now: NOW, state,
       });
       expect(result).toEqual(expect.arrayContaining([
-        `headPlainHint=${condition === "plain"}`,
+        `headPlainHint=${condition === "plain" || condition.startsWith("companion-")}`,
         `headHasJobs=${condition === "jobs"}`,
         `headScopesPresent=${condition === "scopes"}`,
         `headRevokeWarningPresent=${condition === "revoke"}`,
