@@ -6,7 +6,10 @@ import {
   readRequestBodyText,
   unauthorized,
 } from "../json.ts";
-import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
+import {
+  fetchHostedExecutionWebControlPlaneResponse,
+  readHostedSnapshotResponseHeaderMetadata,
+} from "../web-control-plane.ts";
 import {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
@@ -289,6 +292,10 @@ export async function handleRunnerWebControlRequest(input: {
       method,
       operation: policy.operation,
       ...responseBodyMetadata,
+      ...readHostedSnapshotResponseHeaderMetadata(
+        response,
+        isDeviceSyncRuntimeSnapshotRequest,
+      ),
       responseOk: response.ok,
       responseStatus: response.status,
       responseType: response.type,

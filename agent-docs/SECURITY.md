@@ -1506,9 +1506,14 @@ locally readable.
   fact. The container's immutable binding is the sole opaque-name-to-member mapping
   for both warm and cold allocations. Legacy ENAM targets preserve their original
   region and namespace; new global targets must never be parsed as member names.
-  Before provider credential minting, invocation, wake, or cleanup, the
-  per-member owner must re-read that binding and require the exact member,
-  release, region, and slot. A claimed slot is never reusable across members;
+  Before provider credential minting, the per-member owner must verify the exact
+  member, release, region, and slot. Fenced preparation may reuse the immutable
+  binding receipt from allocation or retained-slot resolution in that same
+  request; otherwise it reads the binding. Invocation and wake still authorize
+  the live binding inside the slot owner. Cleanup sends the exact slot and member
+  to that owner, which validates them before retirement and acknowledges only
+  after native destruction and durable identity scrubbing. A successful
+  acknowledgement needs no binding readback. A claimed slot is never reusable across members;
   terminal retirement destroys the container and scrubs claim/member identity.
   Codex standby preflight uses a disposable content-free home and must not make
   a provider request or retain a resident member-configured App Server.
@@ -1649,3 +1654,22 @@ expiry owner without disclosure metadata or a review turn. A message is restrict
 route; Web reauthorizes the member-bound task immediately before model work and
 again at the normal notification/outbox boundary. Neither path creates
 first-contact or group-delivery authority.
+
+
+Feedback diagnostic admission accepts only a feedback id and bounded question
+under existing Ops authentication and same-origin mutation checks. The server
+selects and transactionally verifies existing member linkage; callers cannot
+supply another target. Unlinked and group feedback cannot infer a private
+workspace. A server-returned feedback diagnostic marker selects product-only,
+de-identified output instructions. Results pass the existing deterministic
+feedback sanitizer before encryption and at the feedback read surface; that
+sanitizer remains defense in depth, not a semantic anonymity guarantee. The
+model must omit private source wording, facts, values, and identifiers while
+retaining synthetic reproduction and technical evidence. Feedback reads omit
+member linkage and obey the existing result expiry.
+
+Operator usage identity is runtime-owned and never a model-controlled funding
+flag. Web validates the task against the callback-bound member and recorded
+occurrence window before excluding its cost from allowance. The original
+credential source and token evidence remain intact. Ordinary usage retains its
+existing accounting and provider access checks.

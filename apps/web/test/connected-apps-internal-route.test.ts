@@ -64,7 +64,10 @@ describe("internal connected-apps route", () => {
 
     expect(response.status).toBe(200);
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith({
-      select: hostedMemberAccessSelect,
+      select: {
+        ...hostedMemberAccessSelect,
+        assistantProviderPreference: true,
+      },
       where: { id: "member_family" },
     });
     expect(mocks.executeHostedConnectedAppsRequest).toHaveBeenCalledWith({

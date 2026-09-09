@@ -1654,11 +1654,10 @@ function parseHostedExecutionDeviceSyncJobHintPayload(
   const next: Record<string, unknown> = {};
 
   for (const [field, rawValue] of Object.entries(record)) {
-    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
-
-    if (!kind) {
+    if (!Object.hasOwn(HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS, field)) {
       throw new TypeError(`${label}.${field} is not supported.`);
     }
+    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
 
     if (kind === "string" && rawValue === "") {
       continue;

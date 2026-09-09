@@ -30,7 +30,7 @@ import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
-  listAssistantInputEvents,
+  listAssistantConversationMediaInputEvents,
   resolveAssistantInputEventReferenceAt,
   type AssistantInputAttachmentEvidenceItem,
   type AssistantInputConversationRef,
@@ -181,9 +181,8 @@ export async function readAnalyzeVideoConversationEvents(input: {
   const currentEvents = input.acceptedEvents
   const events = new Map(currentEvents.map((event) => [event.inputId, event]))
   if (events.size > 0) {
-    const history = await listAssistantInputEvents({
-      limit: Number.MAX_SAFE_INTEGER,
-      skipInvalidRecords: true,
+    const history = await listAssistantConversationMediaInputEvents({
+      conversations: currentEvents.map((event) => event.conversation),
       vault: vaultRoot,
     }).catch(() => ({ events: [] }))
     for (const event of history.events) {

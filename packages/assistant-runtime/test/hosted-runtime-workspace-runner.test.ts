@@ -2649,6 +2649,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         assert.ok(lane);
         if (lane.lane === "conversation") {
           return {
+            assistantProvider: "openai",
             fetchedAt: TEST_NOW,
             items: [conversationItem],
             maxSeqByLane: [{
@@ -2665,6 +2666,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             consumedSeq: "0",
             lane: "system",
           }],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: systemFetchCount === 1 ? [] : [channelUpdateItem],
           maxSeqByLane: [{
@@ -3015,6 +3017,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               consumedSeq: "80",
               lane: "conversation",
             }],
+            assistantProvider: "openai",
             fetchedAt: TEST_NOW,
             items: [
               createMailboxItem({
@@ -3039,6 +3042,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             consumedSeq: "0",
             lane: "system",
           }],
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: [],
           maxSeqByLane: [{
@@ -10775,6 +10779,7 @@ function createMailboxPort(input: {
           ...(consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane }),
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: request.lanes.flatMap((lane) => {
             const importedSeq = BigInt(lane.importedSeq);

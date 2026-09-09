@@ -307,6 +307,20 @@ landing; record the chosen posture here so the decision is reviewable.
   marker. The steady-state file bound for the provider-cleanup family is
   asserted by the provider-cleanup unit tests.
 
+- `.runtime/operations/assistant/state/input-media.json` is one portable,
+  rebuildable input-store index per workspace, independent of conversation or
+  message count. It maps hashed conversation identities to input ids and media
+  expiry bounds; it contains no message text or attachment paths. Missing or
+  malformed state rebuilds from canonical input events under the existing
+  runtime write lock. Media evidence updates publish a candidate superset
+  before canonical evidence and prune expired entries; reads open only the
+  current conversations' unexpired candidates and validate canonical evidence.
+  The existing assistant `state` snapshot inclusion carries this file. A first
+  lookup creates at most one file; subsequent turns reuse it. Deploy with
+  `container_rollout=immediate` and drain old input-store writers before first
+  publication. After publication, the index-aware runner is the rollback floor;
+  an older writer would not maintain its candidate set.
+
 - `.runtime/operations/assistant/state/session-routing.sqlite` is one portable,
   rebuildable projection per workspace. It stores hashed exact alias and
   conversation-key routes plus at most 50 recent-session timestamps, while

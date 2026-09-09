@@ -1012,10 +1012,11 @@ export class RuntimeProcessingController {
             runnerContainerName: pending,
             userId,
           });
-          if (retained === "ready") {
+          if (typeof retained !== "string") {
             return {
               kind: "ready",
               runnerContainerName: pending,
+              verifiedSlotBinding: retained,
               standbyAllocationOutcome: "retained",
               standbyAllocationReason: "retained",
             };
@@ -1197,7 +1198,7 @@ export class RuntimeProcessingController {
     if (recovery.kind !== "completed" || !hostedRunnerSlotBindingMatchesTarget(recovery.value, slotName)) {
       return retry();
     }
-    let binding: HostedStandbySlotBinding = recovery.value;
+    const binding = recovery.value;
     if (binding.state === "bound" && boundExactly(binding)) {
       // Same allocating request, same random claim: a just-bound cold target
       // may start. This exception is never used by later pending recovery.
@@ -1205,17 +1206,11 @@ export class RuntimeProcessingController {
     }
     if (binding.state === "unbound") {
       const retirement = await settle(() => slot.retireStandbySlot({}));
-      if (retirement.kind !== "completed") return retry();
-      const receipt = await settle(() => slot.readStandbySlotBinding());
-      if (receipt.kind !== "completed") return retry();
-      binding = receipt.value;
+      if (retirement.kind !== "completed" || retirement.value?.retired !== true) return retry();
+    } else if (binding.state !== "retired") {
+      // Foreign, retiring, malformed and unavailable evidence stays pinned.
+      return retry();
     }
-    // Foreign, retiring, malformed and unavailable evidence all stay pinned.
-    // The retirement RPC's boolean is not a terminal receipt for this identity.
-    if (
-      !hostedRunnerSlotBindingMatchesTarget(binding, slotName)
-      || binding.state !== "retired"
-    ) return retry();
     await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
       runnerContainerName: slotName,
       userId: runtimeInput.userId,
@@ -1232,7 +1227,7 @@ export class RuntimeProcessingController {
     commandBudget: RuntimeProcessingCommandBudget;
     runnerContainerName: string;
     userId: string;
-  }): Promise<"cleared" | "ready" | "retry"> {
+  }): Promise<HostedStandbySlotBinding | "cleared" | "retry"> {
     const currentReleaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
     const identity = readHostedRunnerTargetIdentity(input.runnerContainerName);
     if (!identity) return "retry";
@@ -1252,7 +1247,7 @@ export class RuntimeProcessingController {
     if (binding.state === "bound") {
       return isSupportedHostedRunnerRelease(this.input.runnerRuntimeEnvSource, binding.releaseId)
         && binding.userId === input.userId
-        && isHostedStandbyClaimId(binding.claimId) ? "ready" : "retry";
+        && isHostedStandbyClaimId(binding.claimId) ? binding : "retry";
     }
     if (binding.state !== "retired" || binding.claimId !== null || binding.userId !== null) return "retry";
     const cleared = await this.input.stateStore.clearStoppedRunnerContainerForUserControl({

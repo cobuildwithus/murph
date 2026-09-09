@@ -1,3 +1,4 @@
+import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 
 import type { AutomationRoute } from "@murphai/contracts";
@@ -920,7 +921,7 @@ function buildAssistantNotificationInput(
         }
       }
     : null;
-  return buildAssistantNotificationInputFromRoute({
+  const notificationInput = buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     ...(authorizeOperatorTask
       ? { beforeProviderAcceptedInputs: authorizeOperatorTask }
@@ -979,6 +980,37 @@ function buildAssistantNotificationInput(
     vault,
     wake,
   });
+  return withOperatorTaskExecution(notificationInput, operatorTask, executionContext);
+}
+
+function withOperatorTaskExecution(
+  input: AssistantNotificationInput,
+  operatorTask: HostedExecutionOperatorTaskNotification | null,
+  executionContext: AssistantExecutionContext,
+): AssistantNotificationInput {
+  if (operatorTask) {
+    input.assistantTargetOverride = {
+      model: HOSTED_ASSISTANT_SOL_MODEL,
+      modelProvider: "openai",
+    };
+    const hosted = executionContext.hosted;
+    const recorder = hosted?.usageRecorder;
+    if (hosted && recorder) {
+      input.executionContext = {
+        ...executionContext,
+        hosted: {
+          ...hosted,
+          usageRecorder: {
+            ...recorder,
+            recordUsage(record, acceptedInputIds) {
+              return recorder.recordUsage({ ...record, operatorTaskId: operatorTask.taskId }, acceptedInputIds);
+            },
+          },
+        },
+      };
+    }
+  }
+  return input;
 }
 
 function buildAssistantNotificationInputFromRoute(input: {

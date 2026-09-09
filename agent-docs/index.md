@@ -52,13 +52,13 @@ not a guarantee that every claim was checked in this cleanup.
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |
 | `agent-docs/strategy.md` | Current product strategy. | Current product strategy | High | 2026-07-15 |
-| `agent-docs/PRODUCT_SENSE.md` | Current product posture for a broad personal health assistant. | Current product behavior | High | 2026-08-13 |
+| `agent-docs/PRODUCT_SENSE.md` | Product posture, scope, and member workspace troubleshooting. | Current product behavior | High | 2026-09-09 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-07-15 |
 | `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`. | Current frontend implementation guidance | Medium | 2026-08-31 |
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails, first Linq delivery timing versus receipt ordering, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, companion upload buffering with scoped hydration key reuse, accepted-mailbox progress evidence, and metadata-only snapshot response diagnostics. | Runtime reliability policy | High | 2026-09-08 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails, first Linq delivery timing versus receipt ordering, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, companion upload buffering with scoped hydration key reuse, accepted-mailbox progress evidence, and metadata-only snapshot response diagnostics with bounded header framing categories. | Runtime reliability policy | High | 2026-09-09 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, hosted media receipt recovery and atomic retirement, and escalation rules. | Security policy | High | 2026-09-05 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
@@ -128,7 +128,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `packages/core/bench/container-sizing.md` | Synthetic Docker CPU/RAM sizing matrix, foreground profiling, and limits of production downsizing evidence. | Container sizing investigation | Medium | 2026-09-09 |
 | `packages/query/bench/README.md` | Reproduce synthetic query resource measurements through public canonical and query APIs in constrained Docker containers. | Query resource benchmarks | Medium | 2026-09-09 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
-| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including validated device-continuation scheduling, covered schedule retirement, deferred dirty-hint admission, independent maintenance during due device work, future retry wakes after cold restore, and vault-share deadline revalidation. | Hosted execution architecture | High | 2026-09-08 |
+| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including shared runnable admission, single-pass device-hint coverage, validated continuation scheduling, independent maintenance, future retry wakes after cold restore, and vault-share deadline revalidation. | Hosted execution architecture | High | 2026-09-09 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration target. | Hosted Temporal orchestration target | High | 2026-09-03 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
@@ -156,6 +156,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/exec-plans/completed/2026-09-06-all-tool-failure-diagnostics-extension.md` | Separate PR #2985 telemetry extension record; original completed plan unchanged. | Historical implementation evidence | Low | 2026-09-06 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/completed/2026-09-09-runtime-mailbox-hardening.md` | PR #3102: shared runnable admission and device-hint coverage, producer-reader contracts, and cold-restore regression proof. | Historical implementation evidence | Low | 2026-09-09 |
 | `agent-docs/exec-plans/completed/2026-09-09-runtime-mailbox-recovery-rollout.md` | Reviewed runtime-mailbox fixes, protected rollout convergence, and verified recovery of the original incident cohort. | Historical implementation evidence | Low | 2026-09-09 |
 | `agent-docs/exec-plans/completed/2026-09-08-shared-codex-tool-input-contract.md` | PR3059 canonical tool-contract preservation, measured payloads, five Ready journeys, and validated final review/CI closure. | Historical implementation evidence | Low | 2026-09-08 |
 | `agent-docs/exec-plans/completed/2026-09-08-device-checkpoint-replay.md` | PRs #3080 and #3084: reproduced continuation validation failure, corrected reader, and verified live progress recovery. | Historical implementation evidence | Low | 2026-09-09 |
@@ -177,6 +178,10 @@ not a guarantee that every claim was checked in this cleanup.
 | `packages/vault-usecases/README.md` | CLI/headless vault usecase orchestration boundary over core, importers, and query. | `packages/vault-usecases/**` | Medium | 2026-05-02 |
 
 ## Conventions
+
+Local feedback diagnostics are documented in
+`.agents/skills/feedback-diagnostics/SKILL.md`; `scripts/ops-feedback` owns the
+agent-facing command and dedicated browser session.
 
 - Keep one short discovery description per document; detailed behavior belongs
   in that document and its executable owner, not this index.
