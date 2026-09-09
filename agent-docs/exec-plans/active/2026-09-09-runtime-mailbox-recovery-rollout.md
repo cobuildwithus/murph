@@ -163,3 +163,20 @@ remain required before review and deployment.
   rejection, native-row/page/deadline bounds, and fail-closed activation.
 - A reviewed protected deployment must verify the mitigation and release receipt;
   larger pages reduce exposure to the provider cycle without treating it as drain.
+
+## Independent maintenance during due device work
+
+The reviewed companion-hint and deferred-admission corrections, with the bounded
+pagination mitigation, passed all protected gates, smoke, and native convergence.
+Live invocation evidence now confirms original backlog recovery on that source.
+The remaining active-device lane also exposed a due, untouched maintenance head.
+
+The existing independent-maintenance regression covers a future device retry.
+Changing only its retained job and owner to due reproduces the untouched head:
+oldest-item selection chooses the transferred owner on every pass. Prefer an
+eligible non-device item only when normal selection would choose a validated,
+pending device continuation without a checkpoint record. Reuse the existing
+filtered selector and preserve recording priority, future work, invalid ownership,
+substantive device frontiers, and foreground preemption. No new queue or clock.
+The composed regression must checkpoint independent progress with the exact
+retained job unchanged and still due for the following pass.

@@ -1308,19 +1308,20 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test.each(["maintenance", "covered-schedule", "covered-schedules"])("checkpoints independent work behind a future transferred device retry (%s)", async (kind) => {
+  test.each(["maintenance", "maintenance-due", "covered-schedule", "covered-schedules"])("checkpoints independent work behind a transferred device retry (%s)", async (kind) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-independent-maintenance-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const handledThrough = kind === "covered-schedules" ? "4" : "2";
     const events: string[] = [];
-    const retryAt = new Date(Date.parse(TEST_NOW) + 86_400_000).toISOString();
+    const retryAt = kind === "maintenance-due" ? TEST_NOW
+      : new Date(Date.parse(TEST_NOW) + 86_400_000).toISOString();
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:retained-independent", id: "retained_independent",
       kind: "device-sync.wake", lane: "system", laneSeq: "1",
     });
     const maintenance = createMailboxItem({
       dedupeKey: "runtime.maintenance-requested:independent", id: "maintenance_independent",
-      kind: kind === "maintenance" ? "runtime.maintenance-requested" : "device-sync.wake",
+      kind: kind.startsWith("maintenance") ? "runtime.maintenance-requested" : "device-sync.wake",
       lane: "system", laneSeq: "2",
     });
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -1341,9 +1342,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       ) }));
       const retainedBefore = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
       await enqueueHostedSystemMailboxItem({
-        item: kind === "maintenance" ? createResolvedRuntimeControlSystemMailboxItem(maintenance)
+        item: kind.startsWith("maintenance") ? createResolvedRuntimeControlSystemMailboxItem(maintenance)
           : createResolvedDeviceSyncSystemMailboxItem(maintenance), vaultRoot,
-        wake: kind === "maintenance" ? { eventId: maintenance.dedupeKey, kind: "runtime.maintenance-requested",
+        wake: kind.startsWith("maintenance") ? { eventId: maintenance.dedupeKey, kind: "runtime.maintenance-requested",
           occurredAt: TEST_NOW, userId: TEST_USER_ID }
           : { connectionId: "device_connection_independent", eventId: maintenance.dedupeKey,
             expectedConnectedAt: TEST_NOW, kind: "device-sync.wake", occurredAt: TEST_NOW,
@@ -1415,6 +1416,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, [retainedBefore]);
       assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, handledThrough);
       assert.deepEqual(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["1"]);
+      if (kind === "maintenance-due") return;
       const checkpointCount = checkpointRequests.length;
       const restoredResult = await runPass();
       assert.equal(restoredResult.nextWakeAt, retryAt);
