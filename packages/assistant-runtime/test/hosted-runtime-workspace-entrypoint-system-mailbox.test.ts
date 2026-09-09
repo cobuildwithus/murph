@@ -1301,6 +1301,98 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
+  test.each(["maintenance", "covered-schedule"])("checkpoints independent work behind a future transferred device retry (%s)", async (kind) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-independent-maintenance-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const retryAt = new Date(Date.parse(TEST_NOW) + 86_400_000).toISOString();
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:retained-independent", id: "retained_independent",
+      kind: "device-sync.wake", lane: "system", laneSeq: "1",
+    });
+    const maintenance = createMailboxItem({
+      dedupeKey: "runtime.maintenance-requested:independent", id: "maintenance_independent",
+      kind: kind === "maintenance" ? "runtime.maintenance-requested" : "device-sync.wake",
+      lane: "system", laneSeq: "2",
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncSystemMailboxItem(deviceItem), vaultRoot,
+        wake: { connectionId: "device_connection_independent", eventId: deviceItem.dedupeKey,
+          expectedConnectedAt: TEST_NOW, kind: "device-sync.wake", occurredAt: TEST_NOW,
+          provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID,
+          hint: { nextReconcileAt: retryAt, jobs: [{ availableAt: retryAt, dedupeKey: "future_history", kind: "resource",
+            maxAttempts: 1, payload: { resourceType: "sleep" }, priority: 30 }] } },
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({ pending: state.pending.map(
+        (item) => ({ ...item, deviceSyncContinuationOwner: true, attemptCount: 1,
+          lastAttemptAt: TEST_NOW, nextAttemptAt: retryAt }),
+      ) }));
+      const retainedBefore = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+      await enqueueHostedSystemMailboxItem({
+        item: kind === "maintenance" ? createResolvedRuntimeControlSystemMailboxItem(maintenance)
+          : createResolvedDeviceSyncSystemMailboxItem(maintenance), vaultRoot,
+        wake: kind === "maintenance" ? { eventId: maintenance.dedupeKey, kind: "runtime.maintenance-requested",
+          occurredAt: TEST_NOW, userId: TEST_USER_ID }
+          : { connectionId: "device_connection_independent", eventId: maintenance.dedupeKey,
+            expectedConnectedAt: TEST_NOW, kind: "device-sync.wake", occurredAt: TEST_NOW,
+            provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID,
+            hint: { nextReconcileAt: TEST_NOW } },
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "2";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restored = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/independent-maintenance.bundle.json", vaultRoot,
+      });
+      const artifactBytesByHash = new Map([[restored.hash, restored.bytes]]);
+      let currentWorkspace = createWorkspaceState({ snapshotRef: restored.snapshotRef, version: "0" });
+      let snapshotOrdinal = 0;
+      const baseWorkspacePort = createWorkspacePort({ checkpointRequests, events, workspace: currentWorkspace });
+      const runPass = async () => await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { assistantExecutionBlocked: true,
+          attemptId: "attempt_independent_maintenance", processingMode: "system_mailbox",
+          workspaceVersion: currentWorkspace.version }, resolvedConfig: createDeviceSyncResolvedConfig() }),
+        { async createCheckpointSnapshot() {
+            const snapshot = await createVaultSnapshotBundle({
+              key: `users/bundles/member-synthetic/independent-maintenance-${++snapshotOrdinal}.bundle.json`, vaultRoot,
+            });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
+          },
+          async importItem() { throw new Error("Already imported"); },
+          platform: createPlatform({ artifactBytesByHash,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: { ...baseWorkspacePort,
+              async read() { return { fetchedAt: TEST_NOW, workspace: currentWorkspace }; },
+              async checkpoint(request) {
+                const response = await baseWorkspacePort.checkpoint(request);
+                currentWorkspace = response.workspace;
+                return response;
+              },
+            } }),
+          async runAssistantPhase() { throw new Error("Model-free maintenance cannot run the assistant"); }, vaultRoot },
+      );
+      const result = await runPass();
+      assert.equal(result.nextWakeAt, retryAt);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, [retainedBefore]);
+      assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "2");
+      assert.deepEqual(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["1"]);
+      const checkpointCount = checkpointRequests.length;
+      const restoredResult = await runPass();
+      assert.equal(restoredResult.nextWakeAt, retryAt);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, [retainedBefore]);
+      assert.equal(currentWorkspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "2");
+      assert.equal(checkpointRequests.length, checkpointCount);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test.each(["none", "superseded", "equal"])("system mailbox retains only necessary device work across restore (schedule: %s)", async (schedule) => {
     const retainedRetry = schedule !== "none";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -1488,7 +1580,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(result.nextWakeReason ?? null, retainedRetry ? "device-sync.reconcile" : null);
       const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
       if (retainedRetry) {
-        assert.equal(pending.length, schedule === "equal" ? 3 : 1);
+        assert.equal(pending.length, schedule === "equal" ? 2 : 1);
         assert.equal(pending[0]?.itemId, deviceItem.id);
         assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
         assert.equal(pending[0]?.nextAttemptAt, result.nextWakeAt);
@@ -1499,16 +1591,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        schedule === "superseded" ? "3" : "1",
+        schedule === "superseded" ? "3" : schedule === "equal" ? "2" : "1",
       );
       if (schedule === "equal") {
-        assert.equal(pending[1]?.wake.kind === "device-sync.wake" ? pending[1].wake.hint?.nextReconcileAt : null, TEST_NOW);
+        assert.equal(pending[1]?.wake.kind === "device-sync.wake" ? pending[1].wake.reason : null, "webhook_hint");
         assert.equal(canonicalNextReconcileAt, TEST_NOW);
         assert.ok(result.nextWakeAt);
         vi.setSystemTime(new Date(result.nextWakeAt));
         await runPass();
-        // The next cold admission retires the now-superseded tick, executes
-        // another cadence, and still leaves the history retry untouched.
+        // The schedule was retired at acknowledgement. The next cold admission
+        // fetches the retained webhook and leaves the history retry untouched.
         const continued = (await readHostedSystemMailboxState(vaultRoot)).pending;
         assert.equal(continued.length, 1);
         assert.equal(continued[0]?.itemId, deviceItem.id);

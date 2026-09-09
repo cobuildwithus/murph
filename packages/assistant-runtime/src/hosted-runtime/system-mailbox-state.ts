@@ -40,6 +40,7 @@ import {
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
 } from "../hosted-device-sync-limits.ts";
+import { readHostedMailboxImportState } from "./mailbox-state.ts";
 import type {
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedSystemMailboxPostCheckpointRecord,
@@ -314,6 +315,20 @@ function resolveHostedDeviceSyncContinuationProjection(
   };
 }
 
+export async function readHostedSystemMailboxContinuationItemIds(input: {
+  state: HostedSystemMailboxState;
+  vaultRoot: string;
+}): Promise<ReadonlySet<string>> {
+  if (!input.state.pending.some((item) => item.deviceSyncContinuationOwner === true)) {
+    return new Set();
+  }
+  const mailbox = await readHostedMailboxImportState({ vaultRoot: input.vaultRoot });
+  return resolveHostedDeviceSyncContinuationProjection({
+    importedSeq: BigInt(mailbox.watermarks.system),
+    state: input.state,
+  })?.itemIds ?? new Set();
+}
+
 export async function updateHostedSystemMailboxState<TResult = void>(
   vaultRoot: string,
   update: (
@@ -510,6 +525,7 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
   );
   return resolveHostedSystemMailboxWakeCandidatesFromState({
     ...input,
+    continuationItemIds: await readHostedSystemMailboxContinuationItemIds({ ...input, state }),
     now,
     state,
   }).next;
@@ -533,12 +549,14 @@ export async function resolveHostedSystemMailboxWakeCandidates(input: {
   );
   return resolveHostedSystemMailboxWakeCandidatesFromState({
     ...input,
+    continuationItemIds: await readHostedSystemMailboxContinuationItemIds({ ...input, state }),
     now,
     state,
   });
 }
 
 function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
+  continuationItemIds: ReadonlySet<string>;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   excludeItemId?: string | null;
@@ -562,9 +580,11 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   });
   const wakeOwnerState = projectHostedSystemMailboxWakeOwnerFrontier(
     remainingState,
+    input.continuationItemIds,
   );
   const modelFreeFrontierState = projectHostedSystemMailboxModelFreeFrontier(
     remainingState,
+    input.continuationItemIds,
   );
   const modelFreeProjectedState = shouldProjectHostedSystemMailboxModelFreeFrontier({
     allowedRouteActions: input.allowedRouteActions ?? null,
@@ -595,7 +615,11 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     now,
     state: wakeOwnerState,
   });
-  const runnableModelFreeFrontier = modelFreeFrontierState.pending[0] ?? null;
+  const runnableModelFreeFrontier = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: null,
+    now,
+    state: modelFreeFrontierState,
+  });
   const defaultWakeOwnerState = runnableModelFreeFrontier !== null
       && systemMailboxItemIsDue(runnableModelFreeFrontier, now)
       && (
@@ -792,6 +816,8 @@ export function isHostedRetainedDeviceScheduledAdmission(
     && wake.provider === owner.wake.provider
     && isHostedPlainDeviceSyncWakeHint(item)
     && wake.hint?.nextReconcileAt != null
+    && (owner.wake.hint?.nextReconcileAt == null
+      || Date.parse(wake.hint.nextReconcileAt) >= Date.parse(owner.wake.hint.nextReconcileAt))
     && Date.parse(wake.hint.nextReconcileAt) <= Date.parse(now);
 }
 
@@ -991,28 +1017,33 @@ export function isHostedSystemMailboxModelFreeFrontierItem(
 
 export function projectHostedSystemMailboxModelFreeFrontier(
   state: HostedSystemMailboxState,
+  continuationItemIds: ReadonlySet<string> = new Set(),
 ): HostedSystemMailboxState {
-  const durableFrontier = findHostedSystemMailboxDurableFrontierItem(state.pending);
+  const durableFrontier = findHostedSystemMailboxDurableFrontierItem(
+    state.pending.filter((item) => !continuationItemIds.has(item.itemId)),
+  );
   return {
-    pending: durableFrontier
-      && isHostedSystemMailboxModelFreeFrontierItem(durableFrontier)
-      ? [durableFrontier]
-      : [],
+    // Transferred device operations keep their own retry and connection order.
+    // Only untransferred work participates in the global mailbox frontier.
+    pending: state.pending.filter((item) =>
+      continuationItemIds.has(item.itemId)
+      || (item.itemId === durableFrontier?.itemId
+        && isHostedSystemMailboxModelFreeFrontierItem(item))
+    ),
   };
 }
 
 export function projectHostedSystemMailboxWakeOwnerFrontier(
   state: HostedSystemMailboxState,
+  continuationItemIds: ReadonlySet<string> = new Set(),
 ): HostedSystemMailboxState {
-  const modelFreeFrontier = projectHostedSystemMailboxModelFreeFrontier(state)
-    .pending[0] ?? null;
+  const modelFreeItemIds = new Set(projectHostedSystemMailboxModelFreeFrontier(
+    state, continuationItemIds,
+  ).pending.map((item) => item.itemId));
   return {
     pending: state.pending.filter((item) =>
-      // Default-owned work remains independently eligible. Model-free work is
-      // serialized behind the durable frontier, except for its sequence-less
-      // dense-retention owner.
       resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
-      || item.itemId === modelFreeFrontier?.itemId
+      || modelFreeItemIds.has(item.itemId)
       || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
     ),
   };

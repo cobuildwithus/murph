@@ -56,6 +56,7 @@ import {
   projectHostedSystemMailboxModelFreeFrontier,
   projectHostedSystemMailboxRetainedDeviceWakeAdmission,
   projectHostedSystemMailboxWakeOwnerFrontier,
+  readHostedSystemMailboxContinuationItemIds,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeCandidate,
@@ -144,7 +145,7 @@ export type HostedSystemMailboxCheckpointPreparation =
 
 type HostedSystemMailboxPreparationSelection =
   | {
-      disposition: "attempt_limit";
+      disposition: "attempt_limit" | "schedule_satisfied";
       item: HostedSystemMailboxPendingItem;
     }
   | {
@@ -335,7 +336,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
     HostedSystemMailboxPreparationSelection | null
   >(
     input.vaultRoot,
-    (state) => {
+    async (state) => {
+      const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
+        state, vaultRoot: input.vaultRoot,
+      });
       const admissionState =
         projectHostedSystemMailboxRetainedDeviceWakeAdmission({
           now: startedAt,
@@ -352,9 +356,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         && input.allowedWakeKinds?.includes(
           "assistant.notification.requested",
         ) === true
-          ? projectHostedSystemMailboxModelFreeFrontier(admissionState)
+          ? projectHostedSystemMailboxModelFreeFrontier(admissionState, continuationItemIds)
           : input.allowedRouteActions == null
-            ? projectHostedSystemMailboxWakeOwnerFrontier(admissionState)
+            ? projectHostedSystemMailboxWakeOwnerFrontier(admissionState, continuationItemIds)
             : admissionState;
       const selectionState = {
         pending: modelFreeProjectedState.pending.filter((item) =>
@@ -391,9 +395,17 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         state: selectionState,
       });
       if (!pending) {
-        return {
-          result: null,
+        const compacted = retireHostedCoveredDeviceScheduleHints({
+          continuationItemIds,
+          eligibleItemIds: new Set(selectionState.pending.map((item) => item.itemId)),
+          now: startedAt,
           state,
+        });
+        return {
+          result: compacted.retired
+            ? { disposition: "schedule_satisfied", item: compacted.retired }
+            : null,
+          state: compacted.state,
         };
       }
 
@@ -464,11 +476,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   }
 
   const prepared = selection.item;
-  if (selection.disposition === "attempt_limit") {
+  if (selection.disposition !== "prepared") {
     return {
       item: prepared,
       itemId: prepared.itemId,
-      metrics: createHostedGroupContextHandoffTerminalMetrics(),
+      metrics: createHostedSystemMailboxTerminalMetrics(selection.disposition),
       status: "processed",
     };
   }
@@ -572,7 +584,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       return {
         item: prepared,
         itemId: prepared.itemId,
-        metrics: createHostedGroupContextHandoffTerminalMetrics(),
+        metrics: createHostedSystemMailboxTerminalMetrics(),
         status: "processed",
       };
     }
@@ -697,12 +709,15 @@ function readHostedSystemMailboxErrorRetryable(error: unknown): boolean | null {
   return null;
 }
 
-function createHostedGroupContextHandoffTerminalMetrics(): HostedMailboxExecutionMetrics {
+function createHostedSystemMailboxTerminalMetrics(
+  disposition: "attempt_limit" | "schedule_satisfied" = "attempt_limit",
+): HostedMailboxExecutionMetrics {
   return {
+    ...(disposition === "schedule_satisfied" ? { systemProgressed: true } : {}),
     bootstrapResult: null,
     conversationMetrics: null,
     deliveryIntentIds: [],
-    mailboxLane: "assistant-notification",
+    mailboxLane: disposition === "schedule_satisfied" ? "device-sync" : "assistant-notification",
     nextWakeAt: null,
     postCheckpointRecord: null,
     redactedLogEntries: [],
@@ -747,10 +762,35 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
   };
 }
 
+function retireHostedCoveredDeviceScheduleHints(input: {
+  continuationItemIds: ReadonlySet<string>;
+  eligibleItemIds: ReadonlySet<string>;
+  now: string;
+  state: HostedSystemMailboxState;
+}): { retired: HostedSystemMailboxPendingItem | null; state: HostedSystemMailboxState } {
+  let pending = input.state.pending;
+  for (const owner of input.state.pending) {
+    if (input.continuationItemIds.has(owner.itemId)) {
+      pending = collapseHostedRetainedDeviceSyncWakeHints({
+        now: input.now, pending, scheduledOnly: true, selected: owner,
+      });
+    }
+  }
+  const remainingIds = new Set(pending.map((item) => item.itemId));
+  const retiredIds = new Set(input.state.pending.filter((item) =>
+    input.eligibleItemIds.has(item.itemId) && !remainingIds.has(item.itemId)
+  ).map((item) => item.itemId));
+  return {
+    retired: input.state.pending.find((item) => retiredIds.has(item.itemId)) ?? null,
+    state: { pending: input.state.pending.filter((item) => !retiredIds.has(item.itemId)) },
+  };
+}
+
 function collapseHostedRetainedDeviceSyncWakeHints(input: {
   now: string;
   pending: readonly HostedSystemMailboxPendingItem[];
   selected: HostedSystemMailboxPendingItem;
+  scheduledOnly?: boolean;
 }): HostedSystemMailboxPendingItem[] {
   const owner = input.selected;
   const wake = owner.wake;
@@ -767,6 +807,7 @@ function collapseHostedRetainedDeviceSyncWakeHints(input: {
     return [...input.pending];
   }
 
+  const blockedReason = input.scheduledOnly === true ? "webhook_hint" : null;
   const ownerSeq = BigInt(owner.mailboxLaneSeq);
   const ownerCadence = wake.hint?.nextReconcileAt;
   let reachedOwner = false;
@@ -788,6 +829,7 @@ function collapseHostedRetainedDeviceSyncWakeHints(input: {
     const candidateCadence = candidate.hint?.nextReconcileAt;
     if (
       !isHostedPlainDeviceSyncWakeHint(item)
+      || candidate.reason === blockedReason
       || item.mailboxLaneSeq === null
       || BigInt(item.mailboxLaneSeq) <= ownerSeq
       || candidate.userId !== wake.userId
@@ -1278,43 +1320,52 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
     const connectionId = input.item.wake.kind === "device-sync.wake"
       ? input.item.wake.connectionId ?? null
       : null;
+    const pending = state.pending.map((item, index): HostedSystemMailboxPendingItem => {
+      if (index === retainedIndex) {
+        return {
+          ...input.item,
+          deviceSyncContinuationOwner: true,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          nextAttemptAt,
+          postCheckpointRecord: null,
+          status: "pending" as const,
+          wake: input.dirtyRemainderDiscovered && input.item.wake.kind === "device-sync.wake"
+            ? {
+                ...input.item.wake,
+                hint: { ...input.item.wake.hint, jobs: [], reason: "retained_dirty_remainder" },
+              }
+            : input.item.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch"
+            ? input.item.postCheckpointRecord.retainedWake ?? input.item.wake
+            : input.item.wake,
+        };
+      }
+      if (
+        input.immediateDirtyContinuationCanProgress
+        || admittedAt === null
+        || connectionId === null
+        || index < retainedIndex
+        || item.routeAction !== "run-device-sync-wake"
+        || item.wake.kind !== "device-sync.wake"
+        || item.wake.connectionId !== connectionId
+        || (item.wake.reason !== "webhook_hint"
+          && !isHostedRetainedDeviceScheduledAdmission(input.item, item, admittedAt))
+        || !systemMailboxItemIsDue(item, admittedAt)
+      ) {
+        return item;
+      }
+      return { ...item, nextAttemptAt: input.nextAttemptAt };
+    });
+    const retained = pending[retainedIndex];
     return {
-      pending: state.pending.map((item, index) => {
-        if (index === retainedIndex) {
-          return {
-            ...input.item,
-            deviceSyncContinuationOwner: true,
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            nextAttemptAt,
-            postCheckpointRecord: null,
-            status: "pending" as const,
-            wake: input.dirtyRemainderDiscovered && input.item.wake.kind === "device-sync.wake"
-              ? {
-                  ...input.item.wake,
-                  hint: { ...input.item.wake.hint, jobs: [], reason: "retained_dirty_remainder" },
-                }
-              : input.item.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch"
-              ? input.item.postCheckpointRecord.retainedWake ?? input.item.wake
-              : input.item.wake,
-          };
-        }
-        if (
-          input.immediateDirtyContinuationCanProgress
-          || admittedAt === null
-          || connectionId === null
-          || index < retainedIndex
-          || item.routeAction !== "run-device-sync-wake"
-          || item.wake.kind !== "device-sync.wake"
-          || item.wake.connectionId !== connectionId
-          || (item.wake.reason !== "webhook_hint"
-            && !isHostedRetainedDeviceScheduledAdmission(input.item, item, admittedAt))
-          || !systemMailboxItemIsDue(item, admittedAt)
-        ) {
-          return item;
-        }
-        return { ...item, nextAttemptAt: input.nextAttemptAt };
-      }),
+      pending: retained && admittedAt !== null
+        ? collapseHostedRetainedDeviceSyncWakeHints({
+            now: admittedAt,
+            pending,
+            scheduledOnly: true,
+            selected: retained,
+          })
+        : pending,
     };
   });
 }

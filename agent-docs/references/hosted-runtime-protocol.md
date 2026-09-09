@@ -798,8 +798,12 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-`system_mailbox` runs one bounded model-free item only when that item is the
-exact first live durable system frontier. The shared classifier admits
+`system_mailbox` runs one bounded model-free item from either a validated
+transferred device continuation or the exact first untransferred live durable
+system frontier. Scheduling reuses the same imported-watermark-bounded
+continuation projection as handling. Transferred owners retain their retry
+deadlines and per-connection ordering without blocking independent later work;
+invalid continuation projections remain ordering barriers. The shared classifier admits
 device-sync, member-channel reconciliation, operator maintenance, browser-vault
 refresh, Environment completion, and the narrow exact-notification cases; an
 earlier default-owned row remains a hard ordering barrier. Already committed
@@ -816,7 +820,8 @@ After a device item records a durable follow-up deadline, that
 `device-sync.reconcile` deadline remains in the canonical model-free
 `nextWakeAt` selection; an independently due or future assistant deadline
 remains available through `nextDefaultProcessingWakeAt` instead of replacing
-the device deadline.
+the device deadline. A cold pass with assistant execution blocked also retains
+the future device deadline when no mailbox item is runnable yet.
 Current conversation work and explicitly approved continuations retain
 foreground priority. A non-direct default request behind
 `system_mailbox` wakes the exact active child, preserves its fence, and retries
@@ -2836,9 +2841,15 @@ A retained owner wakes at the earlier of its actual job retry and a future
 provider cadence; job retry times and attempts remain unchanged. A past cadence
 left by a failed scheduler never becomes an immediate continuation timer.
 A due plain scheduled hint for the same connection epoch can admit a future
-owner, just as a webhook hint can. Admission does not consume the scheduled
-obligation: existing compaction still requires a strictly advanced carried
-cadence. When a pass cannot progress, already-due eligible schedule hints share
+owner, just as a webhook hint can, unless the owner's carried cadence already
+strictly exceeds that scheduled tick. Admission does not consume the scheduled
+obligation: compaction requires a strictly advanced carried cadence. Covered
+schedule hints retire when that advanced cadence is retained after recording.
+A cold idle pass can also checkpoint retirement of already-covered eligible
+schedule hints without running a provider job; it first gives runnable work its
+normal priority. Webhook hints still require dirty-work admission, and equal
+cadences, explicit jobs, manual requests, and connection-epoch barriers remain
+pending. When a pass cannot progress, already-due eligible schedule hints share
 the owner retry backoff so they cannot repeatedly readmit it.
 Only that connection mailbox wake may fetch its exact
 Web-owned dirty row or claim its account's local jobs; a generic runtime timer

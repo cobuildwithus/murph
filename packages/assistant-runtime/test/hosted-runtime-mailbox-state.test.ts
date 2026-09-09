@@ -962,6 +962,83 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
+  it.each(["runtime.maintenance-requested", "runtime.browser-vault-refresh-requested"] as const)(
+    "runs due %s after a transferred device continuation without advancing its retry",
+    async (wakeKind) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-transferred-frontier-"));
+      const now = "2026-04-27T00:00:00.000Z";
+      const retryAt = "2026-04-28T00:00:00.000Z";
+      const retained = buildRetainedDeviceSyncMailboxItem({
+        itemId: "retained_history", mailboxLaneSeq: "1", retryAt,
+      });
+      const successor = buildPendingRuntimeControlMailboxItem({
+        itemId: "due_control", mailboxLaneSeq: "2",
+        mailboxDedupeKey: `runtime-control:${wakeKind}:synthetic`, wakeKind,
+      });
+      try {
+        await writeHostedMailboxImportState({
+          vaultRoot,
+          state: { ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "2" } },
+        });
+        await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [retained, successor] }));
+        const restored = await readHostedSystemMailboxState(vaultRoot);
+        expect(resolveHostedSystemMailboxProgress({ importedSeq: "2", state: restored }))
+          .toMatchObject({ handledThroughSeq: "1", firstPendingSeq: "2", deviceSyncContinuationSeqs: ["1"] });
+        await expect(resolveHostedSystemMailboxWakeCandidates({ vaultRoot, now: () => now }))
+          .resolves.toMatchObject({ next: { at: now, executionClass: "model_free", reason: "mailbox" } });
+        expect((await readHostedSystemMailboxState(vaultRoot)).pending[0]).toEqual(retained);
+        await removeHostedSystemMailboxPendingItemIfCurrent({ item: successor, vaultRoot });
+        await expect(resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot, now: () => now }))
+          .resolves.toEqual({ at: retryAt, executionClass: null, reason: "device-sync.reconcile" });
+      } finally {
+        await rm(vaultRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["independent", "same-connection", "untransferred", "duplicate-owner", "unimported"] as const)(
+    "preserves continuation admission boundaries (%s)", async (boundary) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-continuation-boundary-"));
+      const now = "2026-04-27T00:00:00.000Z";
+      const retryAt = "2026-04-28T00:00:00.000Z";
+      const retained = buildRetainedDeviceSyncMailboxItem({
+        connectionId: "connection_a", itemId: "history_a", mailboxLaneSeq: "1", retryAt,
+      });
+      const pending = buildPendingDeviceSyncMailboxItem({ itemId: "fresh_device", mailboxLaneSeq: "2" });
+      const successor = {
+        ...pending,
+        wake: buildHostedExecutionDeviceSyncWake({
+          connectionId: boundary === "same-connection" ? "connection_a" : "connection_b",
+          eventId: pending.mailboxDedupeKey, expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+          occurredAt: now, provider: "junction", reason: "reconcile_due", userId: "member_123",
+          hint: { reason: "manual_reconcile" },
+        }),
+      };
+      const { deviceSyncContinuationOwner: _owner, ...untransferred } = retained;
+      const state = { pending: [boundary === "untransferred"
+        ? { ...untransferred, wake: { ...untransferred.wake, hint: undefined } } : retained,
+        successor,
+        ...(boundary === "duplicate-owner" ? [buildRetainedDeviceSyncMailboxItem({
+          connectionId: "connection_a", itemId: "duplicate_history", mailboxLaneSeq: "3", retryAt,
+        })] : []),
+      ] };
+      try {
+        await writeHostedMailboxImportState({ vaultRoot, state: {
+          ...createEmptyHostedMailboxImportState(),
+          watermarks: { conversation: "0", system: boundary === "unimported" ? "0" : "3" },
+        } });
+        await updateHostedSystemMailboxState(vaultRoot, () => state);
+        await expect(resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot, now: () => now }))
+          .resolves.toEqual({ at: boundary === "independent" ? now : retryAt,
+            executionClass: boundary === "independent" ? "model_free" : null,
+            reason: "device-sync.reconcile" });
+        expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual(state.pending);
+      } finally {
+        await rm(vaultRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("keeps a later due model-free row behind a future durable frontier", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     const now = "2026-04-27T00:00:00.000Z";

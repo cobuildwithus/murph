@@ -1081,7 +1081,21 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   );
 
+  const deviceSyncWake = selectEarliestHostedRuntimeWake([
+    ...(input.extraCandidates ?? []).filter((candidate) =>
+      candidate.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    ),
+    createHostedRuntimeWakeCandidate(
+      systemMailboxWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+        ? systemMailboxWake.at
+        : null,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+  ]);
   const modelFreeWake = selectEarliestHostedRuntimeWake([
+    // A future device retry has no runnable execution class yet, but still
+    // owns a wake when assistant execution is blocked.
+    { at: deviceSyncWake.nextWakeAt, reason: deviceSyncWake.nextWakeReason },
     ...(input.extraCandidates ?? []),
     {
       at: systemMailboxWake.executionClass === "model_free"
@@ -1096,17 +1110,6 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
       reason: input.mailboxImportRetryAt ? "mailbox" : null,
     },
     outboxWake,
-  ]);
-  const deviceSyncWake = selectEarliestHostedRuntimeWake([
-    ...(input.extraCandidates ?? []).filter((candidate) =>
-      candidate.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-    ),
-    createHostedRuntimeWakeCandidate(
-      systemMailboxWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-        ? systemMailboxWake.at
-        : null,
-      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-    ),
   ]);
   const assistantWake = selectEarliestHostedRuntimeWake([
     outboxWake,
