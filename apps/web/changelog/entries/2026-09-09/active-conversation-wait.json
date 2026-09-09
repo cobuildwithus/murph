@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "active-conversation-wait",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting between messages",
+    "summary": "Murph can begin processing follow-up messages sooner while your conversation is active.",
+    "details": "Removes a repeated check between messages while keeping session startup and pause controls in place.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

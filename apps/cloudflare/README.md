@@ -668,6 +668,12 @@ route-to-RPC aggregate. Other per-phase chronology guards omit unavailable or
 reversed cross-runtime clock samples. The report returns no member, mailbox,
 trace, or attempt identifiers.
 
+Admission is read once before each fresh or replacement runtime session. Active
+wakes reuse the existing write fence and make no health-data admission callback.
+Explicit withdrawal still serializes behind ensures, clears the fence, and stops
+the exact runner before acknowledgement. Legacy member-specific prewarm hints
+are no-ops and perform no admission or allocation work.
+
 Fresh starts overlap workspace metadata and runtime crypto reads with slot
 allocation after admission. The reads use the original command budget and stay
 local to that invocation; unused failures are observed if allocation returns a

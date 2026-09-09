@@ -2,15 +2,12 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
-import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -289,6 +286,8 @@ export class RuntimeProcessingController {
     private readonly input: {
       env: HostedExecutionEnvironment;
       invocationService: Pick<RuntimeInvocationService, "prepareForFreshStart" | "invokePreparedWithFence">;
+      readHealthDataAdmission: (userId: string, timeoutMs: number) =>
+        Promise<HostedRuntimeHealthDataAdmissionResponse>;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
       readCheckpointHandoff?: (input: {
         attemptId: string;
@@ -314,28 +313,6 @@ export class RuntimeProcessingController {
     return createRuntimeProcessingRetryLaterResponse({
       ...input,
       analytics: this.input.runtimeRetryAnalytics ?? null,
-    });
-  }
-
-  async beginShellPrewarmForUser(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void> {
-    // Hints never create member-specific shells. The memberless coordinator
-    // owns optional prewarming in every mode; allocation alone binds a target.
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-        ...(orchestration?.shellPrewarmOrchestrationAttemptId === undefined ? {} : {
-          orchestrationAttemptId: orchestration.shellPrewarmOrchestrationAttemptId,
-        }),
-        shellPrewarmSource: source ?? "unknown",
-      },
-      message: "Hosted runner shell prewarm admission decided.",
-      phase: "scheduled",
-      userId,
     });
   }
 
@@ -1289,9 +1266,45 @@ export class RuntimeProcessingController {
     input: RuntimeProcessingInput;
     runtimeWakeStartedAt: number;
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
+    // An existing write fence owns an admitted session. Only a new session
+    // (including replacement) needs the Web-owned consent/member read.
     let processingInput = withRuntimeProcessingOrchestration(input.input, {
       freshStartRequestedAtEpochMs: Date.now(),
+      healthDataAdmissionReadStartedAtEpochMs: Date.now(),
     });
+    let admission: HostedRuntimeHealthDataAdmissionResponse;
+    try {
+      admission = await runRuntimeProcessingCommandStep({
+        budget: input.commandBudget,
+        operation: () => this.input.readHealthDataAdmission(
+          processingInput.userId,
+          readRuntimeProcessingCommandStepTimeoutMs({
+            budget: input.commandBudget,
+            stepTimeoutMs: this.input.env.webControlTimeoutMs,
+          }),
+        ),
+        stepTimeoutMs: this.input.env.webControlTimeoutMs,
+      });
+      if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
+        throw new Error(RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE);
+      }
+    } catch (error) {
+      if (!isRuntimeProcessingCommandBudgetTimeout(error)) throw error;
+      return this.createRetryLater({
+        orchestrationAttemptId: processingInput.orchestrationAttemptId,
+        reason: "command_budget_exhausted",
+        userId: processingInput.userId,
+      });
+    }
+    processingInput = withRuntimeProcessingOrchestration(processingInput, {
+      healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
+    });
+    if (!admission.processingAllowed) {
+      return {
+        kind: "retry_later",
+        retryAt: new Date(Date.now() + 60_000).toISOString(),
+      };
+    }
     const initialRecord = await this.input.stateStore.readState();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -1416,8 +1429,8 @@ export class RuntimeProcessingController {
         freshStartContainerReadyAtEpochMs: preparation.containerReadyAtEpochMs,
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
-      ...(preparation.startupOrchestration ?? {}),
-      ...(preparation.shellPrewarmOrchestration ?? {}),
+      ...preparation.startupOrchestration,
+      ...preparation.shellPrewarmOrchestration,
     });
     const preparationOrchestration =
       preparation.prepared.input.orchestration ?? {};
@@ -1432,7 +1445,7 @@ export class RuntimeProcessingController {
         ...toRuntimeInvocationInput(processingInput),
         orchestration: {
           ...preparationOrchestration,
-          ...(processingInput.orchestration ?? {}),
+          ...processingInput.orchestration,
           ...(runtimeInvocationPreparationElapsedMs === undefined ? {} : {
             runtimeInvocationPreparationElapsedMs,
           }),
@@ -1464,7 +1477,7 @@ export class RuntimeProcessingController {
       input: {
         ...prepared.input,
         orchestration: {
-          ...(prepared.input.orchestration ?? {}),
+          ...prepared.input.orchestration,
           freshStartInvocationAcceptedAtEpochMs: Date.now(),
         },
       },
