@@ -1,6 +1,6 @@
 # Recover stalled runtime mailboxes
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -180,3 +180,37 @@ filtered selector and preserve recording priority, future work, invalid ownershi
 substantive device frontiers, and foreground preemption. No new queue or clock.
 The composed regression must checkpoint independent progress with the exact
 retained job unchanged and still due for the following pass.
+
+## Verified recovery and closure
+
+On 2026-09-09 at 11:03 UTC, read-only production control evidence confirmed all
+nine original workspaces had matching system-mailbox imported, handled-through,
+consumed, and current durable high-water marks. There were zero pending live
+system items and zero stalled live system items in the cohort. This is explicit
+acknowledgement progress, not expiration from the alert window.
+
+The final workspace completed its remaining refresh and subsequent hints on
+runtime source `475c2f4602476fa170325d1e0a3728543b5bf56c` at 11:01:27 UTC.
+Its earlier invocation on that source changed the refresh from untouched to
+recording; the later invocation reported no pending head. Recent passes in the
+two previously busy device lanes each completed 100 jobs with changed
+progress fingerprints and zero maximum retained-job attempts. One provider
+timeout was followed by successful device progress; no manual acknowledgement,
+job cancellation, Temporal mutation, or provider retry-policy change was used.
+
+PR #3099 passed exact-head ReviewGPT on
+`8eb0122330f2c89b3c92e5c4bde09b26c97b171b`, with the captured model verified as
+`gpt-6-pro`, before merge and deployment. Its due-owner cold-restore regression
+failed before the correction; 249 focused runtime tests, runtime and Web
+typechecks, ten changelog rendering tests, complexity, and all required CI
+passed. Earlier telemetry and recovery corrections also passed their review and
+verification gates before their protected deployments.
+
+Protected production run
+https://github.com/cobuildwithus/murph-cloud/actions/runs/34339617419 passed all
+five fresh pre-deployment gates, signed smoke, endpoint smoke, and live release
+convergence at 10:51:49 UTC. Its receipt records NextRunnerContainer version 5
+and Worker version `4e425abe-a218-4400-a34f-a9d45ec3a339`. The canonical Web alias
+was Ready on the same public source. The original recovery objective is met;
+remaining legitimate device work retains its normal durable owner and schedule.
+Completed: 2026-09-09
