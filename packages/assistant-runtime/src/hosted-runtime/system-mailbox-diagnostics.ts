@@ -1,5 +1,6 @@
 import {
   isHostedPlainDeviceSyncWakeHint,
+  isHostedPlainDeviceSyncWakeHintReason,
   systemMailboxItemIsDue,
   type HostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
@@ -80,8 +81,7 @@ function describeNonScheduledHint(head: HostedSystemMailboxPendingItem): Record<
     headHasJobs: (wake.hint?.jobs?.length ?? 0) > 0,
     headScopesPresent: wake.hint?.scopes !== undefined,
     headRevokeWarningPresent: wake.hint?.revokeWarning != null,
-    headHintReasonSupported: wake.hint?.reason == null
-      || wake.hint.reason === "webhook_dirty_transition",
+    headHintReasonSupported: isHostedPlainDeviceSyncWakeHintReason(wake.hint?.reason),
     headRecordPresent: head.postCheckpointRecord !== null,
   };
 }

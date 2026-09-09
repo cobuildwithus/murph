@@ -795,10 +795,19 @@ export function isHostedPlainDeviceSyncWakeHint(item: HostedSystemMailboxPending
     && item.deviceSyncContinuationOwner !== true
     && wake.kind === "device-sync.wake"
     && (wake.reason === "webhook_hint" || wake.reason === "reconcile_due")
-    && (wake.hint?.reason == null || wake.hint.reason === "webhook_dirty_transition")
+    && isHostedPlainDeviceSyncWakeHintReason(wake.hint?.reason)
     && (wake.hint?.jobs?.length ?? 0) === 0
     && wake.hint?.scopes === undefined
     && wake.hint?.revokeWarning == null;
+}
+
+export function isHostedPlainDeviceSyncWakeHintReason(reason: string | null | undefined): boolean {
+  // These producers store their work in canonical dirty state, which the
+  // retained connection owner fetches on its admitted pass.
+  return reason == null
+    || reason === "webhook_dirty_transition"
+    || reason === "companion_health_metadata"
+    || reason === "companion_hrv_rmssd";
 }
 
 export function isHostedRetainedDeviceScheduledAdmission(
