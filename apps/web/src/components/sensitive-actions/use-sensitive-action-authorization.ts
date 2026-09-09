@@ -1,7 +1,8 @@
 "use client";
 
 import { useSignMessage } from "@privy-io/react-auth";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { startAuthentication, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import {
@@ -22,10 +23,32 @@ export function useSensitiveActionAuthorization() {
     signMessageRef.current = signMessage;
   }, [signMessage]);
   const setup = usePasskeyWalletMfa();
+  const [passkeyConfigured, setPasskeyConfigured] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    void requestHostedOnboardingJson<{ configured: boolean }>({
+      url: "/api/settings/approval-passkeys",
+    }).then((status) => {
+      if (active) setPasskeyConfigured(status.configured);
+    }).catch(() => {
+      // This read is a UI hint only. Keep retry available if it fails; the
+      // action endpoint must select the current verifier before any proof.
+    });
+    return () => { active = false; };
+  }, []);
 
   async function signChallenge(
     challenge: SensitiveActionChallengeResponse,
   ): Promise<SensitiveActionAuthorization> {
+    const method = await requestHostedOnboardingJson<
+      { method: "wallet" } | { method: "passkey"; options: PublicKeyCredentialRequestOptionsJSON }
+    >({ method: "POST", payload: { token: challenge.token }, url: "/api/settings/approval-passkeys/authenticate" });
+    if (method.method === "passkey") {
+      setPasskeyConfigured(true);
+      const assertion = await startAuthentication({ optionsJSON: method.options });
+      return { method: "passkey", assertion, token: challenge.token };
+    }
+    setPasskeyConfigured(false);
     const wallet = await setup.ensureConfigured();
     const { signature } = await withTimeout(
       signMessageRef.current(
@@ -58,7 +81,11 @@ export function useSensitiveActionAuthorization() {
   return {
     authorize,
     signChallenge,
-    setup,
+    setup: {
+      ...setup,
+      clientAuthenticated: passkeyConfigured !== false || setup.clientAuthenticated,
+      ready: passkeyConfigured !== false || setup.ready,
+    },
   };
 }
 

@@ -896,6 +896,12 @@ describe("Privy phone-transfer source retirement", () => {
 
   it.each([
     {
+      label: "a migrated approval passkey",
+      mutate: (fixture: Fixture) => {
+        fixture.sourceShape.approvalCredentials = { memberId: SOURCE_MEMBER_ID };
+      },
+    },
+    {
       label: "an address-book projection",
       mutate: (fixture: Fixture) => {
         fixture.sourceShape.addressBookProjection = {
@@ -1640,6 +1646,7 @@ function emptyIdentity() {
 function emptySourceShape() {
   return {
     addressBookProjection: null as { memberId: string } | null,
+    approvalCredentials: null as { memberId: string } | null,
     assistantDetail: null,
     assistantDetailCausalSeq: null,
     assistantHumor: null,

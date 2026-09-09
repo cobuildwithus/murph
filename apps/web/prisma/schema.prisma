@@ -685,6 +685,7 @@ model HostedMember {
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
+  approvalCredentials            HostedMemberApprovalCredentials?
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
   threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
@@ -816,6 +817,18 @@ model HostedAddressBookContact {
   @@id([memberId, phoneTokenVersion, phoneToken])
   @@index([phoneTokenVersion])
   @@map("hosted_address_book_contact")
+}
+
+/// Bounded, member-bound encrypted WebAuthn credentials for action approvals.
+/// Login and credential recovery remain separate policy owners.
+model HostedMemberApprovalCredentials {
+  memberId             String       @id @map("member_id")
+  credentialsEncrypted String       @map("credentials_encrypted")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_member_approval_credentials")
 }
 
 model HostedSensitiveActionChallenge {

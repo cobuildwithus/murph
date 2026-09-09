@@ -106,6 +106,31 @@ export async function requireActiveHostedAppSessionFromRequest(request: Request)
   return session;
 }
 
+// Revalidate the presented credential under the caller's member lock before
+// committing a protected action. This performs only local crypto and DB reads.
+export async function assertHostedAppSessionCurrentTx(input: {
+  memberId: string;
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+  request: Request;
+  sessionId: string;
+}): Promise<void> {
+  const token = parseHostedAppSessionToken(readCookieFromRequest(input.request, HOSTED_APP_SESSION_COOKIE_NAME));
+  if (token && token.sessionId === input.sessionId) {
+    await input.prisma.$queryRaw`
+      SELECT id FROM hosted_web_session WHERE id = ${token.sessionId} FOR UPDATE
+    `;
+  }
+  const row = token && token.sessionId === input.sessionId
+    ? await input.prisma.hostedWebSession.findUnique({ where: { id: token.sessionId } })
+    : null;
+  if (!token || !row || row.memberId !== input.memberId || row.revokedAt
+    || row.expiresAt <= (input.now ?? new Date())
+    || !verifyHostedAppSessionAuthenticator(row, token, readHostedAppSessionHmacKey())) {
+    throw hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." });
+  }
+}
+
 export async function issueHostedAppSession(input: {
   memberId: string;
   now?: Date;

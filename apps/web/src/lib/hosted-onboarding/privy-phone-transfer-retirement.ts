@@ -642,6 +642,7 @@ async function readHostedPrivyPhoneTransferSourceShapeTx(input: {
       usageCreditBalanceUsdMicros: true,
       usageCreditLedgerVersion: true,
       addressBookProjection: { select: { memberId: true } },
+      approvalCredentials: { select: { memberId: true } },
       _count: {
         select: {
           accountGroupInvitesAccepted: true,
@@ -701,6 +702,7 @@ function hasHostedPrivyPhoneTransferSourceCoreCustomization(
   return (
     Boolean(
       source.addressBookProjection
+      || source.approvalCredentials
       || source.codexAuthConnection
       || source.connectedAppsSession
       || source.emailAuthorization
