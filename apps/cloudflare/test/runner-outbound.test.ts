@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER } from "@murphai/device-syncd/hosted-runtime";
 
 const hostedExecutionMocks = vi.hoisted(() => ({
@@ -1832,19 +1833,46 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("upgrades device-sync runtime snapshots after active runtime fence validation", async () => {
+  it.each([
+    [null, null, "missing", "missing"],
+    ["identity", "0", "identity", "valid"],
+    ["GZip", "11", "gzip", "valid"],
+    ["br", "9007199254740991", "br", "valid"],
+    ["deflate", "9007199254740992", "deflate", "invalid"],
+    ["gzip, br", "11, 11", "other", "invalid"],
+    ["", "", "other", "invalid"],
+    ["gzip", "01", "gzip", "invalid"],
+    ["gzip", "-1", "gzip", "invalid"],
+    ["gzip", "-0", "gzip", "invalid"],
+    ["gzip", "0x10", "gzip", "invalid"],
+    ["gzip", "+1", "gzip", "invalid"],
+    ["gzip", "1e3", "gzip", "invalid"],
+    ["gzip", "1.0", "gzip", "invalid"],
+    ["gzip", "1 1", "gzip", "invalid"],
+    ["synthetic-private-header", "synthetic-private-header", "other", "invalid"],
+    ["x".repeat(4096), "9".repeat(4096), "other", "invalid"],
+  ] as const)("adds only finite snapshot header categories after fence validation (case %#)", async (
+    encoding, length, encodingCategory, lengthCategory,
+  ) => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
-    const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ): Promise<Response> =>
-      new Response(JSON.stringify({ ok: true }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER]: "11",
-        },
-        status: 200,
-      })
-    );
+    const bytes = new TextEncoder().encode('{"fixture":"café-🧪"}');
+    let offset = 0;
+    const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+      if (offset < bytes.length) controller.enqueue(bytes.subarray(offset, ++offset));
+      else controller.close();
+    });
+    const body = new ReadableStream<Uint8Array>({ pull }, { highWaterMark: 0 });
+    const upstream = new Response(body, { headers: {
+      "content-type": "application/json; charset=utf-8",
+      [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER]: "11",
+      ...(encoding === null ? {} : { "content-encoding": encoding }),
+      ...(length === null ? {} : { "content-length": length }),
+    } });
+    const originalHeaders = [...upstream.headers];
+    const clone = vi.spyOn(upstream, "clone");
+    const getReader = vi.spyOn(body, "getReader");
+    const getHeader = vi.spyOn(upstream.headers, "get");
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>): Promise<Response> => upstream);
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -1874,10 +1902,35 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123" ,
     );
 
+    expect(response).toBe(upstream);
+    expect(response.body).toBe(body);
     expect(response.status).toBe(200);
-    expect(response.headers.get(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER)).toBe("11");
+    expect(response.headers).toBe(upstream.headers);
+    expect([...response.headers]).toEqual(originalHeaders);
     expect(response.bodyUsed).toBe(false);
-    await expect(response.text()).resolves.toBe('{"ok":true}');
+    expect(body.locked).toBe(false);
+    expect(clone).not.toHaveBeenCalled();
+    expect(getReader).not.toHaveBeenCalled();
+    expect(pull).not.toHaveBeenCalled();
+    expect(getHeader.mock.calls).toEqual([["content-encoding"], ["content-length"]]);
+    const log = hostedExecutionMocks.emitHostedExecutionStructuredLog;
+    expect(log).toHaveBeenCalledTimes(2);
+    const entry = log.mock.calls[1]?.[0];
+    expect(entry).toMatchObject({
+      message: "Hosted runner web-control response received.",
+      details: {
+        operation: "device_sync_runtime_snapshot",
+        responseContentEncodingCategory: encodingCategory,
+        responseContentLengthCategory: lengthCategory,
+      },
+    });
+    expect(buildHostedExecutionStructuredLogRecord(entry).details).toEqual(entry.details);
+    const serializedLogs = JSON.stringify(log.mock.calls);
+    for (const sentinel of ["synthetic-private-header", "x".repeat(64), "9".repeat(64), "café", "9007199254740991"]) {
+      expect(serializedLogs).not.toContain(sentinel);
+    }
+    await expect(response.arrayBuffer()).resolves.toEqual(bytes.buffer);
+    expect(log).toHaveBeenCalledTimes(2);
     expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",
@@ -1895,6 +1948,49 @@ describe("handleRunnerOutboundRequest", () => {
     expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(headers.get("authorization")).toBeNull();
     expect(headers.get("x-api-key")).toBeNull();
+  });
+
+  it.each(["empty", "stream_error", "cancel", "locked"] as const)("leaves snapshot %s behavior and log volume unchanged", async (kind) => {
+    const reason = new Error("synthetic stream result");
+    const cancel = vi.fn();
+    const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+      if (kind === "stream_error") controller.error(reason);
+      else controller.enqueue(Uint8Array.of(123)); // Deliberately unbounded until cancelled.
+    });
+    const upstream = new Response(kind === "empty" ? null
+      : new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 }), {
+      headers: { "content-encoding": "br", "content-length": "0" },
+    });
+    const heldReader = kind === "locked" ? upstream.body!.getReader() : null;
+    const clone = vi.spyOn(upstream, "clone");
+    const fetchMock = vi.fn(async () => upstream);
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH}`, {
+        method: "POST", body: "{}", headers: createRunnerWriteFenceProxyHeaders(),
+      }), createRunnerOutboundEnv(), "member_123",
+    );
+    expect(response).toBe(upstream);
+    expect(response.bodyUsed).toBe(false);
+    expect(response.body?.locked ?? false).toBe(kind === "locked");
+    expect(pull).not.toHaveBeenCalled();
+    expect(clone).not.toHaveBeenCalled();
+    if (kind === "empty") {
+      expect(response.body).toBeNull();
+    } else {
+      const reader = heldReader ?? response.body!.getReader();
+      if (kind === "stream_error") await expect(reader.read()).rejects.toBe(reason);
+      else {
+        await expect(reader.read()).resolves.toEqual({ done: false, value: Uint8Array.of(123) });
+        await reader.cancel(reason);
+        expect(cancel).toHaveBeenCalledExactlyOnceWith(reason);
+      }
+      reader.releaseLock();
+      await Promise.resolve();
+      expect(pull).toHaveBeenCalledTimes(1);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(2);
   });
 
   it("rejects device-sync runtime snapshots when the runtime fence is stale", async () => {
@@ -3629,6 +3725,7 @@ describe("handleRunnerOutboundRequest", () => {
     }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
+        "content-encoding": "gzip", "content-length": "0",
       },
       status: 200,
     }));
@@ -3648,6 +3745,11 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(2);
+    for (const [entry] of hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls) {
+      expect(entry.details).not.toHaveProperty("responseContentEncodingCategory");
+      expect(entry.details).not.toHaveProperty("responseContentLengthCategory");
+    }
     await expect(response.json()).resolves.toEqual({
       fetchedAt: "2026-04-26T00:00:05.000Z",
       workspace: null,
@@ -3697,21 +3799,24 @@ describe("handleRunnerOutboundRequest", () => {
     );
   });
 
-  it("logs non-OK hosted web-control responses without response bodies", async () => {
+  it.each([HOSTED_RUNTIME_WORKSPACE_PATH, HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH])(
+    "keeps non-OK web-control diagnostics unchanged (case %#)", async (path) => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> => new Response("Not found", {
       headers: {
         "content-type": "text/plain; charset=utf-8",
+        "content-encoding": "gzip", "content-length": "9",
       },
       status: 404,
     }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+      new Request(`http://web-control.worker${path}`, {
+        ...(path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH ? { body: "{}" } : {}),
         headers: createRunnerWriteFenceProxyHeaders(),
-        method: "GET",
+        method: path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH ? "POST" : "GET",
       }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://www.withmurph.ai",
@@ -3720,13 +3825,19 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(2);
+    for (const [entry] of hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls) {
+      expect(entry.details).not.toHaveProperty("responseContentEncodingCategory");
+      expect(entry.details).not.toHaveProperty("responseContentLengthCategory");
+    }
     expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "runner",
         details: expect.objectContaining({
           contentTypePresent: true,
-          method: "GET",
-          operation: "workspace_read",
+          method: path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH ? "POST" : "GET",
+          operation: path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH ? "device_sync_runtime_snapshot" : "workspace_read",
           responseBodyBytes: 9,
           responseBodyKind: "text",
           responseOk: false,
