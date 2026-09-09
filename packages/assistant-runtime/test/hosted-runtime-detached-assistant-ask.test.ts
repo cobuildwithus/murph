@@ -841,19 +841,25 @@ describe("hosted detached assistant ask controller", () => {
 
   test("dispatches an operator diagnostic directly without consent review or delivery authority", async () => {
     const groupRuntimeRoot = await createVaultRoot();
+    const records: AssistantUsageRecord[] = [];
+    const deferred: HostedWorkspaceDurableCheckpointEffect[] = [];
     const executeAsk = vi.fn();
     const executeConsentedAsk = vi.fn();
     const executeOperatorDiagnostic = vi.fn(async (
       _input: OperatorDiagnosticInput,
-    ): Promise<OperatorDiagnosticResult> => ({
-      answer: "Synthetic diagnostic answer.",
-      outcome: "answered",
-    }));
+    ): Promise<OperatorDiagnosticResult> => {
+      _input.onProviderUsage?.({ stage: "answer", usage: createTestUsageDraft({ occurredAt: TEST_NOW, inputTokens: 20, outputTokens: 10, providerRequestOrdinal: 0 }) });
+      return {
+        answer: "Synthetic diagnostic answer.",
+        outcome: "answered",
+      };
+    });
     const assistantAskRequest = vi.fn(async (
       request: HostedRuntimeAssistantAskControlRequest,
     ) => request.action === "prepare"
       ? {
           action: "prepare" as const,
+          feedbackDiagnostic: true as const,
           question: "What is the synthetic status?",
           status: "ready" as const,
           targetLabel: null,
@@ -874,6 +880,10 @@ describe("hosted detached assistant ask controller", () => {
         },
         codexHome: "/hosted/codex-home",
         env: {},
+        model: "gpt-5.6-luna",
+        modelProvider: "openai",
+        usageRecordPort: { async recordUsage(record) { records.push(record); return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true }; } },
+        deferUsageUntilAfterDurableCheckpoint(effect) { deferred.push(effect); },
         executeAsk,
         executeConsentedAsk,
         executeOperatorDiagnostic,
@@ -891,11 +901,17 @@ describe("hosted detached assistant ask controller", () => {
       });
       await controller.closeAndRequeue();
 
+      for (const effect of deferred) await effect();
+      assert.equal(records.length, 1);
+      assert.equal(records[0]?.operatorTaskId, `opt_${"a".repeat(64)}`);
       assert.equal(executeAsk.mock.calls.length, 0);
       assert.equal(executeConsentedAsk.mock.calls.length, 0);
       assert.equal(executeOperatorDiagnostic.mock.calls.length, 1);
       const operatorInput = executeOperatorDiagnostic.mock.calls[0]?.[0];
       assert.ok(operatorInput);
+      assert.equal(operatorInput.feedbackDiagnostic, true);
+      assert.equal(operatorInput.model, "gpt-5.6-sol");
+      assert.equal(operatorInput.modelProvider, "openai");
       assert.equal(operatorInput.codexHome, "/hosted/codex-home");
       assert.equal(operatorInput.question, "What is the synthetic status?");
       assert.equal(operatorInput.workspaceRoot, groupRuntimeRoot);
@@ -1571,7 +1587,7 @@ function createPendingAsk(input: {
             question: "operator diagnostic question",
             target: {
               kind: "operator_task" as const,
-              taskId: "opt_synthetic_diagnostic",
+              taskId: `opt_${"a".repeat(64)}`,
             },
           }
         : input.currentSender

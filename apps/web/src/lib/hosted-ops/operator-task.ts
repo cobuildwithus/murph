@@ -1,3 +1,4 @@
+import { sanitizeHostedProductFeedbackSummary } from "@murphai/hosted-execution/runtime-control";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -47,6 +48,7 @@ export type HostedOperatorTaskKind = "diagnostic" | "member_message";
 export type HostedOperatorTaskSource = "cron" | "ops" | "workflow";
 
 export interface HostedOperatorTaskAdmissionInput {
+  feedbackId?: string;
   idempotencyKey: string;
   kind: HostedOperatorTaskKind;
   memberId: string;
@@ -128,12 +130,21 @@ export async function admitHostedOperatorTask(
   const task = await runWithPreparedHostedMailboxItemAppendCrypto({
     append: (prepared) => prisma.$transaction(async (tx) => {
       await requireHostedRuntimeActiveAccessForUpdateTx(memberId, { prisma: tx });
+      if (input.feedbackId) {
+        const feedback = await tx.hostedProductFeedback.findUnique({
+          where: { id: input.feedbackId }, select: { memberId: true },
+        });
+        if (input.kind !== "diagnostic" || feedback?.memberId !== memberId) {
+          throw operatorTaskError("HOSTED_FEEDBACK_TARGET_UNAVAILABLE", "Feedback has no authorized diagnostic target.", 409);
+        }
+      }
       const existing = await tx.hostedOperatorTask.findUnique({
         where: { idempotencyKey },
       });
       if (existing) {
         if (
-          existing.id !== taskId
+          (existing.feedbackId ?? null) !== (input.feedbackId ?? null)
+          || existing.id !== taskId
           || existing.memberId !== memberId
           || existing.kind !== input.kind
           || existing.source !== input.source
@@ -164,6 +175,7 @@ export async function admitHostedOperatorTask(
       }
       return tx.hostedOperatorTask.create({
         data: {
+          ...(input.feedbackId ? { feedbackId: input.feedbackId } : {}),
           expiresAt,
           id: taskId,
           idempotencyKey,
@@ -306,6 +318,7 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
       mailboxWake: null,
       response: {
         action: "prepare",
+        ...(task.feedbackId ? { feedbackDiagnostic: true } : {}),
         question: wake.ask.question,
         status: "ready",
         targetLabel: null,
@@ -318,7 +331,9 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
   const resultEncrypted = await encryptOperatorTaskResult({
     memberId: task.memberId,
     taskId: task.id,
-    value: input.request.result,
+    value: task.feedbackId && input.request.result.outcome === "answered"
+      ? { ...input.request.result, answer: sanitizeHostedProductFeedbackSummary(input.request.result.answer) }
+      : input.request.result,
   });
   await prisma.hostedOperatorTask.updateMany({
     data: { completedAt: now, resultEncrypted, status: "completed" },
@@ -555,7 +570,7 @@ async function encryptOperatorTaskResult(input: {
   return value;
 }
 
-async function decryptOperatorTaskResult(input: {
+export async function decryptOperatorTaskResult(input: {
   memberId: string;
   taskId: string;
   value: string;

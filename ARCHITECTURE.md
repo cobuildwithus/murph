@@ -4331,3 +4331,32 @@ removal condition are defined in
 ### Fitbit / Google Health source replacement
 
 Fitbit migration is a boundary transition inside the existing Junction connection. Importers own canonical daily/interval evidence, device-syncd owns source identities and provider calls, hosted runtime owns continuation, and Web owns the persisted connection lock and one-card projection. The public card may combine Fitbit and Pixel Watch, but stored authorities remain truthful as `fitbit` and `google_health`.
+
+
+## Feedback diagnostic tasks
+
+Web owns feedback and its nullable member linkage. The Ops-authenticated
+`/api/ops/feedback` endpoint lists product-only summaries, accepts a feedback id,
+a bounded question and an idempotency key, and lists associated diagnostic
+results. GET without `feedbackId` lists feedback; GET with it lists tasks;
+`after` follows the returned cursor. POST resolves the target only from existing
+feedback linkage and rechecks it inside task admission. Unlinked feedback
+cannot select a private workspace. Responses never include member linkage.
+
+The nullable operator-task feedback relation reuses mailbox dispatch, retry,
+status, encryption and two-day result retention. Web prepare selects the
+feedback diagnostic profile; the read-only engine composes de-identification
+instructions above untrusted evidence, and Web sanitizes the answer before
+encrypted persistence. Reads expose only sanitized answers and their expiry.
+Local investigation consumers use existing Ops authentication; this endpoint
+adds no machine credential, cron, worker or automatic repository mutation.
+
+Diagnostics use Sol on OpenAI, and operator messages use an invocation-only Sol
+provider override without changing member preferences. Both attach the exact
+operator-task id to usage. Web verifies the same-member task and occurrence
+window before marking allowance cost zero; provider pricing remains in the
+usage snapshot. The member allowance/credit ledger receives no operator debit.
+Existing provider admission still applies when member capacity is exhausted.
+Deploy the additive database migration and Web accounting before the runtime
+producer; mixed older runtimes do not carry the funding identity. This is a
+forward fix, not historical usage reclassification.
