@@ -147,12 +147,15 @@ exchange; it does not expose Telegram login. Actual native SDK replacement,
 app-store/device qualification, credential mutations/recovery and full retirement
 remain unfinished goal scope. The rollout owner names these activation gates.
 
-PR 2 focused proof passes: 33 real-PostgreSQL adapter/member cases, 641
+PR 2 focused proof passes: 34 real-PostgreSQL adapter/member cases, 641
 regular regression cases across the final affected-file reruns, and the separate
 nine-case action-approval database suite. Web typecheck, changed-file lint,
 complexity, documentation drift and added-line privacy checks pass. Parent
-candidate review confirms the backend stays inactive until PR 3. Commit, push,
-exact-head CI and final ReviewGPT remain. No PR 2 deployment or production import
+candidate review confirms the backend stays inactive until PR 3. PR 3128 is
+open, stacked on PR 3127. A local HTTPS public-route fixture reproduced a cookie
+namespace mismatch; writer and readers now share the environment naming rule,
+with production secure-cookie proof retained. Final exact-head CI and ReviewGPT
+remain. No PR 2 deployment or production import
 has occurred. Local member crypto/KMS ports are synthetic; actual installed Better
 Auth, PostgreSQL, pre-auth AEAD and signed JWT/WebAuthn fixtures provide boundary
 proof, not hosted delivery or real-device qualification.

@@ -62,6 +62,7 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
   });
 
   it("runs the pinned Better Auth email OTP, secure cookie, bearer and logout paths", () => fixture(async ({ memberId, email }) => {
+    vi.stubEnv("NODE_ENV", "production");
     let delivered = "";
     const auth = createHostedBetterAuth({
       baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma: getPrisma(),

@@ -6,7 +6,7 @@ import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { createHostedBetterAuth, hostedBetterAuthCookieName } from "./auth";
+import { createHostedBetterAuth } from "./auth";
 import { openAuthRecord } from "./record-crypto";
 import type { HostedAuthTransport } from "./admission";
 import { hostedAuthCookieName } from "./transport";
@@ -24,7 +24,7 @@ export async function readHostedAuthSession(input: {
   credential: string; transport: HostedAuthTransport; refresh?: boolean;
 }) {
   const headers = input.transport === "browser"
-    ? new Headers({ cookie: `${hostedBetterAuthCookieName(input.baseURL)}=${input.credential}` })
+    ? new Headers({ cookie: `${hostedAuthCookieName(process.env.NODE_ENV === "production")}=${input.credential}` })
     : new Headers({ authorization: `Bearer ${input.credential}` });
   const auth = createSessionAuth(input);
   const result = await auth.api.getSession({ headers, query: { disableRefresh: !input.refresh }, returnHeaders: true });
@@ -74,7 +74,7 @@ function authRequired() { return hostedOnboardingError({ code: "AUTH_REQUIRED", 
 
 export async function revokeHostedAuthSession(input: { baseURL: string; secret: string; prisma: PrismaClient; credential: string; transport: HostedAuthTransport }): Promise<void> {
   const headers = input.transport === "browser"
-    ? new Headers({ cookie: `${hostedBetterAuthCookieName(input.baseURL)}=${input.credential}` })
+    ? new Headers({ cookie: `${hostedAuthCookieName(process.env.NODE_ENV === "production")}=${input.credential}` })
     : new Headers({ authorization: `Bearer ${input.credential}` });
   await createSessionAuth(input).api.signOut({ headers });
 }

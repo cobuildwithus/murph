@@ -112,18 +112,22 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     } finally { await prisma.hostedMember.deleteMany({ where: { id: prepared.memberId } }); }
   });
 
-  it.each(["browser", "native"] as const)("completes the public %s OTP routes with fixed transport and canonical signup context", async (transport) => {
+  it.each([["browser", "http://localhost:3000"], ["browser", "https://local.withmurph.ai:3443"], ["native", "http://localhost:3000"]] as const)("completes the public %s OTP routes at %s with canonical signup context", async (transport, baseURL) => {
     const prisma = getPrisma();
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 29).toString("base64url"));
-    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3000");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
     vi.stubEnv("VERCEL", "1");
     const value = transport === "browser" ? `route-${randomUUID()}@example.test` : "+12025550146";
     const kind = transport === "browser" ? "email" : "phone";
+    // Reset only this fixture's synthetic contact budgets in its owned database.
+    const rateIds = [`send:contact:${kind}:${value}`, `verify:contact:${kind}:${value}`, `send:cooldown:${kind}:${value}`]
+      .map((key) => `arl_${authLookupKey("verification", "rate-limit", key)}`);
+    await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateIds } } });
     const ip = `2001:db8::${randomUUID().slice(0, 4)}`;
-    const request = (body: unknown) => new Request("http://localhost:3000/api/auth/otp/verify", {
+    const request = (body: unknown) => new Request(`${baseURL}/api/auth/otp/verify`, {
       method: "POST", body: JSON.stringify(body),
-      headers: { "content-type": "application/json", origin: "http://localhost:3000", "x-vercel-forwarded-for": ip },
+      headers: { "content-type": "application/json", origin: baseURL, "x-vercel-forwarded-for": ip },
     });
     const send = transport === "browser" ? sendBrowserCode : sendNativeCode;
     const verify = transport === "browser" ? verifyBrowserCode : verifyNativeCode;
@@ -139,7 +143,12 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       expect(member.initialOnboardingCompletedAt).toBeNull();
       if (transport === "browser") {
         expect(Object.keys(result).sort()).toEqual(["memberId", "ok"]);
-        expect(response.headers.getSetCookie().some((cookie) => cookie.startsWith("murph-auth-session="))).toBe(true);
+        const cookie = response.headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="));
+        expect(cookie).toBeDefined();
+        const current = await getHostedAppSessionFromRequest(new Request(`${baseURL}/home`, {
+          headers: { cookie: cookie?.split(";")[0] ?? "" },
+        }));
+        expect(current?.member.id).toBe(result.memberId);
       } else {
         expect(Object.keys(result).sort()).toEqual(["memberId", "ok", "token"]);
         expect(result.token).toMatch(/^murph_auth_v1\.[A-Za-z0-9]{32}$/u);
@@ -147,7 +156,10 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       }
       const replay = await verify(request({ kind, value, code: provider.codes.get(value) }));
       expect(replay.status).toBe(400);
-    } finally { await prisma.hostedMember.deleteMany({ where: { id: result.memberId } }); }
+    } finally {
+      await prisma.hostedMember.deleteMany({ where: { id: result.memberId } });
+      await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateIds } } });
+    }
   });
 
   it("claims the existing text-first email stub after proof and rejects a mismatched invite", async () => {

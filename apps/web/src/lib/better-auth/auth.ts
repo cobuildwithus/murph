@@ -7,10 +7,6 @@ import { authLookupKey } from "./record-crypto";
 import { hostedAuthRateLimitStorage } from "./rate-limit";
 import { hostedAuthCookieName } from "./transport";
 
-export function hostedBetterAuthCookieName(baseURL: string): string {
-  return hostedAuthCookieName(new URL(baseURL).protocol === "https:");
-}
-
 export interface HostedAuthDelivery {
   email(input: { address: string; code: string }): Promise<void>;
   sms(input: { phoneNumber: string; code: string }): Promise<void>;
@@ -51,7 +47,7 @@ export function createHostedBetterAuth(input: {
       // The library otherwise prepends __Secure- even to a custom __Host- name.
       // Set the secure attribute explicitly so the browser enforces host scope.
       cookiePrefix: "murph-auth", useSecureCookies: false,
-      cookies: { session_token: { name: hostedBetterAuthCookieName(input.baseURL) } },
+      cookies: { session_token: { name: hostedAuthCookieName(process.env.NODE_ENV === "production") } },
       database: { generateId: input.generateId },
       crossSubDomainCookies: { enabled: false },
       defaultCookieAttributes: { secure: new URL(input.baseURL).protocol === "https:", httpOnly: true, sameSite: "lax", path: "/" },
