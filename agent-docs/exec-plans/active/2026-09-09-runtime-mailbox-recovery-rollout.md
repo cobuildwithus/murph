@@ -128,3 +128,15 @@ warnings, unknown reasons, epoch barriers, active retry work, and checkpoint
 acknowledgement. Do not infer incident recovery from this synthetic proof: verify
 the diagnostic release against the original cohort and then verify the reviewed
 fix after its protected deployment. The overall recovery plan remains active.
+
+### Inactive-target pagination diagnostics
+
+- Two protected deployment attempts rejected provider pagination evidence before
+  native target admission or Worker activation. The existing error did not
+  distinguish its four token rejection conditions.
+- Keep every drain condition and bound unchanged. Report only the fixed rejection
+  category, page count, native row count, and oversized token length. Never emit
+  cursor contents, application identity, or provider response bodies.
+- Seven synthetic diagnostics assertions fail against the prior generic error;
+  existing drain, pagination, admission, and provider-error redaction tests remain
+  the regression surface. A reviewed hosted run must establish the actual cause.

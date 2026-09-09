@@ -61,7 +61,14 @@ export function createRunnerReleaseProvider(input: {
       if (info !== undefined && !isObjectRecord(info)) throw unavailable();
       const next = isObjectRecord(info) ? info.next_page_token : undefined;
       if (next === undefined || next === null || next === "") return true;
-      if (typeof next !== "string" || !next.trim() || next.length > 2048 || tokens.has(next)) throw unavailable();
+      // Report only fixed categories and bounded counts, never opaque cursors.
+      const paginationFailure = (reason: string) => unavailable(
+        `Inactive instance pagination rejected: ${reason}; page=${page + 1}; nativeRows=${rows}.`,
+      );
+      if (typeof next !== "string") throw paginationFailure("non-string token");
+      if (!next.trim()) throw paginationFailure("blank token");
+      if (next.length > 2048) throw paginationFailure(`oversized token (length=${next.length})`);
+      if (tokens.has(next)) throw paginationFailure("repeated token");
       tokens.add(next);
       pageToken = next;
     }

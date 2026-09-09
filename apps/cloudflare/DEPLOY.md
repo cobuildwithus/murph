@@ -37,6 +37,11 @@ redactor removes credential and personal-identifier shapes; the provider boundar
 also removes its exact token, account, requested name/image and native resource
 identifiers. Raw response details remain private. Inspect the provider explanation
 before retrying or changing capacity; transport and malformed responses stay distinct.
+Inactive-instance pagination rejection reports a fixed category (non-string, blank,
+oversized, or repeated token), page and native-row counts, and oversized token
+length. Cursor values, application identity, and provider response bodies are
+excluded. These diagnostics do not relax drain admission or its bounds.
+
 Member applications require drain evidence before namespace reuse. The dedicated
 smoke application carries no member invocation, so it proceeds directly through
 native rollout and readiness checks without member drain admission.
