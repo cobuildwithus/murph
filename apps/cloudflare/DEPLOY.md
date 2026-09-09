@@ -40,7 +40,9 @@ before retrying or changing capacity; transport and malformed responses stay dis
 Inactive-instance pagination rejection reports a fixed category (non-string, blank,
 oversized, or repeated token), page and native-row counts, and oversized token
 length. Cursor values, application identity, and provider response bodies are
-excluded. These diagnostics do not relax drain admission or its bounds.
+excluded. Inspection requests up to 1,000 rows per page to reduce cursor traversal over
+historical objects. All pages must still terminate normally and every native
+instance must be stopped; the 100-page, 10,000-native-row and time bounds remain.
 
 Member applications require drain evidence before namespace reuse. The dedicated
 smoke application carries no member invocation, so it proceeds directly through

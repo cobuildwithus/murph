@@ -13,7 +13,7 @@ Non-string, whitespace-only, oversized, and repeated next-page tokens all produc
 
 ## Possible Solution
 
-Report fixed rejection categories with page count, native-row count, and oversized token length. Preserve every drain condition and bound.
+Report fixed rejection categories with page count, native-row count, and oversized token length. Preserve every drain acceptance condition and inspection bound. Larger bounded pages can reduce exposure to provider cursor cycles, but a repeated cursor must still stop admission.
 
 ## Minimal Reproducible Example
 

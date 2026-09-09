@@ -61,9 +61,22 @@ describe("inactive runner target drain admission", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     const urls = fetchImpl.mock.calls.map(([url]) => new URL(String(url)));
     expect(urls[0]?.pathname).toBe("/client/v4/accounts/fixture/containers/dash/applications/inactive-app/instances");
-    expect(urls[0]?.searchParams.get("per_page")).toBe("100");
+    expect(urls[0]?.searchParams.get("per_page")).toBe("1000");
     expect(urls[1]?.searchParams.get("page_token")).toBe("second page");
     expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("requests a bounded larger page while still requiring terminal drain evidence", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url) => {
+      const largePage = new URL(String(url)).searchParams.get("per_page") === "1000";
+      return Response.json({ success: true,
+        result: { instances: [{ current_placement: { status: { container_status: "stopped" } } }],
+          durable_objects: Array.from({ length: largePage ? 250 : 100 }, (_, index) => ({ id: `synthetic-object-${index}` })) },
+        result_info: { next_page_token: largePage ? null : "synthetic-repeating-cursor" } });
+    });
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .assertDrained("inactive-app")).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("restarts the complete drain observation when a later page is still running", async () => {

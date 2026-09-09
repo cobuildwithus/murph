@@ -42,7 +42,8 @@ export function createRunnerReleaseProvider(input: {
     let rows = 0;
     for (let page = 0; page < 100; page++) {
       if (Date.now() >= deadline) throw unavailable("Inactive instance inspection exceeded its deadline.");
-      const query = new URLSearchParams({ per_page: "100" });
+      // Reduce historical-object cursor traversal without relaxing drain proof.
+      const query = new URLSearchParams({ per_page: "1000" });
       if (pageToken) query.set("page_token", pageToken);
       const response = await request("Read inactive instances",
         `/containers/dash/applications/${encodeURIComponent(applicationId)}/instances?${query}`,

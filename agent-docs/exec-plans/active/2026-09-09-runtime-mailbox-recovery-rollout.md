@@ -151,9 +151,15 @@ remain required before review and deployment.
 - Two protected deployment attempts rejected provider pagination evidence before
   native target admission or Worker activation. The existing error did not
   distinguish its four token rejection conditions.
-- Keep every drain condition and bound unchanged. Report only the fixed rejection
+- Keep every drain acceptance condition unchanged. Report only the fixed rejection
   category, page count, native row count, and oversized token length. Never emit
   cursor contents, application identity, or provider response bodies.
 - Seven synthetic diagnostics assertions fail against the prior generic error;
   existing drain, pagination, admission, and provider-error redaction tests remain
-  the regression surface. A reviewed hosted run must establish the actual cause.
+  the regression surface.
+- Read-only standard-provider pagination reproduced a repeated cursor with small
+  pages. A larger bounded page returned terminal evidence. Request 1,000 rows per
+  page while preserving complete traversal, stopped-native checks, cursor-cycle
+  rejection, native-row/page/deadline bounds, and fail-closed activation.
+- A reviewed protected deployment must verify the mitigation and release receipt;
+  larger pages reduce exposure to the provider cycle without treating it as drain.
