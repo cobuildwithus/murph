@@ -64,7 +64,7 @@ describe("hosted product feedback digest", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("groups private feedback by member and puts groupchat feedback last", async () => {
+  it("groups private and group-runtime feedback by member id with unlinked feedback last", async () => {
     const readFeedback = vi.fn(async () => createFeedbackDigestBatch([
       {
         kind: "frustration",
@@ -83,7 +83,7 @@ describe("hosted product feedback digest", () => {
       },
       {
         kind: "feature_request",
-        memberId: "member_beta",
+        memberId: "member_group_runtime",
         summary: "Asked for treadmill workout support.",
       },
     ]));
@@ -115,7 +115,7 @@ describe("hosted product feedback digest", () => {
       idempotencyKey: "hosted-product-feedback-digest/2026-07-30",
       subject: "Murph feedback — 2026-07-30",
       text: [
-        "Member 1",
+        "Member / group 1",
         "",
         "Feature requests (1)",
         "- Wants a weekly training summary email.",
@@ -123,7 +123,7 @@ describe("hosted product feedback digest", () => {
         "Product frustrations (1)",
         "- Reminder cadence felt too frequent this week.",
         "",
-        "Member 2",
+        "Member / group 2",
         "",
         "Feature requests (1)",
         "- Asked for treadmill workout support.",
@@ -136,7 +136,7 @@ describe("hosted product feedback digest", () => {
       to: ["product@example.test", "founder@example.test"],
     });
     expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("member_alpha");
-    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("member_beta");
+    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("member_group_runtime");
   });
 
   it("fails missing configuration before reading and still sends an empty digest", async () => {
@@ -276,7 +276,7 @@ describe("hosted product feedback digest", () => {
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       text: [
-        "Member 1",
+        "Member / group 1",
         "",
         "Feature requests (1)",
         "- Wants a weekly training summary email.",
@@ -421,7 +421,7 @@ describe("hosted product feedback digest", () => {
     });
 
     const sentText = sendEmail.mock.calls[0]?.[0]?.text;
-    expect(sentText).toContain("Member 1");
+    expect(sentText).toContain("Member / group 1");
     expect(sentText).not.toContain("member_alpha");
     expect(sentText).toContain(
       `Feature requests (${HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS})`,
@@ -543,7 +543,7 @@ describe("hosted product feedback digest", () => {
         from: "Murph Alerts <alerts@example.test>",
         subject: "Murph feedback — 2026-07-30",
         text: [
-          "Member 1",
+          "Member / group 1",
           "",
           "Feature requests (2)",
           "- Wants a weekly training summary email.",

@@ -41,38 +41,44 @@ describe("hosted product feedback record route", () => {
     });
   });
 
-  it("links ordinary bounded feedback to the authenticated member", async () => {
-    const feedback = {
-      idempotencyKey: "a".repeat(64),
-      kind: "feature_interest",
-      relatedChangelogItemIds: [],
-      summary: "Interested in generated song reminders.",
-    };
-    const response = await route.POST(
-      new Request(
-        "https://join.example.test/api/internal/hosted-execution/product-feedback/record",
-        {
-          body: JSON.stringify({ feedback }),
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        },
-      ),
-    );
+  it.each(["member_123", "member_group_runtime"])(
+    "links ordinary bounded feedback to callback member %s",
+    async (memberId) => {
+      mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+        async (request: Request) => ({ payload: await request.json(), userId: memberId }),
+      );
+      const feedback = {
+        idempotencyKey: "a".repeat(64),
+        kind: "feature_interest",
+        relatedChangelogItemIds: [],
+        summary: "Interested in generated song reminders.",
+      };
+      const response = await route.POST(
+        new Request(
+          "https://join.example.test/api/internal/hosted-execution/product-feedback/record",
+          {
+            body: JSON.stringify({ feedback }),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          },
+        ),
+      );
 
-    expect(response.status).toBe(200);
-    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledWith(
-      expect.any(Request),
-      { maxBodyBytes: 16_384 },
-    );
-    expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
-      feedback,
-      memberId: "member_123",
-    });
-    await expect(response.json()).resolves.toEqual({
-      feedbackId: "product_feedback_123",
-      recorded: true,
-    });
-  });
+      expect(response.status).toBe(200);
+      expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledWith(
+        expect.any(Request),
+        { maxBodyBytes: 16_384 },
+      );
+      expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
+        feedback,
+        memberId,
+      });
+      await expect(response.json()).resolves.toEqual({
+        feedbackId: "product_feedback_123",
+        recorded: true,
+      });
+    },
+  );
 
   it("keeps explicit support escalation attribution on the same boundary", async () => {
     const feedback = {
