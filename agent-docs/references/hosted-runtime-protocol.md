@@ -803,7 +803,11 @@ transferred device continuation or the exact first untransferred live durable
 system frontier. Scheduling reuses the same imported-watermark-bounded
 continuation projection as handling. Transferred owners retain their retry
 deadlines and per-connection ordering without blocking independent later work;
-invalid continuation projections remain ordering barriers. The shared classifier admits
+invalid continuation projections remain ordering barriers. If the ordinary selector
+chooses a pending transferred device owner, eligible non-device work takes the
+pass first. Recording owners keep their existing priority, and device successors
+still run through their connection owner. This prevents continuously due device
+jobs from starving the independent durable frontier. The shared classifier admits
 device-sync, member-channel reconciliation, operator maintenance, browser-vault
 refresh, Environment completion, and the narrow exact-notification cases; an
 earlier default-owned row remains a hard ordering barrier. Already committed

@@ -392,8 +392,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           eligibleItemIds.has(item.itemId)
         ),
       };
-      const pending = findNextHostedSystemMailboxQueueItem({
+      const pending = findHostedRunnableSystemMailboxItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
+        continuationItemIds,
         now: startedAt,
         state: selectionState,
       }) ?? findHostedDeferredDirtyHintOwner({
@@ -765,6 +766,23 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
     itemId: input.prepared.itemId,
     status: "preempted",
   };
+}
+
+function findHostedRunnableSystemMailboxItem(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  continuationItemIds: ReadonlySet<string>;
+  now: string;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxPendingItem | null {
+  const selected = findNextHostedSystemMailboxQueueItem(input);
+  if (!selected || !input.continuationItemIds.has(selected.itemId)
+    || selected.status !== "pending" || selected.postCheckpointRecord !== null) return selected;
+  const independent = findNextHostedSystemMailboxQueueItem({
+    ...input,
+    state: { pending: input.state.pending.filter((item) => !input.continuationItemIds.has(item.itemId)) },
+  });
+  // Transferred device jobs must not monopolize a pass needed by new mailbox work.
+  return independent && independent.wake.kind !== "device-sync.wake" ? independent : selected;
 }
 
 function findHostedDeferredDirtyHintOwner(input: {
