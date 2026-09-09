@@ -7,27 +7,26 @@ import {
 
 const DIAGNOSTIC_KEYS = [
   "headDue", "headDeviceSync", "headAttempted", "headRecording",
-  "headPlainHint", "headHasEpoch", "headHasJobs", "headHasScopes",
-  "headManualHint", "headWebhookHint", "headReconcileDue", "headWakeMatchesDedupe",
-  "ownerPresent", "ownerDue", "ownerHasEpoch", "ownerEpochMatches",
-  "ownerProviderMatches", "ownerMemberMatches", "headCadenceMissing",
+  "headPlainHint", "headHasEpoch", "headManualHint", "headWebhookHint",
+  "ownerPresent", "ownerDue", "ownerEpochMatches", "headCadenceMissing",
   "ownerCadenceMissing", "headCadenceCovered", "headCadenceEqual", "headCadenceFuture",
 ] as const;
+const DIAGNOSTIC_VALUES = new Set(DIAGNOSTIC_KEYS.flatMap((key) =>
+  [`${key}=true`, `${key}=false`]
+));
 
-// Only fixed keys and booleans may cross into progress status and logs.
-export function readHostedSystemMailboxFirstPendingDiagnostics(
-  value: unknown,
-): Record<string, boolean>[] | null {
-  if (!Array.isArray(value) || value.length !== 1) return null;
-  const entry: unknown = value[0];
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
-  const record = entry as Record<string, unknown>;
-  const diagnostics: Record<string, boolean> = {};
-  for (const key of DIAGNOSTIC_KEYS) {
-    const field = record[key];
-    if (typeof field === "boolean") diagnostics[key] = field;
-  }
-  return Object.keys(diagnostics).length > 0 ? [diagnostics] : null;
+// Keep the existing wire format: at most 16 fixed scalar strings, never payloads.
+export function readHostedSystemMailboxFirstPendingDiagnostics(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > DIAGNOSTIC_KEYS.length) return null;
+  const diagnostics = value.filter((entry): entry is string =>
+    typeof entry === "string" && DIAGNOSTIC_VALUES.has(entry)
+  );
+  return diagnostics.length > 0 ? diagnostics : null;
+}
+
+function formatDiagnostics(diagnostics: Record<string, boolean>): string[] {
+  return DIAGNOSTIC_KEYS.flatMap((key) => Object.hasOwn(diagnostics, key)
+    ? [`${key}=${diagnostics[key]}`] : []);
 }
 
 export function resolveHostedSystemMailboxFirstPendingDiagnostics(input: {
@@ -35,7 +34,7 @@ export function resolveHostedSystemMailboxFirstPendingDiagnostics(input: {
   firstPendingSeq: string | null;
   now: string;
   state: HostedSystemMailboxState;
-}): Record<string, boolean>[] | null {
+}): string[] | null {
   if (input.firstPendingSeq === null) return null;
   const head = input.state.pending.find((item) => item.mailboxLaneSeq === input.firstPendingSeq);
   if (!head) return null;
@@ -46,7 +45,7 @@ export function resolveHostedSystemMailboxFirstPendingDiagnostics(input: {
     headRecording: head.status === "recording",
   };
   const wake = head.wake;
-  if (wake.kind !== "device-sync.wake") return [diagnostics];
+  if (wake.kind !== "device-sync.wake") return formatDiagnostics(diagnostics);
   const owner = input.state.pending.find((item) =>
     item.mailboxLaneSeq !== null && input.continuationSeqs.includes(item.mailboxLaneSeq)
     && item.wake.kind === "device-sync.wake" && Boolean(wake.connectionId)
@@ -55,22 +54,19 @@ export function resolveHostedSystemMailboxFirstPendingDiagnostics(input: {
   const ownerWake = owner?.wake.kind === "device-sync.wake" ? owner.wake : null;
   const headCadence = Date.parse(wake.hint?.nextReconcileAt ?? "");
   const ownerCadence = Date.parse(ownerWake?.hint?.nextReconcileAt ?? "");
-  return [{
+  return formatDiagnostics({
     ...diagnostics,
     ...describeDeviceHint(head),
     ownerPresent: owner !== undefined,
     ownerDue: owner !== undefined && systemMailboxItemIsDue(owner, input.now),
-    ownerHasEpoch: Boolean(ownerWake?.expectedConnectedAt),
     ownerEpochMatches: Boolean(wake.expectedConnectedAt)
       && ownerWake?.expectedConnectedAt === wake.expectedConnectedAt,
-    ownerProviderMatches: ownerWake?.provider === wake.provider,
-    ownerMemberMatches: ownerWake?.userId === wake.userId,
     headCadenceMissing: !Number.isFinite(headCadence),
     ownerCadenceMissing: !Number.isFinite(ownerCadence),
     headCadenceCovered: headCadence < ownerCadence,
     headCadenceEqual: headCadence === ownerCadence,
     headCadenceFuture: headCadence > Date.parse(input.now),
-  }];
+  });
 }
 
 function describeDeviceHint(head: HostedSystemMailboxPendingItem): Record<string, boolean> {
@@ -79,11 +75,7 @@ function describeDeviceHint(head: HostedSystemMailboxPendingItem): Record<string
   return {
     headPlainHint: isHostedPlainDeviceSyncWakeHint(head),
     headHasEpoch: Boolean(wake.expectedConnectedAt),
-    headHasJobs: (wake.hint?.jobs?.length ?? 0) > 0,
-    headHasScopes: wake.hint?.scopes !== undefined,
     headManualHint: wake.hint?.reason === "manual_reconcile",
     headWebhookHint: wake.reason === "webhook_hint",
-    headReconcileDue: wake.reason === "reconcile_due",
-    headWakeMatchesDedupe: head.mailboxDedupeKey === wake.eventId,
   };
 }

@@ -39,6 +39,12 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import {
+  parseHostedWorkspaceCheckpointRequest,
+  parseHostedWorkspaceInvocationResult,
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+
+import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 
@@ -4638,6 +4644,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       });
       const workspacePort: HostedRuntimeWorkspacePort = {
         async checkpoint(request) {
+          parseHostedWorkspaceCheckpointRequest(request);
           events.push("workspace.checkpoint");
           checkpointRequests.push(request);
           currentWorkspace = createWorkspaceState({
@@ -4706,7 +4713,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         workspacePort,
       });
       const runSystemPass = async (attemptId: string) =>
-        await runHostedWorkspaceRuntimeJobInProcess(
+        parseHostedWorkspaceInvocationResult(await runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
               assistantExecutionBlocked: true,
@@ -4734,7 +4741,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             },
             vaultRoot,
           },
-        );
+        ));
 
       const projectionFailedBeforeRefresh = await runSystemPass(
         "attempt_synthetic_system_mailbox_browser_vault_projection_before_timeout",
@@ -4747,14 +4754,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(projectionFailedBeforeRefresh.nextWakeReason, "assistant");
       assert.equal(projectionFailedBeforeRefresh.immediateRecheckRequested, undefined);
       await drainHostedRuntimeLogWritesBestEffort();
+      for (const request of logRequests) parseHostedRuntimeLogRequest(request);
       assert.deepEqual(
         logRequests.flatMap((request) => request.entries)
           .filter((entry) => entry.eventCode === "runtime.invocation_finished")
           .map((entry) => entry.redactedJson),
         [{
-          hostedMailboxSystemFirstPendingDiagnostics: [{
-            headDue: false, headDeviceSync: false, headAttempted: true, headRecording: true,
-          }],
+          hostedMailboxSystemFirstPendingDiagnostics: [
+            "headDue=false", "headDeviceSync=false", "headAttempted=true", "headRecording=true",
+          ],
           hostedMailboxSystemFirstPendingClassifierFailures: ["wake_not_device_sync"],
           hostedMailboxSystemFirstPendingSeq: "1",
           hostedMailboxSystemHandledThroughSeq: "0",

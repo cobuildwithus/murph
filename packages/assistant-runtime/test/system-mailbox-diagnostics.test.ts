@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseHostedWorkspaceCheckpointRequest,
+  parseHostedWorkspaceInvocationResult,
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   readHostedSystemMailboxFirstPendingDiagnostics,
   resolveHostedSystemMailboxFirstPendingDiagnostics,
 } from "../src/hosted-runtime/system-mailbox-diagnostics.ts";
@@ -45,7 +50,7 @@ describe("mailbox blocker diagnostics", () => {
         firstPendingSeq: "2", now: NOW, state,
         continuationSeqs: condition === "unvalidated-owner" ? [] : ["1"],
       });
-      expect(result?.[0]).toMatchObject({
+      const expected = {
         headDue: true, headDeviceSync: true, ownerDue: false,
         ownerPresent: condition !== "unvalidated-owner",
         headPlainHint: condition !== "manual",
@@ -54,13 +59,42 @@ describe("mailbox blocker diagnostics", () => {
         headCadenceEqual: condition === "equal" || condition === "future",
         headCadenceCovered: condition === "covered" || condition === "missing-epoch",
         headCadenceFuture: condition === "future",
-      });
+      };
+      expect(result).toEqual(expect.arrayContaining(Object.entries(expected).map(
+        ([key, value]) => `${key}=${value}`,
+      )));
       expect(JSON.stringify(result)).not.toContain("synthetic_");
-      expect(Object.values(result?.[0] ?? {}).every((value) => typeof value === "boolean")).toBe(true);
+      expect(result?.length).toBeLessThanOrEqual(16);
       expect(readHostedSystemMailboxFirstPendingDiagnostics(result)).toEqual(result);
       expect(JSON.stringify(state)).toBe(before);
     },
   );
+
+  it.each(["device", "non-device", "empty"])("passes the production wire parsers (%s)", (kind) => {
+    const head = device("2");
+    if (kind === "non-device") {
+      head.routeAction = "apply-runtime-control-request";
+      head.wake = { kind: "runtime.maintenance-requested", eventId: "synthetic_maintenance",
+        occurredAt: NOW, userId: "synthetic_member" };
+    }
+    const redactedStatus = {
+      hostedMailboxSystemFirstPendingDiagnostics: resolveHostedSystemMailboxFirstPendingDiagnostics({
+        continuationSeqs: [], firstPendingSeq: kind === "empty" ? null : "2",
+        now: NOW, state: { pending: kind === "empty" ? [] : [head] },
+      }),
+    };
+    expect(parseHostedWorkspaceCheckpointRequest({
+      attemptId: "synthetic_diagnostics", expectedWorkspaceVersion: "1",
+      leaseGeneration: "1", reason: "import", snapshotRef: null, redactedStatus,
+    }).redactedStatus).toEqual(redactedStatus);
+    expect(parseHostedWorkspaceInvocationResult({
+      status: "scheduled", nextWakeAt: LATER, nextWakeReason: "device-sync.reconcile", redactedStatus,
+    }).redactedStatus).toEqual(redactedStatus);
+    expect(parseHostedRuntimeLogRequest({ entries: [{
+      at: NOW, component: "runtime", eventCode: "runtime.invocation_finished",
+      level: "info", phase: "invoke", redactedJson: redactedStatus,
+    }] }).entries[0]?.redactedJson).toEqual(redactedStatus);
+  });
 
   it("does not invent a blocker after the mailbox has drained", () => {
     expect(resolveHostedSystemMailboxFirstPendingDiagnostics({
@@ -68,12 +102,13 @@ describe("mailbox blocker diagnostics", () => {
     })).toBeNull();
   });
 
-  it("drops unknown fields and non-boolean values before logging restored status", () => {
-    expect(readHostedSystemMailboxFirstPendingDiagnostics([{
-      headDue: false, ownerPresent: true, headManualHint: "synthetic-private-text",
-      userId: "synthetic-private-member", payload: { value: "synthetic-private-payload" },
-    }])).toEqual([{ headDue: false, ownerPresent: true }]);
+  it("drops unknown or malformed values before logging restored status", () => {
+    expect(readHostedSystemMailboxFirstPendingDiagnostics([
+      "headDue=false", "ownerPresent=true", "headManualHint=synthetic-private-text",
+      { userId: "synthetic-private-member" }, "synthetic-private-payload",
+    ])).toEqual(["headDue=false", "ownerPresent=true"]);
     expect(readHostedSystemMailboxFirstPendingDiagnostics(["synthetic-private-text"])).toBeNull();
     expect(readHostedSystemMailboxFirstPendingDiagnostics({ unknown: true })).toBeNull();
+    expect(readHostedSystemMailboxFirstPendingDiagnostics(Array(17).fill("headDue=true"))).toBeNull();
   });
 });
