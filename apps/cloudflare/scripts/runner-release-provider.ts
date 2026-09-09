@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { redactHostedRuntimeDiagnosticText } from "@murphai/hosted-execution";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
-import { runnerApplicationMatches, type RunnerApplicationSpecification } from "./runner-release-application.ts";
+import { runnerApplicationMatches, runnerApplicationResources, type RunnerApplicationSpecification } from "./runner-release-application.ts";
 
 /** Native admission and release evidence. Provider failures never permit a Worker switch. */
 export function createRunnerReleaseProvider(input: {
@@ -75,6 +75,44 @@ export function createRunnerReleaseProvider(input: {
     }
     throw unavailable("Inactive instance inspection exceeded its page bound.");
   };
+  const readMatchingRollout = async (applicationId: string, live: Record<string, unknown>, specification: RunnerApplicationSpecification): Promise<Record<string, unknown> | null> => {
+    const pathname = `/containers/applications/${encodeURIComponent(applicationId)}/rollouts`;
+    const validate = (value: unknown): Record<string, unknown> => {
+      if (!isObjectRecord(value) || !Number.isSafeInteger(value.target_version)
+        || !runnerApplicationMatches(value.target_configuration, specification.configuration)
+        || !["pending", "progressing", "completed"].includes(String(value.status))) {
+        throw unavailable("Native rollout does not match the pending image.");
+      }
+      return value;
+    };
+    if (typeof live.active_rollout_id === "string" && live.active_rollout_id) {
+      const result = (await request("Read active rollout", `${pathname}/${encodeURIComponent(live.active_rollout_id)}`)).result;
+      const rollout = validate(result);
+      if (rollout.id !== live.active_rollout_id || (rollout.current_version !== live.version
+        && rollout.target_version !== live.version)) throw unavailable();
+      return rollout;
+    }
+    let last: string | undefined;
+    const cursors = new Set<string>();
+    let matching: Record<string, unknown> | null = null;
+    for (let page = 0; page < 100; page++) {
+      const query = new URLSearchParams({ limit: "100", ...(last ? { last } : {}) });
+      const result = (await request("Read rollout history", `${pathname}?${query}`)).result;
+      if (!Array.isArray(result) || result.length > 100 || result.some(value => !isObjectRecord(value))) throw unavailable();
+      for (const rollout of result) {
+        if (rollout.target_version !== live.version
+          || !runnerApplicationMatches(rollout.target_configuration, specification.configuration)) continue;
+        if (matching) throw unavailable("Multiple rollouts claim the pending image version.");
+        matching = validate(rollout);
+      }
+      if (result.length < 100) return matching;
+      const cursor: unknown = result.at(-1)?.id;
+      if (typeof cursor !== "string" || !/^\S{1,2048}$/u.test(cursor) || cursors.has(cursor)) throw unavailable();
+      cursors.add(cursor);
+      last = cursor;
+    }
+    throw unavailable("Rollout history exceeded its page bound.");
+  };
   return {
     async readAccountLimits(): Promise<{ vcpu: number; memoryMiB: number; diskMB: number }> {
       const response = await request("Read account limits", "/containers/me");
@@ -96,11 +134,49 @@ export function createRunnerReleaseProvider(input: {
       const response = await request("Read Worker version", `/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
       return response.result;
     },
+    async retireApplication(input: { applicationId: string; name: string; namespaceId: string }): Promise<void> {
+      const pathname = `/containers/applications/${encodeURIComponent(input.applicationId)}`;
+      const live = (await request("Read retiring application", pathname)).result;
+      assertApplicationIdentity(live, input);
+      if (live.active_rollout_id) throw unavailable("Retiring application has an active rollout.");
+      if (live.max_instances === 0) return;
+      if (!await readDrainedInstances(input.applicationId, Date.now() + 30_000)) throw unavailable("Retiring application is not drained.");
+      await request("Retire application capacity", pathname, "PATCH", { max_instances: 0 });
+      const after = (await request("Verify retired application", pathname)).result;
+      assertApplicationIdentity(after, input);
+      if (after.max_instances !== 0 || after.active_rollout_id
+        || !runnerApplicationMatches(after.configuration, live.configuration)) throw unavailable("Retired capacity verification differs; no rollback attempted.");
+    },
+    async assertCapacity(input: { applicationId: string; specification: RunnerApplicationSpecification }): Promise<void> {
+      const limits = await this.readAccountLimits();
+      const response = await request("Read account application budget", "/containers/applications");
+      const applications = exhaustive(response);
+      let found = false;
+      const total = { vcpu: 0, memoryMiB: 0, diskMB: 0 };
+      for (const application of applications) {
+        if (!isObjectRecord(application)) throw unavailable();
+        const target = application.id === input.applicationId;
+        if (target && found) throw unavailable();
+        found ||= target;
+        const app = target ? input.specification : application;
+        const resources = runnerApplicationResources(app.configuration);
+        if (!Number.isSafeInteger(app.max_instances) || Number(app.max_instances) < 0) throw unavailable();
+        const count = Number(app.max_instances);
+        total.vcpu += count * resources.vcpu;
+        total.memoryMiB += count * resources.memoryMiB;
+        total.diskMB += count * resources.diskMB;
+      }
+      if (!found) throw unavailable();
+      if (total.vcpu > limits.vcpu || total.memoryMiB > limits.memoryMiB || total.diskMB > limits.diskMB) {
+        throw unavailable("Requested single-fleet capacity exceeds the measured account resource budget.");
+      }
+    },
     async admitApplication(input: {
       applicationId: string | null;
       name: string;
       namespaceId: string;
       specification: RunnerApplicationSpecification;
+      rolloutStepPercentage?: number | readonly number[];
     }): Promise<"created" | "modified" | "unchanged"> {
       const desired = { ...input.specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
       if (input.applicationId === null) {
@@ -109,17 +185,24 @@ export function createRunnerReleaseProvider(input: {
         return "created";
       }
       const pathname = `/containers/applications/${encodeURIComponent(input.applicationId)}`;
-      const response = await request("Read inactive application", pathname);
-      const live = response.result;
-      if (!isObjectRecord(live) || live.name !== input.name
-        || !isObjectRecord(live.durable_objects) || live.durable_objects.namespace_id !== input.namespaceId) throw unavailable();
-      if (live.active_rollout_id) throw new Error("Candidate native rollout is still in progress; active Worker is unchanged.");
-      // PATCH updates the target for new deployments; an interrupted PATCH/rollout
-      // pair must still roll prefetched instances before readiness is accepted.
-      await request("Modify inactive application", pathname, "PATCH", input.specification);
-      await request("Start inactive rollout", `${pathname}/rollouts`, "POST", {
-        description: "Prepare inactive runner release", strategy: "rolling", kind: "full_auto",
-        step_percentage: 100, target_configuration: input.specification.configuration,
+      const live = (await request("Read application", pathname)).result;
+      assertApplicationIdentity(live, input);
+      const matches = runnerApplicationMatches(live, input.specification);
+      if (live.active_rollout_id || matches) {
+        const rollout = await readMatchingRollout(input.applicationId, live, input.specification);
+        const { configuration: _configuration, ...settings } = input.specification;
+        if (rollout && !runnerApplicationMatches(live, settings)) throw unavailable("Pending application settings differ from the requested release.");
+        if (rollout) return rollout.status === "completed" && !live.active_rollout_id ? "unchanged" : "modified";
+      }
+      // A matching application target without distribution evidence is a lost
+      // PATCH/POST pair. Preserve its version and complete the existing target.
+      if (!matches) await request("Modify application", pathname, "PATCH", input.specification);
+      const steps = input.rolloutStepPercentage ?? 100;
+      await request("Start application rollout", `${pathname}/rollouts`, "POST", {
+        description: "Update runner image", strategy: "rolling", kind: "full_auto",
+        ...(typeof steps === "number" ? { step_percentage: steps }
+          : { steps: steps.map(percentage => ({ step_size: { percentage } })) }),
+        target_configuration: input.specification.configuration,
       });
       return "modified";
     },
@@ -127,16 +210,24 @@ export function createRunnerReleaseProvider(input: {
       name: string;
       specification: RunnerApplicationSpecification;
       listApplications: (name: string) => Promise<unknown>;
+      rolloutStepCount?: number;
     }): Promise<void> {
-      // Distribution waits belong in CI; member requests never poll native release state.
-      for (let attempt = 0; attempt < 60; attempt++) {
+      // Each native step can spend fifteen minutes draining, plus grace/startup.
+      const steps = input.rolloutStepCount ?? 1;
+      if (!Number.isInteger(steps) || steps < 1 || steps > 4) throw unavailable();
+      const attempts = 150 * steps;
+      for (let attempt = 0; attempt < attempts; attempt++) {
         const result = await input.listApplications(input.name);
         if (!Array.isArray(result) || result.length !== 1 || !isObjectRecord(result[0])) throw unavailable();
         const live = result[0];
-        if (!live.active_rollout_id && runnerApplicationMatches(live, input.specification)) return;
-        if (attempt < 59) await delay(10_000);
+        if (!live.active_rollout_id && runnerApplicationMatches(live, input.specification)) {
+          if (typeof live.id !== "string") throw unavailable();
+          const rollout = await readMatchingRollout(live.id, live, input.specification);
+          if (rollout?.status === "completed" || (!rollout && live.version === 1)) return;
+        }
+        if (attempt < attempts - 1) await delay(10_000);
       }
-      throw new Error("Candidate native application did not converge; active Worker is unchanged.");
+      throw new Error("Native runner rollout did not converge; the compatible Worker and pending image remain selected.");
     },
     async assertDrained(applicationId: string): Promise<void> {
       // This waits in CI, while the active target continues serving messages.
@@ -169,4 +260,17 @@ function providerErrorSummary(value: unknown, privateValues: readonly string[]):
 
 function unavailable(detail?: string): Error {
   return new Error(`Authoritative runner release state is unavailable; deployment stopped.${detail ? ` ${detail}` : ""}`);
+}
+
+function assertApplicationIdentity(value: unknown, input: { name: string; namespaceId: string }): asserts value is Record<string, unknown> {
+  if (!isObjectRecord(value) || value.name !== input.name || !isObjectRecord(value.configuration)
+    || !isObjectRecord(value.durable_objects) || value.durable_objects.namespace_id !== input.namespaceId) throw unavailable();
+}
+
+function exhaustive(envelope: Record<string, unknown>): unknown[] {
+  if (!Array.isArray(envelope.result) || envelope.result.length > 10_000) throw unavailable();
+  const info = envelope.result_info;
+  if (info !== undefined && (!isObjectRecord(info) || info.next_page_token || info.cursor
+    || (info.total_count !== undefined && info.total_count !== envelope.result.length))) throw unavailable();
+  return envelope.result;
 }

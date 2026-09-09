@@ -22,104 +22,102 @@ That rendered surface is then used by:
 
 The rendered deploy helper path is the canonical direct Wrangler deploy contract consumed from the private deployment workflow. The checked-in Wrangler scaffold remains useful for local development, but production deploys must run from private Murph Cloud and use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
-The production helper publishes one immutable registry image and uploads an
-inactive Worker version with its container class metadata. This declaration must
-precede native creation: an existing Durable Object namespace alone does not prove
-container enablement. Version upload does not move serving traffic. The helper
-revalidates the live version, then prepares only the inactive native application
-and dedicated smoke application through the Cloudflare Containers API. Quota
-admission and native rollout convergence must complete before Worker activation.
-A failed admission may leave an unactivated version; it never selects that version.
-The serving and retained legacy applications are excluded from native mutations.
-Native provider failures report the operation, HTTP status, numeric API codes,
-and at most five redacted messages of 320 characters each. The existing runtime
-redactor removes credential and personal-identifier shapes; the provider boundary
-also removes its exact token, account, requested name/image and native resource
-identifiers. Raw response details remain private. Inspect the provider explanation
-before retrying or changing capacity; transport and malformed responses stay distinct.
-Inactive-instance pagination rejection reports a fixed category (non-string, blank,
-oversized, or repeated token), page and native-row counts, and oversized token
-length. Cursor values, application identity, and provider response bodies are
-excluded. Inspection requests up to 1,000 rows per page to reduce cursor traversal over
-historical objects. All pages must still terminate normally and every native
-instance must be stopped; the 100-page, 10,000-native-row and time bounds remain.
+The production helper publishes one immutable registry image, uploads an inactive
+Worker version, and uses the native Containers API for image distribution. Normal
+releases keep the currently authoritative member application and its Durable
+Object namespace. They do not rotate between two positive-capacity banks.
+`CF_CONTAINER_MAX_INSTANCES` is one shared budget: subtract any retained legacy
+allowance, assign the remainder to the serving member application, and retain one
+additional deploy-smoke slot. The unused member application stays at zero.
+The scaffold declares the budget on `RunnerContainer`; staging moves that budget
+to `NextRunnerContainer` when the live release selects that namespace.
 
-Member applications require drain evidence before namespace reuse. The dedicated
-smoke application carries no member invocation, so it proceeds directly through
-native rollout and readiness checks without member drain admission.
+### Migration and release order
 
-The controller is published with `wrangler versions upload` and activated at
-100% with `wrangler versions deploy`. Signed smoke proves the actual candidate
-namespace, exact image fingerprints, ready inventory, and configured runtime
-checks before a second Worker-only activation selects the candidate. Worker
-version commands preserve existing secrets and non-versioned settings; namespace
-bootstrap/migrations and changes to triggers or non-versioned settings remain
-separate infrastructure operations. The helper requires the candidate and smoke
-namespaces to exist before native preparation. Never substitute full
-`wrangler deploy` in this sequence: even `rollout_kind: none` can create a
-missing application after activating Worker code.
+1. Read one authoritative live Worker version, its release manifest, the existing
+   application identities and namespace bindings. An old cross-bank pending
+   candidate must be reconciled before the first in-place release.
+2. Upload the compatible Worker without activating it. If the non-serving member
+   application still has capacity, wait for every native instance to stop, then
+   re-read drain evidence, reduce only its ceiling to zero, and verify the result.
+   Retain its class, binding, image, and previous-release descriptor for cleanup.
+   Historical Durable Object records are not running instances. Failed, unknown,
+   repeated-cursor, or bounded-out inspection stops the deployment.
+3. Read the account's actual CPU, memory, and disk limits and all application
+   ceilings. Prove the prospective serving ceiling fits, including smoke and
+   unrelated applications. Missing evidence fails closed; published defaults are
+   never substituted for measured quota.
+4. Admit the isolated one-slot smoke application and wait for native distribution.
+   Activate the compatible Worker with the old/target image pair before mutating
+   the member image. It keeps the same allocation ID and exact member ownership.
+5. Update the serving application in place and submit a native rolling rollout.
+   Gradual mode sends the configured 10/25/50/100 percentage steps; immediate mode
+   sends one 100-percent step. Existing production protocol-floor checks continue
+   to require immediate mode for image changes. Neither mode is an atomic switch.
+6. Wait for completed native distribution, then run signed smoke against the
+   target image and serving namespace. A final Worker-only activation removes the
+   old image from admission and resumes configured pristine standby inventory.
+   Verify that this publication did not mutate native applications and record
+   the effective config for private release verification.
 
-`HOSTED_EXECUTION_RUNNER_DEPLOYMENT` owns active, candidate, and previous release
-identity. Identity includes the immutable image, exact bundle/source fingerprints,
-public commit provenance, and execution configuration, rather than the deployment
-attempt. Before rebuilding an image, the helper checks the admitted artifact
-against the requested commit, fingerprints, configuration, and namespace. A match
-reuses that immutable image despite rebuilt manifest timestamps, preserving its
-active identity or staged candidate inventory. Candidate promotion still requires
-successful smoke. A conflicting admitted candidate requires reconciliation.
-Public banner and health checks allow up to 30 attempts, two seconds apart, for
-the activated Worker version to propagate. Only a well-formed response from a
-different version is retried; HTTP failures and malformed responses fail
-immediately. Exhaustion still blocks candidate promotion.
-The legacy staging pointer predates immutable admission receipts. Its inactive
-application is reconciled through the existing drain/admission path, including
-when a native create committed but its response or subsequent Worker publication
-was lost. Its image is never reused as a verified artifact without provenance.
-A Worker-only release may retain a legacy active record with a mutable image tag.
-The reuse reader applies its legacy-provenance check to whichever release it
-selects, candidate or active, before inspecting the image. Such records require
-a normal immutable image build; they never authorize reuse of a legacy tag.
-No deployment-convergence restart retry is added to message processing.
+Cloudflare sends SIGTERM and allows up to fifteen minutes for a selected process
+to exit before replacement. Its active grace period is connection-age eligibility,
+not an application checkpoint deadline. Existing runner shutdown, checkpoint,
+write-fence, and process-generation checks remain required. Native replacement
+can temporarily interrupt a member process; this procedure does not promise a
+continuously warm shell during deployment. See the official
+[rollout contract](https://developers.cloudflare.com/containers/configuration/rollouts/).
 
-For a compatible Worker coordination change, the protected workflow may explicitly
-select `container_rollout=worker-only`. This retains the serving release's exact
-identity and all existing member application images and capacities, even when the
-new source has different bundle fingerprints. Only the existing one-slot deploy
-smoke application is admitted with the newly built artifact. Signed smoke still
-proves the selected serving namespace and its inventory, then exercises the new
-smoke artifact. There is one Worker activation and no member fleet promotion.
-An existing pending candidate becomes retained history; an absent inactive
-application is omitted from the effective config and exact-state receipt.
-Worker-only mode requires the predeploy gates and does not deploy runner changes.
-Production preflight accepts this explicit retained-image mode; production image
-changes still require immediate rollout and the existing state-isolation floors.
-The selected runner's old parser may omit new optional diagnostics; Worker-side
-logs remain available. Use a full release for changes that require a new runner.
-This mode does not change account quota or the overlap requirement of full image
-releases. Land the public selector before enabling its private workflow input.
+### Identity, recovery, and capacity
 
-A bound, still-warm previous session retains its exact namespace, member, claim,
-and write fence through promotion. After its matching runtime completion is
-recorded, a previous release no longer retains warmth solely for an overdue or
-immediate wake. The ordinary lifecycle checks still require no active operation
-or child, no recent conversation warmth, available health, and no interaction
-race before retiring the shell. Fresh member allocation selects only the
-active release. Previous inventory cannot prepare, bind new members, or restart
-cold processes. Before reusing its namespace, CI requires native drain evidence
-from every page of the Containers dashboard instance endpoint used by Wrangler. Only an empty
-or entirely stopped native instance list proves drain; historical Durable Object
-identities are not occupancy. Unknown state, failed pages, invalid continuation
-tokens, and bounded-inspection exhaustion leave the active release serving. Native rollout admission uses
-the configured capacity without automatically reducing a serving ceiling.
-Account quota and overlap capacity must be verified against the actual account.
+`HOSTED_EXECUTION_RUNNER_DEPLOYMENT` retains active, candidate, and previous
+records. During an in-place transition, active and candidate share the permanent
+allocation ID and bank, but record separate exact bundle/source fingerprint
+pairs. The candidate also records the immutable image, commit provenance, and
+execution configuration before native mutation. Runtime admission accepts only
+those complete pairs, never mixed fingerprint halves or arbitrary historical
+images. Promotion changes the executing image without aging out member bindings.
+The other bank's previous descriptor remains available solely for existing
+retained ownership and cleanup; fresh allocation selects the serving bank.
 
-Worker/controller changes still require consumer-first compatibility with both
-supported images. This procedure cannot make a breaking protocol change safe
-without its compatibility release. A failed preparation leaves the current
-release selected. Promotion performs no native application mutations, verified
-against before/after native receipts. The effective config is recorded at the
-canonical generated path for private release verification. Rollback remains an
-explicitly authorized operation.
+While a candidate is pending, fresh pristine standby preparation pauses and
+unbound inventory drains. Existing exact claim replay remains available.
+Configured standby inventory resumes after promotion. Worker-only deployments
+preserve an existing pending pair and all member images and capacities; only the
+smoke artifact changes. They never silently cancel a pending image rollout.
+
+A failed native mutation or smoke leaves the compatible Worker and immutable
+pending target in place. Retry the same artifact: reconcile an accepted active or
+completed rollout by its version and exact configuration before issuing another
+request. An interrupted PATCH without rollout evidence completes the pending
+rollout; a conflicting candidate or unrelated active rollout requires explicit
+reconciliation. Application target equality alone is not distribution proof.
+There is no automatic rollback, capacity reduction, or message-processing restart
+loop. A rollback below the compatible deployment reader is unsafe once a same-bank
+candidate has been published; rollback remains a separately authorized operation.
+
+The protected workflow and existing expected-live-version checks serialize this
+operation. Breaking Worker/runner protocols still require a consumer-first
+compatibility release before the new writer or image. Worker version commands
+preserve secrets and non-versioned settings; namespace bootstrap, triggers, and
+non-versioned infrastructure changes remain separate operations. Do not replace
+this sequence with a full `wrangler deploy`, which is nontransactional across
+Worker activation and container changes.
+
+At two vCPUs per container, 748 member-application slots plus one smoke slot use
+1,498 vCPUs of declared capacity. With two maintained unbound standby slots, that
+leaves approximately 746 member-bound slots. A ceiling of 702 yields 700 bound
+slots with more CPU headroom. These calculations assume no other consumers;
+actual account limits and current instance resources govern admission. The
+[published limits](https://developers.cloudflare.com/containers/platform/limits/)
+are context, not production evidence. Changing the protected environment's ceiling
+is a separate rollout action after this source release is verified.
+
+Provider failures retain bounded, redacted operation/status/code explanations.
+Drain inspection requests up to 1,000 rows per page and is bounded to 100 pages,
+10,000 native rows, and twenty minutes. Cursor values and raw private provider
+responses are excluded from diagnostics. Native rollout convergence is bounded
+separately and must finish before removing the compatibility pair.
 
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Every protected deploy must set `HOSTED_EXECUTION_DEPLOY_TAG` to the private
@@ -132,22 +130,13 @@ raw application IDs, image references, account identifiers, tokens, and provider
 errors out of the receipt. Exact-name application discovery uses the provider
 list only to resolve one application identifier; both the pre-deploy and
 post-deploy receipt snapshots come from that application's detail endpoint.
-After Wrangler reports a successful container change, the deploy helper waits
-up to two minutes for the provider to expose the exact transition. While a
-rollout is active, the receipt uses that new rollout's authoritative target
-version and image only when its current version and image match the pre-deploy
-application and its identifier differs from any pre-existing active rollout.
-If the rollout has already completed, the receipt uses the transitioned
-application detail instead. Unreadable, reused, reverted, replaced, or
-unrelated rollout evidence fails closed instead of issuing a stale receipt.
-The provider application version is a release identity, not a deploy counter;
-an `updated` entry requires the existing provider application identity to
-remain continuous and either a newly active target or a completed detail
-transition. A later protected observer must match the receipt to 100% Worker
-traffic and the final container versions, image digests, capacities, and rollout
-outcomes. Land
-this public producer before enabling a private workflow that requires the
-receipt; the reverse order intentionally fails closed.
+The receipt is assembled after native distribution completes and records the exact
+resulting application version and image digest. A resumed deployment may record
+completion of its existing pending rollout when the original target version and
+image match exactly. Worker-only retention can preserve an unchanged pending
+rollout, but a full image release cannot finalize while distribution is active.
+A later protected observer must match the receipt to 100% Worker traffic and the
+final container versions, image digests, capacities, and rollout outcomes.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol, biomarker desired-direction, and Goal-index artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The broader web-only Health Commons artifact tree remains excluded; only the compact `generated/web/browse/goals.json` runtime index is retained. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.

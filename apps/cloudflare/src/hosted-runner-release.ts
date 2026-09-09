@@ -1,8 +1,10 @@
-/** Two image targets; the deployment selects one only after its readiness proof. */
+/** Existing physical namespaces. Normal releases keep the serving namespace. */
 export type HostedRunnerBank = "primary" | "next";
 
 export interface HostedRunnerRelease {
   bank: HostedRunnerBank;
+  /** Immutable published artifact; retained across an interrupted native rollout. */
+  image?: string;
   executionIdentity?: string;
   releaseSha?: string;
   bundleFingerprint: string;
@@ -26,13 +28,31 @@ export function readHostedRunnerDeployment(source: Environment): HostedRunnerDep
   try { value = JSON.parse(raw); } catch { throw invalidDeployment(); }
   if (!isRecord(value) || !isRelease(value.active)
     || (value.candidate !== null && !isRelease(value.candidate))
-    || (value.previous !== null && !isRelease(value.previous))
-    || (value.candidate !== null && value.previous !== null)) throw invalidDeployment();
-  const other = value.candidate ?? value.previous;
-  if (other && (other.bank === value.active.bank || other.id === value.active.id)) {
-    throw invalidDeployment();
-  }
+    || (value.previous !== null && !isRelease(value.previous))) throw invalidDeployment();
+  const candidate = value.candidate;
+  const inPlace = isSameBankImageTransition(value.active, candidate);
+  if (candidate && !inPlace && (value.previous !== null
+    || candidate.bank === value.active.bank || candidate.id === value.active.id)) throw invalidDeployment();
+  if (value.previous && (value.previous.bank === value.active.bank
+    || value.previous.id === value.active.id)) throw invalidDeployment();
   return { active: value.active, candidate: value.candidate, previous: value.previous };
+}
+
+export function isHostedRunnerImageTransition(source: Environment): boolean {
+  const deployment = readHostedRunnerDeployment(source);
+  return !!deployment?.candidate && deployment.candidate.bank === deployment.active.bank;
+}
+
+/** Admit whole image pairs, never independent fingerprint halves. */
+export function hostedRunnerImageMatches(source: Environment, bundle: unknown, fingerprint: unknown): boolean {
+  const deployment = readHostedRunnerDeployment(source);
+  const scopedId = readHostedRunnerActiveReleaseId(source);
+  if (deployment?.candidate && deployment.candidate.bank === deployment.active.bank && scopedId === deployment.active.id) {
+    return [deployment.active, deployment.candidate].some(release =>
+      release.bundleFingerprint === bundle && release.sourceFingerprint === fingerprint);
+  }
+  return source.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT === bundle
+    && source.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT === fingerprint;
 }
 
 export function readHostedRunnerActiveReleaseId(source: Environment): string | null {
@@ -49,7 +69,7 @@ export function scopeHostedRunnerReleaseEnvironment<T extends Environment>(
   if (!deployment) return source;
   const release = target === "candidate"
     ? deployment.candidate ?? deployment.active
-    : [deployment.active, deployment.candidate, deployment.previous]
+    : [deployment.candidate, deployment.active, deployment.previous]
       .find((entry) => entry?.bank === target);
   if (!release) throw new Error("Hosted runner image target has no release identity.");
   return {
@@ -66,6 +86,7 @@ export function readHostedRunnerBankFromName(name: string): HostedRunnerBank {
 
 function isRelease(value: unknown): value is HostedRunnerRelease {
   return isRecord(value)
+    && isOptionalImmutableImage(value.image)
     && (value.releaseSha === undefined || (typeof value.releaseSha === "string" && /^[a-f0-9]{40}$/u.test(value.releaseSha)))
     && (value.executionIdentity === undefined || (typeof value.executionIdentity === "string" && /^[a-f0-9]{64}$/u.test(value.executionIdentity)))
     && (value.bank === "primary" || value.bank === "next")
@@ -81,4 +102,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function invalidDeployment(): Error {
   return new Error("Hosted runner deployment identity is invalid.");
+}
+
+function isSameBankImageTransition(active: HostedRunnerRelease, candidate: HostedRunnerRelease | null): boolean {
+  return candidate !== null && candidate.bank === active.bank && candidate.id === active.id && candidate.image !== undefined;
+}
+
+function isOptionalImmutableImage(value: unknown): boolean {
+  return value === undefined || (typeof value === "string" && value.length <= 2048 && /^\S+@sha256:[a-f0-9]{64}$/u.test(value));
 }

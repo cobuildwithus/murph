@@ -191,11 +191,11 @@ describe("native candidate admission", () => {
   });
 
   it("reconciles an interrupted PATCH before rollout instead of mistaking target equality for distribution", async () => {
-    const target = { ...specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
-    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => init?.method === "GET" ? envelope(target) : envelope({ id: "native-rollout" }));
+    const target = { ...specification, id: "candidate", version: 2, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => init?.method !== "GET" ? envelope({ id: "native-rollout" }) : String(url).includes("/rollouts?") ? envelope([]) : envelope(target));
     await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication(input)).resolves.toBe("modified");
-    expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PATCH", "POST"]);
-    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body))).toEqual(specification);
+    expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "GET", "POST"]);
+    expect(fetchImpl.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
     expect(String(fetchImpl.mock.calls[2]?.[0])).toMatch(/\/candidate\/rollouts$/u);
     expect(JSON.parse(String(fetchImpl.mock.calls[2]?.[1]?.body))).toMatchObject({ target_configuration: specification.configuration, step_percentage: 100 });
   });
@@ -210,8 +210,9 @@ describe("native candidate admission", () => {
     const listApplications = vi.fn()
       .mockResolvedValueOnce([{ ...specification, active_rollout_id: "pending" }])
       .mockResolvedValueOnce([{ ...specification, configuration: { ...specification.configuration, image: "old-image" } }])
-      .mockResolvedValueOnce([specification]);
-    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture" }).assertApplicationReady({ ...input, listApplications })).resolves.toBeUndefined();
+      .mockResolvedValueOnce([{ ...specification, id: "candidate", version: 2 }]);
+    const fetchImpl = vi.fn<typeof fetch>(async () => envelope([{ id: "native-rollout", target_version: 2, status: "completed", target_configuration: specification.configuration }]));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).assertApplicationReady({ ...input, listApplications })).resolves.toBeUndefined();
     expect(listApplications).toHaveBeenCalledTimes(3);
   });
 });
@@ -270,5 +271,56 @@ describe("native provider failure diagnostics", () => {
   it("identifies a transport failure without exposing its raw exception", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => { throw new Error("private-account private-token"); });
     await expect(provider(fetchImpl).readAccountLimits()).rejects.toMatchObject({ message: "Authoritative runner release state is unavailable; deployment stopped. Read account limits: request failed before a response." });
+  });
+});
+
+describe("single-fleet rollout recovery", () => {
+  const configuration = { image: `registry.example.test/runner@sha256:${"a".repeat(64)}`, vcpu: 2, memory_mib: 6144, disk: { size_mb: 6000 }, observability: { logs: { enabled: true } }, wrangler_ssh: { enabled: false } };
+  const specification = { configuration, max_instances: 748, scheduling_policy: "default", constraints: { tiers: [1, 2] }, rollout_active_grace_period: 300 };
+  const input = { applicationId: "serving", name: "serving-app", namespaceId: "serving-namespace", specification };
+  const live = { ...specification, id: input.applicationId, name: input.name, durable_objects: { namespace_id: input.namespaceId }, version: 5 };
+  const envelope = (result: unknown) => Response.json({ success: true, result });
+
+  it.each(["progressing", "completed"])("reconciles an accepted rollout after a lost response: %s", async status => {
+    const rollout = { id: "rollout-fixture", current_version: 4, target_version: 5, status, target_configuration: configuration };
+    const fetchImpl = vi.fn<typeof fetch>(async url => String(url).includes("/rollouts")
+      ? envelope(status === "completed" ? [rollout] : rollout)
+      : envelope({ ...live, ...(status === "progressing" ? { active_rollout_id: rollout.id, version: 4, configuration: { ...configuration, image: "old-image" } } : {}) }));
+    const provider = createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl });
+    await expect(provider.admitApplication(input)).resolves.toBe(status === "completed" ? "unchanged" : "modified");
+    expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("refuses to replace an active rollout for another image", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async url => String(url).includes("/rollouts")
+      ? envelope({ id: "other-rollout", current_version: 4, target_version: 5, status: "progressing", target_configuration: { ...configuration, image: "other-image" } })
+      : envelope({ ...live, active_rollout_id: "other-rollout" }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication(input)).rejects.toThrow("does not match");
+    expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("passes gradual steps to native rollout after updating the application", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => envelope(init?.method === "GET"
+      ? { ...live, configuration: { ...configuration, image: "old-image" } } : {}));
+    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, rolloutStepPercentage: [10, 25, 50, 100] });
+    expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PATCH", "POST"]);
+    expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ strategy: "rolling", kind: "full_auto", steps: [10, 25, 50, 100].map(percentage => ({ step_size: { percentage } })) });
+  });
+
+  it.each([0, 1, 2])("accounts for smoke and every other application before expansion (other=%s)", async others => {
+    const fetchImpl = vi.fn<typeof fetch>(async url => envelope(String(url).endsWith("/me")
+      ? { limits: { total_vcpu: 1500, total_memory_mib: 6_000_000, total_disk_mb: 6_000_000 } }
+      : [{ ...live, max_instances: 324 }, { id: "retired", configuration, max_instances: 0 }, { id: "smoke", configuration, max_instances: 1 }, { id: "unrelated", configuration, max_instances: others }]));
+    const work = createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).assertCapacity(input);
+    if (others <= 1) await expect(work).resolves.toBeUndefined();
+    else await expect(work).rejects.toThrow("exceeds the measured");
+    expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("does not retire a pool whose stopped observation changed before mutation", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async url => envelope(String(url).includes("/instances?")
+      ? { instances: [{ current_placement: { status: { container_status: "running" } } }] } : live));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).retireApplication(input)).rejects.toThrow("not drained");
+    expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
 });
