@@ -9,6 +9,6 @@
     "summary": "Murph checks existing connections before asking about your wearable or health app during onboarding.",
     "details": "When Apple Health is connected, Murph acknowledges it and asks about a watch or ring only if you have not already answered. You can continue without a wearable or another connection.",
     "relevanceTags": ["onboarding", "wearables"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3125]
   }
 }
