@@ -7,7 +7,7 @@
     "priority": 1,
     "title": "A shorter homepage tour",
     "summary": "The group and personal feature sections now pair their headings directly with examples.",
-    "details": "A tighter desktop layout and consistent heading-first order on phones make the demos easier to scan without extra supporting paragraphs.",
+    "details": "Larger featured demos, open layouts, and consistent heading-first order on phones give the tour more variety without extra supporting paragraphs.",
     "relevanceTags": ["website"],
     "sourcePullRequests": [3113]
   }

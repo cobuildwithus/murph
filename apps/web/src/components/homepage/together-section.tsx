@@ -9,19 +9,20 @@ export function TogetherSection() {
   return (
     <section className="bg-[#f5f0e8] px-4 pt-20 pb-10 sm:px-8 sm:pt-20 sm:pb-20 lg:px-16 lg:pt-28 lg:pb-28">
       <div className="mx-auto max-w-[1200px]">
-        <div className="max-w-[720px]">
-          <h2 className="font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
+        <div className="max-w-[900px]">
+          <h2 className="font-serif text-[2.5rem] font-semibold leading-[1.02] tracking-[-0.045em] text-balance text-[#2d3436] sm:text-[clamp(3rem,6vw,5.25rem)]">
             Do it with your people.
           </h2>
         </div>
 
-        <div className="mt-10 grid gap-x-10 gap-y-8 sm:mt-12 sm:gap-y-10 lg:grid-cols-2">
+        <div className="mt-10 grid gap-12 sm:mt-14 sm:gap-16 lg:grid-cols-2 lg:gap-20">
           <FeatureCard
             tint="sage"
+            layout="wide"
             headline="I referee health challenges with your friends."
             bubble="no shot you guys are keeping up with me this week 😤"
             artifact={
-              <div className="mx-auto w-full max-w-[340px]">
+              <div className="mx-auto w-full max-w-[390px]">
                 <ChallengeCard />
                 <div className="mt-3 flex items-end gap-1.5">
                   <MurphHeadshotAvatar
@@ -29,7 +30,7 @@ export function TogetherSection() {
                     className="mb-0.5 size-[22px] shrink-0"
                   />
                   <div className="min-w-0">
-                    <p className="mb-0.5 pl-1 font-mono text-[9px] tracking-[0.08em] text-[#736a58]">
+                    <p className="mb-0.5 pl-1 font-mono text-[9px] tracking-[0.08em] text-[#d7e59b]">
                       Murph
                     </p>
                     <div className="w-fit rounded-2xl rounded-bl-[6px] bg-white px-4 py-2.5 text-[0.9375rem] leading-[1.4] text-[#2d3436] shadow-[0_8px_24px_-6px_rgba(60,40,20,0.2)]">
@@ -42,11 +43,11 @@ export function TogetherSection() {
           />
 
           <FeatureCard
-            tint="gold"
+            layout="reverse"
             headline="I send the whole family a weekly health newsletter."
             bubble="can you send grandpa our weekly wins?"
             artifact={
-              <div className="mx-auto w-full max-w-[360px]">
+              <div className="mx-auto w-full max-w-[440px] px-5 py-3">
                 <div className="relative">
                   <div
                     aria-hidden="true"

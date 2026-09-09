@@ -9,18 +9,21 @@ import {
   FeatureCard,
 } from "@/src/components/homepage/asks-section";
 
-test("FeatureCard keeps the heading before the message and demo", () => {
-  const markup = renderToStaticMarkup(
-    createElement(FeatureCard, {
-      artifact: createElement("div", null, "Artifact"),
-      bubble: "Bubble",
-      headline: "Headline",
-      tint: "sage",
-    }),
-  );
+test("FeatureCard keeps the heading before the message and demo in every layout", () => {
+  for (const layout of ["compact", "wide", "reverse"] as const) {
+    const markup = renderToStaticMarkup(
+      createElement(FeatureCard, {
+        artifact: createElement("div", null, "Artifact"),
+        bubble: "Bubble",
+        headline: "Headline",
+        tint: "sage",
+        layout,
+      }),
+    );
 
-  assert.ok(markup.indexOf("Headline") < markup.indexOf("Bubble"));
-  assert.ok(markup.indexOf("Bubble") < markup.indexOf("Artifact"));
+    assert.ok(markup.indexOf("Headline") < markup.indexOf("Bubble"));
+    assert.ok(markup.indexOf("Bubble") < markup.indexOf("Artifact"));
+  }
 });
 
 test("AsksGridSection stacks dense health findings at iPhone Mini widths", () => {

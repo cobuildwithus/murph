@@ -4,18 +4,21 @@ import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 
 type Tint = "sage" | "gold" | "bronze";
 
-const TINTS: Record<Tint, { panel: string; bubble: string }> = {
+const TINTS: Record<Tint, { panel: string; bubble: string; heading: string }> = {
   sage: {
-    panel: "bg-[linear-gradient(135deg,#e8efde_0%,#d5e2c4_55%,#c8d7b1_100%)]",
-    bubble: "bg-[#2c7a3f]",
+    panel: "bg-[#243f32]",
+    bubble: "bg-[#d7e59b] text-[#243f32]",
+    heading: "text-[#f5f0e8]",
   },
   gold: {
-    panel: "bg-[linear-gradient(135deg,#f3e8d0_0%,#ead7af_55%,#dec390_100%)]",
-    bubble: "bg-[#8a5d17]",
+    panel: "bg-[#eddc91]",
+    bubble: "bg-[#7b4d24] text-[#fffcf6]",
+    heading: "text-[#383321]",
   },
   bronze: {
-    panel: "bg-[linear-gradient(135deg,#ead0b0_0%,#d6ad7e_55%,#bf8a55_100%)]",
-    bubble: "bg-[#94591f]",
+    panel: "bg-[#ad542f]",
+    bubble: "bg-[#f4dbaf] text-[#613517]",
+    heading: "text-[#fffcf6]",
   },
 };
 
@@ -24,37 +27,59 @@ export function FeatureCard({
   headline,
   tint,
   artifact,
+  layout = "compact",
 }: {
   bubble?: string;
   headline: string;
   tint?: Tint;
   artifact: React.ReactNode;
+  layout?: "compact" | "wide" | "reverse";
 }) {
   const colors = tint ? TINTS[tint] : null;
+  const wide = layout !== "compact";
 
   return (
-    <article className="grid min-w-0 grid-rows-[auto_1fr] gap-5 lg:row-span-2 lg:grid-rows-subgrid">
-      <h3 className="max-w-[30ch] font-serif text-2xl font-semibold leading-[1.12] tracking-[-0.025em] text-balance text-[#2d3436] sm:text-[1.75rem]">
+    <article
+      className={cn(
+        "min-w-0",
+        wide
+          ? "grid items-center gap-8 sm:gap-12 lg:col-span-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-12 xl:gap-16"
+          : "flex flex-col gap-8 border-t border-[#2d3436]/20 pt-7 sm:gap-10 sm:pt-8",
+        colors
+          ? cn("rounded-[1.5rem] px-5 py-8 sm:rounded-[2rem] sm:p-10 lg:p-14", colors.panel)
+          : wide && "py-4 sm:py-8",
+      )}
+    >
+      <h3
+        className={cn(
+          "font-serif font-semibold tracking-[-0.035em] text-balance",
+          colors?.heading ?? "text-[#2d3436]",
+          wide
+            ? "max-w-[18ch] text-[2rem] leading-[1.06] sm:text-[2.75rem] lg:text-[2.5rem] xl:text-[3.25rem]"
+            : "max-w-[25ch] text-[1.75rem] leading-[1.12] sm:text-[2.125rem]",
+          layout === "reverse" && "lg:col-start-2 lg:row-start-1",
+        )}
+      >
         {headline}
       </h3>
       <div
         className={cn(
-          "flex min-w-0 flex-col gap-6 overflow-hidden rounded-3xl p-5 sm:gap-8 sm:p-8",
-          colors?.panel ?? "bg-[#ece6da]",
+          "flex min-w-0 flex-col gap-6 sm:gap-8",
+          layout === "reverse" && "lg:col-start-1 lg:row-start-1",
         )}
       >
         {bubble ? (
           <div
             className={cn(
-              "max-w-[280px] self-end rounded-2xl rounded-tr-md px-4 py-2.5 text-[0.875rem] leading-[1.4] text-white sm:text-[0.9375rem]",
-              colors?.bubble ?? "bg-[#5a6e32]",
+              "max-w-[280px] self-end rounded-2xl rounded-tr-md px-4 py-2.5 text-[0.875rem] leading-[1.4] sm:text-[0.9375rem]",
+              colors?.bubble ?? "bg-[#2c7a3f] text-[#fffcf6]",
             )}
           >
             {bubble}
           </div>
         ) : null}
-        <div className="flex flex-1 items-center justify-center">
-          <div className="w-full min-w-0 max-w-[440px]">{artifact}</div>
+        <div className={cn("w-full min-w-0", wide ? "mx-auto max-w-[440px]" : "max-w-[500px]")}>
+          {artifact}
         </div>
       </div>
     </article>
@@ -337,14 +362,15 @@ export function AsksGridSection() {
       <div className="mx-auto max-w-[1200px]">
         {/* Bridges the group-chat story above back to the 1:1 assistant:
             everything below happens in a private thread with Murph. */}
-        <div className="mb-10 max-w-[720px] sm:mb-12">
-          <h2 className="font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
+        <div className="mb-12 max-w-[960px] sm:mb-16 lg:mb-20">
+          <h2 className="font-serif text-[2.375rem] font-semibold leading-[1.02] tracking-[-0.045em] text-balance text-[#2d3436] sm:text-[clamp(3rem,5.5vw,4.75rem)]">
             No group? You’re still not doing this alone.
           </h2>
         </div>
-        <div className="grid gap-x-10 gap-y-8 sm:gap-y-10 lg:grid-cols-2">
+        <div className="grid gap-x-16 gap-y-12 sm:gap-y-16 lg:grid-cols-2 lg:gap-y-20">
           <FeatureCard
             tint="gold"
+            layout="wide"
             headline="I run experiments so you know what actually works for you."
             bubble="Did the magnesium actually work?"
             artifact={<ExperimentArtifact />}
@@ -361,6 +387,7 @@ export function AsksGridSection() {
 
           <FeatureCard
             tint="bronze"
+            layout="wide"
             headline="I order the supplements and book the scans."
             bubble="Order me Omega-3, find me a DEXA scan, and confirm my doctor's appointment."
             artifact={<ErrandsArtifact />}
