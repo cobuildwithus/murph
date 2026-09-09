@@ -179,8 +179,8 @@ const VOICE_ORB_POINTS = Array.from({ length: 18 }, (_, index) => {
   const radius = index % 3 === 0 ? 14 : index % 2 === 0 ? 11 : 8;
   return {
     baseRadius: index % 4 === 0 ? 1.35 : 1,
-    x: 20 + Math.cos(angle) * radius,
-    y: 20 + Math.sin(angle) * radius,
+    x: (20 + Math.cos(angle) * radius).toFixed(3),
+    y: (20 + Math.sin(angle) * radius).toFixed(3),
   };
 });
 
