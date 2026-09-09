@@ -181,7 +181,8 @@ describe("hosted Linq audio conversation ingestion", () => {
           ],
           service: "iMessage",
         },
-        occurredAt: "2026-08-26T17:22:20.000Z",
+        // Keep this retry fixture inside the pending-input retention window.
+        occurredAt: new Date().toISOString(),
         phoneLookupKey: "15551234567",
         userId: "member_linq_audio",
       });
