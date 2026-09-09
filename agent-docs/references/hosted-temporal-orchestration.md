@@ -574,6 +574,15 @@ Vercel OIDC for Web's existing direct ingress wake; both forms bind the target
 user before the same processing adapter runs.
 Do not introduce a static shared bearer token for this adapter.
 
+Successful OIDC direct responses also return optional numeric authentication and
+handler duration headers. The existing Web timing callback records them as
+`directEnsureAuthDurationMs` and `directEnsureHandlerDurationMs` for that exact
+HTTP response. Generic orchestration timestamps in a merged mailbox trace may
+come from a competing Temporal wake and must not be paired with the direct
+request to infer its transport or authentication duration. Old clients ignore
+the headers; new clients accept their absence and ignore malformed values. These
+diagnostics never authorize work or change the JSON response contract.
+
 Request summary:
 
 - `orchestrationAttemptId`: an opaque Temporal attempt id for observability and
@@ -608,6 +617,15 @@ gate so the runtime can reconcile an already-created outbox delivery; the
 runtime/provider layer still enforces spend before any actual model call. There
 is no Activity-local signed usage-decision endpoint in the Temporal execution
 path.
+
+The facts owner retains authoritative usage admission and queries a selected
+custom inference override only when a denied managed allowance needs that
+exemption. Allowed and consent-withdrawn decisions do not depend on unrelated
+custom inference configuration. The existing route stage callback records
+bounded, numeric durations for authentication and facts processing, including
+repeated stages. Timing records contain no member or request identifiers and
+cannot change the response or failure behavior. Temporal activity duration
+includes the Web request lifecycle; it is not a measurement of worker queueing.
 
 Response summary:
 

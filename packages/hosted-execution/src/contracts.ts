@@ -1180,6 +1180,10 @@ export const HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-token-acquired-at-ms";
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-direct-request-started-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_AUTH_DURATION_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-auth-duration-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-handler-duration-ms";
 
 export function assertHostedRuntimeProcessingTimeoutMs(
   value: number,

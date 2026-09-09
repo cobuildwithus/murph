@@ -2380,6 +2380,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     tokenAcquiredAtEpochMs?: number;
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
+    // These durations belong to this direct HTTP response; generic orchestration
+    // spans can instead describe a competing Temporal wake.
+    directEnsureAuthDurationMs?: number;
+    directEnsureHandlerDurationMs?: number;
     directEnsureOrchestrationAttemptId?: string;
     directEnsureResultKind?:
       | "legacy_accepted"
@@ -2799,6 +2803,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "tokenAcquiredAtEpochMs",
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
+    "directEnsureAuthDurationMs",
+    "directEnsureHandlerDurationMs",
     "directEnsureOrchestrationAttemptId",
     "directEnsureResultKind",
     "directEnsureAction",

@@ -1100,6 +1100,8 @@ describe("hosted runtime latency dashboard store", () => {
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+          directEnsureAuthDurationMs: 0,
+          directEnsureHandlerDurationMs: 42,
         },
       },
       prisma,
@@ -1117,6 +1119,8 @@ describe("hosted runtime latency dashboard store", () => {
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        directEnsureAuthDurationMs: 0,
+        directEnsureHandlerDurationMs: 42,
       },
     });
     expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
