@@ -40,3 +40,26 @@ unchanged. No new state owner, lock, configuration, or dependency.
   correction deletes eight net source lines and 126 net experiment fixture lines.
 - Live query README documents lock reentry, freshness recheck, and timing spans.
   Final ReviewGPT round three and exact-head CI remain pending at candidate push.
+
+## Final review and disposition
+
+ReviewGPT round three passed on e06e6491a94273083ffe58aaf91a51d251d277a7.
+The captured model is verified gpt-6-pro; response hash:
+`f600ebe084d44f49940de3904a149074c590f87257763b668b8e5c117d0c1894`.
+The reviewer confirmed the earlier foreground-routing correction and the query
+coordination deletion, with no serious bug or material Complexity Collapse
+finding. No accepted finding remains. All 33 CI checks passed on that code
+commit; two inapplicable jobs skipped. The final documentation-only head still
+requires its own CI; the PR remains the authority for that completion gate.
+
+The parent inspected the final diff, privacy, preserved assertions, lock owner
+and freshness paths, and current-base mergeability. A separate alternating
+five-run stale-query sample measured medians of 44/45 ms before/after this
+correction with 20,000 synthetic readings compacted into 71 entities. This
+includes the new freshness recheck and does not establish production p95.
+
+Implementation and review are complete. This closure changes only evidence.
+No merge, deployment, or production mutation was performed.
+Status: completed
+Updated: 2026-09-09
+Completed: 2026-09-09
