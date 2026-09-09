@@ -79,6 +79,7 @@ import {
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 import {
+  buildHostedRuntimeLogContextFields,
   type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
@@ -552,6 +553,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       });
     }
     const normalized = normalizeHostedSystemMailboxError(error);
+    await writeHostedDeviceSyncPreparationFailureLog({
+      error,
+      item: prepared,
+      runtime: input.runtime,
+      runtimeLogContext: input.runtimeLogContext,
+    });
     if (
       shouldStopHostedGroupContextHandoffRetry({
         error,
@@ -1869,6 +1876,40 @@ function normalizeHostedSystemMailboxError(error: unknown): {
     code: "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS",
     message: readHostedRuntimeSafeErrorText(error) ?? "Hosted system mailbox effect failed.",
   };
+}
+
+async function writeHostedDeviceSyncPreparationFailureLog(input: {
+  error: unknown;
+  item: HostedSystemMailboxPendingItem;
+  runtime: HostedSystemMailboxRuntime;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
+}): Promise<void> {
+  if (input.item.routeAction !== "run-device-sync-wake") {
+    return;
+  }
+  const normalized = normalizeHostedSystemMailboxError(input.error);
+  await writeHostedRuntimeLogBestEffort({
+    platform: input.runtime.platform,
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.runtimeLogContext),
+      component: "mailbox",
+      eventCode: "mailbox.system_processed",
+      errorCode: deriveHostedExecutionErrorCode(input.error),
+      level: "warn",
+      phase: "checkpoint",
+      mailboxLane: "system",
+      mailboxSeqStart: input.item.mailboxLaneSeq,
+      mailboxSeqEnd: input.item.mailboxLaneSeq,
+      redactedJson: {
+        attemptCount: input.item.attemptCount,
+        routeAction: input.item.routeAction,
+        status: "retryable_failed",
+        wakeKind: input.item.wake.kind,
+        safeErrorMessage: sanitizeHostedExecutionStructuredLogText(normalized.message)
+          ?? "Hosted device-sync continuation preparation failed.",
+      },
+    },
+  });
 }
 
 async function writeHostedDeviceSyncDirtyAckPersistenceFailureLog(input: {
