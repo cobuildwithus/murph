@@ -153,7 +153,7 @@ describe("runHostedWorkerDeployment", () => {
     expect(result.smokeVersionId).toBe("version-direct");
   });
 
-  it("defaults production deploys to immediate container rollout for hard runner floors", async () => {
+  it("defaults compatible production deploys to gradual container rollout", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
       versions: [
@@ -183,7 +183,7 @@ describe("runHostedWorkerDeployment", () => {
     });
 
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
-      containerRolloutMode: "immediate",
+      containerRolloutMode: "gradual",
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("production direct deploy"),
       includeSecrets: true,

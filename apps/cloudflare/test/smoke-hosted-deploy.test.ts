@@ -204,6 +204,47 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
+  it("keeps both artifact smoke phases off serving inventory while checking provenance and model output", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-artifact-smoke-"));
+    const manifestPath = path.join(root, "manifest.json");
+    const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
+    const calls: URL[] = [];
+    let artifactRequests = 0;
+    try {
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      await runSmokeHostedDeploy({
+        phase: "artifact", log() {},
+        fetchImpl: async input => {
+          const url = new URL(String(input)); calls.push(url);
+          if (url.pathname === "/" || url.pathname === "/health") {
+            return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner", standbyMode: "allocate" }));
+          }
+          expect(url.pathname).toBe("/internal/deploy/artifact-smoke");
+          if (++artifactRequests === 1) return new Response("Old Worker route missing", { status: 404 });
+          return new Response(JSON.stringify({ ok: true, runnerContainer: {
+            ok: true, runnerBundle: manifest, service: "cloudflare-hosted-runner-node", codexShell: createCodexShellSmokeResult(),
+            liveModelTurn: { durationMs: 1, egressGrantConsumed: true, model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, stdoutBytes: 1 },
+          } }));
+        },
+        source: {
+          HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "allocate",
+          HOSTED_EXECUTION_STANDBY_TARGET: "2",
+          HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
+          HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "1",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+          HOSTED_EXECUTION_SMOKE_USER_ID: "synthetic-member",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+      });
+      const artifactCalls = calls.filter(url => url.pathname === "/internal/deploy/artifact-smoke");
+      expect(artifactCalls).toHaveLength(3);
+      expect(artifactCalls[1]!.searchParams.get("attempt")).toBe(artifactCalls[2]!.searchParams.get("attempt"));
+      expect(artifactCalls[2]!.searchParams.get("liveModelTurn")).toBe("1");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it.each([
     { label: "current ready inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: true, inPlace: false },
     { label: "missing inventory", proof: null, passes: false, inPlace: false },

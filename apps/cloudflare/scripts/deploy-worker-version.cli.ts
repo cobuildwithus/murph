@@ -125,6 +125,18 @@ export async function runDeployWorkerVersionCli(
         }
         await activateVersion(staged.configPath, stageVersionId, currentVersionId);
         if (serving) {
+          // This endpoint cannot allocate member slots, even if an older Worker
+          // receives the request during edge propagation (it returns 404).
+          await runSmokeHostedDeploy({
+            phase: "artifact",
+            source: {
+              ...env,
+              HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+              HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: "true",
+              HOSTED_EXECUTION_SMOKE_VERSION_ID: stageVersionId,
+              HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: path.join(runnerBundleDir, ".murph-runner-bundle-manifest.json"),
+            },
+          });
           await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
           const rolloutSteps = input.containerRolloutMode === "gradual"
             ? [10, 25, 50, 100].slice(-Math.min(serving.specification.max_instances, 4)) : [100];

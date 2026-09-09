@@ -181,6 +181,7 @@ export function resolveSmokeExpectedStandbyMode(
 }
 
 export async function runSmokeHostedDeploy(input: {
+  phase?: "artifact" | "serving";
   fetchImpl?: FetchLike;
   log?: (message: string) => void;
   source?: EnvSource;
@@ -192,7 +193,7 @@ export async function runSmokeHostedDeploy(input: {
   const smokeUserId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
   const smokeVersionId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_VERSION_ID);
   const expectedStandbyMode = resolveSmokeExpectedStandbyMode(source);
-  const shouldSmokeRunnerContainer = readBooleanEnv(
+  const shouldSmokeRunnerContainer = input.phase === "artifact" || readBooleanEnv(
     source.HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER,
     false,
   );
@@ -228,17 +229,6 @@ export async function runSmokeHostedDeploy(input: {
     versionOverrideHeaders,
   });
 
-  let status: SmokeUserStatus | null = null;
-  const statusRequest: SmokeControlRequest | null = smokeUserId && authorizationHeader
-    ? {
-        authorizationHeader,
-        boundUserId: smokeUserId,
-        fetchImpl,
-        url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
-        versionOverrideHeaders,
-      }
-    : null;
-
   if (shouldSmokeRunnerContainer) {
     let runnerSmokeDispatcher: Agent | null = null;
     let runnerSmokeFetchImpl = fetchImpl;
@@ -265,6 +255,7 @@ export async function runSmokeHostedDeploy(input: {
         url: buildRunnerContainerSmokeUrl({
           directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
           liveModelTurn: false,
+          phase: input.phase,
           smokeBaseUrl,
         }),
         versionOverrideHeaders,
@@ -285,6 +276,7 @@ export async function runSmokeHostedDeploy(input: {
           url: buildRunnerContainerSmokeUrl({
             directR2PresignedPut: false,
             liveModelTurn: true,
+            phase: input.phase,
             smokeBaseUrl,
           }),
           versionOverrideHeaders,
@@ -293,6 +285,11 @@ export async function runSmokeHostedDeploy(input: {
     } finally {
       await runnerSmokeDispatcher?.close();
     }
+  }
+
+  if (input.phase === "artifact") {
+    log("Isolated candidate artifact smoke checks passed.");
+    return;
   }
 
   if (!smokeUserId) {
@@ -307,10 +304,13 @@ export async function runSmokeHostedDeploy(input: {
     );
   }
 
-  if (!statusRequest) {
-    throw new Error("Authenticated hosted status configuration is missing.");
-  }
-  status ??= await readSmokeUserStatus(statusRequest);
+  const status = await readSmokeUserStatus({
+    authorizationHeader,
+    boundUserId: smokeUserId,
+    fetchImpl,
+    url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
+    versionOverrideHeaders,
+  });
   log(
     "Authenticated hosted status check passed. "
       + `mailboxLag=${JSON.stringify(status.mailboxLag)}`,
@@ -458,6 +458,7 @@ async function readRunnerContainerSmoke(input: {
     }
     throw (
       response.status === 400 || response.status >= 500
+      || (response.status === 404 && url.pathname === "/internal/deploy/artifact-smoke")
     )
       ? new RunnerContainerSmokeRetryableError(message)
       : new Error(message);
@@ -494,7 +495,7 @@ async function readRunnerContainerSmoke(input: {
   assertSmokeRunnerBundleManifest(runnerBundle, input.expectedManifest, {
     retryable: input.retryableManifestMismatch,
   });
-  if (input.expectLiveModelTurnModel === null) {
+  if (input.expectLiveModelTurnModel === null && new URL(input.url).pathname !== "/internal/deploy/artifact-smoke") {
     assertSmokeStandbyInventory(responsePayload.standbyInventory, input.source);
   }
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
@@ -538,9 +539,11 @@ function redactSmokeFailureBody(value: string): string {
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
   liveModelTurn: boolean;
+  phase?: "artifact" | "serving";
   smokeBaseUrl: string;
 }): string {
-  const url = new URL("/internal/deploy/container-smoke", input.smokeBaseUrl);
+  const url = new URL(input.phase === "artifact"
+    ? "/internal/deploy/artifact-smoke" : "/internal/deploy/container-smoke", input.smokeBaseUrl);
   if (input.directR2PresignedPut) {
     url.searchParams.set("directR2PresignedPut", "1");
   }

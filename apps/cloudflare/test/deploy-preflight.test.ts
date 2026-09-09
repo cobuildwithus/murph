@@ -21,8 +21,8 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
   "HOSTED_ASSISTANT_MODEL must be one of gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
-const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
-  "production runner image changes must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; compatible Worker-only deploys may use worker-only; rollback floor is the audience-key, selector-scope, and runner-schema-v16 media-effect bundle.";
+const HOSTED_CONTAINER_ROLLOUT_ERROR =
+  "HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual', 'immediate', or 'worker-only'.";
 
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
@@ -952,7 +952,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_CONTAINER_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -962,7 +962,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_CONTAINER_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -997,47 +997,18 @@ describe("deploy preflight helpers", () => {
     ]));
   });
 
-  it("requires immediate production container rollout while state-isolation keys migrate", () => {
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
-        }),
-        { deployWorker: true },
-      ),
-    ).toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+  it.each([undefined, "gradual", "immediate", "worker-only"])("accepts production rollout mode %s without weakening the remaining preflight", (mode) => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({ HOSTED_EXECUTION_CONTAINER_ROLLOUT: mode }),
+      { deployWorker: true },
+    )).toEqual([]);
+  });
 
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          HOSTED_EXECUTION_CONTAINER_ROLLOUT: undefined,
-        }),
-        { deployWorker: true },
-      ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv(),
-        { deployWorker: true },
-      ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
-          CF_PUBLIC_BASE_URL: "http://localhost:8787",
-          HOSTED_CRYPTO_ENV: "development",
-          HOSTED_DATABASE_ALERT_ENABLED: undefined,
-          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
-          HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
-          HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-          HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
-          HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
-        }),
-        { deployWorker: true },
-      ),
-    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
+  it("rejects unknown production rollout modes", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({ HOSTED_EXECUTION_CONTAINER_ROLLOUT: "unexpected" }),
+      { deployWorker: true },
+    )).toContain(HOSTED_CONTAINER_ROLLOUT_ERROR);
   });
 
   it("rejects deploy timeout settings that cannot contain the web-control request", () => {

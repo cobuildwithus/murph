@@ -63,12 +63,22 @@ describe("runDeployWorkerVersionCli", () => {
     releaseMocks.assertCapacity.mockImplementation(async () => { trace.push("quota"); });
     releaseMocks.admitApplication.mockImplementation(async () => { trace.push("native rollout"); return "modified"; });
     releaseMocks.assertApplicationReady.mockImplementation(async () => { trace.push("distributed"); });
-    releaseMocks.runSmokeHostedDeploy.mockImplementation(async () => { trace.push("smoke"); });
+    releaseMocks.runSmokeHostedDeploy.mockImplementation(async input => { trace.push(input.phase === "artifact" ? "artifact smoke" : "serving smoke"); });
     wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activate"); });
     await syntheticDeployment("gradual");
     expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({ source: expect.objectContaining({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment) }) }));
-    expect(trace).toEqual(["drained", "retired", "quota", "activate", "native rollout", "distributed", "smoke", "activate"]);
+    expect(trace).toEqual(["drained", "retired", "quota", "activate", "artifact smoke", "native rollout", "distributed", "serving smoke", "activate"]);
     expect(releaseMocks.admitApplication).toHaveBeenCalledWith({ ...serving, rolloutStepPercentage: [10, 25, 50, 100] });
+  });
+
+  it("leaves the serving image untouched when isolated behavioral smoke fails", async () => {
+    const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [] }));
+    releaseMocks.runSmokeHostedDeploy.mockRejectedValue(new Error("candidate shell failed"));
+    await expect(syntheticDeployment("gradual")).rejects.toThrow("candidate shell failed");
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({ phase: "artifact" }));
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
   });
 
   it("retains the compatible Worker and pending pair after serving rollout failure", async () => {
@@ -78,7 +88,7 @@ describe("runDeployWorkerVersionCli", () => {
     await expect(syntheticDeployment()).rejects.toThrow("lost rollout response");
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
-    expect(releaseMocks.runSmokeHostedDeploy).not.toHaveBeenCalled();
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ phase: "artifact" }));
   });
 
   beforeEach(() => {
