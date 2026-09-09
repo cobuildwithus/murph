@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import * as assistantEngine from "@murphai/assistant-engine";
 import { runHostedAssistantAutomationLane } from "../src/hosted-runtime/maintenance.ts";
-import { createHostedForegroundDeviceSync } from "../src/hosted-runtime/foreground-device-sync.ts";
+import { createHostedWorkspaceSystemWork } from "../src/hosted-runtime/workspace-system-work.ts";
+import type { HostedWorkspaceRunnerInput, HostedWorkspaceDurableCheckpointEffect } from "../src/hosted-runtime/workspace-runner.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
@@ -414,6 +415,23 @@ describe("foreground checkpoint lease diagnostics", () => {
 });
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("keeps a newly staged receipt when an older metadata publication finishes", async () => {
+    const builder = createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_synthetic_publication", expectedWorkspaceVersion: "0",
+      leaseGeneration: "1", snapshotRef: null,
+    });
+    const earlierStatus = { hostedCanonicalWriteReceiptLogSha256: "a".repeat(64) };
+    builder.recordCheckpoint({ checkpointed: true, workspace: createWorkspaceState({ version: "1", redactedStatus: earlierStatus }) });
+    const metadataResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
+    const publication = metadataResponse.promise.then((response) => builder.recordCheckpoint(response));
+    const stagedStatus = { hostedCanonicalWriteReceiptLogSha256: "b".repeat(64) };
+    builder.recordRedactedStatus(stagedStatus);
+    metadataResponse.resolve({ checkpointed: true, workspace: createWorkspaceState({ version: "2", redactedStatus: earlierStatus }) });
+    await publication;
+    assert.equal(builder.latestWorkspace()?.version, "2");
+    assert.equal(builder.readRedactedStatus()?.hostedCanonicalWriteReceiptLogSha256, stagedStatus.hostedCanonicalWriteReceiptLogSha256);
+  });
+
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-initial-input-tail-"));
     const olderItem = createMailboxItem({
@@ -11372,6 +11390,29 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 // pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
 // owner requirement: these reads intentionally start after the commit settles.
 describe("foreground device ingestion", () => {
+  test("retains an independent device receipt when vault-share publication fails", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    try {
+      fixture.stageDeviceWake();
+      await fixture.run(async () => {
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      const effect = fixture.effects[0];
+      assert.ok(effect);
+      const completion = await effect({ vaultShareProjectionResult: { outcome: "error" } });
+      assert.equal(fixture.acks.length, 0);
+      const pending = (await readHostedSystemMailboxState(fixture.vaultRoot)).pending;
+      const retained = pending.find((item) => item.itemId === "device_concurrent");
+      assert.equal(retained?.status, "recording");
+      assert.equal(retained?.lastErrorCode, "HOSTED_VAULT_SHARE_PROJECTION_FAILED");
+      assert.equal(completion?.nextWakeAt, retained?.nextAttemptAt);
+      assert.ok(completion?.requiresFollowUpCheckpoint);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   test("imports newly staged device data while the model is held and preserves one receipt chain", async () => {
     const fixture = await createForegroundDeviceFixture();
     const modelStarted = createDeferred<void>();
@@ -11430,7 +11471,7 @@ describe("foreground device ingestion", () => {
       await waitForCondition(() => fixture.conversationImports === 2, 5_000);
       assert.equal(fixture.providerAborted, false);
       providerRelease.resolve();
-      await waitForCondition(() => fixture.owner.hasPendingCheckpoint(), 5_000);
+      await waitForCondition(() => fixture.effects.length > 0, 5_000);
       writeAfterImport.resolve();
       await afterWrite.promise;
       await rebuildQueryProjection(fixture.vaultRoot);
@@ -11449,7 +11490,7 @@ describe("foreground device ingestion", () => {
       modelRelease.resolve();
       const result = await run;
       assert.equal(fixture.acks.length, 0);
-      assert.equal(result.afterDurableCheckpoint.length, 1);
+      assert.equal(fixture.effects.length, 1);
       assert.equal(result.runtimeStateDirty, true);
       const pending = (await readHostedSystemMailboxState(fixture.vaultRoot)).pending;
       assert.ok(pending.some((item) => item.itemId === "device_concurrent" && item.status === "recording"));
@@ -11464,20 +11505,17 @@ describe("foreground device ingestion", () => {
         bytes: snapshot, expectedKind: "vault", roots: { vault: fixture.vaultRoot },
       });
       const fetchCount = fixture.providerFetches;
-      const recovered = createHostedForegroundDeviceSync(fixture.ownerInput);
-      const preparation = await recovered.prepare({ signal: new AbortController().signal });
-      assert.ok(preparation?.afterDurableCheckpoint);
+      fixture.effects.splice(0);
+      await fixture.owner?.recover(["run-environment-interview"]);
+      assert.equal(fixture.effects.length, 0);
+      await fixture.owner?.recover();
       assert.equal(fixture.providerFetches, fetchCount);
       assert.equal(fixture.acks.length, 0);
       fixture.newerDirtyRevision = true;
-      const effects = Array.isArray(preparation.afterDurableCheckpoint)
-        ? preparation.afterDurableCheckpoint
-        : [preparation.afterDurableCheckpoint];
-      for (const effect of effects) await effect();
+      for (const effect of fixture.effects.splice(0)) await effect();
       assert.equal(fixture.acks.length, 1);
       assert.equal(fixture.acks[0]?.processedRevision, "7");
       assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
-      assert.equal(recovered.hasPendingCheckpoint(), false);
       assert.ok((await readHostedSystemMailboxState(fixture.vaultRoot)).pending.some(
         (item) => item.routeAction === "run-device-sync-wake",
       ));
@@ -11509,7 +11547,7 @@ describe("foreground device ingestion", () => {
       await withTestTimeout(modelStarted.promise, 5_000);
       fixture.stageConversation();
       fixture.stageDeviceWake();
-      await waitForCondition(() => fixture.owner.hasPendingCheckpoint(), 5_000);
+      await waitForCondition(() => fixture.effects.length > 0, 5_000);
       await rebuildQueryProjection(fixture.vaultRoot);
       assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some(
         (point) => point.metricKey === "readiness-score",
@@ -11527,7 +11565,7 @@ describe("foreground device ingestion", () => {
   });
 
   test.each(["request", "body"] as const)(
-    "aborts a stalled provider %s for delivery, not for foreground arrival",
+    "keeps a stalled provider %s through delivery and settles it at the workspace boundary",
     async (stall: "request" | "body") => {
       const fixture = await createForegroundDeviceFixture();
       const modelRelease = createDeferred<void>();
@@ -11559,6 +11597,8 @@ describe("foreground device ingestion", () => {
         modelRelease.resolve();
         await withTestTimeout(run, 2_000);
         assert.equal(delivered, true);
+        assert.equal(fixture.providerAborted, false);
+        await fixture.owner?.quiesce();
         assert.equal(fixture.providerAborted, true);
         await Promise.all(fixture.tracked);
         const writesAtReturn = fixture.receiptCounts.length;
@@ -11589,7 +11629,6 @@ describe("foreground device ingestion", () => {
       phase.onProviderRequestStarted?.();
       modelStarted.resolve();
       await modelRelease.promise;
-      await phase.quiesceConcurrentDeviceSync?.();
       return { progressed: false };
     });
     try {
@@ -11640,7 +11679,12 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
   };
   const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
     async createConnectLink() { throw new Error("No connection creation in ingestion"); },
-    async applyUpdates() { throw new Error("No idle reconciliation in concurrent ingestion"); },
+    async applyUpdates(request) {
+      return { appliedAt: TEST_NOW, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
+        connection: null, connectionId: update.connectionId, status: "updated" as const,
+        tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+      })) };
+    },
     async fetchSnapshot() {
       return {
         connections: [{
@@ -11701,7 +11745,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
     }),
     deviceSyncPort,
   };
-  const ownerInput: Parameters<typeof createHostedForegroundDeviceSync>[0] = {
+  const ownerInput: Parameters<typeof createHostedWorkspaceSystemWork>[0]["preparation"] = {
     now: () => TEST_NOW,
     operatorHomeRoot: path.join(vaultRoot, ".runtime", "synthetic-operator"),
     runtime: {
@@ -11716,9 +11760,10 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
     },
     runtimeEnv: {}, signal: authority.signal, vaultRoot,
   };
-  const owner = createHostedForegroundDeviceSync(ownerInput);
+  const effects: HostedWorkspaceDurableCheckpointEffect[] = [];
   const fixture = {
-    acks, authority, conversationStaged, owner, ownerInput, platform, providerStarted,
+    acks, authority, conversationStaged, effects, ownerInput, platform, providerStarted,
+    owner: null as ReturnType<typeof createHostedWorkspaceSystemWork> | null,
     receiptCounts, tracked, vaultRoot,
     workspace: createWorkspaceState(),
     newerDirtyRevision: false, providerAborted: false, conversationImports: 0,
@@ -11745,7 +11790,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
       });
     },
     run(runAssistantPhase: NonNullable<Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"]>) {
-      return runHostedWorkspaceUntilIdleOrBudget({
+      const runnerInput: HostedWorkspaceRunnerInput = {
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_concurrent_device", expectedWorkspaceVersion: fixture.workspace.version,
           leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
@@ -11786,16 +11831,27 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
           }
           return { status: "imported" };
         },
-        hasConcurrentDeviceSyncCheckpoint: owner.hasPendingCheckpoint,
-        prepareConcurrentDeviceSync: owner.prepare,
+        kickSystemWork: () => fixture.owner?.kick(),
         limitPerLane, now: () => TEST_NOW, platform, requestId: "request_concurrent_device",
         runAssistantPhase, runtimeWakeSignal, signal: authority.signal,
         trackLocalWorkspaceMutationCompletion: (completion) => { if (completion) tracked.push(completion); },
         vaultRoot, workspace: fixture.workspace,
+      };
+      fixture.owner = createHostedWorkspaceSystemWork({
+        preparation: ownerInput, runnerInput,
+        onCompleted(completion) {
+          if (completion.afterDurableCheckpoint) effects.push(...(typeof completion.afterDurableCheckpoint === "function"
+            ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
+        },
+        onFailure(error) { if (!authority.signal.aborted) throw error; },
+        settleOwnedMutations: async () => { await Promise.allSettled(tracked); },
       });
+      fixture.owner.resume();
+      return runHostedWorkspaceUntilIdleOrBudget(runnerInput);
     },
     async cleanup() {
       authority.abort();
+      await fixture.owner?.quiesce();
       vi.unstubAllGlobals();
       await rm(vaultRoot, { recursive: true, force: true });
     },

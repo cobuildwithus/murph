@@ -1,0 +1,267 @@
+# Decouple hosted work from assistant turns
+
+Status: active
+Created: 2026-09-09
+
+## Outcome and protected invariants
+
+Independent hosted work must make bounded progress during an active conversation,
+across ordinary reply boundaries, and while unrelated mailbox work is pending.
+Foreground model admission and reply delivery retain priority. Canonical files,
+receipts, idempotent effects, checkpoint recovery, tenant fences, consent, and
+same-conversation causality remain correct under concurrent work.
+
+## Current evidence and owners
+
+Web owns encrypted durable mailbox inputs, device dirty state, and product
+permission. Temporal owns pointer-only wake/retry orchestration. Cloudflare owns
+one active write fence and restored runtime. Core owns canonical mutations and
+write receipts; runtime owns assistant admission, system work, and checkpoints.
+
+The earlier PR overlaps device ingestion with a model request but still aborts
+and joins ingestion before reply delivery. Its invocation-local adapter also
+holds preparation until a durable checkpoint. The system frontier classifier,
+processing modes, ordered selection, and shared checkpoint effects couple
+unrelated work. These are hypotheses to reduce, not immutable architecture.
+
+## Investigation and architecture consultation
+
+1. Inspect the complete lifetime from durable admission through selection,
+   execution, commit, effect, checkpoint, and recovery for conversation, device,
+   detached ask, clinical/environment work, and maintenance.
+2. Consult ReviewGPT on the full source snapshot for a simpler long-term target,
+   exact deletion candidates, unavoidable ordering, and a concrete refactor.
+3. Reproduce the current lifetime/ordering failures with held promises and real
+   composed owners. Choose the smallest design supported by that evidence.
+4. Build the chosen architecture, delete superseded paths, and update live owner
+   contracts. No generic scheduler, second queue, service, persisted mirror, or
+   new dependency without a demonstrated requirement.
+
+## Chosen architecture and implementation
+
+ReviewGPT recommends independent attempts within one fenced workspace, one
+current publication owner, and existing durable mailbox/domain retry records.
+The captured response matches the submitted source head and verified
+`gpt-6-pro` response metadata (SHA-256
+`dbc918d21e7dc33dfacc54049e2ddd78ab7f0dbc3ea171fa55c57d95648db688`).
+Its suggested small patch only removed a metadata-publication reader wait;
+the full redesign remains parent-owned implementation work. No attachment was
+bound in capture metadata, so local code follows the captured source assessment.
+
+- Separate workspace version/receipt publication from turn input selection.
+  All current writers reuse the shared accepted state and serialized metadata
+  publication; retain canonical file/rollback locking.
+- Admit finite existing device, clinical, and deterministic environment attempts
+  from workspace readiness. Claimed mailbox rows exclude duplicate execution;
+  recording and retry rows retain their exact domain ownership. No new durable
+  queue, service, generic scheduler, or active-task registry.
+- Ordinary replies and metadata publication do not cancel independent work.
+  Actual snapshot/replacement, shutdown, lost fence, and relevant revocation
+  close admission and settle owned work. Initial implementation retains real
+  quiescent snapshots rather than adding live snapshot versioning.
+- Keep the existing foreground quiet window. Background dirtiness establishes
+  checkpoint need without repeatedly extending a conversation deadline.
+- Replace global execution-frontier filtering with independent readiness while
+  preserving causal preferences, connection epochs, safe handled progress,
+  exact acknowledgments, and deployed capability/wire-mode compatibility.
+- Keep one shared-writable root model. Voice preparation may overlap; its
+  writable assistant step retains the actual root-model authority boundary.
+
+## State, failure, and compatibility
+
+Keep canonical truth with current owners. Reuse durable work identities and
+continuations; do not replace them with process-memory queues. Losing a fence,
+consent, workspace, or process must stop unauthorized work. Ordinary messages
+and replies must not cancel unrelated downloads. Checkpoint construction must
+observe consistent state without acknowledging uncommitted work. Independent
+work may complete out of order only where per-item evidence preserves retry and
+causality. Inspect deployed old/new contracts before changing wire or state.
+
+## Product journey and completion boundary
+
+Effort: product change to execution timing and recovery. A member with a
+consented connected source can continue a conversation while imported data
+becomes readable. Further replies do not restart the download. An independent
+completed environment interview can become useful while that source is slow.
+
+Prove new and established member paths, no-data and delayed-provider behavior,
+retry and restart, newer dirty revisions, and authority loss. Preserve model-free
+processing when assistant execution is unavailable. The selected journeys are
+on hold until composed delivery, canonical readback, and recovery proofs pass.
+
+## Proof and completion
+
+Require a real concurrent chat/import journey that keeps the same download alive
+through two replies, independent work-family progress despite a blocked item,
+canonical commit/rollback and checkpoint/restart proof, bounded resources, and
+consent/fence/shutdown tests. Measure foreground latency, run focused real-Codex
+proof when the assistant path changes, affected typechecks, complexity review,
+final ReviewGPT, and exact-head CI. Publish a clean reviewable PR.
+
+## Scope and continuation
+
+The user explicitly requested whole-runtime architecture reconsideration with
+ReviewGPT followed by implementation, prioritizing deletion and simplicity.
+The existing PR #3090 worktree/head was verified as session-owned and clean at
+4d8cf15bf88a9407bc2e5cd5d421c8b7793df42e and is now draft for this redesign.
+Its earlier R1 reply-stall finding was fixed; R2 and R3 passed. This new product
+requirement challenges the remaining turn-scoped cancellation architecture.
+The architecture consultation is exploratory, not a fourth final bug-audit
+round. Before the renewed final gate, record the cap retrospective and the
+user-authorized redesign continuation under the review loop's policy.
+
+No production mutation, merge, deployment, or member message is authorized.
+
+## Baseline proof and architecture findings
+
+- The composed persistent-download case fails before refactoring: events show
+  provider fetch, first model completion, provider abort, first reply, then
+  second model/reply. Expected: the same provider request stays alive across
+  both replies and commits once after release. The failure is the explicit
+  no-abort assertion, not a timeout or unrelated setup failure.
+- The existing mailbox-state suite explicitly expected a due maintenance item
+  to wait behind a future device retry. Its replacement expectation requires
+  immediate independent maintenance eligibility. Per-route serialization already
+  exists beneath the global frontier projection.
+- Snapshot bridge construction already uses the reentrant canonical lock, but
+  its scope includes cleanup, archive construction, upload and publication.
+  Runtime-only state uses a separate assistant-state lock. Those boundaries
+  must be reconciled before allowing arbitrary background state writes across
+  snapshots; the lock alone is not proof that all coupled metadata is safe.
+- ReviewGPT architecture consultation completed with full source/tests and
+  explicit live contracts; one initial unsupported phase flag was corrected
+  before any browser submission.
+  Conversation: https://chatgpt.com/c/6aa18ea0-075c-83ea-8338-25d437b08daa.
+- The independent-maintenance baseline also fails directly: the wake resolver
+  returns the device retry one minute later instead of the unrelated due item.
+  The underlying selector already separates device connections and route
+  actions; the outer global-frontier projections erase that independence.
+- The device task currently captures a pass-local canonical write port, receipt
+  status, and checkpoint session. Removing its abort alone would leave a task
+  using stale pass metadata. Move lifetime and persistence ownership together.
+  The hosted invocation already owns shared workspace checkpoint metadata and
+  authority; this is a candidate reuse boundary, not evidence for another queue.
+- Existing detached assistant reads and image generation have lifetimes beyond
+  an ordinary reply. Their capability restrictions remain necessary. The same
+  workspace fence does not require independent network work to be serialized.
+- Work kinds do not map directly to safe concurrency: clinical import and
+  completed environment interviews use deterministic importers, but environment
+  voice combines audio download/transcription with a workspace-writing assistant
+  notification. Its external preparation can overlap, while the model-writing
+  stage must retain the existing assistant authority boundary. Do not launch
+  whole handlers concurrently merely because their mailbox kinds differ.
+- The persistent-download composed proof now stages a completed environment
+  interview behind the device item. It requires two delivered replies and a
+  canonical environment update before releasing the same provider request,
+  followed by one exact device acknowledgment and a durable log retaining both
+  canonical import receipts. Its updated baseline still fails at the explicit
+  provider-abort assertion before first delivery.
+- Checkpoint publication currently resets one dirty flag and later drains all
+  pending completion effects. Concurrent task completion must not join that
+  effect batch unless its state was captured. Snapshot metadata derivation,
+  state capture, publication, and effect eligibility need one explicit owner;
+  retaining only the archive helper's lock is insufficient.
+- Baseline verification: the composed suite has three existing scenarios
+  passing and the new persistent scenario failing at the intended cancellation
+  assertion; the independent-maintenance wake test also fails as intended.
+  Assistant-runtime typecheck passes.
+- Publication foundation: conversation sessions now share accepted workspace
+  and redacted publication state; the pass-local version override and duplicate
+  workspace copies were removed. Metadata publication serializes at the
+  invocation owner and no longer quiesces detached read-only work. The existing
+  runner/startup suites passed 173 tests before the strengthened reader proof.
+- The strengthened reader proof fails against the original hosted entrypoint:
+  metadata publication aborts the held child before the foreground commit can
+  finish. It passes after the change, while shutdown still waits for child exit
+  before snapshot construction. This is composed entrypoint proof, not only the
+  extracted callback experiment from the architecture consultation.
+- Workspace ownership now replaces the turn-owned device controller. The old
+  adapter and ingestion-only option were deleted. Existing mailbox claims limit
+  one attempt per explicit work family; attempts survive ordinary reply and
+  detached-read boundaries. The same owner is being wired through model-free
+  startup and an in-place foreground upgrade.
+- The persistent-download composed case passes with two replies, a completed
+  environment import while the provider stays held, one provider request, exact
+  post-snapshot device acknowledgment, and both canonical receipt identities.
+  The full pass also produces legitimate automation receipts, so the proof
+  checks import identities rather than assuming the log contains only two rows.
+- Five existing ownership tests were migrated to the workspace owner and pass:
+  concurrent import/readback, full conversation budget, held request and body
+  through delivery followed by boundary cancellation, exact recovery without a
+  new download, and rollback after rejected authority.
+- Receipt, checkpoint race, startup, and mailbox readiness suites passed 96
+  tests before the subsequent cold-start changes. Web readiness/store suites
+  pass 136 tests. Assistant-runtime and hosted Web typechecks passed at their
+  intermediate revisions; final changed-head checks remain outstanding.
+- The cold-start extension initially exposed fixture bootstrap initialization,
+  then proved an actual stale receipt publication: an old mailbox-status update
+  replaced the newer environment receipt after the workspace upgraded to a
+  foreground conversation. An explicit internal receipt-append intent now
+  prevents ordinary metadata from replacing the shared receipt chain. The cold
+  scenario passes through both replies and exact durable import receipt proof.
+- General effects now become eligible only when their state was captured by a
+  successful snapshot. Later completions stay pending for the next snapshot.
+  Snapshot quiescence races foreground interruption while owned attempts remain
+  tracked for final release; metadata publication does not cancel readers.
+- The broad model-free suite exposed missing browser-replica/projection work,
+  timing-log context, progress accounting, and exact device follow-up wake
+  propagation. Remediation reuses the existing projection and browser owners.
+  Fourteen selected cases subsequently passed; remaining replay/recording and
+  final full-owner regression checks are still outstanding. Obsolete test
+  assertions that prohibited independent device work during approval/Ask work
+  are replaced while retaining exact approval and Ask ordering assertions.
+- Web readiness now checks for existing model-free work behind an assistant
+  item using the current indexed mailbox store and shared kind/dedupe policy.
+  The handled prefix, wire fields, and authority modes remain unchanged. The
+  private Temporal reader was inspected read-only: it consumes these existing
+  facts and does not own individual network attempts. No private repo mutation
+  or new workflow command is introduced; compatibility and deployment evidence
+  still need final review.
+
+## Candidate proof and three-round retrospective
+
+The user explicitly chose redesign and implementation after the prior three
+final rounds. R1 found a reply-path causal-only barrier; its owning condition
+was deleted. R2 passed. A separately reproduced query lock-owner/pending-reader
+cycle was corrected by deleting the pending map and using the reentrant lock
+plus freshness recheck; R3 passed. The later plan-only commit preserved reviewed
+code. This continuation replaces turn-owned import cancellation with independent
+workspace-owned attempts, following the requested architecture consultation.
+The decision is redesign and continue; the next full sensitive audit is round
+four on the same PR, preserving the original first-reviewed head. No new
+service, durable queue, schema, dependency, or capability protocol was added.
+
+- Five composed importer/conversation scenarios pass, including cold model-free
+  startup and two replies while one provider request remains held. Independent
+  environment data commits before that device request is released.
+- Accepted metadata cannot restore an old receipt chain or discard a newly
+  staged receipt. Both interleavings have failing-before proof and passing
+  regressions. A rejected canonical publication rolls back its write.
+- Ordinary replies do not join background jobs. Fresh input interrupts snapshot
+  quiescence and finishes a foreground turn within the synthetic two-second
+  bound while a canceled child remains held; snapshot/release waits for its exit.
+- Snapshot metadata is now derived after quiescence, preserving the child's
+  retry wake. Generated images retain the earliest exact retention deadline;
+  the duplicate workspace-merging helper was deleted.
+- Failed vault-share publication retains the exact recording item and does not
+  acknowledge dirty data. Browser refresh timeout retry remains owned by its
+  existing exact runtime-control item; it is not generalized to device imports.
+- The final focused runtime groups pass 273 and 72 tests. The Web readiness and
+  store groups pass 137 tests. The earlier nine-file runtime sweep passed 374
+  tests before the last focused corrections. Runtime/Web typechecks and the
+  complexity ratchet pass; final candidate checks remain required after edits.
+- The focused real-Codex wearable-arrival journey passes on gpt-5.6-terra via a
+  local subscription. The default and first two alternate homes failed before
+  provider action; the third alternate completed both turns. Parent reply
+  review: Ready. Missing-data copy is truthful; later canonical CLI readback
+  reports the imported distance/duration and correct local/UTC times. No
+  production provider-input builder changed.
+- Current source review preserves active access, consent, connection epochs,
+  exact dirty revision/payload acknowledgments, bounded family admission,
+  mailbox handled-prefix authority, root writable-model ordering, and current
+  wire modes. Web adds at most one ordered filtered lookup after a default-owned
+  live head; no payload read, SQL transaction, or new pooled owner is added.
+
+Remaining: final stable checks/readback, candidate commit and PR rewrite, exact
+pushed-head ReviewGPT and CI, mergeability, and plan closure. Production latency,
+rollout, and an old binary against a new deployment have not been measured.

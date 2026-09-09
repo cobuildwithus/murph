@@ -883,7 +883,18 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
     return null;
   }
 
-  return classifyHostedFirstLiveSystemItemOwnership(frontier);
+  const executionClass = classifyHostedFirstLiveSystemItemOwnership(frontier);
+  if (executionClass === "model_free") return executionClass;
+  // Readiness is independent of the handled prefix. A retained assistant item
+  // must not hide consented deterministic work when assistant usage is blocked.
+  const independent = await readHostedMailboxFirstLiveSystemItemAfterSeq({
+    afterSeq: input.handledThroughSeq,
+    at: input.at,
+    modelFreeOnly: true,
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+  return independent ? classifyHostedFirstLiveSystemItemOwnership(independent) : executionClass;
 }
 
 export function classifyHostedFirstLiveSystemItemOwnership(input: {

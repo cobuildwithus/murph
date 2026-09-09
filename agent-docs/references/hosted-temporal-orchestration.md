@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-31
+Last verified: 2026-09-09
 
 ## Decision
 
@@ -141,11 +141,22 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint and classifies only the exact first live system
-row as `model_free` or `default_owned`. Environment completion is one generic
+redacted workspace checkpoint and projects `model_free` when live eligible work
+exists after that prefix, otherwise `default_owned` for retained live work.
+The first-row lookup adds at most one tenant-scoped, ordered, filtered lookup
+when its head requires the default owner. It reads no payloads and uses no
+transaction. This class admits execution; it neither completes the earlier row
+nor changes the handled prefix. Runtime claims own independent execution. Environment completion is one generic
 model-free kind, as is deterministic member-channel reconciliation; Temporal
 does not know their product meaning or select a feature-specific processing
-mode. Temporal applies three distinct retirement
+mode. The wire shape and the existing two processing modes remain unchanged.
+Deploy the runtime consumer before the broader Web readiness producer. Older
+Web producers remain safe but can delay independent work behind a default-owned
+head; older runtime consumers retain that delay with newer Web facts. Neither
+skew may retire a live pointer before its handled prefix advances. No Temporal
+workflow command or history changes are required, and rollback preserves the
+existing snapshot, mailbox, and receipt readers.
+Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
 Temporal's noncanonical pointer projection because the current facts admit no

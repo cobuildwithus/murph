@@ -57,7 +57,6 @@ export async function executeHostedMailboxEvent(input: {
   preferenceCausalSeq?: string;
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
-  deviceSyncIngestionOnly?: boolean;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
@@ -116,7 +115,6 @@ export async function executeHostedMailboxEvent(input: {
     ...(input.shouldYieldAssistantAskCompletion
       ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
       : {}),
-    deviceSyncIngestionOnly: input.deviceSyncIngestionOnly,
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
@@ -161,7 +159,6 @@ async function handleHostedMailboxEvent(input: {
   signal: AbortSignal | null;
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
-  deviceSyncIngestionOnly?: boolean;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
@@ -188,7 +185,6 @@ async function handleHostedMailboxEvent(input: {
     ...(input.shouldYieldAssistantAskCompletion
       ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
       : {}),
-    deviceSyncIngestionOnly: input.deviceSyncIngestionOnly,
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
@@ -212,7 +208,6 @@ async function executeHostedSystemWake(input: {
   signal: AbortSignal | null;
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
-  deviceSyncIngestionOnly?: boolean;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
@@ -338,7 +333,6 @@ async function executeHostedSystemWake(input: {
         throw error;
       });
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
-        ingestionOnly: input.deviceSyncIngestionOnly,
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
         retainFollowUpWakeUntilCheckpoint: true,
@@ -351,8 +345,7 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
-      const shouldSkipActivityAutomation = input.deviceSyncIngestionOnly === true
-        || deviceSyncMetrics.deviceSyncSkipped
+      const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped
         || input.signal?.aborted === true
         || input.shouldYieldDeviceSync?.() === true;
       const activityAutomation = shouldSkipActivityAutomation

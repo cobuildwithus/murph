@@ -12,6 +12,8 @@ import {
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
+  enqueueEnvironmentInterviewSystemMailboxItemForTest,
+  listHostedCanonicalWriteReceiptLogArtifacts,
   mocks,
   removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess,
@@ -23,7 +25,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
-import { initializeVault } from "@murphai/core";
+import { initializeVault, readHabitatAspect } from "@murphai/core";
 import { listCanonicalEntities } from "@murphai/query";
 import { createAssistantOutboxIntent, listAssistantOutboxIntents, type RunAssistantAutomationPassInput } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
@@ -33,17 +35,21 @@ import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-test.each(["completed", "stalled", "absent"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+test.each(["completed", "stalled", "absent", "persistent", "cold"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+  const persistent = scenario === "persistent" || scenario === "cold";
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
   const controller = new AbortController();
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+  const artifactBytesByHash = new Map<string, Uint8Array>();
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   const imported = createDeferred<void>();
+  const environmentImported = createDeferred<void>();
   const providerStarted = createDeferred<void>();
   const secondReply = createDeferred<void>();
   const releaseSnapshot = createDeferred<void>();
+  const releaseDownload = createDeferred<void>();
   const dirtyAcks: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0][] = [];
   let replySent = false;
   let modelFinishedAt = 0;
@@ -53,7 +59,13 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
     dedupeKey: "device-sync.wake:concurrent-import",
     kind: "device-sync.wake", lane: "system", laneSeq: "1",
   });
-  const items = [createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" })];
+  const environmentItem = createMailboxItem({
+    id: "mailbox_item_concurrent_environment",
+    dedupeKey: "environment-interview.completed:concurrent-import",
+    kind: "environment-interview.completed", lane: "system", laneSeq: "2",
+  });
+  const items = scenario === "cold" ? [deviceItem, environmentItem]
+    : [createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" })];
   const baseDevicePort = createSnapshotDeviceSyncPort({
     connectionId,
     nextReconcileAt: "2099-01-01T00:00:00.000Z",
@@ -68,7 +80,7 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
     if (pathname.includes("/messages")) {
       events.push("reply.sent");
       assert.ok(performance.now() - modelFinishedAt < 2_000, events.join(","));
-      if (scenario === "completed") {
+      if (scenario === "completed" || persistent) {
         if (replySent) {
           secondReply.resolve();
         } else {
@@ -84,16 +96,22 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
     events.push(`provider.fetch:${pathname}`);
     if (pathname.endsWith("/synthetic-concurrent-sleep")) {
       providerStarted.resolve();
-      if (scenario === "stalled" && !replySent) {
+      if (persistent || (scenario === "stalled" && !replySent)) {
         const signal = init?.signal ?? (request instanceof Request ? request.signal : null);
         assert.ok(signal);
-        await new Promise<never>((_, reject) => {
+        await new Promise<void>((resolve, reject) => {
           const abort = () => {
             events.push("provider.aborted");
             reject(signal.reason);
           };
           if (signal.aborted) abort();
           else signal.addEventListener("abort", abort, { once: true });
+          if (persistent) {
+            void releaseDownload.promise.then(() => {
+              signal.removeEventListener("abort", abort);
+              resolve();
+            });
+          }
         });
       }
     }
@@ -113,8 +131,9 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
         assistantInputIds: [currentInputId], providerRequestOrdinal: 0,
         source: "linq", startedAt: TEST_NOW,
       });
-      if (scenario !== "absent" && handledInputIds.size === 1) {
+      if (scenario !== "absent" && scenario !== "cold" && handledInputIds.size === 1) {
         items.push(deviceItem);
+        if (persistent) items.push(environmentItem);
         runtimeWakeSignal.notify();
         await withRealTimeout(
           scenario === "completed" ? imported.promise : providerStarted.promise,
@@ -129,7 +148,7 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
           assert.equal(dirtyAcks.length, 0);
           assert.equal(events.includes("snapshot.completed"), false);
           assert.ok((await readHostedSystemMailboxState(vaultRoot)).pending.some(
-            (item) => item.itemId === deviceItem.id && item.status === "recording",
+            (item) => item.itemId === deviceItem.id,
           ));
         }
       }
@@ -152,6 +171,16 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
     });
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...baseDevicePort,
+      async applyUpdates(request) {
+        return {
+          appliedAt: request.occurredAt ?? TEST_NOW,
+          updates: request.updates.map((update) => ({
+            connection: null, connectionId: update.connectionId, status: "updated" as const,
+            tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+          })),
+          userId: TEST_USER_ID,
+        };
+      },
       async fetchDirtyStates() {
         return {
           hasMore: false, nextWakeAt: null, userId: TEST_USER_ID,
@@ -181,13 +210,17 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
       },
     };
     const basePlatform = createPlatform({
+      artifactBytesByHash,
       mailboxPort: createMailboxPort({ events, items }),
       workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
       deviceSyncPort,
     });
     runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({
-        request: { attemptId: "attempt_synthetic_concurrent_import", idleCheckpointDelayMs: 1 },
+        request: {
+          attemptId: "attempt_synthetic_concurrent_import", idleCheckpointDelayMs: 1,
+          ...(scenario === "cold" ? { processingMode: "system_mailbox" as const } : {}),
+        },
         forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
         resolvedConfig: {
           ...createDeviceSyncResolvedConfig(),
@@ -197,7 +230,7 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
       {
         vaultRoot, runtimeWakeSignal, signal: controller.signal,
         async createCheckpointSnapshot() {
-          if (scenario === "completed") await releaseSnapshot.promise;
+          if (scenario === "completed" || persistent) await releaseSnapshot.promise;
           events.push("snapshot.completed");
           return { snapshotRef: createBundleRef({
             hash: "d".repeat(64), key: "users/bundles/member-synthetic/concurrent-import.bundle.json", size: 512,
@@ -205,10 +238,16 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
         },
         async importItem(item) {
           if (item.item.lane === "conversation") {
-            if (!inputId) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            if (!inputId && scenario !== "cold") await initializeVault({ createdAt: TEST_NOW, vaultRoot });
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
           }
+          if (item.item.kind === "environment-interview.completed") {
+            await enqueueEnvironmentInterviewSystemMailboxItemForTest({ item: item.item, vaultRoot });
+            events.push("environment.staged");
+            return { status: "imported" };
+          }
+          if (scenario === "cold") await initializeVault({ createdAt: TEST_NOW, vaultRoot });
           await enqueueHostedSystemMailboxItem({
             item: createResolvedDeviceSyncSystemMailboxItem(item.item), vaultRoot,
             wake: {
@@ -226,6 +265,10 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
             ...basePlatform.artifactStore,
             async put(artifact) {
               await basePlatform.artifactStore.put(artifact);
+              if (new TextDecoder().decode(artifact.bytes).includes('"habitat_upsert"')) {
+                events.push("environment.receipt.uploaded");
+                environmentImported.resolve();
+              }
               if (new TextDecoder().decode(artifact.bytes).includes('"device_batch_import"')) {
                 events.push("device.receipt.uploaded");
                 imported.resolve();
@@ -250,32 +293,69 @@ test.each(["completed", "stalled", "absent"] as const)("preserves foreground del
         },
       },
     );
-    if (scenario === "completed") {
+    if (scenario === "cold") {
+      await withRealTimeout(providerStarted.promise, 5_000, () => events.join(","));
+      items.push(createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" }));
+      runtimeWakeSignal.notify();
+    }
+    if (scenario === "completed" || persistent) {
       await withRealTimeout(Promise.race([
         secondReply.promise,
         runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
       ]), 5_000, () => events.join(","));
       assert.equal(dirtyAcks.length, 0);
+      if (persistent) {
+        assert.equal(events.includes("provider.aborted"), false, events.join(","));
+        assert.equal(events.filter((event) => event.endsWith("/synthetic-concurrent-sleep")).length, 1);
+        await withRealTimeout(environmentImported.promise, 5_000, () => events.join(","));
+        assert.equal(events.includes("device.receipt.uploaded"), false, events.join(","));
+        const environment = await readHabitatAspect({ slug: "sleep-environment", vaultRoot });
+        assert.equal(environment.indicators.night_temp_c, 19);
+        releaseDownload.resolve();
+        await withRealTimeout(imported.promise, 5_000, () => events.join(","));
+      }
       assert.equal(events.filter((event) => event === "device.receipt.uploaded").length, 1);
       releaseSnapshot.resolve();
     }
     await withRealTimeout(runtimeCompletion, 20_000, () => events.join(","));
     assert.ok(replySent, JSON.stringify({ events, intents: await listAssistantOutboxIntents(vaultRoot) }));
-    if (scenario === "completed") {
+    if (scenario === "completed" || persistent) {
       assert.equal(handledInputIds.size, 2);
       assert.equal(events.filter((event) => event === "reply.sent").length, 2);
-      assert.equal(dirtyAcks.length, 1);
+      assert.equal(dirtyAcks.length, 1, JSON.stringify({events, pending: (await readHostedSystemMailboxState(vaultRoot)).pending}));
       assert.equal(dirtyAcks[0]?.processedRevision, "7");
       assert.deepEqual(dirtyAcks[0]?.processedDirtyPayloadIds, ["synthetic-concurrent-payload"]);
       assert.ok(events.lastIndexOf("reply.sent") < events.indexOf("snapshot.completed"));
       assert.ok(events.indexOf("device.receipt.uploaded") > events.indexOf("model.started"));
-      assert.ok(events.indexOf("model.reads.imported.data") < events.indexOf("model.finished"));
+      if (scenario === "completed") {
+        assert.ok(events.indexOf("model.reads.imported.data") < events.indexOf("model.finished"));
+      } else {
+        assert.ok(events.indexOf("device.receipt.uploaded") > events.lastIndexOf("reply.sent"));
+        const lastCanonicalCheckpoint = checkpointRequests.filter(
+          (checkpoint) => checkpoint.reason === "canonical_runtime_commit",
+        ).at(-1);
+        const receiptLog = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash).find(
+          (log) => log.sha256 === lastCanonicalCheckpoint?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        );
+        assert.ok(receiptLog);
+        const operations = receiptLog.entries.map((entry) => {
+          assert.ok(entry && typeof entry === "object" && "sha256" in entry && typeof entry.sha256 === "string");
+          const bytes = artifactBytesByHash.get(entry.sha256);
+          assert.ok(bytes);
+          return (JSON.parse(new TextDecoder().decode(bytes)) as { operationType: string }).operationType;
+        });
+        assert.equal(operations.filter((operation) => operation === "device_batch_import").length, 1);
+        assert.equal(operations.filter((operation) => operation === "habitat_upsert").length, 1, JSON.stringify({ events, operations, checkpoints: checkpointRequests.map((request) => ({ reason: request.reason, version: request.expectedWorkspaceVersion, receipt: request.redactedStatus?.hostedCanonicalWriteReceiptLogSha256 })) }));
+        const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
+        assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
+      }
     } else if (scenario === "stalled") {
       assert.ok(events.includes("provider.aborted"), events.join(","));
       assert.ok(!events.includes("device.receipt.uploaded")
         || events.indexOf("reply.sent") < events.indexOf("device.receipt.uploaded"), events.join(","));
     }
   } finally {
+    releaseDownload.resolve();
     releaseSnapshot.resolve();
     controller.abort();
     await runtimeCompletion?.catch(() => undefined);

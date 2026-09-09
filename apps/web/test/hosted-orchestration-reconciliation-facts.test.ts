@@ -823,6 +823,28 @@ describe("hosted orchestration reconciliation facts", () => {
     },
   );
 
+  it("exposes independent model-free work behind an assistant item without advancing handled progress", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "0", hostedMailboxSystemHandledThroughSeq: "4", systemImportedSeq: "4",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "6" },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq
+      .mockResolvedValueOnce({ dedupeKey: "assistant.ask.completed:synthetic", kind: "assistant.ask.completed", laneSeq: "5" })
+      .mockResolvedValueOnce({ dedupeKey: "device-sync.wake:synthetic", kind: "device-sync.wake", laneSeq: "6" });
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
+    expect(facts.workspace?.hostedMailboxSystemHandledThroughSeq).toBe("4");
+    expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith({
+      afterSeq: "4", at: new Date(FIXED_NOW), modelFreeOnly: true,
+      prisma: expect.objectContaining({ kind: "prisma" }), userId: MEMBER_ID,
+    });
+  });
+
   it("uses zero as the system handled frontier when no checkpoint exists", async () => {
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
       { lane: "conversation", maxSeq: "0" },

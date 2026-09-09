@@ -164,7 +164,6 @@ export async function runHostedDeviceSyncPass(
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
   options: {
-    ingestionOnly?: boolean;
     onJobTimingDiagnostics?: (
       diagnostics: readonly DeviceSyncJobTimingDiagnostic[]
     ) => void;
@@ -408,9 +407,7 @@ export async function runHostedDeviceSyncPass(
       wake,
     });
 
-    // Foreground concurrency owns only the bounded importer, not control-plane
-    // reconciliation, retention, or automation scheduling. Preserve their wake.
-    if (options.ingestionOnly === true || shouldYieldHostedDeviceSync(shouldYield)) {
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
       return yieldPass();
     }
 
@@ -1332,7 +1329,6 @@ function errorToString(error: unknown): string {
 }
 
 export async function runHostedDeviceSyncWakeLane(input: {
-  ingestionOnly?: boolean;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   platformEnv?: Readonly<Record<string, string>>;
   retainFollowUpWakeUntilCheckpoint?: boolean;
@@ -1409,7 +1405,6 @@ export async function runHostedDeviceSyncWakeLane(input: {
           onStage: (stage) => {
             passStage = stage;
           },
-          ingestionOnly: input.ingestionOnly,
           platformEnv: input.platformEnv ?? {},
           retainFollowUpWakeUntilCheckpoint:
             input.retainFollowUpWakeUntilCheckpoint ?? false,

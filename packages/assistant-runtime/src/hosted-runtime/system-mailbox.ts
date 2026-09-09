@@ -53,9 +53,8 @@ import {
   isHostedPlainDeviceSyncWakeHint,
   isHostedRetainedDeviceScheduledAdmission,
   mergeHostedSystemMailboxRollbackItems,
-  projectHostedSystemMailboxModelFreeFrontier,
+  selectHostedModelFreeSystemMailboxItems,
   projectHostedSystemMailboxRetainedDeviceWakeAdmission,
-  projectHostedSystemMailboxWakeOwnerFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeCandidate,
@@ -309,7 +308,8 @@ export async function enqueueHostedSystemMailboxItem(input: {
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
-  deviceSyncIngestionOnly?: boolean;
+  pendingOnly?: boolean;
+  excludedRouteActions?: readonly HostedSystemMailboxRouteAction[];
   allowedMailboxDedupeKeyPrefixes?: readonly string[] | null;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
@@ -337,6 +337,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   >(
     input.vaultRoot,
     (state) => {
+      if (input.pendingOnly && state.pending.some((item) =>
+        item.status === "sending" && input.allowedRouteActions?.includes(item.routeAction)
+      )) {
+        return { result: null, write: false };
+      }
       const admissionState =
         projectHostedSystemMailboxRetainedDeviceWakeAdmission({
           now: startedAt,
@@ -353,13 +358,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         && input.allowedWakeKinds?.includes(
           "assistant.notification.requested",
         ) === true
-          ? projectHostedSystemMailboxModelFreeFrontier(admissionState)
-          : input.allowedRouteActions == null
-            ? projectHostedSystemMailboxWakeOwnerFrontier(admissionState)
-            : admissionState;
+          ? selectHostedModelFreeSystemMailboxItems(admissionState)
+          : admissionState;
       const selectionState = {
         pending: modelFreeProjectedState.pending.filter((item) =>
-          (
+          !input.excludedRouteActions?.includes(item.routeAction)
+          && (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"
           )
@@ -388,14 +392,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       };
       const pending = findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
+        pendingOnly: input.pendingOnly,
         now: startedAt,
         state: selectionState,
       });
       if (!pending) {
-        return {
-          result: null,
-          state,
-        };
+        return { result: null, write: false };
       }
 
       if (shouldResumeHostedBrowserVaultRecordingItemReadOnly(pending)) {
@@ -493,7 +495,6 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       });
     }
     const metrics = await executePendingHostedSystemMailboxItem({
-      deviceSyncIngestionOnly: input.deviceSyncIngestionOnly,
       executionContext: input.executionContext ?? null,
       operatorHomeRoot: input.operatorHomeRoot ?? undefined,
       pendingItem: prepared,
@@ -1441,7 +1442,6 @@ export async function restoreHostedSystemMailboxCheckpointRollbackState(input: {
 }
 
 async function executePendingHostedSystemMailboxItem(input: {
-  deviceSyncIngestionOnly?: boolean;
   executionContext: AssistantExecutionContext | null;
   operatorHomeRoot?: string | null;
   pendingItem: HostedSystemMailboxPendingItem;
@@ -1498,7 +1498,6 @@ async function executePendingHostedSystemMailboxItem(input: {
   }
 
   return executeHostedMailboxEvent({
-    deviceSyncIngestionOnly: input.deviceSyncIngestionOnly,
     executionContext,
     forceQueueOnlyAssistantNotification: true,
     operatorHomeRoot: input.operatorHomeRoot ?? undefined,

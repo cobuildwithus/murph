@@ -3207,7 +3207,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode hands ready approvals to the foreground owner before device-sync", async () => {
+  test("system mailbox mode delivers ready approvals while independent device work runs", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -3282,7 +3282,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         preparedDispatches: [],
       });
       mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(async (input) => {
-        assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+        assert.ok(deviceSyncPort.fetchSnapshotCalls <= 1);
         for (const effect of input.assistantDeliveryEffects) {
           events.push(`approval.delivery:${effect.effectId}`);
         }
@@ -3536,7 +3536,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("recovers a running canonical claim after its only future wake survives a device-owner handoff", async () => {
+  test("recovers a running canonical claim after concurrent device completion and a durable restart", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const artifactGetCalls: string[] = [];
@@ -3742,8 +3742,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               now: () => TEST_NOW,
             });
             assert.equal(phaseResult.progressed, false);
-            assert.equal(phaseResult.nextWakeAt, TEST_NOW);
-            assert.equal(phaseResult.nextWakeReason, "device-sync.reconcile");
+            assert.equal(phaseResult.nextWakeAt, recoveryWakeAt);
+            assert.equal(phaseResult.nextWakeReason, undefined);
             return phaseResult;
           },
           vaultRoot,
@@ -3751,12 +3751,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
 
       assert.equal(assistantPhaseCalls, 1);
-      assert.equal(checkpointRequests.length, 1);
-      const checkpoint = checkpointRequests[0];
+      assert.equal(checkpointRequests.length, 3);
+      const checkpoint = checkpointRequests.at(-1);
       assert.ok(checkpoint);
       assert.equal(checkpoint.reason, "idle_shutdown");
-      assert.equal(checkpoint.expectedWorkspaceVersion, "0");
-      assert.equal(checkpoint.nextWakeAt, TEST_NOW);
+      assert.equal(checkpoint.expectedWorkspaceVersion, "2");
+      assert.equal(checkpoint.nextWakeAt, staleDeviceWakeAt);
       assert.equal(checkpoint.nextWakeReason, "device-sync.reconcile");
       assert.equal(
         checkpoint.nextDefaultProcessingWakeAt,
@@ -3766,7 +3766,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(checkpoint.systemMailboxProgressGeneration, "1");
       assert.equal(
         checkpoint.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "0",
+        "1",
       );
       assert.equal(
         checkpoint.redactedStatus?.hostedMailboxSystemImportedSeq,
@@ -3776,17 +3776,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(checkpoint.redactedStatus?.hostedMailboxImportedCount, 0);
       assert.equal(result.status, "scheduled");
       assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeAt, staleDeviceWakeAt);
       assert.equal(result.nextWakeReason, "device-sync.reconcile");
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending,
-        pendingBeforeInvocation,
+        [],
       );
-      assert.equal(currentWorkspace.version, "1");
+      assert.equal(currentWorkspace.version, "3");
       assert.deepEqual(currentWorkspace.snapshotRef, checkpoint.snapshotRef);
       const checkpointSnapshotBaseRef = readHostedExecutionSnapshotBaseRef(
         checkpoint.snapshotRef,
@@ -6135,28 +6135,29 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         /synthetic checkpoint transport fault/u,
       );
 
-      assert.equal(checkpointAttempt, 2);
-      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointAttempt, 3);
+      assert.equal(checkpointRequests.length, 3);
       assert.deepEqual(
         checkpointRequests.map((request) => request.reason),
         [
+          "canonical_runtime_commit",
           "canonical_runtime_commit",
           "idle_shutdown",
         ],
       );
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["1", "2"],
+        ["1", "2", "3"],
       );
       assert.deepEqual(
         checkpointRequests.map((request) =>
           request.systemMailboxProgressGeneration
         ),
-        ["0", "1"],
+        ["0", "1", "1"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "2");
-      assert.equal(currentWorkspace.systemMailboxProgressGeneration, "0");
+      assert.equal(currentWorkspace.version, "3");
+      assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
       const initialProviderRequestClasses = providerRequestClasses.slice();
       assert.deepEqual(initialProviderRequestClasses, expectedWhoopRequestClasses);
       assert.deepEqual(cadencePublications, []);
@@ -6165,7 +6166,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         "checkpoint.attempt:attempt_device_sync_closed_loop_initial:1",
       );
       const lostRecordCheckpointIndex = events.indexOf(
-        "checkpoint.fail:attempt_device_sync_closed_loop_initial:2",
+        "checkpoint.fail:attempt_device_sync_closed_loop_initial:3",
       );
       assert.notEqual(firstCheckpointAttemptIndex, -1);
       assert.notEqual(lostRecordCheckpointIndex, -1);
@@ -6183,14 +6184,14 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         0,
       );
       assert.equal(
-        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:3"),
+        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:4"),
         -1,
       );
       const durablePostPullCheckpoint = checkpointRequests[0];
       assert.ok(durablePostPullCheckpoint);
       assert.deepEqual(currentWorkspace.snapshotRef, durablePostPullCheckpoint.snapshotRef);
       assert.deepEqual(currentWorkspace.snapshotRef, committedInputSnapshotRef);
-      const failedPostPullCheckpoint = checkpointRequests[1];
+      const failedPostPullCheckpoint = checkpointRequests[2];
       assert.ok(failedPostPullCheckpoint);
       const failedPostPullSnapshotRef = failedPostPullCheckpoint.snapshotRef;
       assert.ok(isHostedWorkspaceSnapshotV2Ref(failedPostPullSnapshotRef));
@@ -6263,15 +6264,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(recovered.nextWakeAt, "2026-04-27T06:05:00.000Z");
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "5");
+      assert.equal(currentWorkspace.version, "6");
       assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
-      assert.equal(checkpointAttempt, 5);
-      assert.equal(checkpointRequests.length, 5);
+      assert.equal(checkpointAttempt, 6);
+      assert.equal(checkpointRequests.length, 6);
       assert.deepEqual(
-        checkpointRequests.slice(2, 5).map((request) =>
+        checkpointRequests.slice(3, 6).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["2", "3", "4"],
+        ["3", "4", "5"],
       );
       const recoveryCheckpointCommitIndexes = events.flatMap((event, index) =>
         event.startsWith(`checkpoint.commit:${recoveryAttemptId}:`) ? [index] : []
@@ -6298,8 +6299,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.deepEqual((await readHostedSystemMailboxState(coldVaultRoot)).pending, []);
 
       const checkpointAttemptsAfterSettlement = checkpointAttempt;
-      assert.equal(checkpointAttemptsAfterSettlement, 5);
-      assert.equal(checkpointRequests.length, 5);
+      assert.equal(checkpointAttemptsAfterSettlement, 6);
+      assert.equal(checkpointRequests.length, 6);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.fail:")).length,
         1,
@@ -6321,9 +6322,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "5");
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "6");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "6");
+      assert.equal(currentWorkspace.version, "7");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -6341,17 +6342,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "6");
+      assert.equal(currentWorkspace.version, "7");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
       );
       assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement + 1);
-      assert.equal(checkpointAttempt, 6);
+      assert.equal(checkpointAttempt, 7);
       assert.equal(checkpointAttempt, checkpointRequests.length);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.commit:")).length,
-        5,
+        6,
       );
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);
@@ -7290,21 +7291,19 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         ]);
       }
       assert.equal(assistantAskPrepareCalls, approved ? 1 : 0);
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.ok(deviceSyncPort.fetchSnapshotCalls <= 1);
       assert.deepEqual(
-        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+        (await readHostedSystemMailboxState(vaultRoot)).pending.filter((item) => item.routeAction !== "run-device-sync-wake").map((item) => [
           item.itemId,
           item.status,
         ]),
         approved
           ? [
               [firstAsk.id, "pending"],
-              [deviceItem.id, "pending"],
               [lateAsk.id, "sending"],
             ]
           : [
               [firstAsk.id, "pending"],
-              [deviceItem.id, "pending"],
               [lateAsk.id, "pending"],
             ],
       );
@@ -7496,7 +7495,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           setTimeout(() => resolve("blocked"), 250);
         }),
       ]);
-      assert.equal(prematureOwner, "blocked");
+      assert.equal(prematureOwner, "device");
       assert.equal(events.includes("ask.later.prepare"), false);
 
       firstPrepareRelease.resolve();
@@ -7512,23 +7511,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       if (approved) {
         assert.notEqual(laterAskIndex, -1);
         assert.ok(firstTerminalIndex < laterAskIndex, events.join(","));
-        assert.ok(laterAskIndex < deviceSnapshotIndex, events.join(","));
         assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       } else {
         assert.equal(laterAskIndex, -1, events.join(","));
-        assert.equal(deviceSnapshotIndex, -1, events.join(","));
-        assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+        assert.notEqual(deviceSnapshotIndex, -1, events.join(","));
+        assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       }
       assert.equal(result.status, "scheduled");
       assert.deepEqual(
-        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
+        (await readHostedSystemMailboxState(vaultRoot)).pending.filter((item) => item.itemId !== deviceItem.id).map((item) => [
           item.itemId,
           item.status,
         ]),
         approved
           ? [[ordinaryAsk.id, "pending"]]
           : [
-              [deviceItem.id, "pending"],
               [ordinaryAsk.id, "pending"],
               [laterAsk.id, "pending"],
             ],

@@ -1,3 +1,4 @@
+import { HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./workspace-system-work.ts";
 import { createHash } from "node:crypto";
 
 import {
@@ -2665,10 +2666,6 @@ export async function runHostedWorkspaceAssistantPhase(
             });
           }
           throw error;
-        } finally {
-          // The device pass must be quiescent before delivery or idle maintenance
-          // can take ownership of the same workspace.
-          await input.quiesceConcurrentDeviceSync?.();
         }
       })();
       assistantAutomationRedactedLogEntries.push(
@@ -5061,7 +5058,7 @@ function shouldRunIdleDeviceSyncMaintenance(input: {
   if (input.shouldYieldAfterSystemMailboxPreparation) {
     return false;
   }
-  if (!hasHostedDeviceSyncRuntimeConfigured(input.phaseInput)) {
+  if (input.phaseInput.kickSystemWork || !hasHostedDeviceSyncRuntimeConfigured(input.phaseInput)) {
     return false;
   }
 
@@ -5904,6 +5901,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     >,
   ) => prepareHostedSystemMailboxItemForCheckpoint({
     ...selection,
+    excludedRouteActions: HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
     executionContext: input.executionContext,
     ...(phaseInput.now ? { now: phaseInput.now } : {}),
     operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
@@ -6214,6 +6212,7 @@ async function runSystemMailboxMaintenancePhase(input: {
           ...(input.backgroundWakeKinds
             ? { allowedWakeKinds: input.backgroundWakeKinds }
             : {}),
+          excludedRouteActions: HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
           executionContext: input.executionContext,
           operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
           runtimeLogContext: {
