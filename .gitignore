@@ -25,6 +25,8 @@ apps/web/src/lib/changelog-fragments.generated.ts
 /.agents/*
 !/.agents/skills/
 /.agents/skills/*
+!/.agents/skills/feedback-diagnostics/
+!/.agents/skills/feedback-diagnostics/SKILL.md
 !/.agents/skills/github-project-issues/
 !/.agents/skills/github-project-issues/SKILL.md
 !/.agents/skills/write-changelog/

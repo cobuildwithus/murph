@@ -4351,6 +4351,13 @@ encrypted persistence. Reads expose only sanitized answers and their expiry.
 Local investigation consumers use existing Ops authentication; this endpoint
 adds no machine credential, cron, worker or automatic repository mutation.
 
+`scripts/ops-feedback` is the local agent client. It reuses the existing
+Playwright browser dependency and an owner-only, machine-local browser profile
+outside the repository. Interactive login uses normal Ops sign-in; later calls
+share that browser session without extracting cookies. Requests pin the canonical
+production origin, reject redirects, and require explicit idempotency keys.
+The client owns no task state or automatic retries.
+
 Diagnostics use Sol on OpenAI, and operator messages use an invocation-only Sol
 provider override without changing member preferences. Both attach the exact
 operator-task id to usage. Web verifies the same-member task and occurrence

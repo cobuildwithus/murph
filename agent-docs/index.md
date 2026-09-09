@@ -176,6 +176,10 @@ not a guarantee that every claim was checked in this cleanup.
 
 ## Conventions
 
+Local feedback diagnostics are documented in
+`.agents/skills/feedback-diagnostics/SKILL.md`; `scripts/ops-feedback` owns the
+agent-facing command and dedicated browser session.
+
 - Keep one short discovery description per document; detailed behavior belongs
   in that document and its executable owner, not this index.
 - Update entries when docs are added, removed, moved, or materially repurposed.
