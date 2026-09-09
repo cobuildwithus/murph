@@ -29,7 +29,7 @@ import {
 import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHostedRuntimeEffectsPortStub,
@@ -86,7 +86,12 @@ import {
 } from "../src/hosted-runtime/events/conversation.ts";
 
 describe("hosted Linq audio conversation ingestion", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("retries without advancing mailbox progress when stop aborts after the parser drain", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-26T17:30:00.000Z"));
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-audio-abort-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const fakeFfmpeg = path.join(workspaceRoot, "fake-ffmpeg");

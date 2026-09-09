@@ -3243,7 +3243,7 @@ export function createJunctionDeviceSyncProvider(
           window.windowStart,
           window.windowEnd,
           skippedOptionalResources,
-          [effectiveResource],
+          effectiveResource,
           sourceProviderSlug,
           {
             dateQueryFormat: extendedHistoricalPolicy?.completion === "daily_aggregate"
@@ -4292,12 +4292,12 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string,
     windowEnd: string,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
-    resources: readonly string[],
+    resource: string,
     sourceProviderSlug?: string | null,
     options: JunctionPreciseTimeseriesImportOptions = {},
     historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
   ): Promise<JunctionPreciseTimeseriesImportResult> {
-    const accumulatedTimeseries: Record<string, unknown[]> = {};
+    let accumulatedRecords: unknown[] = [];
     let acceptedProviderRecordCount = 0;
     let executionWindowEnd: string | null = null;
     let executionWindowStart: string | null = null;
@@ -4310,14 +4310,10 @@ export function createJunctionDeviceSyncProvider(
     let providerRecordsExamined = false;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
 
-    if (resources.length !== 1) {
-      throw new TypeError("Precise Junction timeseries imports require exactly one resource.");
-    }
-    const resource = resources[0]!;
     const preciseWindows = buildPreciseTimeseriesWindows(
       windowStart,
       windowEnd,
-      resolveJunctionTimeseriesImportChunkMs(resources),
+      resolveJunctionTimeseriesFetchChunkMs(resource),
     );
     for (const [index, window] of preciseWindows.entries()) {
       if (context.shouldYield?.()) {
@@ -4336,7 +4332,7 @@ export function createJunctionDeviceSyncProvider(
       }
 
       const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
-      let timeseries: Record<string, unknown[]>;
+      let records: unknown[];
       try {
         const fetched = await fetchTimeseriesResourceInChunks(
           context,
@@ -4347,13 +4343,13 @@ export function createJunctionDeviceSyncProvider(
           sourceProviderSlug,
           { dateQueryFormat: options.dateQueryFormat ?? "datetime" },
         );
-        timeseries = { [resource]: fetched.records };
+        records = fetched.records;
       } catch (error) {
         if (
           options.preservePartialRetryableFailure === true
           && (
             options.historicalProviderRecordsSeen === true
-            || hasJunctionSnapshotRecords(accumulatedTimeseries)
+            || accumulatedRecords.length > 0
           )
           && (
             isRetryableDeviceSyncFailure(error)
@@ -4373,12 +4369,7 @@ export function createJunctionDeviceSyncProvider(
 
       executionWindowStart ??= window.windowStart;
       executionWindowEnd = window.windowEnd;
-      for (const [resource, records] of Object.entries(timeseries)) {
-        accumulatedTimeseries[resource] = [
-          ...(accumulatedTimeseries[resource] ?? []),
-          ...records,
-        ];
-      }
+      accumulatedRecords = accumulatedRecords.concat(records);
       if (
         options.preservePartialRetryableFailure === true
         && index < preciseWindows.length - 1
@@ -4389,17 +4380,27 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
+    const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords({
+      [resource]: accumulatedRecords,
+    });
     const providerRecordCount = countJunctionSnapshotRecords(dedupedTimeseries);
     let unresolvedProviderRecordIdentities: readonly string[] = [];
     let unresolvedProviderRecordCount = providerRecordCount;
     let unresolvedProviderRecordsWithoutStableIdentity = providerRecordCount > 0;
-    const requiresBloodPressureRecordResolution = resources.includes("blood_pressure");
+    const requiresBloodPressureRecordResolution = resource === "blood_pressure";
     const successfulImportTerminatesDeliveredRows =
-      resources.length === 1
-      && doesJunctionImportReceiptResolveDeliveredRows(resources[0] ?? "");
+      doesJunctionImportReceiptResolveDeliveredRows(resource);
 
-    if (executionWindowStart && executionWindowEnd) {
+    // An intermediate historical segment only schedules an epoch-bound
+    // continuation. It neither completes coverage nor authorizes the next
+    // import; the continuation must pass fresh source admission again.
+    const continuesHistoricalWindow =
+      options.preservePartialRetryableFailure === true && yieldedAt !== null;
+    if (
+      executionWindowStart
+      && executionWindowEnd
+      && (providerRecordCount > 0 || !continuesHistoricalWindow)
+    ) {
       const identifyFetchedProviderRecords = (
         sourceIdentities: readonly JunctionAccountSourceIdentity[],
       ) =>
@@ -4544,11 +4545,13 @@ export function createJunctionDeviceSyncProvider(
               canonicalEventCount >= providerRecordCount ? 0 : providerRecordCount;
             unresolvedProviderRecordsWithoutStableIdentity = unresolvedProviderRecordCount > 0;
           }
-          // Import introduces another asynchronous boundary; empty segments
-          // retain the post-fetch read instead of fetching it twice.
+          // Recheck after import before terminal coverage, not merely to
+          // enqueue another epoch-bound segment. The pre-import read above
+          // remains fresh for every nonempty segment.
           if (
             sourceProviderSlug
             && options.sourceStatusRequirement === "connected"
+            && !continuesHistoricalWindow
           ) {
             postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
               context,
@@ -10091,16 +10094,6 @@ function buildPreciseTimeseriesWindows(
 function resolveJunctionTimeseriesFetchChunkMs(resource: string): number {
   const fetchChunkDays = resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1;
   return Math.max(1, fetchChunkDays) * TIMESERIES_CHUNK_MS;
-}
-
-function resolveJunctionTimeseriesImportChunkMs(resources: readonly string[]): number {
-  if (resources.length === 0) {
-    return TIMESERIES_CHUNK_MS;
-  }
-  return resources.reduce(
-    (smallest, resource) => Math.min(smallest, resolveJunctionTimeseriesFetchChunkMs(resource)),
-    Number.POSITIVE_INFINITY,
-  );
 }
 
 function floorUtcDayTimestamp(timestamp: string): string {
