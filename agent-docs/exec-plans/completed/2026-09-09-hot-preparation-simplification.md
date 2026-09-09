@@ -1,6 +1,6 @@
 # Remove repeated work from hot reply preparation
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -77,4 +77,7 @@ Updated: 2026-09-09
 - Broad CI independently found dropped prototype-backed mailbox methods and stale provider/query fixtures. The wrapper now explicitly binds the existing methods, preserves optional-method absence, and deletes its redundant port alias/fallback. Migrated causal tests exposed a delayed provider handoff; the existing checkpoint deadline now advances immediately on observed handoff. No extra timer, state, or settings request is added.
 - A pre-existing audio fixture crossed its 14-day retention cutoff during verification. Before/after clock-controlled reproduction isolated the cause; the test now fixes Date within its fixture lifetime while retaining real timers and all abort/retry assertions.
 - Final remediation proof passed 119 runtime tests and 42 additional Web tests, with both affected typechecks and a rebuilt canonical runner bundle with import/CLI parity checks. The complexity guard passes: runtime debt 564 to 558, maximum 252 unchanged. Three provider-mismatch cases retain their under-650 ms handoff checks; the matching case retains its at-least-850 ms idle check. The measured engine/service owners are unchanged by these runtime wrapper corrections.
-- Required host checks passed on the first reviewed head. Viewport setup failed twice before browser execution because an external apt package index returned a checksum mismatch. The corrected candidate still needs its second review and fresh CI.
+- Round 2 reviewed 82e7c13f741b39afcc190d76ca1d0da78d361562 as a full sensitive snapshot, with the immutable first head and both ancestry checks verified. It returned PASS with no qualifying findings and confirmed both runtime corrections. Exact turn, response hash, gpt-6-pro response metadata and completion marker match; invocation elapsed 954.63 seconds on the original Mountain thread. Both review rounds have zero accepted unresolved findings; no review finding was rejected.
+- Corrected-candidate CI finished with 33 successful contexts and two skipped, including all package coverage, Web shards, release aggregate and required hosts. Only viewport installation failed: public Chrome package metadata was independently inconsistent even without cache. The installed browser writes google-chrome.sources, while runner cleanup only removed legacy list files. The CI installer now removes that unused source and retains signed Ubuntu dependency installation, fonts and all browser checks. Its five focused tests and tooling typecheck pass.
+- Parent final review is complete. The final commit closes this plan and includes only isolated CI setup/proof changes after the reviewed production head; these do not require another substantive review. Final-head CI and current-base mergeability are recorded on PR #3107. Deployment remains outside this task; production timing is unmeasured.
+Completed: 2026-09-09
