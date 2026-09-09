@@ -2182,10 +2182,10 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
 });
 
 test.each([
-  ["before provider discovery", 0, 0, 0],
+  ["before provider discovery", 1, 0, 0],
   ["after provider discovery", 1, 0, 0],
   ["after timeseries fetch", 1, 1, 0],
-] as const)("an old source epoch is fenced %s", async (
+] as const)("a remote epoch change %s is fenced before health-data fetch or import", async (
   boundary,
   expectedProviderListRequests,
   expectedTimeseriesRequests,
@@ -2475,13 +2475,7 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     toJobRecord(job, 260),
   );
 
-  assert.deepEqual(sourceReads, [
-    targetSlug,
-    "*",
-    "*",
-    "*",
-    targetSlug,
-  ]);
+  assert.deepEqual(sourceReads, ["*", "*", targetSlug]);
   assert.equal(providerListRequests.count, 1);
   assert.equal(requests.length, 1);
   assert.equal(importCalls, 1);
@@ -4137,14 +4131,12 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
       message: `Temporary hosted device-sync ${boundary} failure.`,
       retryable: true,
     });
-    let sourceStateReads = 0;
     const failed = await requireValue(provider.jobExecutor).executeJob(
       createJobContext({
         ...(boundary === "source-state"
           ? {
               listConnectionSources: async () => {
-                sourceStateReads += 1;
-                if (sourceStateReads <= 3) {
+                if (requests.length === 0) {
                   return [];
                 }
                 throw failure;
@@ -4265,7 +4257,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       createJobContext({
         listConnectionSources: async () => {
           sourceStateReads += 1;
-          if (sourceStateReads <= 3) {
+          if (requests.length === 0) {
             return [];
           }
           throw failure;
@@ -4279,7 +4271,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       && error.retryable === true,
   );
 
-  assert.equal(sourceStateReads, 4);
+  assert.equal(sourceStateReads, 2);
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
     1,
