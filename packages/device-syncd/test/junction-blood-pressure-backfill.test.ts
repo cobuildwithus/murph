@@ -2479,7 +2479,6 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
     targetSlug,
     "*",
     "*",
-    "*",
     targetSlug,
   ]);
   assert.equal(providerListRequests.count, 1);
@@ -4265,7 +4264,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       createJobContext({
         listConnectionSources: async () => {
           sourceStateReads += 1;
-          if (sourceStateReads <= 3) {
+          if (requests.length === 0) {
             return [];
           }
           throw failure;
@@ -4279,7 +4278,7 @@ test("an empty successful segment retries when its post-fetch source reread fail
       && error.retryable === true,
   );
 
-  assert.equal(sourceStateReads, 4);
+  assert.equal(sourceStateReads, 3);
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
     1,

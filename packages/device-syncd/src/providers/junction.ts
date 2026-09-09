@@ -2970,17 +2970,22 @@ export function createJunctionDeviceSyncProvider(
               return {};
             }
           }
-          sourceProviders = await loadAndProjectSourceProviders();
           if (extendedHistoricalBackfill && sourceProviderSlug) {
-            sourceIdentityAuthority = context.listConnectionSources
-              ? await context.listConnectionSources()
-              : context.account.sources ?? [];
+            sourceProviders = await loadSourceProviders();
+            sourceIdentityAuthority = await readJunctionImportSources(context);
+            // Projection only writes local source observations. Reuse its fresh
+            // authority for admission before the next provider request.
+            await projectJunctionSources(context, sourceProviders, {
+              admissionSources: sourceIdentityAuthority,
+            });
             currentSourceAdmission = resolveJunctionCurrentSourceAdmissionFromSources(
               sourceIdentityAuthority,
               sourceProviderSlug,
               context.connectionSourceAdmissionMode !== "listed_only",
               sourceLifecycleEpoch ?? undefined,
             );
+          } else {
+            sourceProviders = await loadAndProjectSourceProviders();
           }
         } catch (error) {
           if (
@@ -12595,6 +12600,7 @@ async function projectJunctionSources(
   context: ProviderJobContext,
   providers: readonly JunctionProviderConnection[],
   options: {
+    admissionSources?: readonly JunctionImportAdmissionSource[];
     historicalBackfillCompletedProviderSlug?: string;
     preserveHistoricalReconnect?: boolean;
     preserveHistoricalReconnectProviderSlugs?: readonly string[];
@@ -12639,13 +12645,15 @@ async function projectJunctionSources(
       httpStatus: 502,
     });
   }
-  const existingSources = context.listConnectionSources
-    ? [...await context.listConnectionSources()]
-    : [];
+  const existingSources = options.admissionSources
+    ? [...options.admissionSources]
+    : context.listConnectionSources
+      ? [...await context.listConnectionSources()]
+      : [];
   const admissionSources: readonly JunctionImportAdmissionSource[] =
-    context.listConnectionSources
+    options.admissionSources ?? (context.listConnectionSources
       ? existingSources
-      : context.account.sources ?? [];
+      : context.account.sources ?? []);
   for (const source of projectedSources) {
     const listedOnly = context.connectionSourceAdmissionMode === "listed_only";
     if (
