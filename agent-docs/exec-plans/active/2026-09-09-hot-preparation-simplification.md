@@ -64,3 +64,12 @@ Updated: 2026-09-09
 - `pnpm complexity:diff`, privacy/diff review, and repository assistant verification for current-conversation media access.
 - Safe baseline/candidate Docker comparison with separate module graphs and native processes; compare accepted-input/provider content in memory without persisting prompts.
 - Required PR ReviewGPT and exact-candidate CI; record results before completion.
+
+## Results
+
+- Six combined engine suites passed 102 tests; the final index path-redirection test passed separately. Runtime lifecycle suites passed 68 tests, Web route/provider suites 144, protocol 49, Cloudflare 216, system-mailbox/expiry/notification 171, and changelog rendering 10. All five affected package/app typechecks and canonical runner bundle/parity checks passed.
+- The focused real Codex retained-image journey passed with gpt-5.6-terra through local subscription auth: list, one selected image materialization, correct color answer, no resend request. Product UX: Ready for the tested journeys.
+- A paired offline Docker test on retained data reduced actual-conversation media lookup from 159.92 ms to 8.44 ms median. All 12 measured pairs were faster and complete authority arrays matched. Warm I/O fell from 111 reads, 555 lstat and one readdir to five reads and 25 lstat. First index construction cost 301.72 ms versus 165.09 ms for the baseline lookup; that one-time cost is separate from warm samples.
+- Direct service-to-provider medians were 371.17 ms baseline and 151.65 ms candidate; median within-pair saving 194.33 ms. A synthetic group with three accepted inputs measured 326.97 ms and 88.83 ms; paired saving 259.13 ms. Each scenario used three warmups and 12 measured pairs, separate native processes/module graphs/vaults, and validated warm resume and accepted-input order. These exclude the hosted foreground pipeline and real Web callback, so they are not production guarantees.
+- Baseline bundle source was 475c2f4602476fa170325d1e0a3728543b5bf56c. Candidate source is 2f6df514e5afb971080056746658d99178182a96 (base 90085f6103cf667335fd50301735dabcb91d09ed); canonical bundle source fingerprint 2ebc4d1167607ae169f8d401fc6012cbfd787e160ba7902c3ff157efb4437507. Relevant preparation owners had no intervening base changes.
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3107. Full provider-input equivalence, final PR review and CI remain pending.

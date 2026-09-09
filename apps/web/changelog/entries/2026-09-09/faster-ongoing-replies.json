@@ -9,6 +9,6 @@
     "summary": "Murph does less preparation work before answering in an active conversation.",
     "details": "Earlier photos and videos remain available for follow-up questions in the same conversation.",
     "relevanceTags": ["conversations", "performance"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3107]
   }
 }
