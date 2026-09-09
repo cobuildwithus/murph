@@ -10,6 +10,8 @@ const DIAGNOSTIC_KEYS = [
   "headPlainHint", "headHasEpoch", "headManualHint", "headWebhookHint",
   "ownerPresent", "ownerDue", "ownerEpochMatches", "headCadenceMissing",
   "ownerCadenceMissing", "headCadenceCovered", "headCadenceEqual", "headCadenceFuture",
+  "headHasJobs", "headScopesPresent", "headRevokeWarningPresent",
+  "headHintReasonSupported", "headRecordPresent",
 ] as const;
 const DIAGNOSTIC_VALUES = new Set(DIAGNOSTIC_KEYS.flatMap((key) =>
   [`${key}=true`, `${key}=false`]
@@ -17,7 +19,7 @@ const DIAGNOSTIC_VALUES = new Set(DIAGNOSTIC_KEYS.flatMap((key) =>
 
 // Keep the existing wire format: at most 16 fixed scalar strings, never payloads.
 export function readHostedSystemMailboxFirstPendingDiagnostics(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.length > DIAGNOSTIC_KEYS.length) return null;
+  if (!Array.isArray(value) || value.length > 16) return null;
   const diagnostics = value.filter((entry): entry is string =>
     typeof entry === "string" && DIAGNOSTIC_VALUES.has(entry)
   );
@@ -61,12 +63,27 @@ export function resolveHostedSystemMailboxFirstPendingDiagnostics(input: {
     ownerDue: owner !== undefined && systemMailboxItemIsDue(owner, input.now),
     ownerEpochMatches: Boolean(wake.expectedConnectedAt)
       && ownerWake?.expectedConnectedAt === wake.expectedConnectedAt,
-    headCadenceMissing: !Number.isFinite(headCadence),
-    ownerCadenceMissing: !Number.isFinite(ownerCadence),
-    headCadenceCovered: headCadence < ownerCadence,
-    headCadenceEqual: headCadence === ownerCadence,
-    headCadenceFuture: headCadence > Date.parse(input.now),
+    ...(wake.reason === "reconcile_due" ? {
+      headCadenceMissing: !Number.isFinite(headCadence),
+      ownerCadenceMissing: !Number.isFinite(ownerCadence),
+      headCadenceCovered: headCadence < ownerCadence,
+      headCadenceEqual: headCadence === ownerCadence,
+      headCadenceFuture: headCadence > Date.parse(input.now),
+    } : describeNonScheduledHint(head)),
   });
+}
+
+function describeNonScheduledHint(head: HostedSystemMailboxPendingItem): Record<string, boolean> {
+  const wake = head.wake;
+  if (wake.kind !== "device-sync.wake") return {};
+  return {
+    headHasJobs: (wake.hint?.jobs?.length ?? 0) > 0,
+    headScopesPresent: wake.hint?.scopes !== undefined,
+    headRevokeWarningPresent: wake.hint?.revokeWarning != null,
+    headHintReasonSupported: wake.hint?.reason == null
+      || wake.hint.reason === "webhook_dirty_transition",
+    headRecordPresent: head.postCheckpointRecord !== null,
+  };
 }
 
 function describeDeviceHint(head: HostedSystemMailboxPendingItem): Record<string, boolean> {

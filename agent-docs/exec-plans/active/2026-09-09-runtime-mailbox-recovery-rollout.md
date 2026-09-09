@@ -95,3 +95,19 @@ Cloudflare typecheck pass afterward. Persistent mismatch still fails at the
 bound, while HTTP errors and malformed metadata still fail immediately.
 ReviewGPT and exact-head CI remain required before deploying this correction.
 The original workspace cohort remains the completion boundary.
+
+## Non-scheduled hint diagnostics
+
+The propagation correction passed exact-head review and CI. The supported
+Worker-only reconciliation and subsequent full release both passed all protected
+gates, signed smoke, and convergence. Pending-head diagnostics now reach live
+invocation logs. They distinguish valid retained ownership from a non-plain
+pending hint, but cadence flags do not explain non-scheduled hint shape.
+
+For non-scheduled device wakes, replace the five cadence flags with fixed
+booleans for jobs, scopes, revoke warning, supported hint reason, and pending
+checkpoint record. Scheduled wakes retain the existing cadence diagnostics.
+Keep the same sixteen-value limit and fixed-value allowlist; disclose no payload
+values and change no scheduling or acknowledgement behavior. Six synthetic
+shape cases fail before this addition. Direct checkpoint, invocation, and log
+wire-parser coverage must pass before exact-head review, CI, and deployment.
