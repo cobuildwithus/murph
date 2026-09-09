@@ -161,7 +161,10 @@ describe("hosted Linq audio conversation ingestion", () => {
     });
     mocks.markLinqChatRead.mockResolvedValue(undefined);
 
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
+      // Keep this retry fixture inside the pending-input retention window.
+      vi.setSystemTime(new Date("2026-08-26T17:23:00.000Z"));
       const wake = buildHostedExecutionLinqConversationMessageWake({
         eventId: "evt_linq_audio_abort",
         linqMessage: {
@@ -281,6 +284,7 @@ describe("hosted Linq audio conversation ingestion", () => {
       assert.equal(providerStarts, 1);
       assert.equal(providerSignals.length, 1);
     } finally {
+      vi.useRealTimers();
       await rm(workspaceRoot, {
         force: true,
         maxRetries: 5,
