@@ -27,6 +27,6 @@ test("TogetherSection renders the static social feature reframe", () => {
   assert.match(markup, /pt-20 pb-10/);
   assert.match(markup, /sm:pb-20/);
   assert.match(markup, /lg:pb-28/);
-  assert.match(markup, /mt-10 space-y-5/);
+  assert.ok(markup.indexOf("I send the whole family") < markup.indexOf("can you send grandpa"));
   assert.doesNotMatch(markup, /leaderboard/i);
 });

@@ -6,28 +6,21 @@ import { test } from "vitest";
 
 import {
   AsksGridSection,
-  WideFeature,
+  FeatureCard,
 } from "@/src/components/homepage/asks-section";
 
-test("WideFeature keeps the phone treatment compact and restores the desktop scale", () => {
+test("FeatureCard keeps the heading before the message and demo", () => {
   const markup = renderToStaticMarkup(
-    createElement(WideFeature, {
+    createElement(FeatureCard, {
       artifact: createElement("div", null, "Artifact"),
-      artifactSide: "right",
       bubble: "Bubble",
       headline: "Headline",
       tint: "sage",
     }),
   );
 
-  assert.match(markup, /rounded-\[1\.5rem\]/);
-  assert.match(markup, /sm:rounded-\[2rem\]/);
-  assert.match(markup, /min-h-\[330px\]/);
-  assert.match(markup, /sm:min-h-\[440px\]/);
-  assert.match(markup, /max-w-\[240px\]/);
-  assert.match(markup, /sm:max-w-\[280px\]/);
-  assert.match(markup, /text-\[1\.5rem\]/);
-  assert.match(markup, /sm:text-\[clamp\(1\.75rem,2\.8vw,2\.625rem\)\]/);
+  assert.ok(markup.indexOf("Headline") < markup.indexOf("Bubble"));
+  assert.ok(markup.indexOf("Bubble") < markup.indexOf("Artifact"));
 });
 
 test("AsksGridSection stacks dense health findings at iPhone Mini widths", () => {

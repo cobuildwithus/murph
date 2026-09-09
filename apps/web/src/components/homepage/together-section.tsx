@@ -1,4 +1,4 @@
-import { WideFeature } from "./asks-section";
+import { FeatureCard } from "./asks-section";
 import { ChallengeCard, NewsletterCard } from "./group-chat-cards";
 import {
   DEFAULT_MURPH_HEADSHOT,
@@ -15,10 +15,9 @@ export function TogetherSection() {
           </h2>
         </div>
 
-        <div className="mt-10 space-y-5 sm:mt-12 sm:space-y-6">
-          <WideFeature
+        <div className="mt-10 grid gap-x-10 gap-y-8 sm:mt-12 sm:gap-y-10 lg:grid-cols-2">
+          <FeatureCard
             tint="sage"
-            artifactSide="right"
             headline="I referee health challenges with your friends."
             bubble="no shot you guys are keeping up with me this week 😤"
             artifact={
@@ -42,12 +41,10 @@ export function TogetherSection() {
             }
           />
 
-          <WideFeature
+          <FeatureCard
             tint="gold"
-            artifactSide="left"
             headline="I send the whole family a weekly health newsletter."
             bubble="can you send grandpa our weekly wins?"
-            artifactAlign="center"
             artifact={
               <div className="mx-auto w-full max-w-[360px]">
                 <div className="relative">

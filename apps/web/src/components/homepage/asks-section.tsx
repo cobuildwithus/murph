@@ -4,129 +4,58 @@ import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 
 type Tint = "sage" | "gold" | "bronze";
 
-const TINTS: Record<
-  Tint,
-  {
-    panel: string;
-    bubble: string;
-    glow: string;
-  }
-> = {
+const TINTS: Record<Tint, { panel: string; bubble: string }> = {
   sage: {
-    panel:
-      "bg-[linear-gradient(135deg,#e8efde_0%,#d5e2c4_55%,#c8d7b1_100%)]",
+    panel: "bg-[linear-gradient(135deg,#e8efde_0%,#d5e2c4_55%,#c8d7b1_100%)]",
     bubble: "bg-[#2c7a3f]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(58,80,40,0.45)]",
   },
   gold: {
-    panel:
-      "bg-[linear-gradient(135deg,#f3e8d0_0%,#ead7af_55%,#dec390_100%)]",
+    panel: "bg-[linear-gradient(135deg,#f3e8d0_0%,#ead7af_55%,#dec390_100%)]",
     bubble: "bg-[#8a5d17]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(138,100,40,0.45)]",
   },
   bronze: {
-    panel:
-      "bg-[linear-gradient(135deg,#ead0b0_0%,#d6ad7e_55%,#bf8a55_100%)]",
+    panel: "bg-[linear-gradient(135deg,#ead0b0_0%,#d6ad7e_55%,#bf8a55_100%)]",
     bubble: "bg-[#94591f]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(125,74,26,0.45)]",
   },
 };
 
-export function WideFeature({
-  artifactAlign = "end",
-  artifactSide,
+export function FeatureCard({
   bubble,
   headline,
   tint,
   artifact,
 }: {
-  // Short artifacts read better vertically centered in the panel; tall ones
-  // anchor to the bottom edge.
-  artifactAlign?: "center" | "end";
-  artifactSide: "left" | "right";
-  bubble: string;
+  bubble?: string;
   headline: string;
-  tint: Tint;
+  tint?: Tint;
   artifact: React.ReactNode;
 }) {
-  const t = TINTS[tint];
-  const copy = (
-    <div className="flex flex-col justify-center px-5 pt-8 pb-1 sm:px-10 sm:pt-12 sm:pb-2 lg:col-span-5 lg:py-16 lg:px-12">
-      <h3 className="font-serif text-[1.5rem] font-semibold leading-[1.08] tracking-[-0.03em] text-balance text-[#1f1c18] sm:text-[clamp(1.75rem,2.8vw,2.625rem)] sm:leading-[1.02] sm:tracking-[-0.035em]">
+  const colors = tint ? TINTS[tint] : null;
+
+  return (
+    <article className="grid min-w-0 grid-rows-[auto_1fr] gap-5 lg:row-span-2 lg:grid-rows-subgrid">
+      <h3 className="max-w-[30ch] font-serif text-2xl font-semibold leading-[1.12] tracking-[-0.025em] text-balance text-[#2d3436] sm:text-[1.75rem]">
         {headline}
       </h3>
-    </div>
-  );
-
-  const panel = (
-    <div className="p-2.5 sm:p-4 lg:col-span-7 lg:p-5">
       <div
         className={cn(
-          "relative min-h-[330px] overflow-hidden rounded-[1.25rem] sm:min-h-[440px] sm:rounded-[1.5rem] lg:min-h-[480px]",
-          t.panel,
-          t.glow,
+          "flex min-w-0 flex-col gap-6 overflow-hidden rounded-3xl p-5 sm:gap-8 sm:p-8",
+          colors?.panel ?? "bg-[#ece6da]",
         )}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_20%_-10%,rgba(255,255,255,0.55)_0%,rgba(255,255,255,0)_55%)]" />
-        {/* Below lg the bubble sits in flow above the artifact: with the
-            fixed-reserve overlay, long bubble copy wraps on narrow screens
-            and collides with the artifact card. */}
-        <div
-          className={cn(
-            "relative z-20 flex px-4 pt-5 sm:px-7 sm:pt-8 lg:absolute lg:top-8 lg:px-0 lg:pt-0",
-            artifactSide === "left"
-              ? "justify-start lg:left-7"
-              : "justify-end lg:right-7",
-          )}
-        >
+        {bubble ? (
           <div
             className={cn(
-              "max-w-[240px] px-3.5 py-2 text-[0.875rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(60,40,20,0.3)] sm:max-w-[280px] sm:px-4 sm:py-2.5 sm:text-[0.9375rem]",
-              t.bubble,
-              artifactSide === "left"
-                ? "rounded-2xl rounded-tl-[6px]"
-                : "rounded-2xl rounded-tr-[6px]",
+              "max-w-[280px] self-end rounded-2xl rounded-tr-md px-4 py-2.5 text-[0.875rem] leading-[1.4] text-white sm:text-[0.9375rem]",
+              colors?.bubble ?? "bg-[#5a6e32]",
             )}
           >
             {bubble}
           </div>
+        ) : null}
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full min-w-0 max-w-[440px]">{artifact}</div>
         </div>
-        <div
-          className={cn(
-            "relative z-10 flex h-full justify-center px-3 pb-4 pt-4 sm:px-8 sm:pb-8 sm:pt-6 lg:pt-32",
-            artifactAlign === "center"
-              ? "items-center lg:absolute lg:inset-0"
-              : "items-end",
-          )}
-        >
-          <div className="w-full max-w-[440px]">{artifact}</div>
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <article className="overflow-hidden rounded-[1.5rem] bg-[#fffcf6] ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_20px_60px_-30px_rgba(45,52,54,0.12)] sm:rounded-[2rem] lg:grid lg:grid-cols-12 lg:items-stretch">
-      {artifactSide === "right" ? copy : panel}
-      {artifactSide === "right" ? panel : copy}
-    </article>
-  );
-}
-
-function CompactCard({
-  headline,
-  artifact,
-}: {
-  headline: string;
-  artifact: React.ReactNode;
-}) {
-  return (
-    <article className="flex min-w-0 flex-col gap-5 rounded-[1.5rem] bg-[#fffcf6] p-5 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:gap-6 sm:rounded-[1.75rem] sm:p-9">
-      <h3 className="font-serif text-[1.25rem] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-[#1f1c18] sm:text-[clamp(1.375rem,2vw,1.75rem)] sm:leading-[1.05] sm:tracking-[-0.03em]">
-        {headline}
-      </h3>
-      <div className="mt-auto rounded-2xl bg-[#f5f0e8]/60 p-2.5 ring-1 ring-black/[0.03] sm:rounded-[1.25rem] sm:p-3">
-        {artifact}
       </div>
     </article>
   );
@@ -413,44 +342,38 @@ export function AsksGridSection() {
             No group? You’re still not doing this alone.
           </h2>
         </div>
-        <div className="space-y-5 sm:space-y-6">
-          <WideFeature
+        <div className="grid gap-x-10 gap-y-8 sm:gap-y-10 lg:grid-cols-2">
+          <FeatureCard
             tint="gold"
-            artifactSide="right"
             headline="I run experiments so you know what actually works for you."
             bubble="Did the magnesium actually work?"
             artifact={<ExperimentArtifact />}
           />
 
-          <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
-            <CompactCard
-              headline="I find insights in your bloodwork over time."
-              artifact={<BloodworkArtifact />}
-            />
-            <CompactCard
-              headline="I make it easy to build healthy habits."
-              artifact={<HabitArtifact />}
-            />
-          </div>
+          <FeatureCard
+            headline="I find insights in your bloodwork over time."
+            artifact={<BloodworkArtifact />}
+          />
+          <FeatureCard
+            headline="I make it easy to build healthy habits."
+            artifact={<HabitArtifact />}
+          />
 
-          <WideFeature
+          <FeatureCard
             tint="bronze"
-            artifactSide="left"
             headline="I order the supplements and book the scans."
             bubble="Order me Omega-3, find me a DEXA scan, and confirm my doctor's appointment."
             artifact={<ErrandsArtifact />}
           />
 
-          <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
-            <CompactCard
-              headline="I call the dentist and book the appointment."
-              artifact={<CallArtifact />}
-            />
-            <CompactCard
-              headline="I read your wearables and tell you what actually matters."
-              artifact={<RecoveryArtifact />}
-            />
-          </div>
+          <FeatureCard
+            headline="I call the dentist and book the appointment."
+            artifact={<CallArtifact />}
+          />
+          <FeatureCard
+            headline="I read your wearables and tell you what actually matters."
+            artifact={<RecoveryArtifact />}
+          />
         </div>
       </div>
     </section>

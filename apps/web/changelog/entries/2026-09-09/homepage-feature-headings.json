@@ -7,7 +7,7 @@
     "priority": 1,
     "title": "A shorter homepage tour",
     "summary": "The group and personal feature sections now pair their headings directly with examples.",
-    "details": "Removed the supporting paragraphs so the challenges, family newsletter, and personal assistant demos are easier to scan.",
+    "details": "A tighter desktop layout and consistent heading-first order on phones make the demos easier to scan without extra supporting paragraphs.",
     "relevanceTags": ["website"],
     "sourcePullRequests": [3113]
   }
