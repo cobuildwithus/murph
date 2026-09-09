@@ -418,7 +418,7 @@ describe("runSmokeHostedDeploy", () => {
     ]);
   });
 
-  it("retries when the Worker banner has not reached the requested version", async () => {
+  it.each([2, 6, 30])("waits for Worker banner propagation through attempt %i", async (readyAttempt) => {
     vi.useFakeTimers();
     try {
       let bannerCalls = 0;
@@ -430,7 +430,7 @@ describe("runSmokeHostedDeploy", () => {
             return new Response(JSON.stringify({
               ok: true,
               service: "cloudflare-hosted-runner",
-              workerVersionId: bannerCalls === 1 ? "version-other" : "version-123",
+              workerVersionId: bannerCalls < readyAttempt ? "version-other" : "version-123",
             }), { status: 200 });
           }
 
@@ -447,10 +447,10 @@ describe("runSmokeHostedDeploy", () => {
         },
       });
 
-      await vi.runAllTimersAsync();
-      await smoke;
+      const assertion = expect(smoke).resolves.toBeUndefined();
+      await Promise.all([assertion, vi.runAllTimersAsync()]);
 
-      expect(bannerCalls).toBe(2);
+      expect(bannerCalls).toBe(readyAttempt);
       expect(healthCalls).toBe(1);
     } finally {
       vi.useRealTimers();
@@ -524,7 +524,7 @@ describe("runSmokeHostedDeploy", () => {
       await vi.runAllTimersAsync();
       await assertion;
 
-      expect(bannerCalls).toBe(5);
+      expect(bannerCalls).toBe(30);
     } finally {
       vi.useRealTimers();
     }
