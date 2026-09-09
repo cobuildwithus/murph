@@ -54,9 +54,10 @@ import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.
 describe("runDeployWorkerVersionCli", () => {
   it("retires drained capacity, proves quota, activates compatibility, then rolls the serving image", async () => {
     const trace: string[] = [];
+    const deployment = { active: { id: "synthetic-permanent" }, candidate: { id: "synthetic-permanent" }, previous: null };
     const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} };
     const retirement = { name: "retired-app", applicationId: "retired-id", namespaceId: "retired-namespace" };
-    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [retirement] }));
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, deployment, applications: [serving], retirements: [retirement] }));
     releaseMocks.assertDrained.mockImplementation(async () => { trace.push("drained"); });
     releaseMocks.retireApplication.mockImplementation(async () => { trace.push("retired"); });
     releaseMocks.assertCapacity.mockImplementation(async () => { trace.push("quota"); });
@@ -65,6 +66,7 @@ describe("runDeployWorkerVersionCli", () => {
     releaseMocks.runSmokeHostedDeploy.mockImplementation(async () => { trace.push("smoke"); });
     wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activate"); });
     await syntheticDeployment("gradual");
+    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({ source: expect.objectContaining({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment) }) }));
     expect(trace).toEqual(["drained", "retired", "quota", "activate", "native rollout", "distributed", "smoke", "activate"]);
     expect(releaseMocks.admitApplication).toHaveBeenCalledWith({ ...serving, rolloutStepPercentage: [10, 25, 50, 100] });
   });

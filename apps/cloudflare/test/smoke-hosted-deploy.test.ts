@@ -205,15 +205,19 @@ describe("resolveSmokeRunnerManifestPath", () => {
 
 describe("runSmokeHostedDeploy", () => {
   it.each([
-    { label: "current ready inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: true },
-    { label: "missing inventory", proof: null, passes: false },
-    { label: "wrong target", proof: { ready: true, readyCount: 1, provisioningCount: 0, target: 1, releaseMatches: true }, passes: false },
-    { label: "stale release", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: false }, passes: false },
-    { label: "pending preparation", proof: { ready: true, readyCount: 2, provisioningCount: 1, target: 2, releaseMatches: true }, passes: false },
-  ])("requires $label proof in the protected standby smoke", async ({ proof, passes }) => {
+    { label: "current ready inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: true, inPlace: false },
+    { label: "missing inventory", proof: null, passes: false, inPlace: false },
+    { label: "wrong target", proof: { ready: true, readyCount: 1, provisioningCount: 0, target: 1, releaseMatches: true }, passes: false, inPlace: false },
+    { label: "stale release", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: false }, passes: false, inPlace: false },
+    { label: "pending preparation", proof: { ready: true, readyCount: 2, provisioningCount: 1, target: 2, releaseMatches: true }, passes: false, inPlace: false },
+    { label: "paused transition inventory", proof: { ready: true, readyCount: 0, provisioningCount: 0, target: 0, releaseMatches: true }, passes: true, inPlace: true },
+    { label: "unpaused transition inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: false, inPlace: true },
+  ])("requires $label proof in the protected standby smoke", async ({ proof, passes, inPlace }) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-standby-smoke-"));
     const manifestPath = path.join(root, "manifest.json");
     const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
+    const active = { bank: "primary", id: "primary-permanent", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const candidate = { ...active, bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64), image: `registry.example.test/runner@sha256:${"e".repeat(64)}` };
     try {
       await writeFile(manifestPath, JSON.stringify(manifest));
       const fetchImpl = async (url: RequestInfo | URL) => new Response(JSON.stringify(
@@ -233,6 +237,7 @@ describe("runSmokeHostedDeploy", () => {
         source: {
           HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "shadow",
           HOSTED_EXECUTION_STANDBY_TARGET: "2",
+          ...(inPlace ? { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, candidate, previous: null }) } : {}),
           HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
           HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
           HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "1",

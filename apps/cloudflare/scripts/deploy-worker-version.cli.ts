@@ -151,6 +151,7 @@ export async function runDeployWorkerVersionCli(
         await runSmokeHostedDeploy({
           source: {
             ...env,
+            HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(staged.deployment),
             HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
             HOSTED_EXECUTION_SMOKE_VERSION_ID: stageVersionId,
             HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: path.join(runnerBundleDir, ".murph-runner-bundle-manifest.json"),
