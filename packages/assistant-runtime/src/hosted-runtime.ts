@@ -2002,8 +2002,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       );
     }
 
-    const runtimeMailboxPort = guardedMailboxPort ?? mailboxPort;
-    if (!runtimeMailboxPort) {
+    if (!guardedMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
     }
     const checkpointMetadata = {
@@ -2068,12 +2067,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
     };
     const runnerMailboxPort: NonNullable<HostedRuntimePlatform["mailboxPort"]> = {
-      ...runtimeMailboxPort,
       async fetch(request, context) {
-        const response = await runtimeMailboxPort.fetch(request, context);
+        const response = await guardedMailboxPort.fetch(request, context);
         observeInvocationAssistantProvider(response.assistantProvider);
         return response;
       },
+      fetchPayload: guardedMailboxPort.fetchPayload.bind(guardedMailboxPort),
+      ...(guardedMailboxPort.recordMemberActionOutcome
+        ? {
+            recordMemberActionOutcome:
+              guardedMailboxPort.recordMemberActionOutcome.bind(guardedMailboxPort),
+          }
+        : {}),
     };
     let acceptedCanonicalSystemProgressCheckpointOrdinal = 0;
     let systemMailboxProgressedSinceCheckpoint = false;
@@ -6617,6 +6622,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           return null;
+        }
+        if (runtimeOwnerHandoffRequested) {
+          setIdleCheckpointStartBy(Date.now());
         }
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
           idleCheckpointStartByMs,
