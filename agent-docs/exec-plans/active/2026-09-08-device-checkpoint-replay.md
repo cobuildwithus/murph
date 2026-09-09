@@ -57,3 +57,4 @@ Updated: 2026-09-09
 - A reconstructed pass receives the preceding accepted continuation; failures preserve ownership and emit useful diagnostics.
 - Diagnostic candidate: focused system-mailbox suite passes 106 tests; assistant-runtime typecheck and complexity guard pass.
 - Reader correction: all six producer-to-reader cases fail before the correction and pass afterward; the two device-sync suites pass 140 tests. Device-sync typecheck and complexity guard pass (debt and hotspot maximum unchanged).
+- The mailbox lifecycle suite passes 106 tests, including recording and reloading a 127-job continuation containing a calendar refresh. Assistant-runtime typecheck and 10 changelog rendering tests pass.
