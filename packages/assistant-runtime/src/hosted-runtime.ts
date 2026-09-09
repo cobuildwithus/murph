@@ -252,6 +252,10 @@ import {
   type HostedSystemMailboxState,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
+  readHostedSystemMailboxFirstPendingDiagnostics,
+  resolveHostedSystemMailboxFirstPendingDiagnostics,
+} from "./hosted-runtime/system-mailbox-diagnostics.ts";
+import {
   compactHostedConversationMailboxHandledItemSelection,
   collectHostedPendingAssistantInputMediaRetentionProtections,
   inspectHostedPendingAssistantInputWakeCandidate,
@@ -1445,6 +1449,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       level: "info",
       phase: "invoke",
       redactedJson: {
+        hostedMailboxSystemFirstPendingDiagnostics:
+          readHostedSystemMailboxFirstPendingDiagnostics(
+            result.redactedStatus?.hostedMailboxSystemFirstPendingDiagnostics,
+          ),
         hostedMailboxSystemFirstPendingClassifierFailures:
           readHostedRuntimeProgressClassifierFailuresForLog(
             result.redactedStatus ?? null,
@@ -8655,9 +8663,11 @@ async function withHostedMailboxProgressStatus(input: {
   const mailboxState = input.mailboxState ?? await readHostedMailboxImportState({
     vaultRoot: input.vaultRoot,
   });
+  const systemMailboxState = input.systemMailboxState
+    ?? await readHostedSystemMailboxState(input.vaultRoot);
   const systemMailboxProgress = resolveHostedSystemMailboxProgress({
     importedSeq: mailboxState.watermarks.system,
-    state: input.systemMailboxState ?? await readHostedSystemMailboxState(input.vaultRoot),
+    state: systemMailboxState,
   });
   return {
     ...(input.redactedStatus ?? {}),
@@ -8671,6 +8681,13 @@ async function withHostedMailboxProgressStatus(input: {
             mailboxState.watermarks.conversation,
         }
       : {}),
+    hostedMailboxSystemFirstPendingDiagnostics:
+      resolveHostedSystemMailboxFirstPendingDiagnostics({
+        continuationSeqs: systemMailboxProgress.deviceSyncContinuationSeqs,
+        firstPendingSeq: systemMailboxProgress.firstPendingSeq,
+        now: new Date().toISOString(),
+        state: systemMailboxState,
+      }),
     hostedMailboxSystemFirstPendingClassifierFailures:
       systemMailboxProgress.firstPendingClassifierFailures,
     hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
