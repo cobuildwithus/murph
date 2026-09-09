@@ -22,7 +22,6 @@ import {
   isMissingFileError,
   resolveTimestamp,
 } from './shared.js'
-import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
@@ -82,6 +81,15 @@ export type AssistantInputSourceRef =
     }
 
 const ASSISTANT_INPUT_RUNTIME_EVENT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
+const ASSISTANT_INPUT_MEDIA_INDEX_SCHEMA = 'murph.assistant-input-media-index.v1'
+const assistantInputMediaIndexSchema = z.record(
+  z.string().regex(/^[0-9a-f]{64}$/u),
+  z.record(
+    z.string().regex(ASSISTANT_INPUT_RUNTIME_EVENT_ID_PATTERN),
+    z.number().int().positive(),
+  ),
+)
+type AssistantInputMediaIndex = z.infer<typeof assistantInputMediaIndexSchema>
 const ASSISTANT_INPUT_EVENT_REASON_CODE_PATTERN =
   /^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/u
 const ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u
@@ -789,6 +797,142 @@ export async function listAssistantInputEvents(input: {
   }
 }
 
+/** Candidate discovery only: canonical events still supply turn-frozen evidence. */
+export async function listAssistantConversationMediaInputEvents(input: {
+  conversations: readonly (AssistantInputConversationRef | null)[]
+  now?: Date
+  paths?: AssistantStatePaths
+  vault?: string
+}): Promise<{ events: AssistantInputEventRecord[] }> {
+  const context = resolveAssistantInputContext(input)
+  const now = input.now?.getTime() ?? Date.now()
+  const keys = new Set(input.conversations.map(assistantInputMediaConversationKey)
+    .filter((key): key is string => key !== null))
+  if (keys.size === 0) return { events: [] }
+  let index = await readAssistantInputMediaIndex(context.paths)
+  if (index === null) {
+    index = await withAssistantRuntimeWriteLock(context.vault, async () => {
+      const current = await readAssistantInputMediaIndex(context.paths)
+      if (current !== null) return current
+      // Publish only after a complete successful scan, including legacy vaults.
+      const history = await listAssistantInputEvents({
+        limit: Number.MAX_SAFE_INTEGER,
+        paths: context.paths,
+        skipInvalidRecords: true,
+      })
+      const rebuilt: AssistantInputMediaIndex = {}
+      for (const event of history.events) {
+        const key = assistantInputMediaConversationKey(event.conversation)
+        const expiresAt = assistantInputMediaCandidateExpiresAt(event)
+        if (key !== null && expiresAt > now) {
+          (rebuilt[key] ??= {})[event.inputId] = expiresAt
+        }
+      }
+      await writeAssistantInputMediaIndex(context.paths, rebuilt)
+      return rebuilt
+    })
+  }
+  const inputIds = new Set<string>()
+  for (const key of keys) {
+    for (const [inputId, expiresAt] of Object.entries(index[key] ?? {})) {
+      if (expiresAt > now) inputIds.add(inputId)
+    }
+  }
+  const events: AssistantInputEventRecord[] = []
+  for (const inputId of inputIds) {
+    const event = await readAssistantInputEventAtPaths({ inputId, paths: context.paths })
+      .catch(() => null)
+    if (event && keys.has(assistantInputMediaConversationKey(event.conversation) ?? '')
+      && assistantInputMediaCandidateExpiresAt(event) > now) events.push(event)
+  }
+  return { events }
+}
+
+function assistantInputMediaConversationKey(
+  conversation: AssistantInputConversationRef | null,
+): string | null {
+  if (!conversation?.source || !conversation.threadId
+    || typeof conversation.threadIsDirect !== 'boolean') return null
+  return createHash('sha256').update(JSON.stringify([
+    conversation.source,
+    conversation.accountId,
+    conversation.threadId,
+    conversation.threadIsDirect,
+    conversation.sessionId ?? null,
+    conversation.threadIsDirect ? conversation.actorId : null,
+  ])).digest('hex')
+}
+
+function assistantInputMediaCandidateExpiresAt(event: AssistantInputEventRecord): number {
+  if (event.conversation?.actorIsSelf
+    || (event.attachmentEvidence.status !== 'available'
+      && event.attachmentEvidence.status !== 'partial')) return 0
+  return Math.max(0, ...event.attachmentEvidence.attachments.map((attachment) =>
+    assistantInputMediaExpiresAt(event, attachment) ?? 0))
+}
+
+function assistantInputMediaIndexPath(paths: AssistantStatePaths): string {
+  return path.join(paths.assistantStateRoot, 'state', 'input-media.json')
+}
+
+async function readAssistantInputMediaIndex(
+  paths: AssistantStatePaths,
+): Promise<AssistantInputMediaIndex | null> {
+  const filePath = assistantInputMediaIndexPath(paths)
+  await assertAssistantStatePathHasNoSymlinks(filePath)
+  let raw: string
+  try {
+    raw = await readFile(filePath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) return null
+    throw error
+  }
+  try {
+    return parseVersionedJsonStateEnvelope(JSON.parse(raw), {
+      label: 'assistant input media index',
+      parseValue: (value) => assistantInputMediaIndexSchema.parse(value),
+      schema: ASSISTANT_INPUT_MEDIA_INDEX_SCHEMA,
+      schemaVersion: 1,
+    })
+  } catch {
+    return null
+  }
+}
+
+async function writeAssistantInputMediaIndex(
+  paths: AssistantStatePaths,
+  index: AssistantInputMediaIndex,
+): Promise<void> {
+  await writeAssistantStateVersionedJson({
+    filePath: assistantInputMediaIndexPath(paths),
+    schema: ASSISTANT_INPUT_MEDIA_INDEX_SCHEMA,
+    schemaVersion: 1,
+    value: index,
+  })
+}
+
+async function addAssistantInputMediaCandidate(
+  paths: AssistantStatePaths,
+  event: AssistantInputEventRecord,
+  now: number,
+): Promise<void> {
+  const key = assistantInputMediaConversationKey(event.conversation)
+  const expiresAt = assistantInputMediaCandidateExpiresAt(event)
+  if (key === null || expiresAt <= now) return
+  const existing = await readAssistantInputMediaIndex(paths)
+  // An absent or invalid index needs a complete rebuild, never a partial seed.
+  if (existing === null) return
+  const index: AssistantInputMediaIndex = {}
+  for (const [conversationKey, candidates] of Object.entries(existing)) {
+    const retained = Object.fromEntries(Object.entries(candidates)
+      .filter(([, candidateExpiresAt]) => candidateExpiresAt > now))
+    if (Object.keys(retained).length > 0) index[conversationKey] = retained
+  }
+  const candidates = index[key] ??= {}
+  candidates[event.inputId] = Math.max(candidates[event.inputId] ?? 0, expiresAt)
+  await writeAssistantInputMediaIndex(paths, index)
+}
+
 export async function readLatestAssistantInputCursor(input: {
   onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
   paths?: AssistantStatePaths
@@ -941,6 +1085,9 @@ export async function updateAssistantInputAttachmentEvidence(input: {
         ? redactAssistantInputAttachmentEvidence(existing, nextEvidence, now) : nextEvidence,
       updatedAt: now,
     })
+    // Publish the candidate first: a failed event write leaves a harmless extra
+    // ID, while every committed media event remains discoverable.
+    await addAssistantInputMediaCandidate(paths, updated, Date.parse(now))
     await writeAssistantStateVersionedJson({
       filePath: resolveAssistantInputEventPath({
         inputId: updated.inputId,
@@ -963,7 +1110,6 @@ function isUsefulAssistantInputAttachmentEvidence(
 async function ensureAssistantInputEventStore(
   paths: AssistantStatePaths,
 ): Promise<void> {
-  await ensureAssistantState(paths)
   await ensureAssistantStateDir(resolveAssistantInputEventsDirectory(paths))
 }
 

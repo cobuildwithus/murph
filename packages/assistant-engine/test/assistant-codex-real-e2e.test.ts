@@ -93,6 +93,8 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { upsertKnowledgePage } from '../src/knowledge/service.ts'
 import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
+import { upsertAssistantInputEvent, updateAssistantInputAttachmentEvidence } from '../src/assistant/input-store.js'
+import { readAnalyzeVideoConversationEvents, snapshotConversationAttachmentAuthorities } from '../src/assistant-codex/analyze-video-tool.js'
 import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
 
 import {
@@ -539,13 +541,43 @@ const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
 
 describeRealCodex('real Codex retained image e2e', () => {
-  it('finds and views an earlier image without conversation text', async () => {
+  it('finds and views an earlier image through the conversation media index', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-retained-image-e2e-'))
     const rawPath = 'raw/inbox/synthetic/attachments/01__picture.png'
     const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAcElEQVR4nO3PAQkAAAyEwO8fatkWQwThAuh2c+MLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsakOMLGpDjCxqQ4wsacHv6dOCmA4JHiwAAAABJRU5ErkJggg==', 'base64')
     const materializedPaths: string[] = []
     try {
+      const receivedAt = new Date(Date.now() - 86_400_000).toISOString()
+      const conversation = { source: 'telegram', accountId: 'synthetic-account',
+        actorId: 'synthetic-participant', actorIsSelf: false,
+        threadId: 'synthetic-thread', threadIsDirect: true }
+      const imageEvent = await upsertAssistantInputEvent({ vault: workingDirectory, event: {
+        conversation, occurredAt: receivedAt, receivedAt,
+        sourceRef: { kind: 'inbox-capture', captureId: 'cap_retained_image', source: 'telegram', version: null },
+      } })
+      await updateAssistantInputAttachmentEvidence({ vault: workingDirectory, inputId: imageEvent.inputId,
+        attachmentEvidence: {
+          attachments: [{ byteSize: bytes.length, derived: null, descriptorAttachmentId: 'synthetic-image',
+            fileName: 'picture.png', inlineFragments: [], kind: 'image', mime: 'image/png', ordinal: 1,
+            parseState: 'succeeded', sourceAttachmentId: 'synthetic-image',
+            raw: { kind: 'vault-relative-file', path: rawPath, byteSize: bytes.length,
+              mediaType: 'image/png', sha256: createHash('sha256').update(bytes).digest('hex') } }],
+          optionalInboxCaptureId: 'cap_retained_image', reasonCode: null,
+          source: 'hosted-inbox-projection', status: 'available', updatedAt: receivedAt,
+        } })
+      const prompt = 'What color is the image I sent earlier in this conversation?'
+      const followup = await upsertAssistantInputEvent({ vault: workingDirectory, event: {
+        content: { text: prompt }, conversation, occurredAt: new Date().toISOString(),
+        sourceRef: { kind: 'inbox-capture', captureId: 'cap_image_followup', source: 'telegram', version: null },
+      } })
+      const readAuthorities = async () => snapshotConversationAttachmentAuthorities(
+        await readAnalyzeVideoConversationEvents({ acceptedEvents: [followup], vaultRoot: workingDirectory }),
+      )
+      const restoredAuthorities = await readAuthorities()
+      const authorities = await readAuthorities()
+      expect(authorities).toEqual(restoredAuthorities)
+      expect(authorities).toHaveLength(1)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -555,13 +587,7 @@ describeRealCodex('real Codex retained image e2e', () => {
         env: config.env,
         hostedToolContext: {
           ...createRealCodexSupportHostedToolContext('direct'),
-          currentConversationAttachmentAuthorities: () => [{
-            byteSize: bytes.length, capturedAt: '2026-08-01T12:00:00.000Z',
-            expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-            fileName: 'picture.png', kind: 'image', messageRef: `ain_${'a'.repeat(32)}`,
-            mimeType: 'image/png', ordinal: 1, rawPath,
-            sha256: createHash('sha256').update(bytes).digest('hex'),
-          }],
+          currentConversationAttachmentAuthorities: () => authorities,
         },
         materializeWorkspaceArtifacts: async (refs) => {
           materializedPaths.push(...refs)
@@ -571,7 +597,7 @@ describeRealCodex('real Codex retained image e2e', () => {
           return { materializedArtifactPaths: new Set(refs), missingArtifactPaths: new Set<string>() }
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: 'What color is the image I sent earlier in this conversation?',
+        prompt,
         reasoningEffort: 'low', sandbox: 'workspace-write',
         vaultRoot: workingDirectory, workingDirectory,
       })
@@ -581,7 +607,7 @@ describeRealCodex('real Codex retained image e2e', () => {
       expect(calls).toHaveLength(2)
       expect(calls).toMatchObject([
         { argumentsValue: { action: 'list' }, success: true },
-        { argumentsValue: { action: 'open_image', message_ref: `ain_${'a'.repeat(32)}`, attachment_ordinal: 1 }, success: true },
+        { argumentsValue: { action: 'open_image', message_ref: imageEvent.inputId, attachment_ordinal: 1 }, success: true },
       ])
       expect(materializedPaths).toEqual([rawPath])
       expect(result.jsonEvents).toContainEqual(expect.objectContaining({

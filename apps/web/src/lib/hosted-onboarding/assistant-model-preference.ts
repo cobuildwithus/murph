@@ -38,7 +38,10 @@ import {
   parseHostedBillingPlanCode,
   parseHostedFamilyPlanCode,
 } from "./billing-plans";
-import { hasActiveHostedMemberAccess } from "./member-access";
+import {
+  hasActiveHostedMemberAccess,
+  type HostedMemberPersonAccessState,
+} from "./member-access";
 import { hostedOnboardingError } from "./errors";
 import {
   lockHostedMemberRow,
@@ -63,6 +66,19 @@ export function resolveAvailableHostedAssistantProvider(
       && isHostedVeniceAssistantEnabled(source)
     ? HOSTED_ASSISTANT_VENICE_PROVIDER
     : HOSTED_ASSISTANT_DEFAULT_PROVIDER;
+}
+
+export function resolveHostedMemberAssistantProvider(
+  member: HostedMemberPersonAccessState & {
+    assistantProviderPreference: string | null;
+    threadContainer?: object | null;
+  },
+): HostedAssistantProvider {
+  return resolveAvailableHostedAssistantProvider(
+    isHostedPersonalAssistantConfigurationAvailable(member)
+      ? parseHostedAssistantProviderOverride(member.assistantProviderPreference)
+      : null,
+  );
 }
 
 export const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
@@ -477,7 +493,7 @@ export function resolveHostedMemberAssistantModel(
     !isThreadContainerMember
     && storedModelPreference === HOSTED_ASSISTANT_SOL_MODEL
     && !solAvailable;
-  const provider = resolveAvailableHostedAssistantProvider(storedProviderOverride);
+  const provider = resolveHostedMemberAssistantProvider(member);
   const model = resolveEffectiveHostedAssistantModel({
     astraAvailable,
     isThreadContainerMember,
@@ -537,9 +553,9 @@ export function resolveHostedMemberAssistantModel(
 }
 
 function isHostedPersonalAssistantConfigurationAvailable(
-  member: HostedMemberAssistantModelState,
+  member: HostedMemberPersonAccessState & { threadContainer?: object | null },
 ): boolean {
-  if (member.threadContainer !== null) {
+  if (member.threadContainer) {
     return false;
   }
 

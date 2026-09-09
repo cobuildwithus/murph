@@ -341,6 +341,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   >(
     input.vaultRoot,
     async (state) => {
+      if (state.pending.length === 0) {
+        return { result: null, write: false };
+      }
       const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
         state, vaultRoot: input.vaultRoot,
       });

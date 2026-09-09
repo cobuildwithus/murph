@@ -761,6 +761,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(lateItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [lateItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -967,6 +968,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(lateItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [lateItem],
           maxSeqByLane: request.lanes.map((lane) => ({
@@ -1253,6 +1255,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && BigInt(sidecarItem.laneSeq) > BigInt(lane.importedSeq)
         );
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: fetchCount === 1 || !itemVisible ? [] : [sidecarItem],
           maxSeqByLane: request.lanes.map((lane) => ({

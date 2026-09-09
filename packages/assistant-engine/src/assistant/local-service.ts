@@ -154,6 +154,7 @@ import {
 } from './vault-file-send.js'
 import {
   readAssistantAcceptedTurnInputEvents,
+  resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputJournal,
   type AssistantAcceptedTurnInputItemInput,
   type AssistantAcceptedTurnInputTranscriptRef,
@@ -166,7 +167,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
-import { readAssistantInputEvent, type AssistantInputEventRecord } from './input-store.js'
+import type { AssistantInputEventRecord } from './input-store.js'
 import {
   resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
@@ -464,10 +465,9 @@ async function persistUserTurn(
   let userPersisted = false
   let userTranscriptRef: AssistantAcceptedTurnInputTranscriptRef | null = null
   const userContentReceivedAt =
-    await resolveAcceptedInputContentReceivedAt({
-      inputs: input.acceptedTurnInput?.initialInputs ?? [],
-      vault: input.vault,
-    })
+    resolveAcceptedInputContentReceivedAt(
+      input.acceptedTurnInput?.initialInputs ?? [],
+    )
   if (plan.persistUserPromptOnFailure) {
     const persisted = await appendUserTranscriptEntryForTurn({
       contentReceivedAt: userContentReceivedAt,
@@ -2982,12 +2982,11 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   })
   const refsByInputId = new Map<string, AssistantAcceptedTurnInputTranscriptRef>()
   for (const plan of transcriptPlans) {
-    const contentReceivedAt = await resolveAcceptedInputContentReceivedAt({
-      inputs: input.acceptedInputItems.filter((item) =>
+    const contentReceivedAt = resolveAcceptedInputContentReceivedAt(
+      input.acceptedInputItems.filter((item) =>
         plan.inputIds.includes(item.id)
       ),
-      vault: input.vault,
-    })
+    )
     const persisted = await appendUserTranscriptEntryForTurn({
       contentReceivedAt,
       detail:
@@ -3004,34 +3003,13 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   return refsByInputId
 }
 
-async function resolveAcceptedInputContentReceivedAt(input: {
-  inputs: readonly AssistantAcceptedTurnInputItemInput[]
-  vault: string
-}): Promise<string | null> {
-  const events = await Promise.all(
-    input.inputs
-      .filter((item) => item.source === 'assistant-input')
-      .map((item) =>
-        readAssistantInputEvent({
-          inputId: item.id,
-          vault: input.vault,
-        })
-      ),
-  )
-  let earliestMs: number | null = null
-  for (const event of events) {
-    if (!event) {
-      continue
-    }
-    const receivedAtMs = Date.parse(event.receivedAt ?? event.occurredAt)
-    if (
-      Number.isFinite(receivedAtMs)
-      && (earliestMs === null || receivedAtMs < earliestMs)
-    ) {
-      earliestMs = receivedAtMs
-    }
-  }
-  return earliestMs === null ? null : new Date(earliestMs).toISOString()
+function resolveAcceptedInputContentReceivedAt(
+  inputs: readonly AssistantAcceptedTurnInputItemInput[],
+): string | null {
+  // Accepted assistant-input timestamps have already been checked against their events.
+  return resolveAssistantAcceptedTurnInputReferenceWindow(
+    inputs.filter((item) => item.source === 'assistant-input'),
+  )?.earliestAt ?? null
 }
 
 function resolveAcceptedActiveTurnTranscriptAppendPlans(input: {

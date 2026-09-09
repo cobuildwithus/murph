@@ -167,6 +167,8 @@ describe("hosted Linq audio conversation ingestion", () => {
     mocks.markLinqChatRead.mockResolvedValue(undefined);
 
     try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-08-26T17:22:21.000Z"));
       const wake = buildHostedExecutionLinqConversationMessageWake({
         eventId: "evt_linq_audio_abort",
         linqMessage: {
@@ -286,6 +288,7 @@ describe("hosted Linq audio conversation ingestion", () => {
       assert.equal(providerStarts, 1);
       assert.equal(providerSignals.length, 1);
     } finally {
+      vi.useRealTimers();
       await rm(workspaceRoot, {
         force: true,
         maxRetries: 5,
@@ -719,6 +722,7 @@ function createSingleItemMailboxPort(item: HostedMailboxItem): {
   port: {
     fetch(request: HostedMailboxFetchRequest): Promise<{
       consumedSeqByLane: [];
+      assistantProvider: "openai";
       fetchedAt: string;
       items: HostedMailboxItem[];
       maxSeqByLane: [{ lane: "conversation"; maxSeq: string }];
@@ -740,6 +744,7 @@ function createSingleItemMailboxPort(item: HostedMailboxItem): {
           : false;
         return {
           consumedSeqByLane: [],
+          assistantProvider: "openai",
           fetchedAt: item.updatedAt,
           items: shouldIncludeItem ? [item] : [],
           maxSeqByLane: [

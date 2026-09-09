@@ -4103,14 +4103,21 @@ An eligible turn may receive the schema before its accepted input has video
 authority because the provider tool set freezes at turn start. Keeping the tool
 available lets the first live-steered video be drained, frozen, and authorized
 by the `beforeToolExecution` boundary in that same turn. Before provider execution,
-the turn owner reads retained input history once and freezes eligible video
+the turn owner reads indexed conversation media candidates and freezes eligible video
 metadata from the same source, account, thread, direct/group audience, and
 optional session. Direct history also matches the participant; authenticated
 group history allows other participants in that group. Unknown conversation
 identity and future input provide no historical authority. Retired message text
 grants no authority; unexpired image/video identity remains selectable through
-its separate media window. Existing input records own this lookup; it adds no
-new persisted state. The frozen record contains normalized raw path, byte count,
+its separate media window. The input store's rebuildable `state/input-media.json`
+maps conversation hashes to input references and expiry bounds, keeping file
+count constant as conversations grow. Exact canonical input records still
+supply attachment authority.
+An absent index is rebuilt once under the existing runtime write lock. Evidence
+updates add candidates before writing canonical evidence under that same lock,
+so a failed evidence write can leave only a harmless extra candidate. Retention
+and conversation checks still apply to the canonical record before it is frozen.
+The frozen record contains normalized raw path, byte count,
 SHA-256, MIME type, message ref, and ordinal. Live steering freezes new input
 before forwarding it. Existing attachment keys are never refreshed from
 model-writable files. Historical references do not become current accepted
