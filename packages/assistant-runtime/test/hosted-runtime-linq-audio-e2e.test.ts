@@ -714,6 +714,7 @@ function createSingleItemMailboxPort(item: HostedMailboxItem): {
   port: {
     fetch(request: HostedMailboxFetchRequest): Promise<{
       consumedSeqByLane: [];
+      assistantProvider: "openai";
       fetchedAt: string;
       items: HostedMailboxItem[];
       maxSeqByLane: [{ lane: "conversation"; maxSeq: string }];
@@ -735,6 +736,7 @@ function createSingleItemMailboxPort(item: HostedMailboxItem): {
           : false;
         return {
           consumedSeqByLane: [],
+          assistantProvider: "openai",
           fetchedAt: item.updatedAt,
           items: shouldIncludeItem ? [item] : [],
           maxSeqByLane: [

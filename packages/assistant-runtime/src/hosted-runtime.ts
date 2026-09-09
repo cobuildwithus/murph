@@ -2002,8 +2002,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       );
     }
 
-    const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;
-    if (!runnerMailboxPort) {
+    const runtimeMailboxPort = guardedMailboxPort ?? mailboxPort;
+    if (!runtimeMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
     }
     const checkpointMetadata = {
@@ -2061,6 +2061,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let invocationRuntimeEnv = projectHostedRuntimeProcessEnvironment({
       runtimeEnv: baseRuntimeEnv,
     });
+    const observeInvocationAssistantProvider = (provider: HostedAssistantProvider): void => {
+      const invocationProvider = invocationRuntimeEnv.HOSTED_ASSISTANT_PROVIDER;
+      if (isHostedAssistantProvider(invocationProvider) && provider !== invocationProvider) {
+        runtimeOwnerHandoffRequested = true;
+      }
+    };
+    const runnerMailboxPort: NonNullable<HostedRuntimePlatform["mailboxPort"]> = {
+      ...runtimeMailboxPort,
+      async fetch(request, context) {
+        const response = await runtimeMailboxPort.fetch(request, context);
+        observeInvocationAssistantProvider(response.assistantProvider);
+        return response;
+      },
+    };
     let acceptedCanonicalSystemProgressCheckpointOrdinal = 0;
     let systemMailboxProgressedSinceCheckpoint = false;
     const foregroundWorkspacePort = guardedWorkspacePort;
@@ -2278,6 +2292,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               && (response.result.status === "updated"
                 || response.result.status === "unchanged")
             ) {
+              observeInvocationAssistantProvider(response.result.provider);
               confirmedAssistantTarget = {
                 model: response.result.model,
                 reasoningEffort: response.result.reasoningEffort,
@@ -4041,41 +4056,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         "Hosted runtime invocation assistant provider is not supported.",
       );
     }
-    const readLiveAssistantProvider = async (): Promise<HostedAssistantProvider> => {
-      if (!assistantConfigurationToolPort) {
-        throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider choice is temporarily unavailable; retry the turn later.",
-        );
-      }
-      let response: Awaited<
-        ReturnType<typeof assistantConfigurationToolPort.request>
-      >;
-      try {
-        response = await assistantConfigurationToolPort.request({ action: "read" });
-      } catch {
-        throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider choice is temporarily unavailable; retry the turn later.",
-        );
-      }
-      if (response.action !== "read") {
-        throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider choice is temporarily unavailable; retry the turn later.",
-        );
-      }
-      return response.result.provider;
-    };
-    // Provider preference changes require a fresh provider-specific invocation.
-    // This check preserves accepted work for handoff; it does not reauthorize it.
-    const resolveInvocationAssistantProviderConsistency = async (): Promise<
-      "current" | "handoff"
-    > => {
-      const liveAssistantProvider = await readLiveAssistantProvider();
-      if (liveAssistantProvider === invocationAssistantProvider) {
-        return "current";
-      }
-      runtimeOwnerHandoffRequested = true;
-      return "handoff";
-    };
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
     let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
@@ -4271,10 +4251,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 beforeProviderAcceptedInputs: async ({
                   acceptedInputs,
                 }) => {
-                  if (
-                    await resolveInvocationAssistantProviderConsistency()
-                      === "handoff"
-                  ) {
+                  if (runtimeOwnerHandoffRequested) {
                     throw new AssistantActiveTurnInputUnavailableError(
                       "Assistant provider changed; retrying the turn with the saved provider.",
                     );
@@ -4593,8 +4570,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         markIdleCheckpointTimerAfterDirtyWork();
         options.runtimeWakeSignal?.notify();
       },
-      resolveProviderAuthority:
-        resolveInvocationAssistantProviderConsistency,
+      resolveProviderAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
       ...(ordinaryConsentedAssistantAskSelected
         ? {
             selectNextExactItemId:
@@ -6083,25 +6059,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           || hostedMailboxImportHasForegroundConversationWork(
             conversationImport,
           );
-        if (
-          !hasForegroundConversationWork
-          && input.requestIdKind === "checkpoint-interrupt"
-          && input.latencySeed !== null
-          && !runtimeAbortController.signal.aborted
-          && shouldContinue()
-        ) {
-          try {
-            await resolveInvocationAssistantProviderConsistency();
-          } catch {
-            // An empty runtime wake is only a handoff hint. Foreground
-            // provider entry independently checks the saved provider.
-          }
-          if (runtimeOwnerHandoffRequested) {
-            markIdleCheckpointTimerAfterDirtyWork();
-            await finishMailboxImportWithoutAssistant(conversationImport);
-            return false;
-          }
-        }
         const shouldRunLocalPreCheckpointSystemWork =
           input.systemMailboxAdmission === "pre_checkpoint_safe"
           && !hasForegroundConversationWork

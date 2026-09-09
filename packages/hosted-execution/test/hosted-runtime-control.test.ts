@@ -921,6 +921,7 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: "low",
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -930,6 +931,7 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: "low",
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -939,11 +941,13 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     });
     expect(parseHostedMailboxFetchResponse({
+      assistantProvider: "venice",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toEqual({
+      assistantProvider: "venice",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
@@ -951,12 +955,14 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedMailboxFetchResponse({
       conversationUsageStatus: null,
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toEqual({
       conversationUsageStatus: null,
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
@@ -996,12 +1002,14 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/Hosted mailbox fetch request cursorMode/u);
     expect(() => parseHostedMailboxFetchResponse({
       conversationUsageStatus: "healthy",
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [],
       userId: "member_123",
     })).toThrow(/conversationUsageStatus/u);
     expect(() => parseHostedMailboxFetchResponse({
+      assistantProvider: "openai",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],
       maxSeqByLane: [
@@ -1010,6 +1018,21 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     })).toThrow(/non-negative base-10 integer string/u);
   });
+
+  it.each([undefined, null, "", "invalid", "OPENAI", 0, {}, ["openai"]].map(
+    (assistantProvider) => ({ assistantProvider }),
+  ))(
+    "rejects a mailbox fetch response with a missing or invalid provider: %j",
+    ({ assistantProvider }) => {
+      expect(() => parseHostedMailboxFetchResponse({
+        ...(assistantProvider === undefined ? {} : { assistantProvider }),
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      })).toThrow(/provider/iu);
+    },
+  );
 
   it("parses minimal mailbox records and payload sidecars", () => {
     const minimalItem = {

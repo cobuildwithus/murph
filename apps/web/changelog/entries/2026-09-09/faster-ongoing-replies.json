@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "faster-ongoing-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting in ongoing conversations",
+    "summary": "Murph does less preparation work before answering in an active conversation.",
+    "details": "Earlier photos and videos remain available for follow-up questions in the same conversation.",
+    "relevanceTags": ["conversations", "performance"],
+    "sourcePullRequests": []
+  }
+}

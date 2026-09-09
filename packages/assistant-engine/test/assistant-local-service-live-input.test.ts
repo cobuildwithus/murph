@@ -8,6 +8,7 @@ import { expect, test, vi } from 'vitest'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { createAssistantUsageId } from '@murphai/hosted-execution/assistant-usage'
+import { writeAssistantStateVersionedJson } from '@murphai/runtime-state/node'
 import {
   readAssistantAcceptedTurnInputJournal,
   resolveAssistantAcceptedTurnInputJournalPath,
@@ -1984,10 +1985,10 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
   })
 })
 
-test('sendAssistantMessageLocal derives video authority from validated inputs without another event read', async () => {
+test('sendAssistantMessageLocal derives transcript time and video authority from validated inputs without another event read', async () => {
   const context = await createTempVaultContext('assistant-local-service-input-read-bound-')
   tempRoots.push(context.parentRoot)
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
     realAcceptedInputPersistence: true,
   })
   const inputStore = await import('../src/assistant/input-store.ts')
@@ -1995,6 +1996,7 @@ test('sendAssistantMessageLocal derives video authority from validated inputs wi
     event: {
       content: { text: 'A fresh text message' },
       occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:05:00.000Z',
       sourceRef: createHostedMailboxSourceRef({
         eventId: 'evt_input_read_bound',
         laneSeq: '1',
@@ -2016,6 +2018,10 @@ test('sendAssistantMessageLocal derives video authority from validated inputs wi
   await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [{
+        acceptedAt: '2026-04-01T10:00:00.000Z',
+        id: 'manual-earlier-reference',
+        source: 'manual',
+      }, {
         acceptedAt: event.receivedAt ?? event.occurredAt,
         contentRef: {
           kind: 'assistant-input-event',
@@ -2031,11 +2037,18 @@ test('sendAssistantMessageLocal derives video authority from validated inputs wi
   })
 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
-  // Entry validation, transcript received time, and post-lock journal validation.
-  expect(readsBeforeProvider).toBe(3)
+  // Entry validation and post-lock journal validation remain independent.
+  expect(readsBeforeProvider).toBe(2)
+  const transcript = await readAssistantTranscriptEntries(
+    resolveAssistantStatePaths(context.vaultRoot),
+    session.sessionId,
+  )
+  expect(transcript
+    .find((entry) => entry.kind === 'user' && entry.text === 'A fresh text message'),
+  ).toMatchObject({ contentReceivedAt: event.receivedAt })
 })
 
-test('sendAssistantMessageLocal revalidates accepted inputs after waiting for the turn lock', async () => {
+test.each(['deleted', 'timestamp-changed'] as const)('sendAssistantMessageLocal revalidates %s accepted inputs after waiting for the turn lock', async (change) => {
   const context = await createTempVaultContext('assistant-local-service-input-lock-revalidation-')
   tempRoots.push(context.parentRoot)
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
@@ -2054,10 +2067,20 @@ test('sendAssistantMessageLocal revalidates accepted inputs after waiting for th
     vault: context.vaultRoot,
   })
   mocks.withAssistantTurnLock.mockImplementationOnce(async ({ run }) => {
-    await rm(inputStore.resolveAssistantInputEventPath({
+    const eventPath = inputStore.resolveAssistantInputEventPath({
       inputId: event.inputId,
       paths: resolveAssistantStatePaths(context.vaultRoot),
-    }))
+    })
+    if (change === 'deleted') {
+      await rm(eventPath)
+    } else {
+      await writeAssistantStateVersionedJson({
+        filePath: eventPath,
+        schema: inputStore.ASSISTANT_INPUT_EVENT_SCHEMA,
+        schemaVersion: inputStore.ASSISTANT_INPUT_EVENT_SCHEMA_VERSION,
+        value: { ...event, receivedAt: '2026-04-22T11:00:00.000Z' },
+      })
+    }
     return run()
   })
 
@@ -2077,7 +2100,9 @@ test('sendAssistantMessageLocal revalidates accepted inputs after waiting for th
     prompt: 'A message removed before the turn lock',
     vault: context.vaultRoot,
   })).rejects.toMatchObject({
-    code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+    code: change === 'deleted'
+      ? 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT'
+      : 'ASSISTANT_TURN_INPUT_JOURNAL_ASSISTANT_INPUT_EVENT_MISMATCH',
   })
   expect(mocks.withAssistantTurnLock).toHaveBeenCalledOnce()
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
@@ -2239,6 +2264,53 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
   providerRelease.resolve()
   await runningTurn
 })
+
+test.each([null, '2026-04-22T10:05:00.000Z'])(
+  'sendAssistantMessageLocal preserves late accepted-input transcript time with receivedAt=%s',
+  async (receivedAt) => {
+    const context = await createTempVaultContext('assistant-local-service-late-input-time-')
+    tempRoots.push(context.parentRoot)
+    const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
+      realAcceptedInputPersistence: true,
+    })
+    const event = await upsertAssistantInputEvent({
+      event: {
+        content: { text: 'A durable follow up' },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt,
+        sourceRef: createHostedMailboxSourceRef({
+          eventId: 'evt_late_input_time',
+          laneSeq: '2',
+        }),
+      },
+      vault: context.vaultRoot,
+    })
+    await sendAssistantMessageLocal({
+      activeTurnInput: vi.fn()
+        .mockResolvedValueOnce({
+          acceptedInputs: [{
+            ...assistantInputCandidateFromStoredEvent(event).acceptedInput,
+            promptFallbackText: 'A durable follow up',
+          }],
+          kind: 'accepted',
+          prompt: 'A durable follow up',
+          transcriptText: 'A durable follow up',
+        })
+        .mockResolvedValue({ kind: 'no-new-input' }),
+      prompt: 'Initial prompt',
+      vault: context.vaultRoot,
+    })
+
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+    const transcript = await readAssistantTranscriptEntries(
+      resolveAssistantStatePaths(context.vaultRoot),
+      session.sessionId,
+    )
+    expect(transcript
+      .find((entry) => entry.kind === 'user' && entry.text === 'A durable follow up'),
+    ).toMatchObject({ contentReceivedAt: receivedAt ?? event.occurredAt })
+  },
+)
 
 test('sendAssistantMessageLocal rejects late assistant-input refs before transcript writes when the event is missing', async () => {
   const context = await createTempVaultContext(
