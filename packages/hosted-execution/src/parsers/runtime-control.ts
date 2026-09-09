@@ -1135,10 +1135,15 @@ export function parseHostedRuntimeAssistantAskControlResponse(
     if (record.disclosure === undefined) {
       assertAllowedObjectKeys(
         record,
-        new Set(["action", "question", "status", "targetLabel"]),
+        new Set(["action", "question", "status", "targetLabel", "feedbackDiagnostic"]),
         label,
       );
-      return { action, question, status, targetLabel };
+      if (record.feedbackDiagnostic !== undefined && record.feedbackDiagnostic !== true) {
+        throw new TypeError("Feedback diagnostic marker must be true when present.");
+      }
+      return { action, question, status, targetLabel,
+        ...(record.feedbackDiagnostic === true ? { feedbackDiagnostic: true } : {}),
+      };
     }
     assertAllowedObjectKeys(
       record,

@@ -3164,3 +3164,14 @@ the existing pre-delivery hook, then mark the task complete only after exactly
 one queue-only delivery intent exists. The existing notification identity,
 route check, transcript commit, outbox dedupe, line-health, and provider retry
 owners remain the delivery state machine.
+
+
+Feedback questions reuse operator-task idempotency, with the nullable feedback
+relation included in replay conflict checks. There is no feedback queue or
+second task status. Follow-up questions use a new idempotency key; an unchanged
+retry reuses its key. Both diagnostic and operator-message turns select Sol at
+execution and attach task identity to every recorded provider attempt, including
+failed or preempted attempts. Verified operator usage records zero allowance
+cost while retaining provider pricing evidence; ordinary retries and usage
+idempotency remain unchanged. The feedback API reports result expiry explicitly
+and never decrypts results after the existing two-day retention boundary.

@@ -55,6 +55,7 @@ const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
   "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
 
 const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
+  operatorTaskId: true,
   apiKeyEnv: true,
   attemptCount: true,
   baseUrl: true,
@@ -493,6 +494,7 @@ function buildHostedAiUsageCreateData(
 ): Prisma.HostedAiUsageUncheckedCreateInput {
   return {
     id: record.usageId,
+    operatorTaskId: record.operatorTaskId ?? null,
     memberId,
     sessionId: record.sessionId,
     turnId: record.turnId,
@@ -563,6 +565,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
 }): void {
   const expected = {
     ...input.record,
+    operatorTaskId: input.record.operatorTaskId ?? null,
     id: input.record.usageId,
     memberId: input.memberId,
     occurredAt: normalizeHostedAiUsageDate(input.record.occurredAt, "occurredAt").toISOString(),
@@ -619,6 +622,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageField("baseUrl", input.storedRecord.baseUrl, expected.baseUrl),
     compareHostedAiUsageField("apiKeyEnv", input.storedRecord.apiKeyEnv, expected.apiKeyEnv),
     compareHostedAiUsageField("credentialSource", input.storedRecord.credentialSource, expected.credentialSource),
+    compareHostedAiUsageField("operatorTaskId", input.storedRecord.operatorTaskId ?? null, expected.operatorTaskId),
     compareHostedAiUsageField("featureKey", input.storedRecord.featureKey, expected.featureKey),
     compareHostedAiUsageJsonField("gatewayTagsJson", input.storedRecord.gatewayTagsJson, expected.gatewayTags),
     compareHostedAiUsageField("reportingUserId", input.storedRecord.reportingUserId, expected.reportingUserId),

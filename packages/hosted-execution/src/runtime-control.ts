@@ -1071,6 +1071,7 @@ export type HostedRuntimeAssistantAskControlResponse =
   | {
       action: "prepare";
       disclosure?: HostedRuntimeAssistantAskDisclosureContext;
+      feedbackDiagnostic?: true;
       question: string;
       status: "ready";
       targetLabel: string | null;

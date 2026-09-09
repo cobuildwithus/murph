@@ -1649,3 +1649,22 @@ expiry owner without disclosure metadata or a review turn. A message is restrict
 route; Web reauthorizes the member-bound task immediately before model work and
 again at the normal notification/outbox boundary. Neither path creates
 first-contact or group-delivery authority.
+
+
+Feedback diagnostic admission accepts only a feedback id and bounded question
+under existing Ops authentication and same-origin mutation checks. The server
+selects and transactionally verifies existing member linkage; callers cannot
+supply another target. Unlinked and group feedback cannot infer a private
+workspace. A server-returned feedback diagnostic marker selects product-only,
+de-identified output instructions. Results pass the existing deterministic
+feedback sanitizer before encryption and at the feedback read surface; that
+sanitizer remains defense in depth, not a semantic anonymity guarantee. The
+model must omit private source wording, facts, values, and identifiers while
+retaining synthetic reproduction and technical evidence. Feedback reads omit
+member linkage and obey the existing result expiry.
+
+Operator usage identity is runtime-owned and never a model-controlled funding
+flag. Web validates the task against the callback-bound member and recorded
+occurrence window before excluding its cost from allowance. The original
+credential source and token evidence remain intact. Ordinary usage retains its
+existing accounting and provider access checks.
