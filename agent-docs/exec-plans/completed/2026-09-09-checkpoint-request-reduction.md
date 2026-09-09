@@ -1,6 +1,6 @@
 # Reduce redundant hosted checkpoint work
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -34,7 +34,7 @@ Use existing CAS, lease, session, freshness, and scheduler owners. Snapshot clea
 
 ## Tasks
 
-1. Implement the three independent owner-bound candidates and focused regression proof.
+1. Completed two owner-bound reductions and their regression proof; rejected scheduler suppression after recovery analysis.
 2. Review combined source changes, delete unnecessary additions, and update only affected contract owners.
 3. Run affected typechecks, complexity diff, and focused verification; inspect privacy and change shape.
 4. Commit/push a draft PR, mark the stable candidate Ready, and run ReviewGPT concurrently with required CI.
@@ -49,4 +49,7 @@ Use existing CAS, lease, session, freshness, and scheduler owners. Snapshot clea
 - Complexity guard passes with unchanged hotspot debt and maxima; no extraction or new abstraction was needed. Documentation drift and whitespace checks pass.
 - Parent review: existing freshness, upload-session, lease, workspace CAS, and garbage-collection owners suffice. The unavoidable additive reference field crosses the actual warm-container rollout boundary; old consumers ignore it, and old producers retain the fallback. No public provider input or foreground call is added.
 - Changelog: not applicable; internal background I/O reduction with unchanged product behavior.
-- CI and ReviewGPT remain pending on the pushed candidate. Production request reductions remain unmeasured until serving versions converge and comparable work is observed.
+- ReviewGPT round 1 passed on `9231d8804363b4aab4347fa8047f057da967aa2f`, with zero findings. Managed Vonneumann lane captured the exact committed turn and matching response hash; model metadata confirms gpt-6-pro. Response arrived more than six minutes after submission, exceeding the 270-second minimum. The reviewer verified full-snapshot metadata and all 13 changed-file blobs, and inspected reference/version binding, cleanup, skew, repair, and preemption; reported tests were not independently executed by the reviewer.
+- Parent final review found no further justified source change. Plan closure is explanatory documentation only and does not require another substantive review. Required CI gates the final head before merge.
+- Production request reductions remain unmeasured until serving versions converge and comparable work is observed. No whole-bucket target is claimed from per-operation proof.
+Completed: 2026-09-09
