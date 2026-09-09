@@ -29,6 +29,19 @@ Private cohort identifiers stay outside repository artifacts.
 5. For remaining failures, add the smallest useful safe diagnostics, prove the
    failing owner, and repeat the review/deploy/readback loop.
 
+## Remaining-head diagnostic probe
+
+The reviewed production release has begun draining the original cohort, but
+remaining pending heads are reported only as missing continuation owners. That
+classifier describes transfer ownership and does not identify scheduling gates.
+Add bounded, boolean-only diagnostics derived from the already-read mailbox and
+validated continuation projection. Report due/recording state, plain/manual hint
+shape, epoch agreement, and relative cadence; never log identifiers or payloads.
+The log reader keeps only fixed keys with boolean values, including when status
+comes from a restored snapshot. Use existing progress status and invocation logs;
+add no database/provider calls, event types, scheduling decisions, or state owner.
+ReviewGPT and required CI must pass before this telemetry is deployed.
+
 ## Boundaries
 
 Preserve foreground priority, active device work, retry timing, connection

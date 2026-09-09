@@ -373,6 +373,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemFirstPendingDiagnostics: null,
           hostedMailboxSystemFirstPendingClassifierFailures: null,
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
@@ -4751,6 +4752,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           .filter((entry) => entry.eventCode === "runtime.invocation_finished")
           .map((entry) => entry.redactedJson),
         [{
+          hostedMailboxSystemFirstPendingDiagnostics: [{
+            headDue: false, headDeviceSync: false, headAttempted: true, headRecording: true,
+          }],
           hostedMailboxSystemFirstPendingClassifierFailures: ["wake_not_device_sync"],
           hostedMailboxSystemFirstPendingSeq: "1",
           hostedMailboxSystemHandledThroughSeq: "0",
