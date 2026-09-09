@@ -51,7 +51,8 @@ type FetchLike = typeof fetch;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
-const WORKER_VERSION_SMOKE_MAX_ATTEMPTS = 5;
+// Edge propagation can outlast a few seconds after control-plane activation.
+const WORKER_VERSION_SMOKE_MAX_ATTEMPTS = 30;
 const WORKER_VERSION_SMOKE_RETRY_DELAY_MS = 2_000;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 120;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 10_000;

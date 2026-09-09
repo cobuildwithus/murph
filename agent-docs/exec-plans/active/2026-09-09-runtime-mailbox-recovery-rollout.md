@@ -76,3 +76,22 @@ compaction can therefore retire every eligible covered hint in one checkpoint.
 Route, wake-kind, and dedupe-prefix restrictions still apply, and the retained
 owner and its jobs remain unchanged. The regression failed before this change
 and passes after it, including a second restore without another checkpoint.
+
+## Deployment propagation follow-up
+
+The batch fix passed review, required CI, signed smoke, and live release
+convergence. Pending-head telemetry passed review and CI but its staged Worker
+activation failed the five-attempt public version check. A subsequent public
+read returned the expected version. Rebuilding the same public and private
+sources produced a different bundle fingerprint, so the existing pending
+candidate correctly prevented silent replacement. The protected Worker-only
+path retires that interrupted candidate into retained history before a fresh
+full release; it does not count as runtime recovery.
+
+Extend only the existing version-mismatch retry bound from five to thirty
+attempts at the existing two-second interval. Synthetic propagation through
+attempts six and thirty fails before the correction; all 56 smoke tests and the
+Cloudflare typecheck pass afterward. Persistent mismatch still fails at the
+bound, while HTTP errors and malformed metadata still fail immediately.
+ReviewGPT and exact-head CI remain required before deploying this correction.
+The original workspace cohort remains the completion boundary.

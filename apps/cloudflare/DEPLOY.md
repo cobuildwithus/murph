@@ -60,6 +60,10 @@ against the requested commit, fingerprints, configuration, and namespace. A matc
 reuses that immutable image despite rebuilt manifest timestamps, preserving its
 active identity or staged candidate inventory. Candidate promotion still requires
 successful smoke. A conflicting admitted candidate requires reconciliation.
+Public banner and health checks allow up to 30 attempts, two seconds apart, for
+the activated Worker version to propagate. Only a well-formed response from a
+different version is retried; HTTP failures and malformed responses fail
+immediately. Exhaustion still blocks candidate promotion.
 The legacy staging pointer predates immutable admission receipts. Its inactive
 application is reconciled through the existing drain/admission path, including
 when a native create committed but its response or subsequent Worker publication
