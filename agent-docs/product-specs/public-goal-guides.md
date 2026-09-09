@@ -1,6 +1,6 @@
 # Public Goal Guides
 
-Last verified: 2026-08-31
+Last verified: 2026-09-09
 
 ## Current State
 
@@ -88,6 +88,12 @@ The primary action shows the Murph mark followed by `Ask Murph to help`.
   resolves that private route at click time and opens native Messages directly
   with the guide-owned start prompt prefilled. The static article never caches
   member routing.
+- Homepage goal cards and the shared homepage/library composer use the same
+  assigned-contact lookup for signed-in or temporarily unverifiable sessions,
+  rather than navigating to a guide or `/home`. A contact-only request contains
+  an empty object; selected and typed prompts are attached in the browser and
+  never sent to that endpoint. Canonical guide requests still accept only their
+  bounded goal identifier.
 - Before that signed-in route resolves, the action is an inert button rather
   than an anonymous link; an early click waits for the same private resolution.
 - Anonymous visitors open Messages directly with the same prefilled prompt,

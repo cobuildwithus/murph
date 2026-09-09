@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 100,
+  "item": {
+    "id": "goals-open-your-murph-chat",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Open your Murph chat from a goal",
+    "summary": "When you’re signed in, homepage goal cards and the goal input open your Murph conversation with the goal prefilled.",
+    "details": "If your conversation cannot be opened, you can retry from the same page without losing your draft. Nothing is sent until you send it in your messaging app.",
+    "relevanceTags": ["goals", "messaging"],
+    "sourcePullRequests": [],
+    "tryIt": { "label": "Start with a goal", "href": "/goals" }
+  }
+}
