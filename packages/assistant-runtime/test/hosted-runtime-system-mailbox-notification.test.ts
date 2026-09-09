@@ -38,6 +38,9 @@ import type {
   HostedRuntimePlatform,
 } from "../src/hosted-runtime/platform.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+import type { HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 
 const mocks = vi.hoisted(() => ({
   executeHostedMailboxEvent: vi.fn(),
@@ -86,6 +89,68 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
+
+it.each([false, true])("preserves accepted device continuations and reports rejected persistence (invalid: %s)", async (invalid) => {
+  const workspace = await createHostedRuntimeWorkspace("device-continuation-persistence-");
+  const entries: HostedRuntimeLogEntry[] = [];
+  const runtime = createRuntime({
+    deviceSyncPort: createDeviceSyncPortStub(),
+    logPort: { async write(request) {
+      const parsed = parseHostedRuntimeLogRequest(request);
+      entries.push(...parsed.entries);
+      return { loggedCount: parsed.entries.length };
+    } },
+  });
+  const wake = buildHostedExecutionDeviceSyncWake({
+    connectionId: "synthetic_continuation_connection", eventId: "synthetic-continuation",
+    occurredAt: FIXED_NOW, provider: "junction", reason: "webhook_hint", userId: "member_123",
+    hint: { jobs: [{ kind: "reconcile", dedupeKey: "synthetic-original" }] },
+  });
+  const retryAt = "2026-04-27T00:05:00.000Z";
+  const jobs = Array.from({ length: 127 }, (_, index) => ({
+    kind: "reconcile", dedupeKey: `synthetic-child-${index}`, availableAt: retryAt,
+    payload: { windowStart: FIXED_NOW, windowEnd: retryAt,
+      ...(invalid && index === 126 ? { unsupportedSyntheticField: "private-fixture-value" } : {}) },
+  }));
+  try {
+    await enqueueHostedSystemMailboxItem({ item: createResolvedDeviceSyncItem(), vaultRoot: workspace.vaultRoot, wake });
+    mocks.executeHostedMailboxEvent.mockResolvedValue({
+      bootstrapResult: null, conversationMetrics: null, mailboxLane: "device-sync", nextWakeAt: retryAt,
+      postCheckpointRecord: { kind: "device-sync.dirty-processed-batch", records: [],
+        retainMailboxItemUntil: retryAt, nextWakeAt: retryAt, retainedWake: { ...wake, hint: { jobs } } },
+    });
+    const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+      now: () => FIXED_NOW, runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+      runtimeLogContext: { attemptId: "synthetic_attempt", leaseGeneration: "1", workspaceVersion: "1" },
+    });
+    assert.ok(prepared);
+    await drainHostedRuntimeLogWritesBestEffort();
+    if (invalid) {
+      assert.equal(prepared.status, "retryable_failed");
+      const [saved] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      assert.deepEqual(saved?.wake, wake);
+      assert.equal(saved?.status, "pending");
+      const failure = entries.find((entry) => entry.eventCode === "mailbox.system_processed");
+      assert.ok(failure, "the dedicated system lane needs the persistence failure, not just pass_finished");
+      assert.equal(failure.level, "warn");
+      assert.equal(failure.attemptId, "synthetic_attempt");
+      assert.equal(failure.redactedJson?.status, "retryable_failed");
+      assert.match(String(failure.redactedJson?.safeErrorMessage), /unsupportedSyntheticField/);
+      assert.doesNotMatch(JSON.stringify(failure), /private-fixture-value|synthetic-child/);
+    } else {
+      assert.equal(prepared.status, "processed");
+      const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item, runtime, vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(result.failed, 0);
+      const [saved] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      assert.equal(saved?.status, "pending");
+      assert.deepEqual(saved?.wake.kind === "device-sync.wake" ? saved.wake.hint?.jobs : null, jobs);
+    }
+  } finally {
+    await workspace.cleanup();
+  }
+});
 
 type HostedSystemMailboxRuntimeForTest =
   Parameters<typeof prepareHostedSystemMailboxItemForCheckpoint>[0]["runtime"];

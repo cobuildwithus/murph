@@ -1572,6 +1572,10 @@ Last verified: 2026-09-04
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  Device wake preparation failures, including rejection of a generated
+  continuation while persisting the system mailbox, emit
+  `mailbox.system_processed` with `retryable_failed`, invocation context,
+  mailbox sequence, and sanitized error text before retaining the prior work.
   For `JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE`, the existing failed-attempt
   event may also carry `junctionEcgBindingReason`, checked against the same
   finite service-owned reason set before generic log sanitization. Missing,
