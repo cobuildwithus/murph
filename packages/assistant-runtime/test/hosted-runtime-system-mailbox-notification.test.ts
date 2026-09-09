@@ -4521,8 +4521,8 @@ describe("hosted system mailbox notification execution context", () => {
           importedSeq: "2", now: admittedAt, state: checkpoint,
         })).toMatchObject({
           deviceSyncContinuationSeqs: ["1"],
-          firstPendingSeq: advanced && day > 0 ? null : "2",
-          handledThroughSeq: advanced && day > 0 ? "2" : "1",
+          firstPendingSeq: advanced ? null : "2",
+          handledThroughSeq: advanced ? "2" : "1",
         });
         expect(await prepareHostedSystemMailboxItemForCheckpoint({
           allowedRouteActions: ["run-device-sync-wake"], executionContext: null,
