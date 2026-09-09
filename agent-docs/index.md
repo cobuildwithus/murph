@@ -154,7 +154,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/exec-plans/completed/2026-09-06-all-tool-failure-diagnostics-extension.md` | Separate PR #2985 telemetry extension record; original completed plan unchanged. | Historical implementation evidence | Low | 2026-09-06 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
-| `agent-docs/exec-plans/active/2026-09-08-shared-codex-tool-input-contract.md` | PR3059 shared schema implementation and parent-owned verification handoff. | Task scope and pending gates | Medium | 2026-09-08 |
+| `agent-docs/exec-plans/completed/2026-09-08-shared-codex-tool-input-contract.md` | PR3059 canonical tool-contract preservation, measured payloads, five Ready journeys, and validated final review/CI closure. | Historical implementation evidence | Low | 2026-09-08 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Optional task-specific review prompts; the completion workflow determines required gates. | Workflow prompt library | Low | 2026-08-17 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |

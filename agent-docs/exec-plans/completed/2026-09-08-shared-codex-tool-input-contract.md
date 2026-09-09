@@ -1,6 +1,6 @@
 # Preserve canonical tool input contracts across Codex exposure modes
 
-Status: active
+Status: completed
 Created: 2026-09-08
 Updated: 2026-09-08
 
@@ -8,8 +8,8 @@ Updated: 2026-09-08
 
 Owned PR3059 preserves complete canonical tool input contracts at the model
 boundary across native and code-only exposure, with default-on real CLI upgrade
-guards. Implementation and parent local proof are complete; final ReviewGPT
-round 2 and required exact-head CI remain pending.
+guards. Implementation, parent local proof, final ReviewGPT round 2, and required
+exact-head CI are complete for the validated candidate.
 
 The production correction stays small: a 31-line derived schema adapter,
 existing thread-start/fingerprint integration, and three song-description lines.
@@ -61,13 +61,14 @@ fix schema loss. The stable pin remains unchanged.
 - [x] Rerun all four complete first-input measurements after receipt clarification.
 - [x] Pass all five synthetic live journeys and obtain parent Ready after actual
   reply/effect review, including the strengthened song attachment assertions.
-- [ ] Validate final ReviewGPT round 2 PASS with zero accepted unresolved findings.
-- [ ] Validate required exact-head CI for the reviewed candidate.
+- [x] Final ReviewGPT round 2 validated PASS with zero accepted unresolved findings.
+- [x] Required exact-head CI validated PASS for the reviewed candidate.
 
-The parent owns final review, CI, and mechanical archive/status/scoped commit
-through `scripts/finish-task`, followed by resulting-head verification. Keep this
-plan active until the two final gates pass. The PR body carries the exact reviewed
-head, model, and evidence IDs; no merge or deployment is implied by plan closure.
+The PR body records the exact reviewed head, model, and validated review/CI
+evidence IDs. The parent owns mechanical archive/status/scoped commit through
+`scripts/finish-task` and resulting-head verification. The completed record belongs
+at `agent-docs/exec-plans/completed/2026-09-08-shared-codex-tool-input-contract.md`.
+Plan closure does not claim a merge or deployment.
 
 ## Parent local evidence
 
@@ -155,3 +156,4 @@ schema-preservation improvements are welcome: no guard requires raw schemas to
 remain lossy. Investigate changes to transport, metadata, identity, scope, or
 deferred availability rather than weakening the oracle or blindly updating
 snapshots.
+Completed: 2026-09-08
