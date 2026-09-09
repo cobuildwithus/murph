@@ -42,9 +42,16 @@ Last verified: 2026-09-04
   both receipt/acceptance arrival orders. It is limited to deliveries accepted
   within 24 hours and current configured sender, route, account access, and
   line/chat egress policy. Read the exact failed outbound through the official
-  SDK (three-second limit), then claim in a short database-only transaction,
-  then resend once (five-second limit, SDK retries disabled) into that same
-  chat with a stable retry idempotency key. Retrieved content stays in memory.
+  SDK (three-second limit). When retrieved actual service is null or omitted,
+  only the matching terminal failed receipt's exact `iMessage` service may
+  supply transport evidence: the matching child, or the legacy scalar only
+  when there are no children. Never borrow a sibling or multipart parent
+  projection. Recheck this evidence under the existing parent claim lock.
+  Explicit non-iMessage/unknown retrieved service and contradictory/unknown
+  preferred service stay closed. Then claim in a short database-only transaction
+  and resend once (five-second limit, SDK retries disabled) into that same
+  chat with explicit `preferred_service: iMessage` and a stable retry idempotency
+  key. Retrieved content stays in memory.
   Text, native links, and non-audio attachments preserve their send shape;
   voice memos, app cards, absent/expired content, and other non-reconstructible
   formats retain the original failure instead of changing their semantics.
@@ -58,7 +65,11 @@ Last verified: 2026-09-04
   failed-event evaluation and exceptional acceptance reconciliation. They
   report the trigger, stage, finite outcome/reason, elapsed time, event suffix,
   message correlation digest and whether this evaluation consumed the permanent
-  claim.
+  claim. When available, `providerServiceClass`, `providerPreferredServiceClass`,
+  and `receiptServiceClass` report only `omitted`, `null`, `imessage`, `sms`,
+  `rcs`, or `unknown`; receipt classification uses the candidate evaluated at
+  the latest checkpoint. These distinguish absent actual transport from an
+  explicit provider value without retaining raw strings or adding log events.
   Provider failures expose only bounded HTTP status and a closed error class;
   bodies, attachment URLs, sender/chat identities and provider prose stay out.
   Normal successful acceptance checks stay quiet. An accepted replacement is
