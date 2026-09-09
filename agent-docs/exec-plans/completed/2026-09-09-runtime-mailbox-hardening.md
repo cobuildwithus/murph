@@ -1,6 +1,6 @@
 # Harden mailbox continuation and hint contracts
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-09
 
@@ -94,3 +94,8 @@ their existing behavior. Old and new runners read the same persisted shapes.
   sufficient; no deployment code or production state changed.
 - Final pushed-head ReviewGPT and required CI remain PR delivery gates; their
   authoritative results belong to the PR checks and review evidence.
+
+Implementation and parent candidate review are complete. PR #3102 owns final
+ReviewGPT and exact-head CI evidence and remains open for review; no merge or
+production deployment is part of this task.
+Completed: 2026-09-09
