@@ -88,7 +88,11 @@ This mode does not change account quota or the overlap requirement of full image
 releases. Land the public selector before enabling its private workflow input.
 
 A bound, still-warm previous session retains its exact namespace, member, claim,
-and write fence through promotion. Fresh member allocation selects only the
+and write fence through promotion. After its matching runtime completion is
+recorded, a previous release no longer retains warmth solely for an overdue or
+immediate wake. The ordinary lifecycle checks still require no active operation
+or child, no recent conversation warmth, available health, and no interaction
+race before retiring the shell. Fresh member allocation selects only the
 active release. Previous inventory cannot prepare, bind new members, or restart
 cold processes. Before reusing its namespace, CI requires native drain evidence
 from every page of the Containers dashboard instance endpoint used by Wrangler. Only an empty

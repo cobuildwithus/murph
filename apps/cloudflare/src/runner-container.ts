@@ -1999,6 +1999,10 @@ export class RunnerContainer extends Container {
 
     if (
       input.trigger === "invoke-completed"
+      // A completed previous release must reach the normal idle checks so
+      // an overdue wake cannot indefinitely retain an obsolete runner image.
+      && readHostedRunnerDeployment(this.environment)?.previous?.id
+        !== resolveHostedRunnerReleaseId(this.environment)
       && this.retainCompletedInvocationForPendingWake(
         input.result,
         lifecycleObservedAtMs,
