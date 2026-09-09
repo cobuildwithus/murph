@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
 import type {
   AuditRecord,
@@ -397,6 +398,7 @@ export interface DeviceBatchImportSession {
 }
 
 export interface ImportDeviceBatchExecutionOptions {
+  signal?: AbortSignal | null;
   onTiming?: (timing: DeviceBatchImportTiming) => void;
   session?: DeviceBatchImportSession;
 }
@@ -649,8 +651,10 @@ function stableSortValue(value: unknown): unknown {
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, stableSortValue(entry)] as const);
+      .sort(([left], [right]) => left.localeCompare(right));
+    for (const entry of entries) {
+      entry[1] = stableSortValue(entry[1]);
+    }
     return Object.fromEntries(entries);
   }
 
@@ -2284,7 +2288,7 @@ interface EventExternalRefIndex {
   aliasRepairContaminatedEventIds: Set<string>;
   aliasRepairContaminatedRefKeys: Set<string>;
   aliasRepairHistoryById: Map<string, EventSpineEntry<EventRecord>[]>;
-  liveOwnerIdsByRefKey: Map<string, Set<string>>;
+  liveOwnerIdsByRefKey: Map<string, ReadonlySet<string>>;
   junctionSparseDayHistoryById: Map<string, {
     latest: { dayKey: string; revision: number };
     previous?: { dayKey: string; revision: number };
@@ -2429,7 +2433,11 @@ async function indexLatestEventsByExternalRef(
 
   const groupedByRefKey = new Map<string, IndexedEventExternalRefMatch[]>();
 
+  let indexedCount = 0;
   for (const state of entriesById.values()) {
+    if (signal && ++indexedCount % 256 === 0) {
+      await yieldToEventLoop();
+    }
     signal?.throwIfAborted();
     // Collapse each event id globally before indexing external refs. An event
     // whose latest revision moved to a corrected ref must not remain
@@ -2463,7 +2471,11 @@ async function indexLatestEventsByExternalRef(
     }
   }
 
+  let groupedCount = 0;
   for (const [refKey, group] of groupedByRefKey) {
+    if (signal && ++groupedCount % 256 === 0) {
+      await yieldToEventLoop();
+    }
     signal?.throwIfAborted();
     // Preserve the prior duplicate-ref behavior: if multiple live ids still
     // claim one external ref, reconcile against the latest comparable spine.
@@ -2475,7 +2487,7 @@ async function indexLatestEventsByExternalRef(
   }
 
   const junctionNoIdProfilePredecessorsByScope =
-    indexJunctionNoIdProfilePredecessors(latestByRefKey.values());
+    await indexJunctionNoIdProfilePredecessors(latestByRefKey.values(), signal);
 
   return {
     aliasRepairContaminatedEventIds,
@@ -2496,12 +2508,14 @@ async function loadBoundedAliasRepairHistories(
   vaultRoot: string,
   relativePaths: readonly string[],
   eventIds: ReadonlySet<string>,
+  signal?: AbortSignal | null,
 ): Promise<Map<string, EventSpineEntry<EventRecord>[]>> {
   const histories = new Map<string, EventSpineEntry<EventRecord>[]>();
   for (const relativePath of relativePaths) {
     await visitJsonlRecordsInterruptible({
       vaultRoot,
       relativePath,
+      signal,
       visit(raw) {
         const parsed = safeParseContract(eventRecordSchema, raw);
         if (!parsed.success || !eventIds.has(parsed.data.id)) {
@@ -2658,11 +2672,17 @@ function isJunctionNoIdProfilePredecessor(
   return junctionNoIdProfileProviderBaselineRevision(match) !== null;
 }
 
-function indexJunctionNoIdProfilePredecessors(
+async function indexJunctionNoIdProfilePredecessors(
   matches: Iterable<IndexedEventExternalRefMatch>,
-): Map<string, IndexedEventExternalRefMatch[]> {
+  signal?: AbortSignal | null,
+): Promise<Map<string, IndexedEventExternalRefMatch[]>> {
   const byScope = new Map<string, IndexedEventExternalRefMatch[]>();
+  let matchCount = 0;
   for (const match of matches) {
+    if (signal && ++matchCount % 256 === 0) {
+      await yieldToEventLoop();
+    }
+    signal?.throwIfAborted();
     if (!isJunctionNoIdProfilePredecessor(match)) {
       continue;
     }
@@ -3133,6 +3153,9 @@ function selectLatestIndexedEventExternalRefMatch(
   if (entries.length === 0) {
     return null;
   }
+  if (entries.length === 1) {
+    return entries[0]!;
+  }
 
   const hasOrderedImportSourceVersions = entries.every((entry) =>
     entry.record.source === "import"
@@ -3565,7 +3588,9 @@ async function buildDeviceEventIdentityContext(
   vaultRoot: string,
   entries: readonly PreparedDeviceEventEntry[],
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
+  signal?: AbortSignal | null,
 ): Promise<DeviceEventIdentityContext> {
+  signal?.throwIfAborted();
   if (entries.length === 0 && authoritativeEventSets.length === 0) {
     return {
       index: {
@@ -3584,8 +3609,11 @@ async function buildDeviceEventIdentityContext(
       legacyReservations: new Map(),
     };
   }
-  const shardPaths = await listEventLedgerShardPaths(vaultRoot);
-  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
+  const { relativePaths: shardPaths } = await listEventLedgerShardPathsInterruptible({
+    vaultRoot,
+    signal,
+  });
+  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
   const context: DeviceEventIdentityContext = { index, legacyReservations: new Map() };
   // A legitimate primary spine may advance before the duplicate is repaired.
   // Load only structural candidates first so reservations can use the bounded
@@ -3608,6 +3636,7 @@ async function buildDeviceEventIdentityContext(
       vaultRoot,
       shardPaths,
       aliasRepairOwnerIds,
+      signal,
     );
   }
   context.legacyReservations = buildLegacyExternalRefReservations(entries, index);
@@ -3635,9 +3664,7 @@ function cloneDeviceEventIdentityContext(
       junctionSparseDayHistoryById: context.index.junctionSparseDayHistoryById,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
-      liveOwnerIdsByRefKey: new Map(
-        [...context.index.liveOwnerIdsByRefKey].map(([key, ids]) => [key, new Set(ids)]),
-      ),
+      liveOwnerIdsByRefKey: new Map(context.index.liveOwnerIdsByRefKey),
       maxRevisionById: new Map(context.index.maxRevisionById),
       revisionsById: new Map(
         [...context.index.revisionsById].map(([id, revisions]) => [id, new Set(revisions)]),
@@ -7779,6 +7806,7 @@ export async function importDeviceBatch(
     totalElapsedMs: 0,
   };
   try {
+    options.signal?.throwIfAborted();
     return await importDeviceBatchWithExecutionOptions(input, options, timing);
   } catch (error) {
     clearDeviceBatchImportSessionVaultState(options.session, input.vaultRoot);
@@ -7820,9 +7848,11 @@ timing: DeviceBatchImportTiming,
     ingestReceipt,
     provenance,
   });
+  options.signal?.throwIfAborted();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
   const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
     dedupeWithinPlan: true,
+    signal: options.signal,
   });
   const requiresEventIdentityContext = deviceBatchPlan.preparedEvents.length > 0
     || deviceBatchPlan.authoritativeEventSets.length > 0;
@@ -7851,6 +7881,7 @@ timing: DeviceBatchImportTiming,
       vaultRoot,
       deviceBatchPlan.preparedEvents,
       deviceBatchPlan.authoritativeEventSets,
+      options.signal,
     );
   if (
     cachedEventIdentityContext
@@ -7865,10 +7896,12 @@ timing: DeviceBatchImportTiming,
       vaultRoot,
       deviceBatchPlan.preparedEvents,
       deviceBatchPlan.authoritativeEventSets,
+      options.signal,
     );
   } else if (cachedEventIdentityContext) {
     timing.eventIdentityIndexCacheHit = true;
   }
+  options.signal?.throwIfAborted();
   timing.eventIdentityIndexElapsedMs = Math.max(0, performance.now() - indexStartedAt);
   if (options.session && requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
     const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
@@ -8459,6 +8492,7 @@ timing: DeviceBatchImportTiming,
     const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, eventReconciliation.appendEntries, {
       dedupeWithinPlan: true,
       forceAppendIds: eventReconciliation.forceAppendIds,
+      signal: options.signal,
     });
     const eventRecords = eventReconciliation.records;
     const canonicalIdByPreparedId = mapPreparedDeviceEventsToCanonicalIds(
@@ -8622,6 +8656,9 @@ timing: DeviceBatchImportTiming,
   try {
     persistence = await preparePersistence(exactState);
   } catch (error) {
+    if (options.signal?.aborted) {
+      throw error;
+    }
     await ensureFullInspection();
     exactState = inspectExactDeliveryState();
     if (exactState.authorizedStoredDelivery) {
@@ -8721,6 +8758,11 @@ timing: DeviceBatchImportTiming,
     return buildNoopResult();
   }
 
+  // Publication must finish atomically once started; only preparation yields.
+  if (options.signal) {
+    await yieldToEventLoop();
+    options.signal.throwIfAborted();
+  }
   const canonicalWriteStartedAt = performance.now();
   const result: ImportDeviceBatchResult = await runCanonicalWrite({
     vaultRoot,
