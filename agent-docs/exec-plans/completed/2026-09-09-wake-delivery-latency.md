@@ -57,6 +57,18 @@ infer transport/authentication durations from merged competing wake traces.
   runs passed 264 cases. Web, Cloudflare, hosted-execution and control-client
   typechecks passed. Parent source review and complexity guard passed; the
   existing parser and reconciliation hotspots did not gain complexity.
-- Required exact-head PR review and CI are next. No production deployment yet.
+- PR #3087 round 1 passed with no qualifying findings on the pushed candidate.
+  The exact-turn capture and response hash match the independently captured
+  gpt-6-pro model metadata. The response text self-attested UNKNOWN; acceptance
+  uses that exact-response model evidence, confirmed attachment, substantive
+  full-snapshot review, and more than 301 seconds of attached response waiting.
+  An earlier browser attempt failed before staging and was recovered on another
+  existing lane without changing the candidate or completing a review round.
+- All candidate CI checks passed. This final plan closure changes documentation
+  only; final-head CI and merge remain operational gates. Production deployment
+  and observed latency improvement are not claimed by this completed code plan.
 - Production latency improvement remains unmeasured; this patch closes the
   request-attribution and facts-stage evidence gaps for the next observation.
+Status: completed
+Updated: 2026-09-09
+Completed: 2026-09-09
