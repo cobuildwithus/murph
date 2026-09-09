@@ -8,7 +8,12 @@
     "title": "Clearer Murph troubleshooting",
     "summary": "In private chat, Murph can inspect available diagnostic information when you ask about a problem with your account.",
     "details": "Troubleshooting reads relevant status information without changing your data. Credentials and information outside your workspace remain protected.",
-    "relevanceTags": ["assistant", "reliability"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "assistant",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3106
+    ]
   }
 }
