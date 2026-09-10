@@ -1942,6 +1942,40 @@ Preserve the encrypted-only writer rollback floor during this rollout. Once
 the columns are dropped, the encrypted-only reader build becomes the schema
 compatibility floor; use a compatible deployment or forward fix.
 
+### Held phone-call plaintext column removal
+
+The contract migration
+`20260910220000_drop_hosted_phone_call_plaintext` is the final stage of phone
+private-content retirement. **Hold this PR's merge until the earlier deletion
+capability has removed the authorized legacy records, the plaintext-empty
+predeploy guard has passed, and the encrypted-only reader deployment is live.**
+The contract workflow runs automatically on production deployment and supplies
+its own opt-in flag; that flag does not keep merged SQL from executing.
+
+Before merging the final contract PR, the execution owner must prove the exact
+production alias remains on the encrypted-only reader revision and prove that
+every older phone-call function invocation and deployment-pinned phone Workflow
+has finished. Keep new calls on the encrypted-only reader revision. A generic
+function-lifetime delay is insufficient for durable Workflows, which may retain
+their original deployment. Neither this SQL nor the deployment workflow can
+infer that drain from phone-row age or terminal status.
+
+The SQL requires the applied
+`20260910210000_require_hosted_phone_call_encrypted_private_content` Prisma
+migration, locks the phone table, and refuses to drop either legacy column while
+either JSON value is other than SQL NULL or JSON `null`. It then removes only
+`brief_json` and `result_json`; encrypted content, call metadata, usage, and billing remain
+intact. The existing contract owner supplies lock and statement deadlines and
+records the migration checksum. This guard protects stored content; it does not
+replace the old-reader and Workflow drain proof.
+
+After execution, verify the contract ledger entry, absence of both legacy
+columns, and a current encrypted call read. The encrypted-only reader revision
+becomes the schema rollback floor: older Prisma clients still selecting either
+column are incompatible. A rollback to them requires a separately reviewed
+schema restoration and compatible deployment. No production deployment,
+database mutation, secret access, or rollback is part of preparing this PR.
+
 ## Production build memory guard
 
 The hosted web production build must keep fitting Vercel's Standard build
