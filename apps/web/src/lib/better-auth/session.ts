@@ -6,7 +6,10 @@ import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { createHostedBetterAuth } from "./auth";
+import { betterAuth } from "better-auth";
+import { createAuthEndpoint } from "better-auth/api";
+import { createHostedBetterAuth, hostedBetterAuthOptions } from "./auth";
+import { AuthRecordChangedError } from "./adapter";
 import { openAuthRecord } from "./record-crypto";
 import type { HostedAuthTransport } from "./admission";
 import { hostedAuthCookieName } from "./transport";
@@ -76,7 +79,27 @@ export async function revokeHostedAuthSession(input: { baseURL: string; secret: 
   const headers = input.transport === "browser"
     ? new Headers({ cookie: `${hostedAuthCookieName(process.env.NODE_ENV === "production")}=${input.credential}` })
     : new Headers({ authorization: `Bearer ${input.credential}` });
-  await createSessionAuth(input).api.signOut({ headers });
+  const options = hostedBetterAuthOptions({ ...input, delivery: sessionOnlyDelivery });
+  const auth = betterAuth({ ...options, plugins: [...options.plugins, {
+    id: "murph-durable-logout",
+    endpoints: { durablyRevokeSession: createAuthEndpoint("/murph-durable-logout", { method: "POST", requireHeaders: true }, async (ctx) => {
+      const token = await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret);
+      if (!token) return;
+      // The library signOut endpoint suppresses deletion failures. This private
+      // endpoint acknowledges only an authenticated deletion or an absent row.
+      // CAS conflicts retry against fresh authenticated ciphertext; outages and
+      // repeated conflicts propagate, so success always means durable revocation.
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await ctx.context.adapter.delete({ model: "session", where: [{ field: "token", value: token }] });
+          return;
+        } catch (error) {
+          if (!(error instanceof AuthRecordChangedError) || attempt >= 2) throw error;
+        }
+      }
+    }) },
+  }] });
+  await auth.api.durablyRevokeSession({ headers });
 }
 
 export function buildHostedAuthSessionClearCookie(): string {
@@ -85,10 +108,10 @@ export function buildHostedAuthSessionClearCookie(): string {
 }
 
 function createSessionAuth(input: { baseURL: string; secret: string; prisma: PrismaClient }) {
-  return createHostedBetterAuth({
-    ...input, delivery: {
-      email: async () => { throw new Error("Session operations cannot send codes."); },
-      sms: async () => { throw new Error("Session operations cannot send codes."); },
-    },
-  });
+  return createHostedBetterAuth({ ...input, delivery: sessionOnlyDelivery });
 }
+
+const sessionOnlyDelivery = {
+  email: async () => { throw new Error("Session operations cannot send codes."); },
+  sms: async () => { throw new Error("Session operations cannot send codes."); },
+};

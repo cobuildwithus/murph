@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
 
-const mocks = vi.hoisted(() => ({ verify: vi.fn(), lookup: vi.fn(), deletion: vi.fn(), open: vi.fn(), find: vi.fn() }));
+const mocks = vi.hoisted(() => ({ verify: vi.fn(), lookup: vi.fn(), deletion: vi.fn(), open: vi.fn(), find: vi.fn(), identity: vi.fn() }));
 vi.mock("../src/lib/hosted-onboarding/privy", () => ({ verifyHostedPrivyIdentityToken: mocks.verify }));
-vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ lookupHostedMemberIdentityByPrivyUserId: mocks.lookup }));
+vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ lookupHostedMemberIdentityByPrivyUserId: mocks.lookup, projectHostedMemberIdentityState: mocks.identity }));
 vi.mock("../src/lib/hosted-onboarding/member-identity-service", () => ({ assertHostedPrivyAccountDeletionNotPending: mocks.deletion }));
 vi.mock("../src/lib/better-auth/record-crypto", () => ({ openAuthRecord: mocks.open }));
 import { resolveHostedLegacyNativeMember } from "../src/lib/better-auth/legacy-native";
@@ -20,6 +20,8 @@ beforeEach(() => {
   mocks.verify.mockResolvedValue({ id: principal, linked_accounts: [{ type: "email", address: "unrelated@example.test" }] });
   mocks.lookup.mockResolvedValue({ core: member, identity: { privyUserId: principal } });
   mocks.find.mockResolvedValue(null);
+  vi.spyOn(prisma.hostedMemberIdentity, "findUnique").mockResolvedValue({ memberId: member.id } as Awaited<ReturnType<typeof prisma.hostedMemberIdentity.findUnique>>);
+  mocks.identity.mockResolvedValue({ privyUserId: principal });
   mocks.deletion.mockResolvedValue(undefined);
 });
 

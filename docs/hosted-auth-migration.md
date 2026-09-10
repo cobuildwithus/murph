@@ -55,7 +55,10 @@ handler is exposed. A successful browser OTP response sets only its cookie;
 native completion returns the prefixed bearer and sets no cookies. Session GET
 reads; POST renews. Renewal preserves the token and primary-auth time. Login
 commits before retryable product bootstrap, so billing/runtime projection errors
-do not lose a completed login.
+do not lose a completed login. Logout authenticates and deletes the session
+through the protected adapter, retries bounded renewal conflicts, and propagates
+storage failures. Better Auth's best-effort sign-out response is not evidence of
+durable revocation.
 
 Before widening, prove hosted email/SMS delivery, same-member login, consent and
 billing continuations, settings recovery, cross-format logout and background

@@ -15,7 +15,7 @@ export interface HostedAuthDelivery {
 // Instances are private to the hosted authentication owner. Do not expose the
 // library's catch-all handler: the route owner controls transport, contact
 // reconciliation and the database-only login completion transaction.
-export function createHostedBetterAuth(input: {
+export function hostedBetterAuthOptions(input: {
   baseURL: string;
   database?: BetterAuthOptions["database"];
   delivery: HostedAuthDelivery;
@@ -26,7 +26,7 @@ export function createHostedBetterAuth(input: {
   secret: string;
 }) {
   if (input.secret.length < 32) throw new TypeError("Better Auth requires a configured secret.");
-  return betterAuth({
+  return {
     appName: "Murph", baseURL: input.baseURL, basePath: "/api/auth",
     secret: input.secret, trustedOrigins: [new URL(input.baseURL).origin],
     database: input.database ?? hostedAuthAdapter(input.prisma),
@@ -102,5 +102,9 @@ export function createHostedBetterAuth(input: {
         },
       }),
     ],
-  });
+  } satisfies BetterAuthOptions;
+}
+
+export function createHostedBetterAuth(input: Parameters<typeof hostedBetterAuthOptions>[0]) {
+  return betterAuth(hostedBetterAuthOptions(input));
 }

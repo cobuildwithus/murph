@@ -14,12 +14,17 @@ vi.mock("../src/lib/hosted-onboarding/privy", async (original) => ({
 // synthetic port; the shared member codec checks member/field binding.
 vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
   ...await original<typeof import("../src/lib/hosted-crypto/domain-root-store")>(),
+  provisionActiveHostedDomainRootEnvelopeForUserOnly: async () => undefined,
   prepareHostedDomainRootForWeb: async ({ userId }: { userId: string }) => ({ domain: "control", userId, rootKeyId: "synthetic-root" }),
   revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({ rootKey: Buffer.alloc(32, 7) }) }),
 }));
 
 import { POST as sendBrowserCode } from "../app/api/auth/otp/send/route";
 import { POST as verifyBrowserCode } from "../app/api/auth/otp/verify/route";
+import { POST as logoutBrowser } from "../app/api/auth/logout/route";
+import { POST as logoutNative } from "../app/api/device-sync/companion/auth/logout/route";
+import { POST as completeBrowserAuthentication } from "../app/api/auth/complete/route";
+import { claimHostedSignupReferralLink, issueHostedSignupReferralLink } from "../src/lib/hosted-growth/signup-referral";
 import { POST as sendNativeCode } from "../app/api/device-sync/companion/auth/otp/send/route";
 import { POST as verifyNativeCode } from "../app/api/device-sync/companion/auth/otp/verify/route";
 import { getPrisma } from "../src/lib/prisma";
@@ -149,6 +154,15 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
           headers: { cookie: cookie?.split(";")[0] ?? "" },
         }));
         expect(current?.member.id).toBe(result.memberId);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const completion = await completeBrowserAuthentication(new Request(`${baseURL}/api/auth/complete`, {
+            method: "POST", headers: { origin: baseURL, cookie: cookie?.split(";")[0] ?? "" },
+          }));
+          expect(completion.status).toBe(200);
+          expect(await completion.json()).toMatchObject({ ok: true, launchConsentGranted: false });
+        }
+        expect(await readHostedMemberIdentity({ memberId: result.memberId, prisma })).toMatchObject({ privyUserId: null });
+        expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: result.memberId } })).billingStatus).toBe("not_started");
       } else {
         expect(Object.keys(result).sort()).toEqual(["memberId", "ok", "token"]);
         expect(result.token).toMatch(/^murph_auth_v1\.[A-Za-z0-9]{32}$/u);
@@ -160,6 +174,36 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       await prisma.hostedMember.deleteMany({ where: { id: result.memberId } });
       await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateIds } } });
     }
+  });
+
+  it.each(["email", "phone"] as const)("claims a pristine referral member with %s proof without losing attribution", async (kind) => {
+    const prisma = getPrisma(); const referrerMemberId = `auth-referrer-${randomUUID()}`;
+    const value = kind === "email" ? `referral-${randomUUID()}@example.test` : "+12025550147";
+    await prisma.hostedMember.create({ data: { id: referrerMemberId } });
+    let memberId = "";
+    try {
+      const referral = await issueHostedSignupReferralLink({ referrerMemberId, prisma, publicBaseUrl: configuration().baseURL });
+      const claim = await claimHostedSignupReferralLink({
+        referralCode: decodeURIComponent(new URL(referral.signupUrl).pathname.split("/").at(-1)!),
+        prisma, publicBaseUrl: configuration().baseURL,
+      });
+      const inviteCode = decodeURIComponent(new URL(claim.signupUrl).pathname.split("/").at(-1)!);
+      const invite = await prisma.hostedInvite.findUniqueOrThrow({ where: { inviteCode } });
+      memberId = invite.memberId;
+      const membersBefore = await prisma.hostedMember.count();
+      const selected = contact(kind, value);
+      const prepared = await prepareHostedAuthOtpMember({ contact: selected, prisma, inviteCode });
+      expect(prepared.memberId).toBe(memberId);
+      const otp = await send(kind, value);
+      await prisma.hostedInvite.update({ where: { id: invite.id }, data: { expiresAt: new Date(0) } });
+      await expect(commitHostedAuthOtp({ ...configuration(), ...prepared, otp })).rejects.toMatchObject({ code: "INVITE_EXPIRED" });
+      expect(await prisma.hostedAuthRecord.count({ where: { model: "user", memberId } })).toBe(0);
+      await prisma.hostedInvite.update({ where: { id: invite.id }, data: { expiresAt: invite.expiresAt } });
+      const result = await commitHostedAuthOtp({ ...configuration(), ...prepared, otp });
+      expect(result.memberId).toBe(memberId);
+      expect(await prisma.hostedMember.count()).toBe(membersBefore);
+      expect(await prisma.hostedInvite.findUniqueOrThrow({ where: { id: invite.id } })).toMatchObject({ memberId, referrerMemberId });
+    } finally { await prisma.hostedMember.deleteMany({ where: { id: { in: [memberId, referrerMemberId] } } }); }
   });
 
   it("claims the existing text-first email stub after proof and rejects a mismatched invite", async () => {
@@ -282,6 +326,67 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       memberId, sessionId: session.sessionId, authProof: session.authProof, request: both, prisma: tx,
     }))).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
   }));
+
+  it.each(["browser", "native"] as const)("durably revokes %s logout when renewal wins the first deletion race", (transport) => legacyFixture(async (memberId, phone) => {
+    const { prisma, issued, browserRequest, nativeRequest, options } = await logoutFixture(memberId, phone);
+    const token = issued.token;
+    const adapter = hostedAuthAdapter(prisma)({});
+    await adapter.update({ model: "session", where: [{ field: "token", value: token }], update: {
+      updatedAt: new Date(Date.now() - 2 * 86_400_000), expiresAt: new Date(Date.now() + 28 * 86_400_000),
+    } });
+    const before = await readHostedNativeMemberAuth(nativeRequest, prisma);
+    const originalDelete = prisma.hostedAuthRecord.deleteMany.bind(prisma.hostedAuthRecord);
+    const deletion = vi.spyOn(prisma.hostedAuthRecord, "deleteMany").mockImplementationOnce((args) => {
+      const pending = (async () => {
+      const renewed = await readHostedAuthSession({ ...options, credential: token, transport: "native", refresh: true });
+      expect(renewed.session?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+        return originalDelete(args);
+      })();
+      return {
+        then: pending.then.bind(pending), catch: pending.catch.bind(pending), finally: pending.finally.bind(pending),
+        [Symbol.toStringTag]: "PrismaPromise",
+      };
+    });
+    try {
+      const response = await (transport === "browser" ? logoutBrowser(browserRequest) : logoutNative(nativeRequest));
+      expect(response.status).toBe(200);
+      expect(await getHostedAppSessionFromRequest(browserRequest)).toBeNull();
+      expect(deletion).toHaveBeenCalledTimes(2);
+      await expect(readHostedNativeMemberAuth(nativeRequest, prisma)).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
+      await expect(prisma.$transaction((tx) => assertHostedNativeMemberAuthCurrentTx(before, tx))).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
+      expect((await (transport === "browser" ? logoutBrowser(browserRequest) : logoutNative(nativeRequest))).status).toBe(200);
+    } finally { deletion.mockRestore(); }
+  }));
+
+  it.each(["browser", "native"] as const)("does not acknowledge %s logout after a storage deletion failure", (transport) => legacyFixture(async (memberId, phone) => {
+    const { prisma, browserRequest, nativeRequest } = await logoutFixture(memberId, phone);
+    const deletion = vi.spyOn(prisma.hostedAuthRecord, "deleteMany").mockRejectedValueOnce(new Error("Synthetic session deletion failure"));
+    try {
+      const response = await (transport === "browser" ? logoutBrowser(browserRequest) : logoutNative(nativeRequest));
+      expect(response.status).toBe(500);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect((await getHostedAppSessionFromRequest(browserRequest))?.member.id).toBe(memberId);
+      expect((await readHostedNativeMemberAuth(nativeRequest, prisma)).member.id).toBe(memberId);
+    } finally { deletion.mockRestore(); }
+  }));
+
+  async function logoutFixture(memberId: string, phone: string) {
+    const prisma = getPrisma();
+    const secret = Buffer.alloc(32, 29).toString("base64url");
+    const baseURL = "http://localhost:3000";
+    vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", secret);
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
+    const prepared = await prepareHostedAuthOtpMember({ prisma, contact: contact("phone", phone) });
+    const issued = await commitHostedAuthOtp({ ...configuration(), baseURL, secret, ...prepared, otp: await send("phone", phone) });
+    expect(issued.memberId).toBe(memberId);
+    const cookie = issued.headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="))?.split(";")[0];
+    if (!cookie) throw new Error("Expected a browser session credential.");
+    const browserRequest = new Request(`${baseURL}/api/auth/logout`, { method: "POST", headers: { cookie, origin: baseURL } });
+    const nativeRequest = new Request(`${baseURL}/api/device-sync/companion/auth/logout`, {
+      method: "POST", headers: { authorization: `Bearer murph_auth_v1.${issued.token}` },
+    });
+    return { prisma, issued, browserRequest, nativeRequest, options: { baseURL, secret, prisma } };
+  }
 
   it("rejects provider disagreement and a stale canonical snapshot", () => legacyFixture(async (memberId) => {
     const prisma = getPrisma();

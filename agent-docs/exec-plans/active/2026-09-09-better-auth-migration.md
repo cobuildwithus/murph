@@ -159,3 +159,35 @@ remain. No PR 2 deployment or production import
 has occurred. Local member crypto/KMS ports are synthetic; actual installed Better
 Auth, PostgreSQL, pre-auth AEAD and signed JWT/WebAuthn fixtures provide boundary
 proof, not hosted delivery or real-device qualification.
+
+
+## PR 2 review remediation
+
+The valid first substantive review at dd276e29cd708954f0d8c8ab31d804a8d2695440
+identified three high-impact bugs. All were independently reproduced and accepted:
+new email signup lacked the canonical identity required by product completion;
+pristine referral targets were omitted from OTP member selection; and concurrent
+session renewal or a storage deletion failure could produce false-success logout.
+
+The email owner now creates the missing identity scaffold through the existing
+writer. Invite selection retains claimability, expiry, contact conflicts and
+member-locked revalidation. The logout owner verifies the signed credential and
+uses authenticated adapter deletion with three bounded attempts for ciphertext
+conflicts; other failures propagate. No new persisted state or weaker guard was
+introduced. Tests exercise actual product completion, real referral allocation,
+and both public logout routes. The prior logout implementation fails all four
+race/storage regressions.
+
+Two composed native-auth fixture suites now follow the shared verifier and
+preserve the original identity-verification/member-lookup stage boundaries. An
+unintended OpenAI peer-lock change duplicated Zod in the CLI bundle; its previous
+peer resolution is restored without raising the size budget. Final focused checks pass: 40 PostgreSQL cases, 119 affected native-route
+regressions, Web typecheck, changed-file lint, documentation drift and complexity.
+The second substantive review and exact-head CI gate this remediation.
+
+Tooling retries did not advance the review counter. The invalid first capture
+requested missing installed dependency source. A plaintext-source staging retry
+failed before send. The successful retry included the complete compressed,
+hash-verified Better Auth 1.7.3 dependency source and the guarded repository ZIP.
+The completed response came from the requested Pro model and inspected both
+repository and decoded dependency contracts. No deployment or activation occurred.

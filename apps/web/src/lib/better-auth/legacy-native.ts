@@ -1,11 +1,16 @@
 import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import { verifyHostedPrivyIdentityToken } from "../hosted-onboarding/privy";
-import { lookupHostedMemberIdentityByPrivyUserId } from "../hosted-onboarding/hosted-member-identity-store";
+import { lookupHostedMemberIdentityByPrivyUserId, projectHostedMemberIdentityState } from "../hosted-onboarding/hosted-member-identity-store";
 import { assertHostedPrivyAccountDeletionNotPending } from "../hosted-onboarding/member-identity-service";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { openAuthRecord } from "./record-crypto";
+
+export type HostedNativeMemberAuthStage = "identity_token_verification" | "member_lookup";
+export interface HostedNativeMemberAuthOptions {
+  runStage?<T>(stage: HostedNativeMemberAuthStage, run: () => Promise<T>): Promise<T>;
+}
 
 // Legacy admission has no member creation, credential synchronization, invite,
 // consent, grant or activation side effects. JWT contact claims are irrelevant:
@@ -13,24 +18,31 @@ import { openAuthRecord } from "./record-crypto";
 export async function resolveHostedLegacyNativeMember(input: {
   token: string;
   prisma: PrismaClient;
-}) {
-  const principal = await verifyHostedPrivyIdentityToken(input.token);
+}, options: HostedNativeMemberAuthOptions = {}) {
+  const runStage = options.runStage ?? ((_stage, run) => run());
+  const principal = await runStage("identity_token_verification", () => verifyHostedPrivyIdentityToken(input.token));
   const expiresAt = readVerifiedTokenExpiry(input.token);
-  await assertHostedPrivyAccountDeletionNotPending({ prisma: input.prisma, privyUserId: principal.id });
+  return runStage("member_lookup", () => readLegacyMember(input.prisma, principal.id, expiresAt));
+}
+
+async function readLegacyMember(prisma: PrismaClient, privyUserId: string, expiresAt: Date) {
+  await assertHostedPrivyAccountDeletionNotPending({ prisma, privyUserId });
   const match = await lookupHostedMemberIdentityByPrivyUserId({
-    privyUserId: principal.id, prisma: input.prisma,
+    privyUserId, prisma,
   });
   // The blind index routes the read; encrypted identity proves the binding.
-  if (!match || match.identity.privyUserId !== principal.id) throw legacyNativeUnavailable();
+  if (!match || match.identity.privyUserId !== privyUserId) throw legacyNativeUnavailable();
   assertHostedMemberNotSuspended(match.core);
-  const row = await input.prisma.hostedAuthRecord.findUnique({
+  const row = await prisma.hostedAuthRecord.findUnique({
     where: { model_id: { model: "user", id: match.core.id } },
   });
   if (row) {
-    const user = await openAuthRecord(row, input.prisma);
+    const user = await openAuthRecord(row, prisma);
     if (user.credentialsChangedAt !== null) throw legacyNativeUnavailable();
   }
-  return { member: match.core, privyUserId: principal.id, expiresAt, userRow: row };
+  const identityRow = await prisma.hostedMemberIdentity.findUnique({ where: { memberId: match.core.id } });
+  if (!identityRow || (await projectHostedMemberIdentityState(identityRow, prisma)).privyUserId !== privyUserId) throw legacyNativeUnavailable();
+  return { member: match.core, privyUserId, expiresAt, userRow: row, identityRow };
 }
 
 function legacyNativeUnavailable() {

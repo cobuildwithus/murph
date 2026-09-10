@@ -1,13 +1,13 @@
 import "server-only";
 import type { HostedAuthRecord, HostedMemberIdentity, Prisma, PrismaClient } from "@prisma/client";
 import { readHostedMemberCoreState, type HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
-import { projectHostedMemberIdentityState } from "../hosted-onboarding/hosted-member-identity-store";
 import { assertHostedPrivyAccountDeletionNotPending } from "../hosted-onboarding/member-identity-service";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { classifyHostedNativeCredential } from "./transport";
 import { requireHostedBetterAuthConfig } from "./config";
-import { resolveHostedLegacyNativeMember } from "./legacy-native";
+import { resolveHostedLegacyNativeMember, type HostedNativeMemberAuthOptions } from "./legacy-native";
+export type { HostedNativeMemberAuthOptions, HostedNativeMemberAuthStage } from "./legacy-native";
 import { assertHostedAuthSessionCurrentTx, readHostedAuthSession, type HostedAuthSessionProof } from "./session";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 
@@ -16,12 +16,6 @@ export type HostedNativeMemberAuth = { member: HostedMemberCoreState } & (
   | { kind: "legacy"; privyUserId: string; expiresAt: Date; identityRow: HostedMemberIdentity; userRow: HostedAuthRecord | null }
 );
 
-export type HostedNativeMemberAuthStage = "identity_token_verification" | "member_lookup";
-export interface HostedNativeMemberAuthOptions {
-  // Keep existing diagnostics phase names stable during the migration.
-  runStage?<T>(stage: HostedNativeMemberAuthStage, run: () => Promise<T>): Promise<T>;
-}
-
 export async function readHostedNativeMemberAuth(request: Request, prisma: PrismaClient, options: HostedNativeMemberAuthOptions = {}): Promise<HostedNativeMemberAuth> {
   const credential = classifyHostedNativeCredential({
     authorization: request.headers.get("authorization"), cookie: request.headers.get("cookie"),
@@ -29,12 +23,8 @@ export async function readHostedNativeMemberAuth(request: Request, prisma: Prism
   });
   const runStage = options.runStage ?? ((_stage, run) => run());
   if (credential.kind === "legacy") {
-    const legacy = await runStage("identity_token_verification", () => resolveHostedLegacyNativeMember({ token: credential.token, prisma }));
-    return runStage("member_lookup", async () => {
-      const identityRow = await prisma.hostedMemberIdentity.findUnique({ where: { memberId: legacy.member.id } });
-      if (!identityRow || (await projectHostedMemberIdentityState(identityRow, prisma)).privyUserId !== legacy.privyUserId) throw authRequired();
-      return { ...legacy, identityRow, kind: "legacy" };
-    });
+    const legacy = await resolveHostedLegacyNativeMember({ token: credential.token, prisma }, options);
+    return { ...legacy, kind: "legacy" };
   }
   const result = await runStage("identity_token_verification", () => readHostedAuthSession({
     ...requireHostedBetterAuthConfig(), prisma, credential: credential.token, transport: "native",

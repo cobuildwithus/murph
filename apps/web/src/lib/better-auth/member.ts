@@ -49,7 +49,7 @@ export async function prepareHostedAuthOtpMember(input: {
 }): Promise<PreparedHostedAuthOtpMember> {
   const invite = input.inviteCode
     ? await requireHostedInviteForAuthentication(input.inviteCode, input.prisma, new Date()) : null;
-  const prepared = await prepareContactMember(input);
+  const prepared = await prepareContactMember({ ...input, invitedMemberId: invite?.member.id });
   if (!invite) return prepared;
   if (invite.member.id !== prepared.memberId) throw new HostedAuthMigrationConflictError();
   return { ...prepared, commitMember: async (tx) => {
@@ -59,7 +59,7 @@ export async function prepareHostedAuthOtpMember(input: {
   } };
 }
 
-async function prepareContactMember(input: { contact: HostedLinqParticipantContact; prisma: PrismaClient }): Promise<PreparedHostedAuthOtpMember> {
+async function prepareContactMember(input: { contact: HostedLinqParticipantContact; prisma: PrismaClient; invitedMemberId?: string }): Promise<PreparedHostedAuthOtpMember> {
   const { contact, prisma } = input;
   const selector = authLookupKey("user", contact.kind === "email" ? "email" : "phoneNumber", contact.value);
   const row = await prisma.hostedAuthRecord.findFirst({ where: {
@@ -92,7 +92,7 @@ async function prepareContactMember(input: { contact: HostedLinqParticipantConta
     if (prepared.kind === "already_owned") throw new HostedAuthMigrationConflictError();
     if (prepared.kind === "prepared") return prepareImportedLogin(prepared, contact, prisma);
   }
-  return prepareUnclaimedLogin(prisma, contact, member?.id ?? null);
+  return prepareUnclaimedLogin(prisma, contact, member?.id ?? null, member ? undefined : input.invitedMemberId);
 }
 
 async function prepareImportedLogin(prepared: PreparedHostedAuthImport, contact: HostedLinqParticipantContact, prisma: PrismaClient): Promise<PreparedHostedAuthOtpMember> {
@@ -112,10 +112,28 @@ async function prepareImportedLogin(prepared: PreparedHostedAuthImport, contact:
   } };
 }
 
-async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqParticipantContact, existingId: string | null): Promise<PreparedHostedAuthOtpMember> {
-  const memberId = existingId ?? generateHostedMemberId();
+async function assertPristineInviteMember(prisma: Client, memberId: string): Promise<void> {
+  const [member, identity, email, routing, user] = await Promise.all([
+    prisma.hostedMember.findUnique({ where: { id: memberId }, select: {
+      billingStatus: true, suspendedAt: true, initialOnboardingCompletedAt: true,
+      identity: { select: { linqEmailHandleEncrypted: true } },
+    } }),
+    readHostedMemberIdentity({ memberId, prisma }),
+    prisma.hostedMemberEmailAuthorization.findUnique({ where: { memberId }, select: { memberId: true } }),
+    prisma.hostedMemberRouting.findUnique({ where: { memberId }, select: { memberId: true } }),
+    prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } }, select: { id: true } }),
+  ]);
+  if (!member || member.billingStatus !== HostedBillingStatus.not_started || member.suspendedAt || member.initialOnboardingCompletedAt
+    || identity?.privyUserId || identity?.phoneNumber || identity?.signupPhoneNumber || member.identity?.linqEmailHandleEncrypted || email || routing || user) {
+    throw new HostedAuthMigrationConflictError();
+  }
+}
+
+async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqParticipantContact, existingId: string | null, invitedMemberId?: string): Promise<PreparedHostedAuthOtpMember> {
+  const memberId = existingId ?? invitedMemberId ?? generateHostedMemberId();
+  if (invitedMemberId) await assertPristineInviteMember(prisma, memberId);
   const snapshot = await readHostedAuthSourceSnapshot(prisma, memberId);
-  const identity = existingId ? await readHostedMemberIdentity({ memberId, prisma }) : null;
+  const identity = existingId || invitedMemberId ? await readHostedMemberIdentity({ memberId, prisma }) : null;
   if (identity?.privyUserId) throw new HostedAuthMigrationConflictError();
   const root = await prepareHostedDomainRootForWeb({ domain: "control", prisma, userId: memberId, reason: "hosted-auth.signup" });
   const replyAlias = contact.kind === "email"
@@ -123,15 +141,21 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
   return { memberId, preparedControlRoot: root, commitMember: async (tx) => {
     await acquireHostedLinqParticipantContactLockTx({ contact, tx, lockTimeoutMs: 5_000 });
     await lockHostedMemberRow(tx, memberId, { timeoutMs: 5_000 });
+    if (invitedMemberId) await assertPristineInviteMember(tx, memberId);
     const current = await findCanonicalMember(tx, contact);
     const owned = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } } });
     if ((current?.id ?? null) !== existingId || owned || snapshot !== await readHostedAuthSourceSnapshot(tx, memberId)) {
       throw new HostedAuthMigrationConflictError();
     }
     if (current) assertHostedMemberNotSuspended(current);
-    else await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });
+    else if (!invitedMemberId) await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     if (contact.kind === "email") {
+      if (!identity) await upsertHostedMemberIdentity({
+        memberId, maskedPhoneNumberHint: null, phoneLookupKey: null, phoneNumber: null, phoneNumberVerifiedAt: null,
+        privyUserId: null, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null, signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
+      });
       await syncHostedMemberVerifiedEmailAuthorization({
         authSource: "better-auth",
         memberId, address: contact.value, verifiedAt: new Date(), preparedControlRoot: root, preparedReplyAlias: replyAlias, prisma: tx,
