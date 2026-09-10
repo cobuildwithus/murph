@@ -251,6 +251,13 @@ export async function runHostedDeviceSyncPass(
     snapshot: null,
   };
   let processedJobs = 0;
+  const yieldPass = () => buildHostedDeviceSyncYieldedPassResult({
+    processedJobs,
+    retainFollowUpWakeUntilCheckpoint: options.retainFollowUpWakeUntilCheckpoint ?? false,
+    service,
+    syncState,
+    wake,
+  });
 
   try {
     options.onStage?.("retry_fence");
@@ -401,14 +408,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     options.onStage?.("source_staleness");
@@ -418,14 +418,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     syncState = await reconcileHostedDeviceSyncPassControlPlane({
@@ -445,14 +438,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     options.onStage?.("dense_raw_retention");
@@ -468,14 +454,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     const serviceNextWakeAt = resolveHostedDeviceSyncServiceNextWakeAt(service);
@@ -522,14 +501,7 @@ export async function runHostedDeviceSyncPass(
     };
   } catch (error) {
     if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
     throw error;
   } finally {

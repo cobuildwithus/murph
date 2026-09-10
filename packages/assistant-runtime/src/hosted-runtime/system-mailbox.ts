@@ -55,14 +55,13 @@ import {
   mergeHostedSystemMailboxRollbackItems,
   projectHostedDeviceHintCoverage,
   projectHostedEligibleDirtyHintIds,
-  projectHostedSystemMailboxModelFreeFrontier,
+  selectHostedModelFreeSystemMailboxItems,
   projectHostedSystemMailboxRetainedDeviceWakeAdmission,
-  projectHostedSystemMailboxWakeOwnerFrontier,
   readHostedSystemMailboxContinuationItemIds,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeCandidate,
-  shouldProjectHostedSystemMailboxModelFreeFrontier,
+  usesHostedModelFreeSystemMailboxSelection,
   systemMailboxItemIsDue,
   updateHostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
@@ -314,6 +313,8 @@ export async function enqueueHostedSystemMailboxItem(input: {
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+  pendingOnly?: boolean;
+  excludedRouteActions?: readonly HostedSystemMailboxRouteAction[];
   allowedMailboxDedupeKeyPrefixes?: readonly string[] | null;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
@@ -344,6 +345,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       if (state.pending.length === 0) {
         return { result: null, write: false };
       }
+      if (input.pendingOnly && state.pending.some((item) =>
+        item.status === "sending" && input.allowedRouteActions?.includes(item.routeAction)
+      )) {
+        return { result: null, write: false };
+      }
       const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
         state, vaultRoot: input.vaultRoot,
       });
@@ -353,16 +359,15 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           state,
         });
       const modelFreeProjectedState =
-        shouldProjectHostedSystemMailboxModelFreeFrontier({
+        usesHostedModelFreeSystemMailboxSelection({
           allowedRouteActions: input.allowedRouteActions ?? null,
           allowedWakeKinds: input.allowedWakeKinds ?? null,
         })
-          ? projectHostedSystemMailboxModelFreeFrontier(admissionState, continuationItemIds)
-          : input.allowedRouteActions == null
-            ? projectHostedSystemMailboxWakeOwnerFrontier(admissionState, continuationItemIds)
-            : admissionState;
+          ? selectHostedModelFreeSystemMailboxItems(admissionState)
+          : admissionState;
       const eligibleItemIds = new Set(admissionState.pending.filter((item) =>
-        (
+        !input.excludedRouteActions?.includes(item.routeAction)
+        && (
           input.allowedRouteActions?.includes(item.routeAction)
           ?? item.routeAction !== "run-assistant-ask"
         )
@@ -397,6 +402,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       const eligibleDirtyHintIds = projectHostedEligibleDirtyHintIds({ eligibleItemIds, state });
       const pending = findHostedRunnableSystemMailboxItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
+        pendingOnly: input.pendingOnly,
         continuationItemIds, coverage, eligibleDirtyHintIds,
         now: startedAt,
         state: selectionState,
@@ -521,9 +527,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       prepared.routeAction === "run-device-sync-wake"
       && metrics.backgroundMaintenanceYielded === true
       && metrics.postCheckpointRecord == null
-      && input.shouldYieldBackgroundMaintenance?.() === true
+      && metrics.nextWakeAt !== null
     ) {
       return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        nextAttemptAt: metrics.nextWakeAt,
         prepared,
         vaultRoot: input.vaultRoot,
       });
@@ -744,6 +751,7 @@ function shouldPreemptHostedDeviceSyncSystemMailboxItem(
 }
 
 async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(input: {
+  nextAttemptAt?: string | null;
   prepared: HostedSystemMailboxPendingItem;
   vaultRoot: string;
 }): Promise<Extract<HostedSystemMailboxCheckpointPreparation, { status: "preempted" }>> {
@@ -751,7 +759,7 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
     ...input.prepared,
     lastErrorCode: null,
     lastErrorMessage: null,
-    nextAttemptAt: null,
+    nextAttemptAt: input.nextAttemptAt ?? null,
     status: "pending",
   };
   await retainHostedSystemMailboxItemAfterForegroundPreemption({
@@ -888,7 +896,6 @@ export async function retainHostedSystemMailboxItemAfterForegroundPreemption(inp
   await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
     pending: upsertHostedSystemMailboxPendingItem(state.pending, {
       ...input.item,
-      nextAttemptAt: null,
       status: "pending",
     }),
   }));

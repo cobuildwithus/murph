@@ -83,6 +83,7 @@ import {
   resolveMealNutritionGoals,
   type CanonicalEntity,
 } from '@murphai/query'
+import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
   logLiveWorkoutSet,
@@ -2427,6 +2428,39 @@ describe('real Codex live fixture contracts', () => {
       })
       expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toHaveLength(1)
     } finally { await removeRealCodexTemporaryPath(root) }
+  }, 120_000)
+
+  it('reads a later canonical wearable import through the arrival fixture CLI', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-wearable-arrival-cli-'))
+    const binDirectory = path.join(vaultRoot, 'bin')
+    try {
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      await materializeWearableArrivalVaultCli({ binDirectory })
+      const read = async () => {
+        const result = await execFileAsync(path.join(binDirectory, 'vault-cli'), [
+          'wearables', 'activity', 'list', '--date', '2026-07-15', '--format', 'json',
+        ], { env: {
+          PATH: process.env.PATH,
+          TSX_TSCONFIG_PATH: REAL_CODEX_E2E_TSX_TSCONFIG_PATH,
+          MURPH_WEARABLE_TIMING_E2E_NODE: process.execPath,
+          MURPH_WEARABLE_TIMING_E2E_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+          MURPH_WEARABLE_TIMING_E2E_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+          MURPH_WEARABLE_TIMING_E2E_VAULT: vaultRoot,
+        } })
+        return JSON.parse(result.stdout)
+      }
+      expect(await read()).toMatchObject({ items: [] })
+      await importWearableArrivalFixture(vaultRoot)
+      const imported = await read()
+      expect(imported.items).toHaveLength(1)
+      expect(imported.items[0]).toMatchObject({
+        activityTypes: ['running'],
+        sessionMinutes: { value: 24 },
+        distanceKm: { value: 3.8624256 },
+      })
+    } finally {
+      await removeRealCodexTemporaryPath(vaultRoot)
+    }
   }, 120_000)
 
   it('recognizes both wearable workout-detail option spellings in the compact fixture', async () => {
@@ -15456,7 +15490,6 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
       try {
         const binDirectory = path.join(workingDirectory, 'bin')
         const skillsRoot = path.join(workingDirectory, 'skills')
-        const stateFile = path.join(workingDirectory, 'wearable-state.txt')
         await initializeVault({
           timezone: 'America/New_York',
           vaultRoot: workingDirectory,
@@ -15465,7 +15498,6 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
           materializeAssistantSkill({ skillsRoot, slug: 'daily-activity' }),
           materializeAssistantSkill({ skillsRoot, slug: 'running-cardio' }),
           materializeWearableArrivalVaultCli({ binDirectory }),
-          writeFile(stateFile, 'missing\n', 'utf8'),
         ])
 
         const promptTimeContext = {
@@ -15499,9 +15531,13 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-            MURPH_WEARABLE_TIMING_E2E_STATE_FILE: stateFile,
+            MURPH_WEARABLE_TIMING_E2E_NODE: process.execPath,
+            MURPH_WEARABLE_TIMING_E2E_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+            MURPH_WEARABLE_TIMING_E2E_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            MURPH_WEARABLE_TIMING_E2E_VAULT: workingDirectory,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
+          fixtureBinDirectory: binDirectory,
           excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -15522,13 +15558,13 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
         expect(first.finalMessage).toMatch(/cannot|can['’]t|hasn['’]t|isn['’]t|\bno\b|\bnot\b/iu)
         expect(first.finalMessage).not.toMatch(/2\.4|24m|17:45/iu)
 
-        await writeFile(stateFile, 'present\n', 'utf8')
+        await importWearableArrivalFixture(workingDirectory)
         const secondPrompt = await buildWearableArrivalPrompt({
           occurredAt: '2026-07-15T18:20:00.000Z',
           promptTimeContext,
           text: [
             'Please check the wearable record again now.',
-            'If the run is present, summarize it and state when I originally asked you to analyze it in both my local time and UTC.',
+            'If the run is present, summarize its distance in miles and duration, and state when I originally asked you to analyze it in both my local time and UTC.',
           ].join(' '),
           vaultRoot: workingDirectory,
         })
@@ -35443,53 +35479,40 @@ async function materializeWearableArrivalVaultCli(input: {
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const missingResult = JSON.stringify({
-    activities: [],
-    date: '2026-07-15',
-    summary: {
-      totalWorkoutDurationSeconds: 0,
-      workoutCount: 0,
-    },
-  })
-  const presentResult = JSON.stringify({
-    activities: [{
-      averagePaceSecondsPerMile: 600,
-      distanceMiles: 2.4,
-      durationSeconds: 1_440,
-      startAt: '2026-07-15T17:10:00.000Z',
-      type: 'running',
-    }],
-    date: '2026-07-15',
-    summary: {
-      totalWorkoutDurationSeconds: 1_440,
-      workoutCount: 1,
-    },
-  })
 
   await writeFile(
     executablePath,
     [
       '#!/bin/sh',
-      'case "$*" in',
-      '  *"wearables sources list"*)',
-      '    printf \'%s\\n\' \'{"sources":[{"provider":"fixture","status":"healthy","lastDate":"2026-07-15","stalenessVsNewestDays":0}]}\'',
-      '    ;;',
-      '  *"wearables"*)',
-      '    if [ "$(head -n 1 "$MURPH_WEARABLE_TIMING_E2E_STATE_FILE")" = "present" ]; then',
-      `      printf '%s\\n' '${presentResult}'`,
-      '    else',
-      `      printf '%s\\n' '${missingResult}'`,
-      '    fi',
-      '    ;;',
-      '  *)',
-      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
-      '    ;;',
-      'esac',
+      'set -eu',
+      'exec "$MURPH_WEARABLE_TIMING_E2E_NODE" --import "$MURPH_WEARABLE_TIMING_E2E_LOADER" "$MURPH_WEARABLE_TIMING_E2E_CLI" "$@" --vault "$MURPH_WEARABLE_TIMING_E2E_VAULT"',
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },
   )
   await chmod(executablePath, 0o700)
+}
+
+async function importWearableArrivalFixture(vaultRoot: string): Promise<void> {
+  await importDeviceProviderSnapshot({
+    provider: 'junction',
+    vaultRoot,
+    snapshot: {
+      accountId: 'synthetic-wearable-arrival',
+      importedAt: '2026-07-15T18:00:00.000Z',
+      summaries: { workouts: [{
+        id: 'synthetic-arrival-run',
+        sourceProviderSlug: 'apple_health_kit',
+        type: 'running',
+        sport: { name: 'Running', type: 'running' },
+        startAt: '2026-07-15T17:10:00.000Z',
+        endAt: '2026-07-15T17:34:00.000Z',
+        observedAt: '2026-07-15T17:34:00.000Z',
+        durationMinutes: 24,
+        distanceMeters: 3862.4256,
+      }] },
+    },
+  }, { corePort: await import('@murphai/core') })
 }
 
 async function materializeWearableActivityCompactionVaultCli(input: {

@@ -475,8 +475,9 @@ describe("hosted workspace runtime entrypoint", () => {
       mocks.snapshotHostedPortableWorkspaceDelta.getMockImplementation();
     mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockClear();
     mocks.snapshotHostedPortableWorkspaceDelta.mockClear();
-    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(() => {
-      return { createRequest };
+    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation((...args) => {
+      assert.ok(restoreBuilder);
+      return { ...restoreBuilder(...args), createRequest, checkpoint: async () => createRequest() };
     });
     mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(() => {
       throw new Error("Foreground test should not snapshot portable workspace deltas.");
@@ -752,6 +753,9 @@ describe("hosted workspace runtime entrypoint", () => {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchCount += 1;
         events.push(`mailbox.fetch:${fetchCount}`);
+        if (fetchCount === 4) {
+          assert.deepEqual(request.lanes.map((lane) => lane.lane), ["system"]);
+        }
         const lateItem = createMailboxItem({
           id: "mailbox_item_entrypoint_late_active_turn",
           laneSeq: "1",
@@ -834,6 +838,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch:2",
         "mailbox.fetch:3",
         "import:1",
+        "mailbox.fetch:4",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
       ]);
@@ -1250,6 +1255,9 @@ describe("hosted workspace runtime entrypoint", () => {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchCount += 1;
         events.push(`mailbox.fetch:${fetchCount}`);
+        if (fetchCount === 4) {
+          assert.deepEqual(request.lanes.map((lane) => lane.lane), ["system"]);
+        }
         const itemVisible = request.lanes.some((lane) =>
           lane.lane === sidecarItem.lane
           && BigInt(sidecarItem.laneSeq) > BigInt(lane.importedSeq)
@@ -1328,6 +1336,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch:2",
         "mailbox.fetch:3",
         "mailbox.fetchPayload",
+        "mailbox.fetch:4",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
       ]);

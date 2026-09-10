@@ -83,6 +83,7 @@ import {
   resolveHostedSystemMailboxWakeCandidates,
   type HostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
+  recoverHostedSystemMailboxClaims,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedRuntimeResolvedConfig,
@@ -256,7 +257,7 @@ describe("hosted system mailbox notification execution context", () => {
         });
         expect(result).toMatchObject({
           failed: 1,
-          nextWakeAt: remaining === "approval" ? FIXED_NOW : retryAt,
+          nextWakeAt: remaining === "approval" || remaining === "device" ? FIXED_NOW : retryAt,
           nextWakeReason: remaining === "approval" ? "assistant" : "device-sync.reconcile",
           recorded: 0,
         });
@@ -274,9 +275,9 @@ describe("hosted system mailbox notification execution context", () => {
           vaultRoot: workspace.vaultRoot,
         });
         expect(next).toMatchObject({
-          itemId: remaining === "approval"
+          itemId: remaining === "approval" || remaining === "device"
             ? "mailbox_callback_successor" : failedItem.itemId,
-          status: remaining === "approval"
+          status: remaining === "approval" || remaining === "device"
             ? "processed" : "recording",
         });
       } finally {
@@ -1480,6 +1481,8 @@ describe("hosted system mailbox notification execution context", () => {
           status: "sending",
         })),
       }));
+
+      await recoverHostedSystemMailboxClaims(workspace.vaultRoot);
 
       await expect(prepareHostedSystemMailboxItemForCheckpoint({
         executionContext: null,

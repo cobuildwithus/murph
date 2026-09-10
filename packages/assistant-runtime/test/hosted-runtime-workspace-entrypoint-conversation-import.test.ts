@@ -191,8 +191,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         },
       );
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "12"]);
-      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 13]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "12"]);
+      assert.ok(fetchRequests.every((request) => request.limitPerLane === 13));
       assert.deepEqual(
         events.filter((event) => event.startsWith("import:")),
         expectedImportedSeqs.map((seq) => `import:${seq}`),
@@ -492,7 +492,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         },
       );
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "2"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "2"]);
       assert.deepEqual(importedSeqs, ["1", "2", "3", "4"]);
       assert.ok(events.includes("snapshot:idle_shutdown:4"));
       assert.equal(result.status, "idle");
@@ -601,8 +601,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         importedSeqs,
         Array.from({ length: 12 }, (_, index) => String(index + 1)),
       );
-      assert.equal(fetchRequests.length, 12);
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), [
+      assert.ok(fetchRequests.length <= 23, "one system page per foreground wake");
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), [
         "0",
         ...Array.from({ length: 11 }, (_, index) => String(index + 1)),
       ]);

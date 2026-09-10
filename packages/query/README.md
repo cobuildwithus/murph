@@ -2,6 +2,13 @@
 
 Workspace-private read-helper, filter, derived-retrieval, and export-pack surface over canonical vault state. Query code must not mutate canonical vault data. It owns the rebuildable local query projection at `.runtime/projections/query.sqlite`, which backs cross-family, aggregate, derived, and lexical-search reads.
 
+Stale projection readers acquire the existing reentrant canonical write lock,
+recheck freshness, and rebuild only when needed. Source capture and publication
+stay inside that boundary. Fresh reads take no lock. Do not coalesce rebuilds
+with a separate pending promise: a lock owner could join a reader waiting for
+that same lock. The `query-wait` timing span measures acquisition;
+`query-rebuild` measures actual rebuilding.
+
 Exact and family-local reads must not rebuild or hydrate that shared projection.
 Use core-owned exact readers when the canonical owner exposes one, or use
 `resolveCanonicalEntityInFamily()` / `readCanonicalEntityFamilySource()` for a

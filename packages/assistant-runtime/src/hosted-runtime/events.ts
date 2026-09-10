@@ -336,15 +336,11 @@ async function executeHostedSystemWake(input: {
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
         retainFollowUpWakeUntilCheckpoint: true,
-        ...(input.runtimeLogContext
-          ? { runtimeLogContext: input.runtimeLogContext }
-          : {}),
+        runtimeLogContext: input.runtimeLogContext,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
-        ...(input.shouldYieldDeviceSync
-          ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
-          : {}),
-        ...(input.signal ? { signal: input.signal } : {}),
+        shouldYieldDeviceSync: input.shouldYieldDeviceSync,
+        signal: input.signal,
         timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
         vaultRoot: input.vaultRoot,
         wake: input.wake,

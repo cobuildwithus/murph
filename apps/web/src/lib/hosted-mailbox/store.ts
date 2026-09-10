@@ -22,6 +22,10 @@ import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
+import {
+  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES,
+} from "@murphai/hosted-execution/orchestration-control";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import type {
   HostedExecutionConversationMessageWake,
@@ -1816,6 +1820,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
 export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
   afterSeq: bigint | number | string;
   at: Date;
+  modelFreeOnly?: true;
   prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<{
@@ -1840,6 +1845,23 @@ export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
     },
     where: {
       ...buildHostedMailboxLiveItemWhere(input.at),
+      ...(input.modelFreeOnly
+        ? {
+            AND: [{
+              OR: [
+                { kind: { in: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.filter(
+                  (kind) => kind !== "assistant.notification.requested",
+                ) } },
+                ...HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.map(
+                  (prefix) => ({
+                    kind: "assistant.notification.requested",
+                    dedupeKey: { startsWith: prefix, not: prefix },
+                  }),
+                ),
+              ],
+            }],
+          }
+        : {}),
       lane: "system",
       laneSeq: {
         gt: afterSeq,

@@ -833,9 +833,9 @@ describe("hosted runtime system mailbox state", () => {
         now: () => "2026-04-27T00:00:00.000Z",
         vaultRoot,
       })).resolves.toEqual({
-        at: "2026-04-27T00:01:00.000Z",
-        executionClass: null,
-        reason: "assistant",
+        at: "2026-04-27T00:00:00.000Z",
+        executionClass: "model_free",
+        reason: "device-sync.reconcile",
       });
       await expect(resolveHostedSystemMailboxWakeCandidates({
         now: () => "2026-04-27T00:00:00.000Z",
@@ -846,9 +846,9 @@ describe("hosted runtime system mailbox state", () => {
           reason: "assistant",
         },
         next: {
-          at: "2026-04-27T00:01:00.000Z",
-          executionClass: null,
-          reason: "assistant",
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
         },
       });
       await expect(resolveHostedSystemMailboxWakeCandidates({
@@ -1026,7 +1026,7 @@ describe("hosted runtime system mailbox state", () => {
         allowedWakeKinds: ["device-sync.wake", "runtime.maintenance-requested", "assistant.notification.requested"],
         now: () => now, vaultRoot,
       })).resolves.toEqual({
-        defaultOwned: approved ? { at: now, reason: "assistant" } : { at: null, reason: null },
+        defaultOwned: { at: now, reason: "assistant" },
         next: { at: now, executionClass: "model_free", reason: "device-sync.reconcile" },
       });
       // An already-running default pass keeps its ordinary foreground choice.
@@ -1039,7 +1039,7 @@ describe("hosted runtime system mailbox state", () => {
   });
 
   it.each(["independent", "same-connection", "untransferred", "duplicate-owner", "unimported"] as const)(
-    "preserves continuation admission boundaries (%s)", async (boundary) => {
+    "runs independent connections without advancing invalid continuation authority (%s)", async (boundary) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-continuation-boundary-"));
       const now = "2026-04-27T00:00:00.000Z";
       const retryAt = "2026-04-28T00:00:00.000Z";
@@ -1071,17 +1071,27 @@ describe("hosted runtime system mailbox state", () => {
         } });
         await updateHostedSystemMailboxState(vaultRoot, () => state);
         await expect(resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot, now: () => now }))
-          .resolves.toEqual({ at: boundary === "independent" ? now : retryAt,
-            executionClass: boundary === "independent" ? "model_free" : null,
+          .resolves.toEqual({ at: boundary === "same-connection" ? retryAt : now,
+            executionClass: boundary === "same-connection" ? null : "model_free",
             reason: "device-sync.reconcile" });
-        expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual(state.pending);
+        const restored = await readHostedSystemMailboxState(vaultRoot);
+        expect(restored.pending).toEqual(state.pending);
+        // Admission may pass unrelated work; handled-prefix authority still
+        // requires an imported, unique continuation owner.
+        const validContinuation = boundary === "independent" || boundary === "same-connection";
+        expect(resolveHostedSystemMailboxProgress({
+          importedSeq: boundary === "unimported" ? "0" : "3", state: restored,
+        })).toMatchObject({
+          handledThroughSeq: validContinuation ? "1" : "0",
+          deviceSyncContinuationSeqs: validContinuation ? ["1"] : [],
+        });
       } finally {
         await rm(vaultRoot, { recursive: true, force: true });
       }
     },
   );
 
-  it("keeps a later due model-free row behind a future durable frontier", async () => {
+  it("does not delay unrelated due maintenance behind a backed-off device item", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     const now = "2026-04-27T00:00:00.000Z";
     const deviceRetryAt = "2026-04-27T00:01:00.000Z";
@@ -1117,9 +1127,9 @@ describe("hosted runtime system mailbox state", () => {
           reason: null,
         },
         next: {
-          at: deviceRetryAt,
-          executionClass: null,
-          reason: "device-sync.reconcile",
+          at: now,
+          executionClass: "model_free",
+          reason: "mailbox",
         },
       });
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
@@ -1226,7 +1236,7 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
-  it("keeps a later generic notification behind a runnable device-sync owner", async () => {
+  it("keeps assistant readiness independent of a runnable device-sync owner", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-hosted-system-mailbox-state-"),
     );
@@ -1261,8 +1271,8 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         defaultOwned: {
-          at: null,
-          reason: null,
+          at: now,
+          reason: "assistant",
         },
         next: {
           at: now,

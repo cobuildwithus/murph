@@ -1331,13 +1331,17 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("keeps foreground authority while a detached ask runs and drains it before shutdown snapshot", async () => {
+  test.each(["shutdown", "fresh input"] as const)("keeps foreground authority beside a detached ask across %s and joins it before snapshot", async (boundary) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const askStarted = createDeferred<void>();
     const childExitRelease = createDeferred<void>();
     const foregroundStarted = createDeferred<void>();
     const foregroundRelease = createDeferred<void>();
     const shutdownController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const secondForeground = createDeferred<void>();
+    let foregroundCalls = 0;
+    let freshInputId: string | null = null;
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
@@ -1376,11 +1380,12 @@ describe("hosted workspace runtime entrypoint", () => {
         lane: "system",
         laneSeq: "1",
       });
+      const mailboxItems = [askItem];
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_detached_ask_concurrency",
-            idleCheckpointDelayMs: 120_000,
+            idleCheckpointDelayMs: boundary === "shutdown" ? 120_000 : 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1399,6 +1404,10 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           async importItem(item) {
+            if (item.item.lane === "conversation") {
+              freshInputId = await stageAssistantInputEventForMailboxItem({ item: item.item, vaultRoot });
+              return { assistantInputId: freshInputId, status: "imported" };
+            }
             assert.equal(item.route.action, "run-assistant-ask");
             return await enqueueHostedSystemMailboxItem({
               item,
@@ -1425,7 +1434,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   };
                 },
               },
-              mailboxPort: createMailboxPort({ events, items: [askItem] }),
+              mailboxPort: createMailboxPort({ events, items: mailboxItems }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1439,12 +1448,34 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
+          runtimeWakeSignal,
           async runAssistantPhase() {
+            foregroundCalls += 1;
+            if (foregroundCalls > 1) {
+              assert.ok(freshInputId);
+              assert.equal(events.includes("ask.exited"), false);
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({ inputId: freshInputId, vaultRoot });
+              events.push("foreground.second.finished");
+              secondForeground.resolve();
+              shutdownController.abort(new Error("Synthetic shutdown after fresh input."));
+              return { checkpointReason: "assistant_runtime_commit", progressed: true };
+            }
             events.push("foreground.started");
             foregroundStarted.resolve();
             await foregroundRelease.promise;
+            await runCanonicalWrite({
+              vaultRoot,
+              operationType: "hosted_concurrent_publication_test",
+              summary: "Exercise publication beside an independent reader.",
+              occurredAt: TEST_NOW,
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite("journal/concurrent-publication.md", "Synthetic publication proof.\n");
+              },
+            });
+            events.push("foreground.committed");
+            assert.equal(events.includes("ask.aborted"), false);
             events.push("foreground.finished");
-            shutdownController.abort(new Error("Synthetic shutdown after foreground reply."));
+            if (boundary === "shutdown") shutdownController.abort(new Error("Synthetic shutdown after foreground reply."));
             return {
               checkpointReason: "assistant_runtime_commit",
               progressed: true,
@@ -1462,8 +1493,21 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(events.includes("foreground.finished"), true);
       assert.equal(snapshotStarted, false);
 
+      if (boundary === "fresh input") {
+        mailboxItems.push(createMailboxItem({ id: "mailbox_item_during_quiescence", laneSeq: "1" }));
+        const notifiedAt = performance.now();
+        runtimeWakeSignal.notify();
+        await withRealTimeout(secondForeground.promise, 2_000, () => events.join(","));
+        assert.ok(performance.now() - notifiedAt < 2_000);
+        assert.equal(snapshotStarted, false);
+        assert.equal(events.includes("ask.exited"), false);
+      }
       childExitRelease.resolve();
       const result = await withRealTimeout(resultPromise, 30_000, () => events.join(","));
+      assert.ok(
+        requireEventIndex(events, "foreground.committed")
+          < requireEventIndex(events, "ask.aborted"),
+      );
       assert.ok(
         requireEventIndex(events, "foreground.finished")
           < requireEventIndex(events, "ask.aborted"),

@@ -1,6 +1,7 @@
 import {
   REAL_SET_TIMEOUT,
   TEST_NOW,
+  ensureHostedBootstrapMetadataForSystemMailboxTest,
   TEST_USER_ID,
   createAssistantAskRequestedWake,
   createBundleRef,
@@ -127,9 +128,8 @@ import {
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
-  test("checkpoints a stale delivery projection so pending device work can resume", async () => {
+  test("clears a stale delivery projection while the same workspace drains device work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-stale-delivery-"));
-    const resumedVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-delivery-resume-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -139,6 +139,7 @@ describe("hosted workspace runtime entrypoint", () => {
     vi.setSystemTime(new Date(TEST_NOW));
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: createMailboxItem({
           id: "mailbox_stale_delivery_device",
@@ -196,60 +197,17 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
       assert.ok(checkpointRequests.length > 0, "Stale delivery must be corrected durably before the next attempt.");
-      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeAt, null);
-      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeReason, null);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0, "The default owner must hand off device work.");
-      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 1);
+      const correctedCheckpoint = checkpointRequests.find((request) => request.reason === "idle_shutdown");
+      assert.ok(correctedCheckpoint);
+      assert.equal(correctedCheckpoint.nextDefaultProcessingWakeAt, null);
+      assert.equal(correctedCheckpoint.nextDefaultProcessingWakeReason, null);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
       assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
-      const checkpoint = checkpointRequests.at(-1)!;
-      const nextVersion = String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n);
-      await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: { idleCheckpointDelayMs: 1, processingMode: "system_mailbox", workspaceVersion: nextVersion },
-          resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
-          vaultRoot: resumedVaultRoot,
-          platform: createPlatform({
-            artifactBytesByHash,
-            deviceSyncPort,
-            mailboxPort: createMailboxPort({ events, items: [] }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests, events,
-              workspace: createWorkspaceState({
-                nextWakeAt: checkpoint.nextWakeAt ?? null,
-                nextWakeReason: checkpoint.nextWakeReason ?? null,
-                nextDefaultProcessingWakeAt: checkpoint.nextDefaultProcessingWakeAt,
-                nextDefaultProcessingWakeReason: checkpoint.nextDefaultProcessingWakeReason,
-                systemMailboxProgressGeneration: checkpoint.systemMailboxProgressGeneration,
-                redactedStatus: checkpoint.redactedStatus ?? null,
-                snapshotRef: checkpoint.snapshotRef,
-                version: nextVersion,
-              }),
-            }),
-          }),
-          async importItem() {
-            throw new Error("Device work is already imported.");
-          },
-          async runAssistantPhase(input) {
-            return await runHostedWorkspaceAssistantPhase({ ...input, now: () => TEST_NOW });
-          },
-          async createCheckpointSnapshot() {
-            return { snapshotRef: (await createVaultSnapshotBundle({
-              key: "users/bundles/member-synthetic/stale-delivery-drained.bundle.json",
-              vaultRoot: resumedVaultRoot,
-            })).snapshotRef };
-          },
-        },
-      );
-      assert.ok(deviceSyncPort.fetchSnapshotCalls > 0, "The next owner must reach device sync.");
-      assert.equal((await readHostedSystemMailboxState(resumedVaultRoot)).pending.length, 0);
-      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, null);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
-      await removeTempRoot(resumedVaultRoot);
     }
   });
   test("persists a disproved default wake without claiming assistant progress", async () => {
@@ -2455,6 +2413,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                   laneSeq: "1",
                 }));
                 runtimeWakeSignal.notify(Date.now());
+                // This scenario requires a staged retry before checkpointing.
+                // Hold the model phase until staging; delivery may now cancel it.
+                await trustedCompletionRetryFailed.promise;
               }
               if (checkpointAssistantInputRetry) {
                 mailboxItems.push(createMailboxItem({
@@ -3386,7 +3347,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     try {
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
 
+      const initialSnapshot = await createVaultSnapshotBundle({ key: "users/bundles/member-synthetic/stale-device-base.bundle.json", vaultRoot });
+      const artifactBytesByHash = new Map([[initialSnapshot.hash, initialSnapshot.bytes]]);
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -3410,12 +3374,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             throw new Error("Import should not run when no mailbox items are fetched.");
           },
           platform: createPlatform({
+            artifactBytesByHash,
             deviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
+                snapshotRef: initialSnapshot.snapshotRef,
                 nextWakeAt: staleWakeAt,
                 nextWakeReason: input.nextWakeReason,
                 version: "0",
@@ -3435,12 +3401,15 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           : []),
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
+        ...(input.nextWakeReason === "device-sync.reconcile"
+          ? ["snapshot:idle_shutdown", "workspace.checkpoint"]
+          : []),
       ];
       assert.deepEqual(events, expectedEvents);
       const shouldRunDeviceSync = input.nextWakeReason === "device-sync.reconcile";
       assert.equal(deviceSyncPort.fetchSnapshotCalls, shouldRunDeviceSync ? 1 : 0);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 2 : 1);
+      assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 3 : 1);
       const terminalCheckpoint = checkpointRequests.at(-1);
       assert.equal(terminalCheckpoint?.reason, "idle_shutdown");
       assert.equal(terminalCheckpoint?.nextWakeAt, null);

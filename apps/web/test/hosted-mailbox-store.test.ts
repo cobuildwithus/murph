@@ -2510,6 +2510,47 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
   });
 
+  it("keeps model-free readiness scoped to live tenant rows and exact notification policy", async () => {
+    const findFirst = vi.fn<HostedMailboxItemFindFirst>(async () => null);
+    await readHostedMailboxFirstLiveSystemItemAfterSeq({
+      afterSeq: "4",
+      at: FIXED_NOW,
+      modelFreeOnly: true,
+      prisma: createHostedMailboxClient({
+        hostedMailboxItem: createHostedMailboxItemDelegate({ findFirst }),
+        hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+      }),
+      userId: "member_mailbox_1",
+    });
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findFirst).toHaveBeenCalledWith({
+      orderBy: { laneSeq: "asc" },
+      select: { dedupeKey: true, kind: true, laneSeq: true },
+      where: expectLiveHostedMailboxWhere({
+        lane: "system",
+        laneSeq: { gt: 4n },
+        userId: "member_mailbox_1",
+        AND: [{ OR: expect.arrayContaining([
+          { kind: { in: expect.arrayContaining(["device-sync.wake", "environment-interview.completed"]) } },
+        ]) }],
+      }),
+    });
+    const query = findFirst.mock.calls[0]?.[0];
+    const serialized = JSON.stringify(query, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value,
+    );
+    expect(serialized).not.toContain("assistant.ask.requested");
+    expect(serialized).not.toContain("assistant.ask.completed");
+    // Generic notifications have no bare kind admission: every such branch
+    // requires a nonempty exact-policy dedupe suffix.
+    const notificationBranches = serialized.match(/\{"kind":"assistant.notification.requested"[^}]*\}/gu) ?? [];
+    expect(notificationBranches.length).toBeGreaterThan(0);
+    for (const branch of notificationBranches) {
+      expect(branch).toContain('"startsWith":');
+      expect(branch).toContain('"not":');
+    }
+  });
+
   it("checks whether a member has any mailbox item for a given kind", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate({
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({

@@ -961,7 +961,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               });
               return {
                 checkpointReason: "assistant_runtime_commit" as const,
-                deviceSyncMaintenanceRan: true,
                 nextWakeAt: continuationWakeAt,
                 nextWakeReason: "device-sync.reconcile",
                 progressed: true,
@@ -972,10 +971,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               };
             }
 
-            assert.deepEqual(input.deviceSyncWorkspaceWakeHandled, {
-              nextWakeAt: initialWakeAt,
-              nextWakeReason: "device-sync.reconcile",
-            });
             assert.equal(input.workspace?.nextWakeAt, initialWakeAt);
             assert.equal(input.workspace?.nextWakeReason, "device-sync.reconcile");
             if (lateConversationInputId) {

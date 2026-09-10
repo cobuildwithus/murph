@@ -1407,7 +1407,6 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
             return {
               checkpointReason: "assistant_runtime_commit" as const,
-              deviceSyncMaintenanceRan: true,
               nextWakeAt: continuationWakeAt,
               nextWakeReason: "device-sync.reconcile",
               progressed: true,

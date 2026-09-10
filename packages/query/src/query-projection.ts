@@ -1,3 +1,4 @@
+import { withCanonicalWriteLock } from "@murphai/core";
 import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
 import {
   isValidIanaTimeZone,
@@ -49,7 +50,6 @@ import {
   listCanonicalSourceManifest,
   readVaultSourceStrict,
   readVaultSourceTolerant,
-  type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
 import type {
@@ -82,7 +82,7 @@ import {
   extractMetricPointsFromMetricRows,
 } from "./metrics/index.ts";
 import {
-  rebuildQueryProjectionWithManifest,
+  rebuildQueryProjectionFromCanonicalSource,
 } from "./projection/rebuild.ts";
 import {
   searchQueryProjection,
@@ -120,8 +120,6 @@ function readStoredPublicWearableSummaryBundle(
   );
 }
 
-const pendingQueryProjectionRebuilds = new Map<string, Promise<void>>();
-
 export async function getQueryProjectionStatus(
   vaultRoot: string,
 ): Promise<QueryProjectionStatus> {
@@ -134,8 +132,7 @@ export async function getQueryProjectionStatus(
 export async function rebuildQueryProjection(
   vaultRoot: string,
 ): Promise<RebuildQueryProjectionResult> {
-  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
-  return rebuildQueryProjectionWithManifest(vaultRoot, currentManifest);
+  return rebuildQueryProjectionFromCanonicalSource(vaultRoot);
 }
 
 export async function loadProjectedVaultSource(
@@ -431,8 +428,7 @@ async function ensureFreshQueryProjection(
     const status = await timeCliPhase("query-status", () => readProjectionStatus(location, currentManifest));
 
     if (!status?.fresh) {
-      await rebuildQueryProjectionWithManifestOnce({
-        currentManifest,
+      await rebuildStaleQueryProjection({
         location,
         readSource,
         vaultRoot,
@@ -444,8 +440,7 @@ async function ensureFreshQueryProjection(
         const refreshedStatus = await timeCliPhase("query-status", () => readProjectionStatus(location, refreshedManifest));
 
         if (!refreshedStatus?.fresh) {
-          await rebuildQueryProjectionWithManifestOnce({
-            currentManifest: refreshedManifest,
+          await rebuildStaleQueryProjection({
             location,
             readSource,
             vaultRoot,
@@ -460,36 +455,27 @@ async function ensureFreshQueryProjection(
   }
 }
 
-async function rebuildQueryProjectionWithManifestOnce(input: {
-  currentManifest: readonly QuerySourceManifestEntry[];
+async function rebuildStaleQueryProjection(input: {
   location: QueryProjectionLocation;
   readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot>;
   vaultRoot: string;
 }): Promise<void> {
-  const key = input.location.absolutePath;
-  const pending = pendingQueryProjectionRebuilds.get(key);
-
-  if (pending) {
-    await timeCliPhase("query-wait", () => pending);
-    return;
-  }
-
-  const endRebuild = startCliPhase("query-rebuild");
-  const rebuild = rebuildQueryProjectionWithManifest(
-    input.vaultRoot,
-    input.currentManifest,
-    input.location,
-    input.readSource,
-  ).then(() => undefined);
-
-  pendingQueryProjectionRebuilds.set(key, rebuild);
-
+  // Acquire the existing reentrant boundary before deciding whether to rebuild.
+  // A shared pending promise can belong to a reader waiting for our own lock.
+  const endWait = startCliPhase("query-wait");
   try {
-    await rebuild;
+    await withCanonicalWriteLock(input.vaultRoot, async () => {
+      endWait();
+      const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(input.vaultRoot));
+      const status = await timeCliPhase("query-status", () => readProjectionStatus(input.location, manifest));
+      if (status?.fresh) return;
+      await timeCliPhase("query-rebuild", () => rebuildQueryProjectionFromCanonicalSource(
+        input.vaultRoot,
+        input.location,
+        input.readSource,
+      ));
+    });
   } finally {
-    endRebuild();
-    if (pendingQueryProjectionRebuilds.get(key) === rebuild) {
-      pendingQueryProjectionRebuilds.delete(key);
-    }
+    endWait();
   }
 }

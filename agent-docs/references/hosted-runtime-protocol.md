@@ -810,35 +810,53 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-`system_mailbox` runs one bounded model-free item from either a validated
-transferred device continuation or the exact first untransferred live durable
-system frontier. Scheduling reuses the same imported-watermark-bounded
-continuation projection as handling. Transferred owners retain their retry
-deadlines and per-connection ordering without blocking independent later work;
-invalid continuation projections remain ordering barriers. If the ordinary selector
-chooses a pending transferred device owner, eligible non-device work takes the
-pass first. Recording owners keep their existing priority, and device successors
-still run through their connection owner. This prevents continuously due device
-jobs from starving the independent durable frontier. Wake projection and
-preparation share the runnable admission decision, including immediate admission
-of eligible deferred dirty hints through a validated owner. That immediate wake
-does not change the retained jobs' retry deadlines. A single pure coverage
-projection supplies execution-covered hints and the narrower idle-covered
-schedules; dirty work requires execution and blocks idle retirement across it.
-Coverage alone never grants imported continuation authority or bypasses the
-invocation's filters. The shared classifier admits
-device-sync, member-channel reconciliation, operator maintenance, browser-vault
-refresh, Environment completion, and the narrow exact-notification cases; an
-earlier default-owned row remains a hard ordering barrier. Already committed
-Web updates remain authoritative, while an interrupted or not-yet-checkpointed
-unit stays recoverable from the durable mailbox and its existing continuation
-contract.
+`system_mailbox` admits eligible model-free work through the existing kind and
+exact-notification policy. Device, clinical, and Environment attempts belong to
+the fenced workspace and use existing mailbox claims; the invocation's policy
+still decides which families are allowed. Device and Environment work can start
+without assistant preparation. A conversation can upgrade that invocation while
+the same import continues. The default assistant and ordered controls remain
+single-writer; ordinary replies neither cancel nor join independent imports. The
+assistant phase has no inline device executor or turn-local dirty-ack buffer.
+Device hints, restored timers, imports, activity scheduling, and exact
+acknowledgments all use the workspace-owned mailbox path. Common durable effects
+retain their existing delivery and shutdown behavior.
 
-Default and `system_mailbox` remain separate bounded owners over one ordered
-mailbox. When the runnable mailbox owner is model-free, the checkpoint
-projection does not publish a second ordinary default wake behind it. Default
-rows remain eligible inside an already-running pass and become independently
-wake-eligible whenever the model-free frontier is backed off or advances.
+Scheduling preserves per-connection ordering and the imported-watermark-bounded
+continuation projection used by handling. Invalid continuation authority cannot
+advance the handled prefix, but it does not block an unrelated connection or
+work family. Wake projection and preparation share runnable admission, including
+immediate admission of eligible deferred dirty hints through a validated owner.
+That wake does not change retained job retry deadlines. The shared coverage
+projection supplies execution-covered hints and narrower idle-covered schedules;
+dirty work requires execution and blocks idle retirement across it. Coverage
+never grants continuation authority or bypasses invocation filters. Claimed
+attempts publish completion through the workspace instead of projecting another
+immediate wake. Restoring a newly fenced workspace releases stale in-process
+claims through the existing pending state. A due mailbox item already owns
+the restored device alarm. When none exists, a due workspace device timer enters
+that same mailbox claim path; a future retry for another connection does not
+suppress it. A device attempt that yields before service initialization keeps
+its exact hint pending with the requested retry deadline; no-retry unavailable
+results remain terminal. At the quiescent snapshot boundary, remaining mailbox
+work and returned provider deadlines replace the consumed alarm, including
+yields that have no acknowledgment effect. Clearing a due device carry requires
+completed-work recording or a current device mailbox retry; unrelated checkpoint
+publication preserves unconsumed device wakes and durable continuations.
+
+Both assistant and model-free wake deadlines remain independently available.
+Workspace metadata publication is serialized against the latest accepted version
+and preserves locally staged canonical receipts. The publication owner starts
+with the accepted restored workspace and its sanitized receipt references before
+any importer can publish metadata. Explicitly disproved wake projections replace
+the stale deadline, while canonical retention writes retain the selected assistant
+predecessor until it is serviced. Full snapshots pause and join
+owned mutations before capturing state; newly arrived conversation input can
+withdraw that wait, leaving the actual child tracked until it exits. Only effects
+covered by a successful snapshot may acknowledge exact device revisions. Already
+committed Web updates remain authoritative, and interrupted attempts recover
+through the durable mailbox and existing continuation contract.
+
 After a device item records a durable follow-up deadline, that
 `device-sync.reconcile` deadline remains in the canonical model-free
 `nextWakeAt` selection; an independently due or future assistant deadline
@@ -850,8 +868,33 @@ foreground priority. A non-direct default request behind
 `system_mailbox` wakes the exact active child, preserves its fence, and retries
 while that child checkpoints and releases. Authenticated Web-direct foreground
 work may instead preempt that exact system child through the existing abort
-seam. A `system_mailbox` request behind an active default owner only retries; it
-does not wake or interrupt the foreground child. This adds no queue, scheduler,
+seam. A `system_mailbox` request behind an active default owner sends a normal
+wake to that exact child, preserving its default mode and fence. It sends no
+requested mode handoff and never interrupts foreground work. Wake acceptance
+is not import completion: durable mailbox and import receipts remain the
+completion authority, including when an older warm child handles the wake.
+
+An active default invocation may prepare device work after its model provider
+starts. Its existing watcher admits conversation input first, then one bounded
+system page, including when the conversation-input budget is full. The device
+pass uses the same restored workspace, fence, canonical write port, and receipt
+history. It retains the existing 100-job pass ceiling and provider-specific job
+bounds; it does not run retention or activity-automation maintenance alongside
+the model. New conversation arrivals can proceed while provider I/O is pending.
+Reply preparation cancels device work and stops mailbox staging together.
+Canonical commits already underway finish persistence or rollback before the
+runner checkpoints or releases ownership; cancellation never detaches a mutator.
+
+One completed device preparation waits for the existing durable checkpoint
+before another preparation can run. This pending state only yields background
+maintenance; it never changes a fresh conversation into a completion-only pass.
+The existing recording item and exact dirty payload/revision acknowledgments
+remain recovery authority. This accelerates usable observations during a turn; it does not guarantee unlimited progress
+under traffic that indefinitely defers checkpointing. Query rebuilds use the
+same cross-process canonical boundary through source scanning and publication,
+so foreground queries see committed data rather than an in-flight rollback.
+
+This adds no queue, scheduler,
 feature-specific mode, persisted handoff state, or Environment-specific
 promotion rule. An already-default-owned assistant queue head may reuse the
 runtime's existing foreground phase inside a `system_mailbox` invocation,
@@ -887,8 +930,8 @@ For foreground/default work behind an `inbox_media_retention` fence, and for
 authenticated Web-direct foreground/default work behind a `system_mailbox`
 fence, the existing workspace-invocation abort seam is the sole preemption
 authority. A non-direct default request behind system-mailbox work retains the
-exact-child wake-and-checkpoint handoff. A system-mailbox request never wakes an
-active default child. A local exact-pointer abort enters the same inactive-fence
+exact-child wake-and-checkpoint handoff. A system-mailbox request may wake an
+active default child but cannot preempt or downgrade it. A local exact-pointer abort enters the same inactive-fence
 replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
@@ -1454,17 +1497,19 @@ and the runtime skips assistant admission while still draining model-free
 system work and retaining the canonical assistant wake. It is not durable
 Cloudflare state and cannot attach to default foreground processing.
 The optional workspace `systemMailboxFrontier` fact is a separate rollout seam.
-An omitted field means an older Web producer, `model_free` means the first live
-system item beyond the runtime's handled-through frontier is eligible for the
-bounded system-mailbox executor, and `default_owned` leaves that item with
-ordinary default processing. `null` means no system work is admitted by the
+An omitted field means an older Web producer. `model_free` means eligible live
+model-free work exists beyond the runtime's handled-through frontier, including
+behind a default-owned item; `default_owned` means live work remains for ordinary
+default processing with no eligible model-free item. `null` means no system work is admitted by the
 current reconciliation facts. For active access, Web derives that result from
-the durable retained frontier. For inactive access, Web emits `null` without a
+bounded ordered mailbox lookups using the shared kind and exact-notification
+policy. This scheduling fact does not advance the handled prefix. For inactive access, Web emits `null` without a
 mailbox read so Temporal can retire its pointer projection while the durable
 mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
-When an existing mailbox kind moves from `default_owned` to `model_free`, deploy
-the Cloudflare runtime allowlist before the Web classifier. Old Web remains
+When an existing mailbox kind moves from `default_owned` to `model_free`, or
+admission expands past an unrelated default-owned item, deploy the Cloudflare
+runtime consumer before the Web classifier. Old Web remains
 compatible with the expanded runtime; new Web paired with an old runtime keeps
 the item durable but cannot make progress until the runtime is upgraded. Reverse
 that order for rollback.
