@@ -41,6 +41,25 @@ retractions of previously accepted facts retain their existing fences. Missing
 or corrupt evidence fails closed; retained reads are cached within the existing
 page and aggregate snapshot byte bounds. No provider revision is fabricated.
 
+### Hospital history and source notes
+
+Supported allergies, conditions, medication requests/statements/dispenses,
+encounters, procedures, immunizations, family history, care plans/teams, goals,
+devices and service requests become dated, source-versioned notes. The notes
+retain readable labels, source statuses and selected structured clinical details
+with raw evidence links. They do not overwrite member-confirmed registries,
+activate provider goals or treat prescriptions/dispenses as doses taken.
+When an exact clinical date is unavailable, the note explicitly identifies its
+source-update date rather than presenting it as the clinical event date.
+
+Inline clinical note text beyond 4,000 characters uses existing ordered note
+sections (up to 50 sections of 12,000 characters) with Unicode-safe boundaries.
+Oversized or invalid evidence remains explicitly held. Previously unsupported
+long-note markers can upgrade only through the same retained-evidence proof as
+measurement markers; provider withdrawals and conflicting revisions stay fenced.
+Linked Binary bodies and additional provider query variants remain acquisition
+work owned separately from these retained-snapshot mappings.
+
 ## Member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,

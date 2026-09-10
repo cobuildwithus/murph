@@ -40,6 +40,47 @@ afterEach(async () => {
 });
 
 describe("importClinicalFhirSnapshot", () => {
+  it("promotes an unchanged long inline note held by the old importer without losing its body", async () => {
+    const text = "Historical discharge instruction. ".repeat(600);
+    const resource = {
+      resourceType: "DocumentReference", id: "legacy-long-note",
+      subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+      status: "current", docStatus: "final", date: "2004-03-12T12:00:00.000Z",
+      type: { text: "Discharge summary" },
+      content: [{ attachment: { contentType: "text/plain", data: Buffer.from(text).toString("base64") } }],
+    };
+    const input = await createSnapshotInput({
+      pages: [{ resourceType: "DocumentReference", content: fhirBundle([resource]) }],
+      resourceTypes: ["DocumentReference"],
+    });
+    let checks = 0;
+    const beforeCanonical = new Error("Seed legacy document hold");
+    await expect(importClinicalFhirSnapshot({
+      ...input, assertCurrent: async () => { if (++checks === 2) throw beforeCanonical; },
+    })).rejects.toBe(beforeCanonical);
+    const externalRef = {
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "document-reference", resourceId: resource.id, version: resource.meta.lastUpdated,
+    };
+    await importEventBatch({
+      vaultRoot: input.vaultRoot, apply: true,
+      decisions: [{
+        action: "retract", externalRef, reason: "document reference text exceeds supported import bounds",
+        evidence: [{
+          rawRef: `raw/clinical/fhir/${input.connectionId}/${input.retrievalJobId}/documentreference/whole/DocumentReference/page-0001.json`,
+          sourceLabel: `DocumentReference/${resource.id}`,
+        }],
+      }],
+    });
+    const upgrade = { ...input, retrievalJobId: "long-note-upgrade" };
+    expect((await importClinicalFhirSnapshot(upgrade)).canonical.createdCount).toBe(1);
+    const note = await findEventByExternalRef({ vaultRoot: input.vaultRoot, ...externalRef });
+    if (note?.kind !== "note") throw new Error("Upgraded clinical note is missing.");
+    expect(note.sections?.map((section) => section.text).join("")).toBe(text.trim());
+    expect(note.occurredAt).toBe(resource.date);
+    expect((await importClinicalFhirSnapshot(upgrade)).canonical.createdCount).toBe(0);
+  });
   it("promotes a verified legacy unsupported hold and imports an unrelated lab atomically", async () => {
     const { input, resource } = await seedLegacyMeasurementHold();
     const next = {

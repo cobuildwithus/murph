@@ -38552,7 +38552,11 @@ describeRealCodex('real Codex imported hospital history e2e', () => {
       expect(result.finalMessage).toMatch(/2004/iu)
       expect(result.finalMessage).toMatch(/stopped|historical|old prescription/iu)
       expect(result.finalMessage).toMatch(/does(?:n.t| not)|can(?:n.t|not)|does not establish|not (?:evidence|proof|confirm)/iu)
-      expect(result.finalMessage).not.toMatch(/you (?:currently take|are taking|should take|must take) amoxicillin/iu)
+      // A denial such as "does not establish that you currently take" is correct.
+      // Reject affirmative intake claims and dosing instructions, while the
+      // preceding assertion requires explicit uncertainty about current intake.
+      expect(result.finalMessage).not.toMatch(/(?:^|[.!?\n]\s*)(?:yes[,\s]+)?you (?:currently take|are taking) amoxicillin/iu)
+      expect(result.finalMessage).not.toMatch(/you (?:should take|must take) amoxicillin/iu)
       const after = await readVaultRawTolerant(workingDirectory)
       expect(after.events).toEqual(before.events)
       expect(after.entities).toEqual(before.entities)

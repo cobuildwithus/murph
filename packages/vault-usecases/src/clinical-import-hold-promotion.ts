@@ -19,6 +19,9 @@ const PROMOTABLE_OBSERVATION_HOLDS = new Set([
   "vital component code is not importable",
   "vital quantity unit is not importable",
 ]);
+const PROMOTABLE_DOCUMENT_HOLDS = new Set([
+  "document reference text exceeds supported import bounds",
+]);
 
 export function createClinicalImportHoldVerifier(input: {
   manifest: ClinicalRawManifest;
@@ -67,7 +70,7 @@ export function createClinicalImportHoldVerifier(input: {
         || manifest.fhirBaseUrlHash !== input.manifest.fhirBaseUrlHash
         || manifest.patientIdHash !== input.manifest.patientIdHash) return null;
       const file = manifest.resourceFiles.find((entry) => entry.relativePath === parts.slice(5).join("/"));
-      if (!file || file.resourceType !== "Observation") return null;
+      if (!file || !["Observation", "DocumentReference"].includes(file.resourceType)) return null;
       const retainedContent = await readRetainedFile(rawRef);
       return createHash("sha256").update(retainedContent, "utf8").digest("hex") === file.sha256
         ? retainedContent : null;
@@ -97,15 +100,17 @@ export function createClinicalImportHoldVerifier(input: {
   };
 }
 
-function isPromotableObservationHold(marker: Readonly<EventRecord>): boolean {
+function isPromotableClinicalHold(marker: Readonly<EventRecord>): boolean {
+  const reasons = marker.externalRef?.resourceType === "observation"
+    ? PROMOTABLE_OBSERVATION_HOLDS
+    : marker.externalRef?.resourceType === "document-reference" ? PROMOTABLE_DOCUMENT_HOLDS : undefined;
   return marker.kind === "note"
-    && PROMOTABLE_OBSERVATION_HOLDS.has(marker.note ?? "")
-    && marker.externalRef?.resourceType === "observation"
+    && reasons?.has(marker.note ?? "") === true
     && marker.evidence?.length === 1;
 }
 
 function promotionEvidence(marker: Readonly<EventRecord>, incoming: Readonly<EventRecord>) {
-  if (!isPromotableObservationHold(marker) || incoming.evidence?.length !== 1) return null;
+  if (!isPromotableClinicalHold(marker) || incoming.evidence?.length !== 1) return null;
   const oldEvidence = marker.evidence?.[0];
   const newEvidence = incoming.evidence[0];
   if (!oldEvidence?.rawRef || !newEvidence?.rawRef
