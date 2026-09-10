@@ -6177,7 +6177,14 @@ describe('assistant cron runtime orchestration', () => {
     const automationId = MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
     addManagedBackgroundAutomation(vaultRoot, automationId)
     const executionContext: AssistantExecutionContext = {
-      hosted: { memberId: 'member-patterns-fixture', userEnvKeys: [] },
+      hosted: {
+        memberId: 'member-patterns-fixture',
+        resolveScheduledExternalThreadRoute: async ({ target }) => ({
+          channel: 'telegram', containerMemberId: 'member-patterns-fixture',
+          threadId: target, threadIsDirect: true,
+        }),
+        userEnvKeys: [],
+      },
     }
     cronMocks.canSkipManagedPersonalPatterns.mockResolvedValueOnce(true)
     expect(await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot }))
