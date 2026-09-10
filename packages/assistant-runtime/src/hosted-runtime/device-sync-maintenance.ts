@@ -15,8 +15,6 @@ import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
 import type {
-} from "@murphai/device-syncd/config";
-import type {
   DeviceSyncJobFailureDiagnostic,
   DeviceSyncJobFailureEventOrigin,
   DeviceSyncJobRecord,
