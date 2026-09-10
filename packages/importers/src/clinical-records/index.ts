@@ -101,8 +101,12 @@ const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
   ["8462-4", { facet: "bp-diastolic", metric: "diastolic-blood-pressure", title: "Diastolic blood pressure", unit: "mmHg" }],
   ["8867-4", { facet: "heart-rate", metric: "heart-rate", title: "Heart rate", unit: "bpm" }],
   ["9279-1", { facet: "respiratory-rate", metric: "respiratory-rate", title: "Respiratory rate", unit: "breaths/min" }],
+  ["2708-6", { facet: "spo2", metric: "spo2", title: "Oxygen saturation", unit: "percent" }],
   ["59408-5", { facet: "spo2", metric: "spo2", title: "Oxygen saturation", unit: "percent" }],
   ["8310-5", { facet: "temperature", metric: "temperature", title: "Body temperature", unit: "Cel" }],
+  ["8302-2", { facet: "body-height", metric: "body-height", title: "Body height", unit: "cm" }],
+  ["39156-5", { facet: "bmi", metric: "bmi", title: "BMI", unit: "kg/m^2" }],
+  ["9843-4", { facet: "head-circumference", metric: "head-circumference", title: "Head circumference", unit: "cm" }],
   ["29463-7", { facet: "body-weight", metric: "body-weight", title: "Body weight", unit: "kg" }],
 ]);
 
@@ -133,7 +137,10 @@ const DIAGNOSTIC_SUMMARY_MAX_LENGTH = 1_000;
 const LAB_RESULT_TEXT_MAX_LENGTH = 160;
 const LAB_RESULT_MAX_COUNT = 500;
 const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, string>>([
-  ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"]])],
+  ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"], ["g", "g"]])],
+  ["body-height", new Map([["[in_i]", "in"], ["in", "in"]])],
+  ["head-circumference", new Map([["[in_i]", "in"], ["in", "in"]])],
+  ["bmi", new Map([["kg/m2", "kg/m^2"]])],
   ["bp-diastolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
   ["bp-systolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
   ["heart-rate", new Map([
@@ -150,7 +157,7 @@ const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, str
     ["breaths/minute", "breaths/min"],
   ])],
   ["spo2", new Map([["%", "percent"], ["percent", "percent"]])],
-  ["temperature", new Map([["cel", "Cel"]])],
+  ["temperature", new Map([["cel", "Cel"], ["[degf]", "degF"], ["degf", "degF"]])],
 ]);
 type QuantityComparator = NonNullable<BloodTestResultRecord["comparator"]>;
 type BloodTestResultFlag = NonNullable<BloodTestResultRecord["flag"]>;

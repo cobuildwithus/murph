@@ -177,6 +177,49 @@ describe("importClinicalFhirSnapshot", () => {
     expect(event?.kind).toBe("measurement");
   });
 
+  it("persists historical height, BMI and standard oxygen saturation with replay-safe provenance", async () => {
+    const measurements = [
+      { id: "historical-height", codes: ["8302-2"], value: 69, code: "[in_i]", metric: "body-height", unit: "in" },
+      { id: "historical-bmi", codes: ["39156-5"], value: 24.2, code: "kg/m2", metric: "bmi", unit: "kg/m^2" },
+      { id: "historical-oxygen", codes: ["2708-6", "59408-5"], value: 98, code: "%", metric: "spo2", unit: "percent" },
+    ];
+    const resources = measurements.map((item) => ({
+      ...heartRateObservation(item.id, item.value),
+      effectiveDateTime: "2010-04-02T12:00:00.000Z",
+      code: { coding: item.codes.map((code) => ({ system: "http://loinc.org", code })) },
+      valueQuantity: { value: item.value, system: "http://unitsofmeasure.org", code: item.code },
+    }));
+    const input = await createSnapshotInput({
+      pages: [{ resourceType: "Observation", content: fhirBundle(resources) }],
+      resourceTypes: ["Observation"],
+    });
+
+    const result = await importClinicalFhirSnapshot(input);
+    expect(result).toMatchObject({
+      canonical: { createdCount: 3 },
+      executableDecisionCount: 3,
+      reviewDecisionCount: 0,
+    });
+    expect((await importClinicalFhirSnapshot(input)).canonical).toMatchObject({
+      createdCount: 0,
+      skippedExistingCount: 3,
+    });
+    for (const item of measurements) {
+      const event = await findEventByExternalRef({
+        vaultRoot: input.vaultRoot,
+        system: "epic-fhir-" + FHIR_BASE_URL_HASH + "-" + PATIENT_ID_HASH,
+        resourceType: "observation",
+        resourceId: item.id,
+      });
+      expect(event).toMatchObject({
+        kind: "measurement",
+        occurredAt: "2010-04-02T12:00:00.000Z",
+        measurements: [{ metric: item.metric, unit: item.unit, value: item.value }],
+        externalRef: { version: "2026-07-10T12:00:00.000Z" },
+      });
+    }
+  });
+
   it("persists repeated resource types beneath query-aware raw evidence paths", async () => {
     const base = await createSnapshotInput({
       pages: [],
