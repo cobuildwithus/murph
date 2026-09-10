@@ -3390,12 +3390,10 @@ in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 Hosted Linq typing-start events are verified, parsed strictly, and acknowledged
 without scheduling member lookup or runtime work. Current Web no longer sends
 member-specific shell-prewarm hints from typing, message routing, or instant
-start. The old authenticated Worker receiver bounds and discards its request
-body, then returns success without resolving a Durable Object. A minimal inert
-UserRunner RPC remains only until Worker versions that still delegate old hints
-have drained. Two inert container RPCs likewise remain until pre-unified-fleet
-UserRunner producers drain. These compatibility methods return constants and
-perform no member binding, admission read, logging, or container work. The inventory coordinator owns speculative preparation;
+start. The retired HTTP endpoint returns 404 without resolving a runtime owner,
+and its UserRunner and RunnerContainer RPC compatibility methods are removed.
+Older Web's best-effort helper treats that response as an optional hint failure.
+The inventory coordinator owns speculative preparation;
 normal admitted execution remains the only member-binding path. The Temporal
 mailbox signal remains the durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner
@@ -3410,7 +3408,10 @@ only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
-fence coalesces runners that overlap in the same invocation.
+fence coalesces runners that overlap in the same invocation. Exact legacy stop
+targets retain their recovery and deletion paths, and stored shell-prewarm
+latency fields remain readable. Transport retirement adds no persistent format
+or rollback floor beyond the unified fleet contract.
 
 Hosted Linq message edits are immutable correction inputs, not mutations of an
 accepted mailbox item or transcript. Each accepted inbound Linq conversation
