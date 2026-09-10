@@ -3,14 +3,18 @@ import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { type Prisma } from "@prisma/client";
-import { cookies } from "next/headers";
+import { headers as requestHeaders } from "next/headers";
 import { cache } from "react";
 
+import { assertHostedLegacyCredentialWriterTx } from "../better-auth/legacy-writer";
 import { getPrisma } from "../prisma";
+import { classifyHostedBrowserCredential, hostedAuthCookieName } from "../better-auth/transport";
+import { requireHostedBetterAuthConfig } from "../better-auth/config";
+import { readHostedAuthSession, assertHostedAuthSessionCurrentTx, revokeHostedAuthSession, buildHostedAuthSessionClearCookie, type HostedAuthSessionProof } from "../better-auth/session";
 import {
   assertActiveHostedMemberAccessAllowed,
 } from "./member-access";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   readHostedMemberCoreState,
   type HostedMemberCoreState,
@@ -25,8 +29,10 @@ import { readHostedAppSessionHmacKey } from "./app-session-config";
 export interface HostedAppSession {
   expiresAt: Date;
   member: HostedMemberCoreState;
-  privyUserId: string;
+  privyUserId: string | null;
   sessionId: string;
+  authProof?: HostedAuthSessionProof;
+  primaryAuthenticatedAt?: Date | null;
 }
 
 const HOSTED_APP_SESSION_COOKIE_NAME_PRODUCTION = "__Host-murph-session";
@@ -52,8 +58,7 @@ const HOSTED_APP_SESSION_COOKIE_NAME =
     : HOSTED_APP_SESSION_COOKIE_NAME_DEVELOPMENT;
 
 const resolveHostedAppSessionFromCookies = cache(async (): Promise<HostedAppSession | null> => {
-  const cookieStore = await cookies();
-  return resolveHostedAppSessionFromToken(cookieStore.get(HOSTED_APP_SESSION_COOKIE_NAME)?.value);
+  return resolveHostedAppSessionFromHeaders(await requestHeaders());
 });
 
 export async function getHostedAppSession(): Promise<HostedAppSession | null> {
@@ -82,7 +87,27 @@ export async function requireActiveHostedAppSession(): Promise<HostedAppSession>
 }
 
 export async function getHostedAppSessionFromRequest(request: Request): Promise<HostedAppSession | null> {
-  return resolveHostedAppSessionFromToken(readCookieFromRequest(request, HOSTED_APP_SESSION_COOKIE_NAME));
+  return resolveHostedAppSessionFromHeaders(request.headers);
+}
+
+async function resolveHostedAppSessionFromHeaders(headers: Pick<Headers, "get">): Promise<HostedAppSession | null> {
+  let credential: ReturnType<typeof classifyHostedBrowserCredential>;
+  try {
+    credential = classifyHostedBrowserCredential({
+      authorization: headers.get("authorization"), cookie: headers.get("cookie"), production: process.env.NODE_ENV === "production",
+    });
+  } catch (error) {
+    if (isHostedOnboardingError(error) && error.code === "AUTH_REQUIRED") return null;
+    throw error;
+  }
+  if (credential.kind === "anonymous") return null;
+  if (credential.kind === "legacy") return resolveHostedAppSessionFromToken(credential.token);
+  const result = await readHostedAuthSession({
+    ...requireHostedBetterAuthConfig(), credential: credential.token, transport: "browser", prisma: getPrisma(),
+  });
+  if (!result.session) return null;
+  const { proof, ...session } = result.session;
+  return { ...session, authProof: proof };
 }
 
 export async function requireHostedAppSessionFromRequest(request: Request): Promise<HostedAppSession> {
@@ -114,7 +139,17 @@ export async function assertHostedAppSessionCurrentTx(input: {
   prisma: Prisma.TransactionClient;
   request: Request;
   sessionId: string;
+  authProof?: HostedAuthSessionProof;
 }): Promise<void> {
+  const credential = classifyHostedBrowserCredential({
+    authorization: input.request.headers.get("authorization"), cookie: input.request.headers.get("cookie"),
+    production: process.env.NODE_ENV === "production",
+  });
+  if (credential.kind === "better-auth") {
+    if (!input.authProof) throw hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." });
+    await assertHostedAuthSessionCurrentTx({ ...input, credential: credential.token, proof: input.authProof });
+    return;
+  }
   const token = parseHostedAppSessionToken(readCookieFromRequest(input.request, HOSTED_APP_SESSION_COOKIE_NAME));
   if (token && token.sessionId === input.sessionId) {
     await input.prisma.$queryRaw`
@@ -156,6 +191,7 @@ export async function issueHostedAppSession(input: {
       });
     }
     assertHostedMemberNotSuspended(member);
+    await assertHostedLegacyCredentialWriterTx(tx, input.memberId);
     await tx.hostedWebSession.create({
       data: {
         id: sessionId,
@@ -195,7 +231,14 @@ export async function revokeHostedAppSessionFromRequest(input: {
   now?: Date;
   reason: string;
   request: Request;
-}): Promise<string> {
+}): Promise<string[]> {
+  if (input.request.headers.has("authorization")) throw hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." });
+  const replacement = readCookieFromRequest(input.request, hostedAuthCookieName(process.env.NODE_ENV === "production"));
+  if (replacement && replacement.length <= 4096) await revokeHostedAuthSession({
+    ...requireHostedBetterAuthConfig(), credential: replacement, prisma: getPrisma(), transport: "browser",
+  });
+  // Logout independently revokes both presented formats. Removing the new
+  // cookie must not uncover an older, still-valid browser login.
   const token = parseHostedAppSessionToken(
     readCookieFromRequest(input.request, HOSTED_APP_SESSION_COOKIE_NAME),
   );
@@ -224,7 +267,11 @@ export async function revokeHostedAppSessionFromRequest(input: {
     }
   }
 
-  return buildHostedAppSessionClearCookie();
+  return buildHostedAppSessionClearCookies();
+}
+
+export function buildHostedAppSessionClearCookies(): string[] {
+  return [buildHostedAppSessionClearCookie(), buildHostedAuthSessionClearCookie()];
 }
 
 export function buildHostedAppSessionClearCookie(): string {

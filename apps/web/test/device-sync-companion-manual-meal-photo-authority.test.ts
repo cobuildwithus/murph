@@ -7,15 +7,15 @@ const mocks = vi.hoisted(() => ({
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lockHostedMemberSponsoredAccessRows: vi.fn(),
-  lookupHostedMemberForPrivyPrincipal: vi.fn(),
+  assertHostedNativeMemberAuthCurrentTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  lookupHostedMemberForPrivyPrincipal: mocks.lookupHostedMemberForPrivyPrincipal,
+vi.mock("@/src/lib/better-auth/native-auth", () => ({
+  assertHostedNativeMemberAuthCurrentTx: mocks.assertHostedNativeMemberAuthCurrentTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
@@ -35,19 +35,18 @@ import {
 } from "../src/lib/device-sync/meal-photo-capture";
 
 const MEMBER_ID = "member_1";
-const IDENTITY_USER_ID = "privy_member_1";
+const AUTH = { member: { id: MEMBER_ID } } as never;
 const PRISMA = { label: "transaction" };
 
 describe("manual meal photo final authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue({ id: MEMBER_ID });
+    mocks.assertHostedNativeMemberAuthCurrentTx.mockResolvedValue(undefined);
   });
 
-  it("locks before rechecking identity, access, and historical consent", async () => {
+  it("rechecks the current credential under its member lock before access and historical consent", async () => {
     await expect(assertCurrentManualMealPhotoUploadAuthorityTx({
-      identityUserId: IDENTITY_USER_ID,
-      memberId: MEMBER_ID,
+      auth: AUTH,
       prisma: PRISMA as never,
     })).resolves.toBeUndefined();
 
@@ -56,10 +55,7 @@ describe("manual meal photo final authority", () => {
       PRISMA,
       MEMBER_ID,
     );
-    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledWith({
-      identity: { userId: IDENTITY_USER_ID },
-      prisma: PRISMA,
-    });
+    expect(mocks.assertHostedNativeMemberAuthCurrentTx).toHaveBeenCalledWith(AUTH, PRISMA);
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: PRISMA,
@@ -72,24 +68,20 @@ describe("manual meal photo final authority", () => {
       mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0]
         ?? Number.MAX_SAFE_INTEGER,
     );
-    expect(
+    expect(mocks.assertHostedNativeMemberAuthCurrentTx.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.lookupHostedMemberForPrivyPrincipal.mock.invocationCallOrder[0]
-        ?? Number.MAX_SAFE_INTEGER,
     );
   });
 
-  it("rejects a changed Privy binding before protected-state checks", async () => {
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValueOnce({ id: "member_2" });
+  it("rejects a revoked credential before protected-state checks", async () => {
+    mocks.assertHostedNativeMemberAuthCurrentTx.mockRejectedValueOnce({ code: "AUTH_REQUIRED", httpStatus: 401 });
 
     await expect(assertCurrentManualMealPhotoUploadAuthorityTx({
-      identityUserId: IDENTITY_USER_ID,
-      memberId: MEMBER_ID,
+      auth: AUTH,
       prisma: PRISMA as never,
     })).rejects.toMatchObject({
-      code: "PRIVY_USER_MISMATCH",
-      httpStatus: 409,
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
     });
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();

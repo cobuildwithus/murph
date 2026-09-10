@@ -120,7 +120,7 @@ export async function verifySensitiveActionChallenge(input: {
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
-  privyUserId: string;
+  privyUserId: string | null;
 }): Promise<VerifiedSensitiveActionChallenge> {
   assertBindingHash(input.bindingHash);
   const authorization = parseSensitiveActionAuthorization(input.authorization);
@@ -169,7 +169,7 @@ export async function verifySensitiveActionChallenge(input: {
       passkeys: credentials,
     };
   }
-  if (authorization.method === "passkey") throw sensitiveActionSetupRequired();
+  if (authorization.method === "passkey" || !input.privyUserId) throw sensitiveActionSetupRequired();
 
   let privyUser: unknown;
   try {
@@ -227,7 +227,7 @@ export async function consumeSensitiveActionChallenge(input: {
   challenge: VerifiedSensitiveActionChallenge;
   now?: Date;
   prisma: PrismaClient;
-  session: { request: Request; sessionId: string };
+  session: { request: Request; sessionId: string; authProof?: import("../better-auth/session").HostedAuthSessionProof };
 }): Promise<void> {
   await input.prisma.$transaction(async (prisma) => {
     await lockHostedMemberRow(prisma, input.challenge.memberId);

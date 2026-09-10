@@ -1,10 +1,11 @@
+import { readHostedAuthenticationCompletion } from "./authentication-completion";
 import {
-  HostedBillingStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { assertHostedLegacyCredentialWriterTx } from "../better-auth/legacy-writer";
 import {
   signalHostedPhoneCallResultNotificationRecovery,
 } from "../phone-calls/reconciliation-workflow-start";
@@ -20,16 +21,13 @@ import {
 } from "../hosted-crypto/domain-root-store";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
-import { deriveHostedPostVerificationStage } from "./lifecycle";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
-import { isHostedMemberActivationPending } from "./activation-progress";
 import {
   prepareHostedMemberVerifiedEmailReplyAlias,
-  readHostedMemberMessagingSetupState,
   readHostedMemberEmailAuthorization,
   type HostedMemberVerifiedEmailReplyAliasPreparation,
   type HostedMemberCoreState,
@@ -43,9 +41,6 @@ import {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
 import {
-  isHostedMemberMessagingSetupRequired,
-} from "./messaging-state";
-import {
   readHostedPrivyUserById,
   resolveHostedPrivyIdentityFromVerifiedUser,
   type HostedPrivyIdentity,
@@ -54,8 +49,6 @@ import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
 import type { HostedPrivyAuthMethod } from "./types";
 import { normalizeHostedSignupTimeZone } from "./time-zone-hint";
 import {
-  buildHostedInviteUrl,
-  issueHostedInvite,
   requireHostedInviteMemberIdentity,
   requireHostedInviteForAuthentication,
 } from "./invite-service";
@@ -72,7 +65,6 @@ import {
   generateHostedMemberId,
 } from "./shared";
 import { readHostedMemberIdentity } from "./hosted-member-identity-store";
-import { readActiveHostedMemberAccess } from "./member-access";
 import type { HostedPostVerificationStage } from "./stage";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import type {
@@ -104,6 +96,9 @@ export async function completeHostedPrivyVerification(input: {
   messagingSetupRequired: boolean;
   stage: HostedPostVerificationStage;
 }> {
+  if (process.env.HOSTED_BETTER_AUTH_ENABLED === "true") {
+    throw hostedOnboardingError({ code: "AUTHORITY_MIGRATED", httpStatus: 409, message: "Refresh Murph to use the current sign-in flow." });
+  }
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const timeZone = normalizeHostedSignupTimeZone(input.timeZone);
@@ -153,55 +148,13 @@ export async function completeHostedPrivyVerification(input: {
       }
     }
 
-    const messagingSetupState = await readHostedMemberMessagingSetupState({
-      memberId: member.id,
-      prisma,
+    const result = await readHostedAuthenticationCompletion({
+      member, prisma, invite, emailLinked: Boolean(memberResolution.identity.email?.verifiedAt),
     });
-
-    const activeInvite = invite ?? await issueHostedInvite({
-      channel: "web",
-      memberId: member.id,
-      prisma,
-    });
-    const accessActive = await readActiveHostedMemberAccess({
-      memberId: member.id,
-      prisma,
-    });
-    const activationPending = accessActive
-      ? await isHostedMemberActivationPending({
-          billingStatus: HostedBillingStatus.active,
-          memberId: member.id,
-          prisma,
-        })
-      : false;
-    const stage = deriveHostedPostVerificationStage({
-      activationPending,
-      billingStatus: member.billingStatus,
-      sponsoredAccessActive: accessActive,
-      suspendedAt: member.suspendedAt,
-    });
-    const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
-      identity: {
-        ...(messagingSetupState?.identity ?? {}),
-        emailLinked: Boolean(memberResolution.identity.email?.verifiedAt),
-      },
-      routing: messagingSetupState?.routing ?? null,
-    });
-
     finishHostedOnboardingTiming(timing, "completed", {
-      messagingSetupRequired,
-      stage,
-      usedInvite,
+      messagingSetupRequired: result.messagingSetupRequired, stage: result.stage, usedInvite,
     });
-
-    return {
-      inviteCode: activeInvite.inviteCode,
-      joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
-      member,
-      memberId: member.id,
-      messagingSetupRequired,
-      stage,
-    };
+    return result;
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -638,6 +591,7 @@ async function syncHostedPrivyTransactionalBindingsTx(input: {
   preparedReplyAlias: HostedMemberVerifiedEmailReplyAliasPreparation | null;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
+  await assertHostedLegacyCredentialWriterTx(input.prisma, input.memberId);
   if (input.authMethod === "email" && input.identity.email?.verifiedAt) {
     await syncHostedMemberVerifiedEmailAuthorization({
       address: input.identity.email.address,

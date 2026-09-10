@@ -33,8 +33,8 @@ export const HOSTED_RETENTION_MAX_BATCHES = 4;
 export const HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES =
   HOSTED_RETENTION_MAX_BATCHES * 100;
 // Short-lived control artifacts are normally tiny and should never inherit the
-// high-volume diagnostic drain budget. Across the eight owners below this caps
-// one hourly pass at 16 statements and 4,000 deleted or compacted rows.
+// high-volume diagnostic drain budget. Across the ten categories below this caps
+// one hourly pass at 20 statements and 5,000 deleted or compacted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // Clinical Records started intents remain the completion owner after their
@@ -54,6 +54,7 @@ type HostedRuntimeRecheckSignal = (input: {
 export interface HostedControlPlaneRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
+  expiredAuthRecordsDeleted: number;
   expiredClinicalRecordConnectIntentsDeleted: number;
   expiredClinicalRecordOauthSessionsDeleted: number;
   expiredConnectedAppConnectIntentsDeleted: number;
@@ -91,6 +92,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     await deleteExpiredConnectedAppConnectIntents({ now, prisma });
   const expiredSensitiveActionChallengesDeleted =
     await deleteExpiredSensitiveActionChallenges({ now, prisma });
+  const expiredAuthRecordsDeleted = await deleteExpiredHostedAuthRecords({ now, prisma });
   const expiredDeviceConnectIntentsDeleted =
     await deleteExpiredDeviceConnectIntents({ now, prisma });
   const expiredDeviceOauthSessionsDeleted =
@@ -137,6 +139,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
   return {
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
+    expiredAuthRecordsDeleted,
     expiredClinicalRecordConnectIntentsDeleted,
     expiredClinicalRecordOauthSessionsDeleted,
     expiredConnectedAppConnectIntentsDeleted,
@@ -691,6 +694,32 @@ export async function deleteExpiredEmailPublicBootstrapAttempts(input: {
     USING doomed
     WHERE attempt."id" = doomed."id"
   `);
+}
+
+export async function deleteExpiredHostedAuthRecords(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  let deleted = 0;
+  // Give sessions and pre-auth OTP/rate-limit state separate indexed budgets.
+  // User/account projections have no expiry and are removed only by their owner.
+  for (const model of ["session", "verification"] as const) {
+    deleted += await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+      WITH doomed AS MATERIALIZED (
+        SELECT record."model", record."id"
+        FROM "hosted_auth_record" AS record
+        WHERE record."model" = ${model}::"HostedAuthModel"
+          AND record."expires_at" <= ${input.now}
+        ORDER BY record."expires_at" ASC, record."id" ASC
+        LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+        FOR UPDATE OF record SKIP LOCKED
+      )
+      DELETE FROM "hosted_auth_record" AS record
+      USING doomed
+      WHERE record."model" = doomed."model" AND record."id" = doomed."id"
+    `);
+  }
+  return deleted;
 }
 
 async function deleteExpiredSensitiveActionChallenges(input: {

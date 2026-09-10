@@ -454,7 +454,7 @@ describe("hosted app session", () => {
     const revokedRecord = findStoredSession(issueResult.sessionId);
     expect(revokedRecord.revokedAt).toEqual(now);
     expect(revokedRecord.revokeReason).toBe("logout");
-    expect(clearCookie).toBe("murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    expect(clearCookie).toEqual(["murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"]);
     expect(harness.rootHostedWebSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         id: issueResult.sessionId,
@@ -486,7 +486,7 @@ describe("hosted app session", () => {
 
     expect(findStoredSession(issueResult.sessionId).revokedAt).toBeNull();
     expect(harness.rootHostedWebSession.updateMany).not.toHaveBeenCalled();
-    expect(clearCookie).toBe("murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    expect(clearCookie).toEqual(["murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"]);
   });
 
   it("fails issuance closed before database writes when the HMAC key is missing or malformed", async () => {
@@ -565,6 +565,7 @@ function createPrismaHarness(records: StoredHostedWebSession[] = []) {
   const rootHostedWebSession = createHostedWebSessionDelegate(records);
   const transactionHostedWebSession = createHostedWebSessionDelegate(records);
   const transactionClient = {
+    hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
     $queryRaw: vi.fn(async () => [{ "?column?": 1 }]),
     hostedWebSession: transactionHostedWebSession,
   };

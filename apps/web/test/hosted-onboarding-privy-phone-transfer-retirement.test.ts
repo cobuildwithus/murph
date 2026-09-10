@@ -515,7 +515,7 @@ describe("Privy phone-transfer source retirement", () => {
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
-  it("lets Settings phone sync retire a source with only an expired callback nonce", async () => {
+  it("rejects cross-member phone sync without invoking source retirement", async () => {
     const fixture = makeFixture({ autoTrial: true });
     stubHostedCallbackNonce(fixture, new Date(0));
     const prisma = Object.assign(fixture.prisma, {
@@ -606,24 +606,10 @@ describe("Privy phone-transfer source retirement", () => {
     );
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
-      phoneNumber: PHONE_NUMBER,
-      status: "synced",
-    });
-    expect(JSON.stringify(body)).not.toContain(
-      "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
-    );
-    expect(JSON.stringify(body)).not.toContain("saved activity");
-    expect(
-      fixture.prisma.hostedWebInternalRequestNonce.findFirst,
-    ).toHaveBeenCalledWith({
-      where: {
-        expiresAt: { gte: expect.any(Date) },
-        userId: SOURCE_MEMBER_ID,
-      },
-      select: { nonceHash: true },
-    });
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({ error: { code: "PHONE_IDENTITY_CONFLICT" } });
+    expect(mocks.deleteHostedPrivyPhoneTransferSourceAccountData).not.toHaveBeenCalled();
+
   });
 
   it("retries an exact automatic-trial scaffold after cleanup cancellation", async () => {

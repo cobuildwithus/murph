@@ -29,7 +29,7 @@ Entry and promise: existing Settings/passkey and approval surfaces, existing log
 Affected people: protected and unconfigured members, existing browser sessions, new and dormant logins, legacy/updated/offline native clients, pending/text-first/invited members, suspended/deleting members.
 Proof: complete user journeys plus real WebAuthn fixtures, Postgres concurrency, cross-format revocation, actual native restoration and explicit deployment compatibility.
 Done when: intended actions succeed with the same member and original authorization, failures preserve valid state, and supported old clients have a tested transition.
-Current verdict: PR 1 local journeys Ready; external candidate review and CI pending. Later stages remain Hold.
+Current verdict: PR 1 has a resolved ReviewGPT PASS and green exact-head CI at bc9f3728b12bcb54ab941505e34ff32cecde9c68. Later stages remain Hold.
 
 ## Tasks
 
@@ -71,7 +71,7 @@ also applies successfully in the isolated task database. These
 tests use real PostgreSQL and WebAuthn signatures with the repository's synthetic
 member-crypto codec; they are not a hosted KMS or real-device qualification.
 
-Remaining verification: focused Web tests/typecheck, real cryptographic assertions and Postgres races, rendered approval journeys, actual native tests/device qualification, dependency guards, complexity review, exact-head CI and final ReviewGPT. No passing runtime proof is claimed yet.
+Remaining verification covers later PRs' focused tests/typechecks, real native restoration and device qualification, dependency guards, complexity review, exact-head CI and final ReviewGPT. Local and CI proof does not establish production activation.
 
 ## PR 1 candidate review
 
@@ -98,3 +98,107 @@ actual generated registration/authentication challenges. The privacy schema
 inventory now explicitly includes the encrypted approval aggregate. Focused
 cryptographic/schema tests, PostgreSQL journeys, typecheck and lint pass; the
 remediated candidate still requires resolved final review and exact-head CI.
+
+PR 1 review round 2 passed on bc9f3728b12bcb54ab941505e34ff32cecde9c68.
+Required CI subsequently passed on that exact head, including all four Web
+test shards and the final release gate. PR 3127 is Ready; enrollment remains off.
+
+## PR 2 implementation progress
+
+The private Better Auth 1.7.3 owner now has a closed encrypted adapter, bounded
+retention, atomic rate-limit storage, explicit transport classification and
+credential-read-only legacy principal resolution. Auth-user presence is the
+monotonic handoff marker; imported credentials retain a null credential-change
+date until a new authority mutation, avoiding another migration-state table.
+
+OTP completion uses one database-only transaction for consumption, canonical
+member/contact writes and session creation. Wrong-code attempts commit their
+budget; failures after proof roll back consumption and all writes. Signup pins
+the auth-user ID to the prepared canonical member. Imported users require
+independent provider/canonical agreement and exact source revalidation.
+Previously handed-off users never refresh credentials from Privy.
+
+Resend and verification share an OTP-identifier lock. The route owner stages
+generation in a short transaction, keeps one current code, then delivers after
+commit. This accommodates the pinned phone plugin's duplicate-identifier insert
+behavior without weakening storage uniqueness or doing delivery under locks.
+Session primary-auth time is independent from renewal and silent migration.
+
+The composed proofs now include the actual public browser/native OTP routes,
+canonical signup metadata, pending text-first email claims, mismatched/expired
+invites, same-member native exchange using real signed JWTs, and native session
+read/renew/logout during an issuance pause. Mixed browser-cookie proof shows
+that old sessions continue, the replacement selects its verifier exclusively,
+and logout revokes both. Protected commit guards reject stale or revoked auth
+snapshots without provider calls under locks. Old Privy session issuance is
+fenced after handoff; cross-member phone retirement was removed.
+
+All native product routes now use the shared member-auth boundary. New native
+admission reuses product bootstrap, consent and Starter owners. Legacy native
+admission stays read-only after global activation or per-member handoff; pausing
+issuance cannot restore old writers. The Ops importer is bounded to five members
+per keyset page, defaults to dry-run and reports closed private outcomes.
+
+PR 2 is the deployable backend compatibility boundary with issuance off.
+Telegram primary login, new credential controls and web/native activation move
+together in PR 3 so no member is handed off before the replacement UI is usable.
+The importer already reconciles numeric Telegram bindings for same-member native
+exchange; it does not expose Telegram login. Actual native SDK replacement,
+app-store/device qualification, credential mutations/recovery and full retirement
+remain unfinished goal scope. The rollout owner names these activation gates.
+
+PR 2 focused proof passes: 34 real-PostgreSQL adapter/member cases, 641
+regular regression cases across the final affected-file reruns, and the separate
+nine-case action-approval database suite. Web typecheck, changed-file lint,
+complexity, documentation drift and added-line privacy checks pass. Parent
+candidate review confirms the backend stays inactive until PR 3. PR 3128 is
+open, stacked on PR 3127. A local HTTPS public-route fixture reproduced a cookie
+namespace mismatch; writer and readers now share the environment naming rule,
+with production secure-cookie proof retained. Final exact-head CI and ReviewGPT
+remain. No PR 2 deployment or production import
+has occurred. Local member crypto/KMS ports are synthetic; actual installed Better
+Auth, PostgreSQL, pre-auth AEAD and signed JWT/WebAuthn fixtures provide boundary
+proof, not hosted delivery or real-device qualification.
+
+
+## PR 2 review remediation
+
+The valid first substantive review at dd276e29cd708954f0d8c8ab31d804a8d2695440
+identified three high-impact bugs. All were independently reproduced and accepted:
+new email signup lacked the canonical identity required by product completion;
+pristine referral targets were omitted from OTP member selection; and concurrent
+session renewal or a storage deletion failure could produce false-success logout.
+
+The email owner now creates the missing identity scaffold through the existing
+writer. Invite selection retains claimability, expiry, contact conflicts and
+member-locked revalidation. The logout owner verifies the signed credential and
+uses authenticated adapter deletion with three bounded attempts for ciphertext
+conflicts; other failures propagate. No new persisted state or weaker guard was
+introduced. Tests exercise actual product completion, real referral allocation,
+and both public logout routes. The prior logout implementation fails all four
+race/storage regressions.
+
+Two composed native-auth fixture suites now follow the shared verifier and
+preserve the original identity-verification/member-lookup stage boundaries. The prior OpenAI peer resolution was restored, but CI proved that it was not
+the bundle-size cause. The second substantive review passed on
+`ae758d69d46cc680f88fb86ebdc25126cd505236`; all application checks passed on that
+head, while the independent runner budget remained failing. Focused checks pass:
+40 PostgreSQL cases, 119 affected native-route regressions, Web typecheck,
+changed-file lint, documentation drift and complexity.
+
+The standalone runner seed included registry versions used only by the Web app.
+Adding Better Auth therefore moved its existing Zod resolution from 4.4.3 to
+4.5.4 and grew the CLI by 153704 bytes. The installer now asks the pinned pnpm
+CLI for the runner's production lockfile graph and limits seed package records
+to that closure. Source manifests, dependency versions and size budgets stay
+unchanged. Real assembly reproduces the original CLI size of 10053128 bytes,
+passes both absolute budgets and all eight command-parity probes. Focused
+installer tests and Cloudflare typecheck pass. This tooling correction requires
+a third exact-head review and CI before PR 2 is mergeable.
+
+Tooling retries did not advance the review counter. The invalid first capture
+requested missing installed dependency source. A plaintext-source staging retry
+failed before send. The successful retry included the complete compressed,
+hash-verified Better Auth 1.7.3 dependency source and the guarded repository ZIP.
+The completed response came from the requested Pro model and inspected both
+repository and decoded dependency contracts. No deployment or activation occurred.

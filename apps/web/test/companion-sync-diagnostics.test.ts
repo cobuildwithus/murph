@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuthFromBearerToken: mocks.auth,
+  requireActiveHostedMemberAuthFromBearerToken: mocks.auth,
 }));
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedHistoricalLaunchConsentGranted: mocks.consent,

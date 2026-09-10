@@ -109,6 +109,7 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
       prisma,
       request: input.request,
       sessionId: input.session.sessionId,
+      authProof: input.session.authProof,
     });
     await consumeSensitiveActionChallengeTx({
       challenge: { ...verified.proof, credentialWrite: prepared },

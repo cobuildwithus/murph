@@ -3,9 +3,6 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import {
-  deleteHostedPrivyPhoneTransferSourceAccountData,
-} from "@/src/lib/hosted-privacy/account-data-service";
-import {
   hostedPhoneLookupKeyMatchesValue,
   readHostedPhoneHint,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -25,9 +22,6 @@ import {
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
-  HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
-  prepareHostedPrivyPhoneTransferSourceRetirement,
-  prepareHostedPrivyPhoneTransferSourceRetirementTx,
   readHostedPrivyPhoneTransferProof,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
@@ -121,52 +115,11 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const now = new Date();
   if (phoneTransfer) {
-    const preparedRetirement =
-      await prepareHostedPrivyPhoneTransferSourceRetirement({
-        prisma,
-        sourceMemberId: phoneTransfer.sourceMemberId,
-        targetMemberId: auth.member.id,
-      });
-    const retirement = await prisma.$transaction((tx) =>
-      prepareHostedPrivyPhoneTransferSourceRetirementTx({
-        identity: providerSession.identity,
-        member: auth.member,
-        now,
-        prepared: preparedRetirement,
-        prisma: tx,
-        targetPhoneNumberBeforeTransfer:
-          currentIdentity?.phoneNumber ?? null,
-        transfer: phoneTransfer,
-      }), HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS);
-    traceHostedPhoneSync("source-classified", {
-      sourceKind: retirement.autoTrialBilling
-        ? "legacy-auto-trial"
-        : "non-billing-scaffold",
+    throw hostedOnboardingError({
+      code: "PHONE_IDENTITY_CONFLICT",
+      httpStatus: 409,
+      message: "That phone number belongs to another Murph account. Use another number or contact support.",
     });
-    const deletion =
-      await deleteHostedPrivyPhoneTransferSourceAccountData({
-        prisma,
-        request,
-        retirement,
-        targetMember: auth.member,
-        targetPhoneNumberBeforeTransfer:
-          currentIdentity?.phoneNumber ?? null,
-        targetPrivyUserId: appSession.privyUserId,
-        transfer: phoneTransfer,
-      });
-    traceHostedPhoneSync("transfer-committed", {
-      channelSyncQueued: deletion.channelSyncDispatch !== null,
-    });
-    if (deletion.channelSyncDispatch) {
-      await signalHostedMailboxAppendBestEffort({
-        expectedUserId: auth.member.id,
-        mailboxItemId: deletion.channelSyncDispatch.mailboxItemId,
-      });
-    }
-    return jsonOk(buildSyncedPhoneResult(
-      phoneNumber,
-      deletion.channelSyncDispatch !== null,
-    ));
   }
 
   const syncResult = await prisma.$transaction(async (tx) => {

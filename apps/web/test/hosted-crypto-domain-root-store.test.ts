@@ -3877,6 +3877,7 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
   return {
     ...tx,
     prisma: Object.assign(tx.prisma, {
+      hostedAuthRecord: { findUnique: async () => null },
       hostedAccountDeletionCleanup: {
         findFirst: async () => null,
       },

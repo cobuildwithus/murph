@@ -1,3 +1,4 @@
+import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
 import "server-only";
 
 import { Buffer } from "node:buffer";
@@ -27,7 +28,6 @@ import {
 } from "../hosted-crypto/secure-box";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
-import { lookupHostedMemberForPrivyPrincipal } from "../hosted-onboarding/member-identity-service";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
@@ -956,29 +956,19 @@ export async function assertCurrentMealPhotoCaptureEnrollmentTx(input: {
 }
 
 export async function assertCurrentManualMealPhotoUploadAuthorityTx(input: {
-  identityUserId: string;
-  memberId: string;
+  auth: HostedNativeMemberAuth;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  await lockHostedMemberRow(input.prisma, input.memberId);
-  await lockHostedMemberSponsoredAccessRows(input.prisma, input.memberId);
-  const currentMember = await lookupHostedMemberForPrivyPrincipal({
-    identity: { userId: input.identityUserId },
-    prisma: input.prisma,
-  });
-  if (currentMember?.id !== input.memberId) {
-    throw hostedOnboardingError({
-      code: "PRIVY_USER_MISMATCH",
-      httpStatus: 409,
-      message: "This login no longer matches the current Murph member.",
-    });
-  }
+  const memberId = input.auth.member.id;
+  await assertHostedNativeMemberAuthCurrentTx(input.auth, input.prisma);
+  await lockHostedMemberRow(input.prisma, memberId);
+  await lockHostedMemberSponsoredAccessRows(input.prisma, memberId);
   await assertActiveHostedMemberAccessAllowed({
-    memberId: input.memberId,
+    memberId: memberId,
     prisma: input.prisma,
   });
   await assertHostedHistoricalLaunchConsentGranted({
-    memberId: input.memberId,
+    memberId: memberId,
     prisma: input.prisma,
   });
 }
