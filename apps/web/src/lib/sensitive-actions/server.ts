@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { isAddressEqual, recoverMessageAddress } from "viem";
 
 import {
@@ -22,6 +22,17 @@ import {
   type SettingsSensitiveActionKind,
 } from "./shared";
 
+import {
+  commitApprovalPasskeyWriteTx,
+  prepareApprovalPasskeyWrite,
+  preserveApprovalPasskeyState,
+  readApprovalPasskeyState,
+  type PreparedApprovalPasskeyWrite,
+} from "./passkey-store";
+import { verifyApprovalPasskeyAssertion, type ApprovalPasskey } from "./webauthn";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS, lockHostedMemberRow } from "../hosted-onboarding/shared";
+import { assertHostedAppSessionCurrentTx } from "../hosted-onboarding/app-session";
+
 const SENSITIVE_ACTION_BINDING_VERSION = "murph-sensitive-action-binding-v1";
 const SENSITIVE_ACTION_MESSAGE_VERSION = "1";
 const SENSITIVE_ACTION_TOKEN_PREFIX = "sac_";
@@ -39,7 +50,8 @@ export async function createSensitiveActionChallenge(input: {
   assertBindingHash(input.bindingHash);
   const origin = requireSensitiveActionOrigin();
   const now = input.now ?? new Date();
-  const expiresAt = new Date(now.getTime() + SENSITIVE_ACTION_CHALLENGE_TTL_MS);
+  const ttl = input.kind === "approval.passkey.enroll" ? 5 * 60 * 1000 : SENSITIVE_ACTION_CHALLENGE_TTL_MS;
+  const expiresAt = new Date(now.getTime() + ttl);
   const challenge = createSensitiveActionChallengeMaterial({
     bindingHash: input.bindingHash,
     expiresAt,
@@ -92,6 +104,8 @@ export function createSensitiveActionChallengeMaterial(input: {
 }
 
 export interface VerifiedSensitiveActionChallenge {
+  credentialWrite: PreparedApprovalPasskeyWrite;
+  passkeys: ApprovalPasskey[];
   bindingHash: string;
   expiresAt: Date;
   kind: SensitiveActionKind;
@@ -129,6 +143,33 @@ export async function verifySensitiveActionChallenge(input: {
   ) {
     throw sensitiveActionUnavailable();
   }
+
+  const state = await readApprovalPasskeyState({ memberId: input.memberId, prisma: input.prisma });
+  if (state.credentials.length > 0) {
+    if (authorization.method !== "passkey") throw sensitiveActionSetupRequired();
+    const credentials = await verifyApprovalPasskeyAssertion({
+      credentials: state.credentials,
+      message: buildSensitiveActionMessage({
+        bindingHash: challenge.bindingHash,
+        expiresAt: challenge.expiresAt,
+        kind: input.kind,
+        origin: requireSensitiveActionOrigin(),
+        token: authorization.token,
+      }),
+      origin: requireSensitiveActionOrigin(),
+      response: authorization.assertion,
+    }).catch(() => { throw sensitiveActionInvalidSignature(); });
+    return {
+      bindingHash: challenge.bindingHash,
+      expiresAt: challenge.expiresAt,
+      kind: input.kind,
+      memberId: input.memberId,
+      tokenHash,
+      credentialWrite: await prepareApprovalPasskeyWrite({ credentials, state, prisma: input.prisma }),
+      passkeys: credentials,
+    };
+  }
+  if (authorization.method === "passkey") throw sensitiveActionSetupRequired();
 
   let privyUser: unknown;
   try {
@@ -174,7 +215,9 @@ export async function verifySensitiveActionChallenge(input: {
   return {
     bindingHash: challenge.bindingHash,
     expiresAt: challenge.expiresAt,
-    kind: challenge.kind as SensitiveActionKind,
+    kind: input.kind,
+    credentialWrite: preserveApprovalPasskeyState(state),
+    passkeys: [],
     memberId: challenge.memberId,
     tokenHash,
   };
@@ -183,8 +226,26 @@ export async function verifySensitiveActionChallenge(input: {
 export async function consumeSensitiveActionChallenge(input: {
   challenge: VerifiedSensitiveActionChallenge;
   now?: Date;
-  prisma: Pick<PrismaClient, "hostedSensitiveActionChallenge">;
+  prisma: PrismaClient;
+  session: { request: Request; sessionId: string };
 }): Promise<void> {
+  await input.prisma.$transaction(async (prisma) => {
+    await lockHostedMemberRow(prisma, input.challenge.memberId);
+    await assertHostedAppSessionCurrentTx({
+      memberId: input.challenge.memberId,
+      prisma,
+      ...input.session,
+    });
+    await consumeSensitiveActionChallengeTx({ challenge: input.challenge, now: input.now, prisma });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+export async function consumeSensitiveActionChallengeTx(input: {
+  challenge: VerifiedSensitiveActionChallenge;
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await commitApprovalPasskeyWriteTx({ prepared: input.challenge.credentialWrite, prisma: input.prisma });
   const consumedAt = input.now ?? new Date();
   if (input.challenge.expiresAt <= consumedAt) {
     throw sensitiveActionUnavailable();
@@ -203,23 +264,6 @@ export async function consumeSensitiveActionChallenge(input: {
   if (consumed.count !== 1) {
     throw sensitiveActionUnavailable();
   }
-}
-
-export async function verifyAndConsumeSensitiveActionChallenge(input: {
-  authorization: SensitiveActionAuthorization | unknown;
-  bindingHash: string;
-  kind: SensitiveActionKind;
-  memberId: string;
-  now?: Date;
-  prisma: PrismaClient;
-  privyUserId: string;
-}): Promise<void> {
-  const challenge = await verifySensitiveActionChallenge(input);
-  await consumeSensitiveActionChallenge({
-    challenge,
-    now: input.now,
-    prisma: input.prisma,
-  });
 }
 
 export function buildSettingsSensitiveActionBinding(input: {
@@ -288,7 +332,7 @@ function sensitiveActionSetupRequired() {
   return hostedOnboardingError({
     code: "SENSITIVE_ACTION_SETUP_REQUIRED",
     httpStatus: 409,
-    message: "Set up a passkey-protected Murph wallet before continuing.",
+    message: "Set up or use your current approval passkey before continuing.",
   });
 }
 

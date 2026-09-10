@@ -1,3 +1,4 @@
+import { isApprovalPasskeyEnrollmentEnabled } from "@/src/lib/sensitive-actions/passkey-rollout";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import {
@@ -505,6 +506,7 @@ function renderAuthenticatedSettingsPage(input: {
             Security
           </div>
           <HostedPasskeySettings
+            enrollmentEnabled={isApprovalPasskeyEnrollmentEnabled()}
             authenticated={authenticated}
             secureApprovalStatus={secureApprovalStatus}
           />
@@ -1009,10 +1011,11 @@ async function readSettingsPageData(input: {
   usageReturnPurchaseId: string | null;
 }) {
   const { memberId, prisma } = input;
-  // The Privy reads are network calls with no database cost, so they overlap
-  // the database reads below.
+  // Approval status adds one bounded member lookup before the legacy provider
+  // read. The larger Settings projections below remain sequential.
   const freshPrivySessionPromise = getHostedPrivySession().catch(() => null);
   const secureApprovalStatusPromise = readHostedSecureApprovalStatus({
+    memberId, prisma,
     privyUserId: input.privyUserId,
   });
 

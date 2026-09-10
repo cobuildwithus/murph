@@ -754,6 +754,8 @@ function verifiedApprovalChallenge(
 ) {
   return {
     bindingHash: pending.bindingHash,
+    credentialWrite: { memberId, expectedEncrypted: null, nextEncrypted: null },
+    passkeys: [],
     expiresAt: pending.expiresAt,
     kind: "assistant.action.approve" as const,
     memberId,

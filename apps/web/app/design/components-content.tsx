@@ -192,6 +192,7 @@ import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standi
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
+import { ApprovalPasskeyStudy } from "./approval-passkey-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -2777,6 +2778,12 @@ export function ComponentsContent() {
 
         <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
+        </Section>
+
+        <Separator />
+
+        <Section title="Approval passkey update">
+          <ApprovalPasskeyStudy />
         </Section>
 
         <Separator />

@@ -2867,6 +2867,19 @@ order.
 
 Hosted app-session cookies use a strict v2 session-id plus bearer format. The existing token-hash field stores a dedicated web-key HMAC over the session id, bearer, member id, Privy identity, and expiry, so Postgres write access alone cannot mint or retarget browser authority; legacy unsigned cookies are rejected.
 
+Approval passkeys live with the sensitive-action owner. One encrypted aggregate
+per canonical member holds at most eight WebAuthn credentials; the existing
+member crypto owner binds its confidentiality and integrity. Browser options
+and cryptographic verification use the complete action challenge, required user
+verification, and canonical RP/origin. Enrollment reuses the existing one-use
+challenge rather than creating a second session or permit lifecycle. Provider
+verification and crypto preparation precede the short database transaction;
+member and current-session locks plus an exact-ciphertext comparison fence
+stale proof. The counter update and approved mutation share the challenge's
+transaction. Unmigrated members retain the legacy wallet verifier; enrolled
+members cannot fall back. The reader-first rollout and original browser-session
+drain are owned by `docs/hosted-auth-migration.md`.
+
 Hosted browser wearable OAuth is a same-browser, same-member, same-host
 boundary. Start issues one short-lived, host-only callback proof bound to the
 provider, OAuth state, member, and app-session generation. The provider callback
