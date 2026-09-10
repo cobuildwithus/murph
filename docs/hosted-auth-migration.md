@@ -29,12 +29,8 @@ and [Android #39](https://github.com/cobuildwithus/murph-android/pull/39).
 Android #39 is stacked on [review tooling #38](https://github.com/cobuildwithus/murph-android/pull/38),
 which only corrects the required reviewer model target. Merge that prerequisite
 before its product PR. iOS #150 has an independent PASS at
-`c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e`; Android #39 has green CI at
-`1740066c8a5e31c09de9b8d1e350bc39acdf604e` and its external review remains pending.
-Web #3132 has an additional session-cache correction at
-`82d5147a74b274e222ca1cf5f9c32a11c741aa9a`; its current-head CI is green and its second external review is pending. Successful login invalidates the previous decrypted
-vault at response headers, and an unreadable successful response reloads the
-document. Both phone and Telegram regressions were reproduced before the fix.
+`c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e`. Android #39's first review found an interrupted initial secure-write recovery defect. The correction passes real Keystore/AtomicFile instrumentation and full Android verification; its new exact-head review and CI are required.
+Web #3132 at `4dd15d07dabb7d37e1ae3763e79693d01150a42c` includes both response-header vault invalidation and origin-wide cookie-write ordering. Its third external review and current-head CI are running. Real Chromium proved OTP/Telegram ordering in one and two tabs; the rollout gates still require real delivery and installed-device qualification.
 These links identify candidates, not deployed versions. Final retirement remains
 under implementation and must not be deployed until every retirement gate passes.
 
