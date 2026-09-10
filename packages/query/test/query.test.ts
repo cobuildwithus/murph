@@ -5614,11 +5614,11 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
       unit: "mg",
     },
     {
-      id: "evt_metric_observation_height_01",
+      id: "evt_metric_observation_arm-span_01",
       occurredAt: "2026-04-02T07:05:00Z",
       source: "manual",
-      title: "Height",
-      metric: "height",
+      title: "Arm span",
+      metric: "arm-span",
       value: 180,
       unit: "cm",
     },
@@ -5661,7 +5661,7 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
     await rebuildQueryProjection(vaultRoot);
 
     const caffeine = await listMetricPointsRuntime(vaultRoot, { metricKey: "caffeine", limit: null });
-    const height = await listMetricPointsRuntime(vaultRoot, { metricKey: "height", limit: null });
+    const armSpan = await listMetricPointsRuntime(vaultRoot, { metricKey: "arm-span", limit: null });
     const glucose = await listMetricPointsRuntime(vaultRoot, { metricKey: "glucose", limit: null });
     const stressVariation = await listMetricPointsRuntime(vaultRoot, {
       metricKey: "stress-mean-absolute-successive-difference",
@@ -5673,12 +5673,12 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
     assert.equal(caffeine[0]?.unit, "mg");
     assert.equal(caffeine[0]?.source.kind, "observation");
 
-    assert.equal(resolveMetricDefinition("height"), null);
-    assert.equal(height.length, 1);
-    assert.equal(height[0]?.metricKey, "height");
-    assert.equal(height[0]?.value, 180);
-    assert.equal(height[0]?.unit, "cm");
-    assert.equal(height[0]?.biomarkerKey, null);
+    assert.equal(resolveMetricDefinition("arm-span"), null);
+    assert.equal(armSpan.length, 1);
+    assert.equal(armSpan[0]?.metricKey, "arm-span");
+    assert.equal(armSpan[0]?.value, 180);
+    assert.equal(armSpan[0]?.unit, "cm");
+    assert.equal(armSpan[0]?.biomarkerKey, null);
 
     assert.equal(glucose.length, 1);
     assert.equal(glucose[0]?.metricKey, "glucose");

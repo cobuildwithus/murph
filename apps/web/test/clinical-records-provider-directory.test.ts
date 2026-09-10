@@ -109,6 +109,10 @@ describe("Clinical Records provider directory", () => {
       "provider-goals",
       "service-requests",
       "vital-sign-observations",
+      "document-references-imaging",
+      "document-references-external-ccda",
+      "document-references-outside-notes",
+      "outside-vital-sign-observations",
     ]);
   });
 

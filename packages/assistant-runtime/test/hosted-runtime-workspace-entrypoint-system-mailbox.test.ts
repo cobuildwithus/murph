@@ -2,7 +2,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createBrowserVaultReplicaRef,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createAssistantAskRequestedWake,
   createConsentedMemberAssistantAskRequestedWake,
   createDeferred,
@@ -260,9 +260,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             events.push(`snapshot:${state.watermarks.conversation}`);
             assert.equal(await readCheckpointConversationWatermark(snapshotInput, vaultRoot), "1");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/workspace-entrypoint.bundle.json",
                 size: 512,
               }),
             };
@@ -450,9 +449,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               [issueRecord.issueId],
             );
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/issue-export.bundle.json",
                 size: 256,
               }),
             };
@@ -566,9 +564,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             assert.equal(snapshotInput.reason, "idle_shutdown");
             assert.equal(await readCheckpointConversationWatermark(snapshotInput, vaultRoot), "1");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/cold-bootstrap.bundle.json",
                 size: 512,
               }),
             };
@@ -723,9 +720,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/terminal-system-import.bundle.json",
                 size: 512,
               }),
             };
@@ -815,7 +811,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-only-before.bundle.json",
         vaultRoot,
       });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -828,9 +823,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-only.bundle.json",
                 size: 512,
               }),
             };
@@ -1026,7 +1020,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-already-imported-device-before.bundle.json",
         vaultRoot,
       });
 
@@ -1043,9 +1036,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-already-imported-device.bundle.json",
                 size: 512,
               }),
             };
@@ -1162,7 +1154,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-progress-convergence-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -1225,7 +1216,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             async createCheckpointSnapshot() {
               snapshotOrdinal += 1;
               const snapshot = await createVaultSnapshotBundle({
-                key: `users/bundles/member-synthetic/system-mailbox-progress-convergence-${snapshotOrdinal}.bundle.json`,
                 vaultRoot,
               });
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -1439,7 +1429,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = handledThrough;
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restored = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/independent-maintenance.bundle.json", vaultRoot,
+        vaultRoot,
       });
       const artifactBytesByHash = new Map([[restored.hash, restored.bytes]]);
       let currentWorkspace = createWorkspaceState({ snapshotRef: restored.snapshotRef, version: "0" });
@@ -1451,7 +1441,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           workspaceVersion: currentWorkspace.version }, resolvedConfig: createDeviceSyncResolvedConfig() }),
         { async createCheckpointSnapshot() {
             const snapshot = await createVaultSnapshotBundle({
-              key: `users/bundles/member-synthetic/independent-maintenance-${++snapshotOrdinal}.bundle.json`, vaultRoot,
+              vaultRoot,
             });
             artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
             return { snapshotRef: snapshot.snapshotRef };
@@ -1633,7 +1623,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       const runPass = async () => {
         const restoredWorkspace = await createVaultSnapshotBundle({
-          key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty-before.bundle.json",
           vaultRoot,
         });
 
@@ -1649,9 +1638,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "8".repeat(64),
-                  key: "users/bundles/member-synthetic/system-mailbox-webhook-dirty.bundle.json",
                   size: 512,
                 }),
               };
@@ -1781,7 +1769,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/environment-interview-before.bundle.json",
         vaultRoot,
       });
 
@@ -1796,9 +1783,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/environment-interview-after.bundle.json",
                 size: 512,
               }),
             };
@@ -1912,7 +1898,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.prepareHostedCodexAssistantProcess.mockClear();
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/group-journal-model-free-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -2016,7 +2001,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           async createCheckpointSnapshot() {
             snapshotOrdinal += 1;
             const snapshot = await createVaultSnapshotBundle({
-              key: `users/bundles/member-synthetic/group-journal-model-free-${snapshotOrdinal}.bundle.json`,
               vaultRoot,
             });
             artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -2210,7 +2194,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/blocked-group-join-before.bundle.json",
         vaultRoot,
       });
       const completedResult = await runHostedWorkspaceRuntimeJobInProcess(
@@ -2243,9 +2226,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/blocked-group-join.bundle.json",
                 size: 512,
               }),
             };
@@ -2692,7 +2674,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/blocked-group-join-restored-before.bundle.json",
         vaultRoot,
       });
       const checkpointBundles: Array<Awaited<
@@ -2731,11 +2712,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             const checkpointBundle = await createVaultSnapshotBundle({
-              key:
-                "users/bundles/member-synthetic/"
-                + `blocked-group-join-restored-checkpoint-${
-                  checkpointRequests.length + 1
-                }.bundle.json`,
               vaultRoot,
             });
             checkpointBundles.push(checkpointBundle);
@@ -3112,9 +3088,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             {
               async createCheckpointSnapshot() {
                 const checkpointBundle = await createVaultSnapshotBundle({
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `${input.attemptId}-${coldCheckpointRequests.length + 1}.bundle.json`,
                   vaultRoot,
                 });
                 coldCheckpointBundles.push(checkpointBundle);
@@ -3260,11 +3233,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             {
               async createCheckpointSnapshot() {
                 return {
-                  snapshotRef: createBundleRef({
+                  snapshotRef: createSnapshotFixtureRef({
                     hash: "f".repeat(64),
-                    key:
-                      "users/bundles/member-synthetic/"
-                      + "blocked-group-join-restored-telegram-ambiguous.bundle.json",
                     size: 512,
                   }),
                 };
@@ -3358,11 +3328,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "e".repeat(64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "blocked-group-join-restored-after-foreground-done.bundle.json",
                   size: 512,
                 }),
               };
@@ -3526,7 +3493,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "3";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-approval-owner-before.bundle.json",
         vaultRoot,
       });
 
@@ -3542,9 +3508,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-approval-owner.bundle.json",
                 size: 512,
               }),
             };
@@ -3677,7 +3642,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-device-browser-refresh-wake-before.bundle.json",
         vaultRoot,
       });
 
@@ -3693,9 +3657,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-device-browser-refresh-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -3868,7 +3831,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/stale-default-projection-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -3935,8 +3897,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const createCheckpointSnapshot = async () => {
         snapshotOrdinal += 1;
         const snapshot = await createVaultSnapshotBundle({
-          key:
-            `users/bundles/member-synthetic/stale-default-projection-${snapshotOrdinal}.bundle.json`,
           vaultRoot,
         });
         artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -4010,12 +3970,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(currentWorkspace.version, "3");
       assert.deepEqual(currentWorkspace.snapshotRef, checkpoint.snapshotRef);
-      const checkpointSnapshotBaseRef = readHostedExecutionSnapshotBaseRef(
-        checkpoint.snapshotRef,
-      );
-      assert.ok(checkpointSnapshotBaseRef);
+      const checkpointSnapshotRef = checkpoint.snapshotRef;
+      assert.ok(isHostedWorkspaceSnapshotV2Ref(checkpointSnapshotRef));
       assert.equal(
-        artifactBytesByHash.has(checkpointSnapshotBaseRef.hash),
+        artifactBytesByHash.has(checkpointSnapshotRef.archive.plaintextArchiveSha256),
         true,
       );
 
@@ -4067,7 +4025,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
       assert.equal(
         artifactGetCalls.slice(artifactGetCountBeforeSystemPass).includes(
-          checkpointSnapshotBaseRef.hash,
+          checkpointSnapshotRef.archive.plaintextArchiveSha256,
         ),
         true,
       );
@@ -4271,7 +4229,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/default-browser-vault-timeout-retry-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -4355,7 +4312,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             async createCheckpointSnapshot() {
               snapshotIndex += 1;
               const snapshot = await createVaultSnapshotBundle({
-                key: `users/bundles/member-synthetic/default-browser-vault-timeout-retry-${snapshotIndex}.bundle.json`,
                 vaultRoot,
               });
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -4746,7 +4702,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-browser-vault-timeout-retry-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -4805,7 +4760,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const persistHarnessVaultState = async (label: string) => {
         snapshotIndex += 1;
         const snapshot = await createVaultSnapshotBundle({
-          key: `users/bundles/member-synthetic/system-mailbox-browser-vault-${label}-${snapshotIndex}.bundle.json`,
           vaultRoot,
         });
         artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -4849,7 +4803,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             async createCheckpointSnapshot() {
               snapshotIndex += 1;
               const snapshot = await createVaultSnapshotBundle({
-                key: `users/bundles/member-synthetic/system-mailbox-browser-vault-timeout-retry-${snapshotIndex}.bundle.json`,
                 vaultRoot,
               });
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -5275,7 +5228,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-device-browser-publish-retry-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -5283,7 +5235,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         async createCheckpointSnapshot() {
           snapshotIndex += 1;
           const snapshot = await createVaultSnapshotBundle({
-            key: `users/bundles/member-synthetic/system-mailbox-device-browser-publish-retry-${snapshotIndex}.bundle.json`,
             vaultRoot,
           });
           artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -5485,7 +5436,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-operator-maintenance-before.bundle.json",
         vaultRoot,
       });
 
@@ -5501,9 +5451,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-operator-maintenance.bundle.json",
                 size: 512,
               }),
             };
@@ -5636,7 +5585,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-replica-publish-retry-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -5727,7 +5675,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             async createCheckpointSnapshot() {
               snapshotOrdinal += 1;
               const snapshot = await createVaultSnapshotBundle({
-                key: `users/bundles/member-synthetic/system-mailbox-replica-publish-retry-${snapshotOrdinal}.bundle.json`,
                 vaultRoot,
               });
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -6774,7 +6721,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
 
       const assistantWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/restored-reply-assistant-handoff.bundle.json",
         vaultRoot,
       });
       let assistantPhaseInputIds: readonly string[] = [];
@@ -6820,9 +6766,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/restored-reply-assistant-handoff-after.bundle.json",
                 size: 512,
               }),
             };
@@ -6832,6 +6777,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           },
           platform: createPlatform({
             artifactBytesByHash: new Map([[assistantWorkspace.hash, assistantWorkspace.bytes]]),
+            snapshotFixtureVaultRelativePath: "vault",
             assistantAskPort: {
               async request(request) {
                 if (request.action === "complete") {
@@ -6947,7 +6893,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/same-key-reply-before.bundle.json",
         vaultRoot,
       });
 
@@ -6963,9 +6908,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/same-key-reply-after.bundle.json",
                 size: 512,
               }),
             };
@@ -7100,7 +7044,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/pre-barrier-approved-before.bundle.json",
         vaultRoot,
       });
       const mailboxPort = createMailboxPort({ events, items: approvedAsks });
@@ -7131,9 +7074,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/pre-barrier-approved-after.bundle.json",
                 size: 512,
               }),
             };
@@ -7330,7 +7272,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/pre-watcher-foreground-before.bundle.json",
         vaultRoot,
       });
       const mailboxPort = createMailboxPort({
@@ -7367,9 +7308,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/pre-watcher-foreground-after.bundle.json",
                 size: 512,
               }),
             };
@@ -7625,7 +7565,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/exact-owner-before.bundle.json",
         vaultRoot,
       });
 
@@ -7643,9 +7582,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           async createCheckpointSnapshot() {
             events.push("snapshot");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/exact-owner-after.bundle.json",
                 size: 512,
               }),
             };
@@ -7848,7 +7786,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/foreground-requeue-before.bundle.json",
         vaultRoot,
       });
 
@@ -7865,9 +7802,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-requeue-after.bundle.json",
                 size: 512,
               }),
             };
@@ -8038,7 +7974,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.cancelPendingWarmCodexPreinitialization.mockClear();
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-new-device-before.bundle.json",
         vaultRoot,
       });
 
@@ -8056,9 +7991,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-new-device.bundle.json",
                 size: 512,
               }),
             };
@@ -8181,7 +8115,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-assistant-source-before.bundle.json",
         vaultRoot,
       });
 
@@ -8197,9 +8130,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-assistant-source.bundle.json",
                 size: 512,
               }),
             };
@@ -8299,7 +8231,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-device-execution-failure-before.bundle.json",
         vaultRoot,
       });
 
@@ -8315,9 +8246,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-device-execution-failure.bundle.json",
                 size: 512,
               }),
             };
@@ -8548,7 +8478,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         : "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-follow-up-before.bundle.json",
         vaultRoot,
       });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -8563,9 +8492,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-follow-up.bundle.json",
                 size: 512,
               }),
             };
@@ -8727,7 +8655,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         }) => {
           const followUpCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
           const restored = await createVaultSnapshotBundle({
-            key: `users/bundles/member-synthetic/${input.attemptId}-before.bundle.json`,
             vaultRoot,
           });
           const workspace = {
@@ -8747,9 +8674,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             {
               async createCheckpointSnapshot() {
                 return {
-                  snapshotRef: createBundleRef({
+                  snapshotRef: createSnapshotFixtureRef({
                     hash: "a".repeat(64),
-                    key: `users/bundles/member-synthetic/${input.attemptId}-after.bundle.json`,
                     size: 512,
                   }),
                 };
@@ -8894,7 +8820,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-failure-before.bundle.json",
         vaultRoot,
       });
 
@@ -8910,9 +8835,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/system-mailbox-device-dirty-ack-failure.bundle.json",
                 size: 512,
               }),
             };

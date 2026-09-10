@@ -1,5 +1,4 @@
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
-import type Stripe from "stripe";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -80,17 +79,7 @@ import {
 } from "../hosted-onboarding/privy-phone-transfer-retirement";
 import { readHostedPrivyUserById } from "../hosted-onboarding/privy";
 import { buildHostedPrivySessionState } from "../hosted-onboarding/privy-user";
-import {
-  isHostedPulseTrialSubscriptionForKnownPolicy,
-  retrieveHostedPulseTrialCleanupTarget,
-} from "../hosted-onboarding/pulse-trial-subscription-cleanup";
-import {
-  hasHostedStripeSubscriptionPaymentMethod,
-} from "../hosted-onboarding/stripe-subscription-payment-method";
-import {
-  getHostedOnboardingStripe,
-  requireHostedStripeBillingPlanConfig,
-} from "../hosted-onboarding/runtime";
+import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import { retrieveAndExpireHostedSubscriptionCheckout } from "../hosted-onboarding/subscription-checkout-lifecycle";
 import {
@@ -159,14 +148,8 @@ const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
   // correlated consequence before suspension crosses the shared drain.
   timeout: 20_000,
 } as const;
-const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
-const HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS = 10;
 const HOSTED_ACCOUNT_DELETION_REFRESH_LEASE_RECOVERY_LIMIT = 32;
 const HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS = 4;
-const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS: Stripe.RequestOptions = {
-  maxNetworkRetries: 0,
-  timeout: HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS,
-};
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -1127,10 +1110,8 @@ async function deleteHostedAccountDataInternal(input: {
       HOSTED_PRIVY_PHONE_TRANSFER_RETIREMENT_TRANSACTION_OPTIONS,
     );
     if (
-      !isSameHostedPrivyPhoneTransferRetirement(
-        retirementBeforeBillingCleanup,
-        phoneTransfer.retirement,
-      )
+      retirementBeforeBillingCleanup.sourceMemberId
+        !== phoneTransfer.retirement.sourceMemberId
     ) {
       throwHostedPrivyPhoneTransferTargetNotReady();
     }
@@ -1592,22 +1573,6 @@ async function assertHostedPrivyPhoneTransferRawFingerprintUnchangedTx(input: {
   if (currentFingerprint !== input.expectedFingerprint) {
     throwHostedPrivyPhoneTransferTargetNotReady();
   }
-}
-
-function isSameHostedPrivyPhoneTransferRetirement(
-  current: HostedPrivyPhoneTransferSourceRetirementProof,
-  expected: HostedPrivyPhoneTransferSourceRetirementProof,
-): boolean {
-  return current.sourceMemberId === expected.sourceMemberId
-    && (
-      current.autoTrialBilling === null
-        ? expected.autoTrialBilling === null
-        : expected.autoTrialBilling !== null
-          && current.autoTrialBilling.stripeCustomerId
-            === expected.autoTrialBilling.stripeCustomerId
-          && current.autoTrialBilling.stripeSubscriptionId
-            === expected.autoTrialBilling.stripeSubscriptionId
-    );
 }
 
 function throwHostedPrivyPhoneTransferTargetNotReady(): never {
@@ -2774,31 +2739,16 @@ async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
   stripeSubscriptionIds: readonly string[];
 }): Promise<HostedAccountVendorDeletionResult> {
   if (input.phoneTransferRetirement) {
-    if (input.phoneTransferRetirement.sourceMemberId !== input.memberId) {
-      throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-    }
-    const autoTrialBilling = input.phoneTransferRetirement.autoTrialBilling;
-    if (autoTrialBilling === null) {
-      if (input.stripeSubscriptionIds.length > 0) {
-        throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-      }
-      return {
-        errorCode: null,
-        status: "skipped_no_record",
-      };
-    }
     if (
-      input.stripeSubscriptionIds.length !== 1
-      || input.stripeSubscriptionIds[0]
-        !== autoTrialBilling.stripeSubscriptionId
+      input.phoneTransferRetirement.sourceMemberId !== input.memberId
+      || input.stripeSubscriptionIds.length > 0
     ) {
       throwHostedPrivyPhoneTransferBillingAuthorityChanged();
     }
-    return cancelHostedPrivyPhoneTransferAutoTrialForAccountDeletion({
-      memberId: input.memberId,
-      stripeCustomerId: autoTrialBilling.stripeCustomerId,
-      stripeSubscriptionId: autoTrialBilling.stripeSubscriptionId,
-    });
+    return {
+      errorCode: null,
+      status: "skipped_no_record",
+    };
   }
 
   let result: HostedAccountVendorDeletionResult = {
@@ -2812,171 +2762,6 @@ async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
     });
   }
   return result;
-}
-
-async function cancelHostedPrivyPhoneTransferAutoTrialForAccountDeletion(input: {
-  memberId: string;
-  stripeCustomerId: string;
-  stripeSubscriptionId: string;
-}): Promise<HostedAccountVendorDeletionResult> {
-  const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
-    billingPlanCode: "launch_monthly",
-  });
-  let subscription: Awaited<
-    ReturnType<typeof retrieveHostedPulseTrialCleanupTarget>
-  >;
-  try {
-    subscription = await retrieveHostedPulseTrialCleanupTarget({
-      expandCustomer: true,
-      expectedCustomerId: input.stripeCustomerId,
-      memberId: input.memberId,
-      priceId,
-      requestOptions:
-        HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS,
-      stripe,
-      subscriptionId: input.stripeSubscriptionId,
-    });
-  } catch (error) {
-    if (
-      isHostedOnboardingError(error)
-      && error.code === "HOSTED_PULSE_TRIAL_CLEANUP_TARGET_CHANGED"
-    ) {
-      throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-    }
-    throw error;
-  }
-  if (!subscription) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-  assertHostedPrivyPhoneTransferUnusedStripeSurface({
-    memberId: input.memberId,
-    priceId,
-    stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
-    subscription,
-  });
-  if (subscription.status === "canceled") {
-    assertHostedPrivyPhoneTransferCanceledDuringTrial(subscription);
-    return {
-      errorCode: null,
-      status: "completed",
-    };
-  }
-  if (subscription.status === "incomplete_expired") {
-    return {
-      errorCode: null,
-      status: "completed",
-    };
-  }
-  if (subscription.status !== "trialing") {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-  const trialEnd = subscription.trial_end;
-  if (
-    typeof trialEnd !== "number"
-    || !Number.isInteger(trialEnd)
-    || trialEnd <= (
-      Math.floor(Date.now() / 1_000)
-      + HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS
-    )
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-
-  let canceledSubscription: Awaited<
-    ReturnType<typeof stripe.subscriptions.cancel>
-  >;
-  try {
-    canceledSubscription = await stripe.subscriptions.cancel(
-      input.stripeSubscriptionId,
-      { expand: ["customer"] },
-      HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS,
-    );
-  } catch (error) {
-    logHostedStripeFailure({
-      error,
-      operationName: "subscription.cancel.phone-transfer",
-    });
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
-      httpStatus: 502,
-      message:
-        "We could not cancel the unused trial while linking your phone. Try again, or contact support if it keeps failing.",
-      retryable: true,
-    });
-  }
-  if (
-    canceledSubscription.status !== "canceled"
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-  assertHostedPrivyPhoneTransferUnusedStripeSurface({
-    memberId: input.memberId,
-    priceId,
-    stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
-    subscription: canceledSubscription,
-  });
-  assertHostedPrivyPhoneTransferCanceledDuringTrial(canceledSubscription);
-  return {
-    errorCode: null,
-    status: "completed",
-  };
-}
-
-function assertHostedPrivyPhoneTransferUnusedStripeSurface(input: {
-  memberId: string;
-  priceId: string;
-  stripeCustomerId: string;
-  stripeSubscriptionId: string;
-  subscription: Stripe.Subscription;
-}): void {
-  const customer = input.subscription.customer;
-  if (
-    input.subscription.id !== input.stripeSubscriptionId
-    || !customer
-    || typeof customer !== "object"
-    || customer.object !== "customer"
-    || customer.deleted
-    || customer.id !== input.stripeCustomerId
-    || !isHostedPulseTrialSubscriptionForKnownPolicy({
-      memberId: input.memberId,
-      priceId: input.priceId,
-      subscription: input.subscription,
-    })
-    || input.subscription.collection_method !== "charge_automatically"
-    || hasHostedStripeSubscriptionPaymentMethod(input.subscription)
-    || input.subscription.cancel_at !== null
-    || input.subscription.cancel_at_period_end !== false
-    || input.subscription.pending_invoice_item_interval !== null
-    // Stripe itself attaches a pending SetupIntent to every
-    // automatic-collection trial without a payment method, so its presence
-    // is provider scaffolding. A setup intent that ever succeeded sets the
-    // payment method checked above, which stays fail-closed.
-    || input.subscription.pending_update !== null
-    || input.subscription.pause_collection !== null
-    || input.subscription.schedule !== null
-    || input.subscription.trial_settings?.end_behavior.missing_payment_method
-      !== "pause"
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
-}
-
-function assertHostedPrivyPhoneTransferCanceledDuringTrial(
-  subscription: Stripe.Subscription,
-): void {
-  const endedAt = subscription.ended_at;
-  const trialEnd = subscription.trial_end;
-  if (
-    typeof endedAt !== "number"
-    || !Number.isInteger(endedAt)
-    || typeof trialEnd !== "number"
-    || !Number.isInteger(trialEnd)
-    || endedAt > trialEnd
-  ) {
-    throwHostedPrivyPhoneTransferBillingAuthorityChanged();
-  }
 }
 
 function throwHostedPrivyPhoneTransferBillingAuthorityChanged(): never {

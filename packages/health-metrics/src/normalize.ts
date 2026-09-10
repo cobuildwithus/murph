@@ -110,6 +110,9 @@ function normalizeDeclaredMetricUnit(
   unit: string | null,
   definition: MetricDefinition,
 ): MetricValueNormalization {
+  if (definition.canonicalUnit === "cm") {
+    return normalizeLengthCentimeters(value, unit, definition.displayName);
+  }
   if (definition.canonicalUnit === null) {
     const commonCustomValue = normalizeCommonCustomValue(value, unit);
     if (commonCustomValue) return commonCustomValue;
@@ -309,6 +312,9 @@ function normalizeWeight(value: number, unit: string | null): MetricValueNormali
   }
   if (unitsEquivalent(unit, "lb")) {
     return { canonicalUnit: "kg", canonicalValue: Number((value * 0.45359237).toFixed(4)), unit, warnings: [] };
+  }
+  if (unitsEquivalent(unit, "g")) {
+    return { canonicalUnit: "kg", canonicalValue: value / 1000, unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("Body weight", unit, "kg")] };
 }

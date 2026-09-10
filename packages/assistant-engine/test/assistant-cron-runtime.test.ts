@@ -4313,6 +4313,31 @@ describe('assistant cron runtime orchestration', () => {
     },
   )
 
+  it('resolves plan-dependent targets after copied instructions without dropping a one-day pause', async () => {
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-canonical-target-')
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'canonical target')
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) throw new Error('Expected canonical automation.')
+    automation.supportKind = 'reminder'
+    automation.contextReferences = [{ entityKind: 'experiment', entityId: 'exp_synthetic_rotation' }]
+    automation.instructions = 'Cue seated rows from a copied anchor. Skip on 2026-04-19 only.'
+
+    await runAssistantCronJobNow({ job: canonicalJob.jobId, vault: vaultRoot })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    const input = cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0]
+    expect(input?.instructions).toContain(automation.instructions)
+    expect(input?.instructions).toContain(JSON.stringify(automation.contextReferences))
+    expect(input?.instructions).toContain('The canonical plan owns the target')
+    expect(input?.instructions).toContain('local calendar date')
+    expect(input?.instructions).toContain('do not reset the rotation')
+    expect(input?.instructions).toContain('do not guess a target or silently repair state')
+    expect(input?.instructions.indexOf('The canonical plan owns the target')).toBeGreaterThan(
+      input?.instructions.indexOf(automation.instructions) ?? -1,
+    )
+    expect(automation.instructions).toBe('Cue seated rows from a copied anchor. Skip on 2026-04-19 only.')
+  })
+
   it('passes exercise cue guidance into an ordinary independent automation after its saved task', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-independent-exercise-cue-',

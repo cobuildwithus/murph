@@ -1,15 +1,8 @@
 import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 
-// Ordinary (non-chat, non-setup) vault-cli invocations must not load the full
-// command manifest or the interactive ink UI stack (ink/react/yoga-layout).
-// Both leaked into the eager startup graph before 2026-06-11 and multiplied
-// hosted per-invocation CLI latency. Each forbidden module is mocked to throw
-// at load, so any re-introduced static import fails these tests.
-// The ink chat surface itself is guarded in-package by
-// `packages/assistant-cli/test/assistant-command-startup-imports.test.ts`;
-// reaching into that package's src tree from here is forbidden by
-// `scripts/verify-package-shape.ts`.
+// Scoped vault-cli invocations keep the full command manifest, setup wizard,
+// and core umbrella entrypoint outside their startup dependency graph.
 const forbiddenStartupModules = [
   '../src/vault-cli-command-manifest.js',
   '@murphai/setup-cli/setup-assistant-wizard',

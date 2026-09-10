@@ -165,7 +165,7 @@ test('scoped command routing mounts assistant commands with inbox and vault serv
   ]])
 })
 
-for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
+for (const root of ['doctor', 'run', 'status', 'stop'] as const) {
   test(`scoped command routing maps ${root} assistant shorthand to assistant commands`, async () => {
     const cli = Cli.create('vault-cli', { description: 'test cli' })
     const services = createTestVaultServices()
@@ -557,7 +557,7 @@ test('lazy route table accounts for every full manifest root command', async () 
 
   assert.deepEqual(unaccountedRootCommands, [])
 
-  for (const root of ['assistant', 'chat', 'run', 'status', 'doctor', 'stop'] as const) {
+  for (const root of ['assistant', 'run', 'status', 'doctor', 'stop'] as const) {
     assert.deepEqual(classifyVaultCliInvocation([root]), {
       kind: 'scoped',
       root,

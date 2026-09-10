@@ -146,115 +146,17 @@ const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_CONNECTION = 500;
 const DIRTY_PAYLOAD_HYDRATE_LIMIT_PER_RESPONSE = 1_000;
 const DIRTY_PAYLOAD_HYDRATE_RESPONSE_MAX_ESTIMATED_BYTES = 8 * 1024 * 1024;
 const DIRTY_PAYLOAD_PRESEAL_CONCURRENCY = 16;
-const DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT = 100;
-const DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_MAX_BATCHES = 8;
-const HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE =
-  "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING";
 const HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION_CODE = "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION";
 const COMPANION_HRV_NIGHT_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const COMPANION_HRV_NIGHT_RECEIPT_MAX_PER_CONNECTION = 64;
 
 export type CompanionHrvNightReceiptInspection = "conflict" | "exact" | "missing";
 
-export async function classifyHostedUnclassifiedDirtyPayloadsForConnection(input: {
-  connectionId: string;
-  tx: HostedPrismaTransactionClient;
-  userId: string;
-}): Promise<void> {
-  const classifyResource = createDirtyPayloadCredentialClassifier();
-
-  for (
-    let batch = 0;
-    batch < DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_MAX_BATCHES;
-    batch += 1
-  ) {
-    const rows = await input.tx.deviceSyncDirtyPayload.findMany({
-      orderBy: [
-        { createdAt: "asc" },
-        { id: "asc" },
-      ],
-      select: {
-        connectionId: true,
-        dirtyRevision: true,
-        id: true,
-        provider: true,
-        resourceEncrypted: true,
-      },
-      take: DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT + 1,
-      where: {
-        connectionId: input.connectionId,
-        credentialIndependent: null,
-        userId: input.userId,
-      },
-    });
-    if (rows.length === 0) {
-      return;
-    }
-
-    const classified = await mapLimit(
-      rows.slice(0, DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT),
-      DIRTY_PAYLOAD_PRESEAL_CONCURRENCY,
-      async (row) => {
-        const resource = await readDirtyPayloadResourceJson({
-          row,
-          tx: input.tx,
-          userId: input.userId,
-        });
-        return {
-          credentialIndependent: resource
-            ? await classifyResource({
-                provider: row.provider,
-                resource,
-              })
-            : false,
-          id: row.id,
-        };
-      },
-    );
-
-    for (const credentialIndependent of [false, true] as const) {
-      const ids = classified
-        .filter((entry) => entry.credentialIndependent === credentialIndependent)
-        .map((entry) => entry.id);
-      if (ids.length === 0) {
-        continue;
-      }
-      await input.tx.deviceSyncDirtyPayload.updateMany({
-        data: { credentialIndependent },
-        where: {
-          connectionId: input.connectionId,
-          credentialIndependent: null,
-          id: { in: ids },
-          userId: input.userId,
-        },
-      });
-    }
-
-    if (rows.length <= DIRTY_PAYLOAD_LEGACY_CLASSIFICATION_BATCH_LIMIT) {
-      return;
-    }
-  }
-
-  // The caller commits this bounded annotation work before asking for a retry.
-}
-
-export function isHostedDirtyPayloadClassificationPendingError(
-  error: unknown,
-): boolean {
-  return Boolean(
-    typeof error === "object"
-      && error !== null
-      && "code" in error
-      && (error as { code?: unknown }).code
-        === HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE,
-  );
-}
-
 export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(input: {
   connectionId: string;
   tx: HostedPrismaTransactionClient;
   userId: string;
-}): Promise<"classification_pending" | void> {
+}): Promise<void> {
   const [existing] = await input.tx.$queryRaw<Array<{
     dirtyRevision: bigint;
     latestDirtyAt: Date;
@@ -271,30 +173,6 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
   `);
   if (!existing) {
     return;
-  }
-
-  let unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
-    where: {
-      connectionId: input.connectionId,
-      credentialIndependent: null,
-      userId: input.userId,
-    },
-  });
-  if (unclassifiedPayloadCount > 0) {
-    // Acknowledgement takes this dirty-marker lock before deleting payload
-    // rows. Keep reconnect on the same marker-before-payload order while
-    // mixed-version nullable rows are classified behind the consent fence.
-    await classifyHostedUnclassifiedDirtyPayloadsForConnection(input);
-    unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
-      where: {
-        connectionId: input.connectionId,
-        credentialIndependent: null,
-        userId: input.userId,
-      },
-    });
-  }
-  if (unclassifiedPayloadCount > 0) {
-    return "classification_pending";
   }
 
   const updated = await input.tx.deviceSyncDirtyConnection.updateMany({
@@ -1175,16 +1053,6 @@ function createDirtyStateContentionError(operation: "ack" | "update"): Error {
       operation === "ack"
         ? "Hosted device-sync dirty state was updated concurrently while marking work processed. Retry the request."
         : "Hosted device-sync dirty state was updated concurrently. Retry the request.",
-    retryable: true,
-  });
-}
-
-export function createDirtyPayloadClassificationPendingError(): Error {
-  return deviceSyncError({
-    code: HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING_CODE,
-    httpStatus: 503,
-    message:
-      "Hosted device-sync payload classification did not converge before reconnect. Retry the request.",
     retryable: true,
   });
 }
