@@ -2706,6 +2706,39 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
 });
 
 describe("resolveHostedAiUsageGate", () => {
+  it("reads period state under the row lock without a separate period lookup", async () => {
+    const prisma = createGatePrisma({ spentUsdMicros: 100n });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ allowed: true, spentUsdMicros: 100n });
+
+    const lockedReads = prisma.$queryRaw.mock.calls.filter(([sql]) =>
+      sql.join("?").includes('FROM "hosted_ai_usage_period"')
+    );
+    expect(lockedReads).toHaveLength(1);
+    expect(lockedReads[0]?.[0].join("?")).toContain('AS "spentUsdMicros"');
+    expect(lockedReads[0]?.[0].join("?")).toContain("FOR UPDATE");
+    expect(prisma.hostedAiUsagePeriod.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed if the locked period read unexpectedly finds no row", async () => {
+    const prisma = createGatePrisma({
+      queryRaw: vi.fn(async () => []),
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).rejects.toThrow();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
   it("allows active members while recorded spend is below the period limit", async () => {
     const prisma = createGatePrisma({
       spentUsdMicros: 5_400_000n,
@@ -3829,10 +3862,6 @@ describe("resolveHostedAiUsageGate", () => {
   );
 
   it("uses billing-period counter without aggregating historical usage rows", async () => {
-    const queryRaw = vi.fn(async (sql: TemplateStringsArray) => {
-      void sql;
-      return [];
-    });
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-20T12:00:00.000Z"),
@@ -3856,7 +3885,6 @@ describe("resolveHostedAiUsageGate", () => {
       },
       periodEnd: new Date("2026-05-15T00:00:00.000Z"),
       periodStart: new Date("2026-04-15T00:00:00.000Z"),
-      queryRaw,
       spentUsdMicros: 5_000_000n,
       update,
     });
@@ -3872,8 +3900,8 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 11_000_000n,
     });
-    expect(queryRaw).toHaveBeenCalledTimes(2);
-    const queryRawSql = queryRaw.mock.calls.map(([sql]) =>
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    const queryRawSql = prisma.$queryRaw.mock.calls.map(([sql]) =>
       Array.isArray(sql) ? sql.join("") : String(sql)
     );
     expect(queryRawSql[0]).toContain('FROM "hosted_member"');
@@ -4889,27 +4917,30 @@ function createAllowanceTx(input: {
 
   return {
     $executeRaw: input.executeRaw,
-    $queryRaw: vi.fn<AllowanceQueryRaw>(async () => []),
+    $queryRaw: vi.fn<AllowanceQueryRaw>(async (sql) =>
+      sql.join("?").includes('FROM "hosted_ai_usage_period"')
+        ? [{
+            billingPlanCode: input.billingPlanCode ?? "launch_monthly",
+            blockedAt: input.blockedAt ?? null,
+            highestBillingPlanCode:
+              input.highestBillingPlanCode === undefined
+                ? input.billingPlanCode ?? "launch_monthly"
+                : input.highestBillingPlanCode,
+            lastUsageAt: null,
+            limitUsdMicros: input.limitUsdMicros ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+            periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+            periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+            planResetAt: input.planResetAt ?? null,
+            spentUsdMicros: input.spentUsdMicros ?? 0n,
+        }]
+        : []
+    ),
     hostedAiUsage: {
       aggregate: input.hostedAiUsageAggregate ?? defaultAggregate,
       updateMany: input.hostedAiUsageUpdateMany,
     },
     hostedAiUsagePeriod: {
       createMany: vi.fn(async () => ({ count: 1 })),
-      findUniqueOrThrow: vi.fn(async () => ({
-        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        blockedAt: input.blockedAt ?? null,
-        highestBillingPlanCode:
-          input.highestBillingPlanCode === undefined
-            ? input.billingPlanCode ?? "launch_monthly"
-            : input.highestBillingPlanCode,
-        lastUsageAt: null,
-        limitUsdMicros: input.limitUsdMicros ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
-        periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
-        periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
-        planResetAt: input.planResetAt ?? null,
-        spentUsdMicros: input.spentUsdMicros ?? 0n,
-      })),
       update: vi.fn(async (args?: {
         data?: {
           billingPlanCode?: string;
@@ -5137,7 +5168,11 @@ function createGatePrisma(input: {
 
   return {
     $executeRaw: input.executeRaw ?? vi.fn(async () => 1),
-    $queryRaw: input.queryRaw ?? vi.fn(async () => []),
+    $queryRaw: input.queryRaw ?? vi.fn<AllowanceQueryRaw>(async (sql) =>
+      sql.join("?").includes('FROM "hosted_ai_usage_period"')
+        ? [{ ...defaultPeriod, ...input.findUniquePeriod }]
+        : []
+    ),
     hostedAiUsage: {
       aggregate: input.aggregate ?? vi.fn(async () => ({
         _max: {
@@ -5159,11 +5194,6 @@ function createGatePrisma(input: {
           : input.findUniquePeriod === undefined
             ? defaultPeriod
             : { ...defaultPeriod, ...input.findUniquePeriod }
-      ),
-      findUniqueOrThrow: vi.fn(async () =>
-        input.findUniquePeriod === undefined
-          ? defaultPeriod
-          : { ...defaultPeriod, ...input.findUniquePeriod }
       ),
       update: input.update ?? vi.fn(async (args?: {
         data?: {

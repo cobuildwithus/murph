@@ -1367,16 +1367,16 @@ export async function readCanonicalEventAvailabilityInterruptible(
       signal: input.signal,
       vaultRoot: input.vaultRoot,
       visit: (shardRecord) => {
-        let spineRecord: StoredAvailabilitySpineRecord | null;
+        let candidate: StoredAvailabilityEventEntry | null;
         try {
-          spineRecord = parseStoredAvailabilitySpineRecord(shardRecord);
+          candidate = parseStoredAvailabilityEventEntry(shardRecord, relativePath);
         } catch (error) {
           if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
             throw error;
           }
           return;
         }
-        if (!spineRecord) {
+        if (!candidate) {
           if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
             throw new VaultError(
               "EVENT_CONTRACT_INVALID",
@@ -1386,14 +1386,9 @@ export async function readCanonicalEventAvailabilityInterruptible(
           return;
         }
 
-        const candidate = {
-          relativePath,
-          record: spineRecord,
-          value: shardRecord,
-        };
-        const current = latestByEventId.get(spineRecord.id);
+        const current = latestByEventId.get(candidate.record.id);
         if (!current || compareEventSpineEntries(current, candidate) < 0) {
-          latestByEventId.set(spineRecord.id, candidate);
+          latestByEventId.set(candidate.record.id, candidate);
         }
       },
     });
@@ -1411,7 +1406,7 @@ export async function readCanonicalEventAvailabilityInterruptible(
     if (!shouldContinue()) {
       return interruptedCanonicalEventAvailability();
     }
-    if (isDeletedEventSpineRecord(candidate.record)) {
+    if (candidate.value === null || isDeletedEventSpineRecord(candidate.record)) {
       continue;
     }
 
@@ -1427,8 +1422,6 @@ export async function readCanonicalEventAvailabilityInterruptible(
       const parsed = safeParseContract(eventRecordSchema, normalizedStoredRecord);
       if (parsed.success) {
         record = parsed.data;
-        providerBodyObservation = record.kind === "observation"
-          && record.externalRef !== undefined;
       } else {
         const legacyBodyObservation =
           parseStoredProviderBodyAvailabilityEvent(normalizedStoredRecord);
@@ -1563,9 +1556,10 @@ function isLaterCanonicalAvailabilityEvent(
     );
 }
 
-function parseStoredAvailabilitySpineRecord(
+function parseStoredAvailabilityEventEntry(
   value: unknown,
-): StoredAvailabilitySpineRecord | null {
+  relativePath: string,
+): StoredAvailabilityEventEntry | null {
   if (
     !isPlainRecord(value)
     || typeof value.id !== "string"
@@ -1576,14 +1570,23 @@ function parseStoredAvailabilitySpineRecord(
   }
 
   return {
-    id: value.id,
-    occurredAt: value.occurredAt,
-    recordedAt: value.recordedAt,
-    lifecycle: parseStoredEventSpineLifecycle(
-      value.lifecycle,
-      "EVENT_CONTRACT_INVALID",
-      "Stored availability event record has an invalid lifecycle.",
-    ),
+    relativePath,
+    record: {
+      id: value.id,
+      occurredAt: value.occurredAt,
+      recordedAt: value.recordedAt,
+      lifecycle: parseStoredEventSpineLifecycle(
+        value.lifecycle,
+        "EVENT_CONTRACT_INVALID",
+        "Stored availability event record has an invalid lifecycle.",
+      ),
+    },
+    // Every revision still participates in ordering. Unrelated observations
+    // need only their spine, so large payloads can be collected during scanning.
+    // History kinds retain their existing validation even when unrelated.
+    value: value.kind === "observation" && !storedEventMayContributeToCanonicalAvailability(value)
+      ? null
+      : value,
   };
 }
 

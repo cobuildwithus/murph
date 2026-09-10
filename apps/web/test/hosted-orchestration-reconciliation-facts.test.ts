@@ -430,6 +430,59 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["nextWakeAt"],
+    ["nextDefaultProcessingWakeAt"],
+    ["inboxMediaRetentionWakeAt"],
+  ] as const)("logs due %s as work pending without mailbox lag", async (field) => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      [field]: FIXED_NOW,
+      systemMailboxProgressGeneration: "1",
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ conversationLagPresent: false, status: "work_pending" }),
+    );
+  });
+
+  it("logs future workspace wakes as idle", async () => {
+    const future = "2026-05-20T12:01:00.000Z";
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: future,
+      nextDefaultProcessingWakeAt: future,
+      nextWakeAt: future,
+      systemMailboxProgressGeneration: "1",
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ status: "idle" }),
+    );
+  });
+
+  it("keeps blocked status when a workspace wake is due", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ status: "blocked" }),
+    );
+  });
+
   it("logs one metadata-only reconciliation record", async () => {
     const response = await reconciliationRoute.GET(
       requestForFacts(),

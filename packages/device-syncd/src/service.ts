@@ -1355,7 +1355,7 @@ class DeviceSyncServiceController {
                 vaultRoot: this.vaultRoot,
                 ...options,
               },
-              { importSession: input.importSession },
+              { importSession: input.importSession, signal: jobAbortController.signal },
             );
           } finally {
             snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(

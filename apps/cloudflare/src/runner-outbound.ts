@@ -1271,9 +1271,25 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
             ),
           };
         }
+        const replacedSnapshotRef = body.replacedSnapshotRef === undefined
+          ? undefined
+          : body.replacedSnapshotRef === null
+            ? null
+            : parseHostedWorkspaceSnapshotV2Ref(body.replacedSnapshotRef);
+        if (replacedSnapshotRef && !await isHostedWorkspaceSnapshotV2RefOwnedByUser({
+          snapshotRef: replacedSnapshotRef,
+          userId: input.userId,
+        })) {
+          return {
+            kind: "rejected" as const,
+            outcome: "unauthorized" as const,
+            response: jsonError("Hosted workspace replaced snapshot is outside the bound user namespace.", 403),
+          };
+        }
         return {
           expectedWorkspaceVersion,
           kind: "valid" as const,
+          replacedSnapshotRef,
           writeFence,
         };
       },
@@ -1345,6 +1361,9 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
           expiresAt,
           leaseGeneration: validation.writeFence.generation,
           objectKey: crypto.objectKey,
+          ...(validation.replacedSnapshotRef === undefined
+            ? {}
+            : { replacedSnapshotRef: validation.replacedSnapshotRef }),
           schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
           snapshotId: crypto.snapshotId,
           userId: input.userId,
@@ -2459,15 +2478,18 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   };
 
   let preCheckpointReplacedSnapshotRef: HostedExecutionSnapshotRefValue | null = null;
-  try {
-    const preCheckpointWorkspace = await readCurrentHostedWorkspace({
-      environment: input.environment,
-      fetchImpl: fetch,
-      userId: input.userId,
-    });
-    preCheckpointReplacedSnapshotRef = preCheckpointWorkspace?.snapshotRef ?? null;
-  } catch {
-    return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
+  // Legacy snapshots and warm older producers omit this baseline.
+  if (session.replacedSnapshotRef === undefined) {
+    try {
+      const preCheckpointWorkspace = await readCurrentHostedWorkspace({
+        environment: input.environment,
+        fetchImpl: fetch,
+        userId: input.userId,
+      });
+      preCheckpointReplacedSnapshotRef = preCheckpointWorkspace?.snapshotRef ?? null;
+    } catch {
+      return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
+    }
   }
   if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
@@ -2475,7 +2497,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (
     preCheckpointReplacedSnapshotRef
     && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
-    && !session.replacedSnapshotRef
   ) {
     try {
       const remembered = await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({

@@ -180,6 +180,7 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+  parseHostedWorkspaceSnapshotUploadSession,
   type HostedWorkspaceSnapshotOrphanCandidate,
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.ts";
@@ -4870,9 +4871,17 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("starts direct-R2 workspace snapshot upload sessions without a presigned PUT URL", async () => {
+  it.each(["omitted", "null", "reference"] as const)("starts direct-R2 workspace snapshot sessions with a %s replacement baseline", async (baseline) => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
+    const replacedSnapshotRef = baseline === "omitted" ? undefined : baseline === "null" ? null
+      : createWorkspaceSnapshotV2Ref({
+          encryptedByteSize: 4,
+          encryptedObjectSha256: "b".repeat(64),
+          objectKey: await hostedWorkspaceSnapshotObjectKey({ snapshotId: "snapshot_previous", userId: "member_123" }),
+          snapshotId: "snapshot_previous",
+          userId: "member_123",
+        });
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
@@ -4884,6 +4893,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotStartRequest({
         expectedWorkspaceVersion: "4",
+        replacedSnapshotRef,
         workspaceVersion: "4",
       }),
       env,
@@ -4935,6 +4945,8 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
       workspaceVersion: "4",
     }));
+    expect(session?.replacedSnapshotRef).toEqual(replacedSnapshotRef);
+    expect(Object.hasOwn(session ?? {}, "replacedSnapshotRef")).toBe(baseline !== "omitted");
     expect(session).not.toHaveProperty("dataKeyBase64");
     expect(session).not.toHaveProperty("putUrl");
 
@@ -4964,6 +4976,42 @@ describe("handleRunnerOutboundRequest", () => {
         === "Hosted runner workspace snapshot start diagnostic.",
     )).toBe(false);
   });
+
+  it.each(["other_user", "wrong_namespace", "stale_version", "malformed"] as const)(
+    "rejects a %s replacement baseline before creating a snapshot session",
+    async (kind) => {
+      const fixture = await createHostedRuntimeCryptoContextFixture();
+      const runner = createWorkspaceVersionAwareUserRunner();
+      const userId = kind === "other_user" ? "other_member" : "member_123";
+      const replacedSnapshotRef = kind === "malformed" ? {} : createWorkspaceSnapshotV2Ref({
+        encryptedByteSize: 4,
+        encryptedObjectSha256: "b".repeat(64),
+        objectKey: await hostedWorkspaceSnapshotObjectKey({
+          snapshotId: "snapshot_previous",
+          userId: kind === "wrong_namespace" ? "other_member" : userId,
+        }),
+        snapshotId: "snapshot_previous",
+        userId,
+      });
+      vi.stubGlobal("fetch", fixture.fetchMock);
+      const response = handleRunnerOutboundRequest(
+        createWorkspaceSnapshotStartRequest({
+          expectedWorkspaceVersion: kind === "stale_version" ? "3" : "4",
+          replacedSnapshotRef,
+          workspaceVersion: "4",
+        }),
+        createRunnerOutboundEnv({ ...fixture.env, USER_RUNNER: { getByName: runner.getByName } }),
+        "member_123",
+      );
+      if (kind === "malformed") {
+        await expect(response).rejects.toThrow();
+      } else {
+        expect((await response).status).toBe(kind === "stale_version" ? 409 : 403);
+      }
+      expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+      expect(fixture.fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("emits bounded fixed-key workspace snapshot start route diagnostics", async () => {
     vi.useFakeTimers();
@@ -6673,7 +6721,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
   });
 
-  it("completes workspace snapshot refs only after matching object size is present", async () => {
+  it.each(["omitted", "null", "reference"] as const)("completes a restored snapshot session with a %s replacement baseline", async (baseline) => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete";
@@ -6689,9 +6737,19 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
       userId: "member_123",
     });
+    const replacedSnapshotRef = baseline === "omitted" ? undefined : baseline === "null" ? null
+      : createWorkspaceSnapshotV2Ref({
+          encryptedByteSize: 4,
+          encryptedObjectSha256: "b".repeat(64),
+          objectKey: await hostedWorkspaceSnapshotObjectKey({ snapshotId: "snapshot_previous", userId: "member_123" }),
+          snapshotId: "snapshot_previous",
+          userId: "member_123",
+        });
     runner.workspaceSnapshotUploadSessions.set(
       snapshotId,
-      createWorkspaceSnapshotUploadSession(snapshotRef, { workspaceVersion: "5" }),
+      parseHostedWorkspaceSnapshotUploadSession(JSON.parse(JSON.stringify(
+        createWorkspaceSnapshotUploadSession(snapshotRef, { replacedSnapshotRef, workspaceVersion: "5" }),
+      ))),
     );
     const head = vi.fn(async (key: string) => ({
       key,
@@ -6763,10 +6821,10 @@ describe("handleRunnerOutboundRequest", () => {
       }),
     }));
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(4);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint");
-    const checkpointInit = fetchMock.mock.calls[1]?.[1] as RequestInit | undefined;
+    expect(fetchMock).toHaveBeenCalledTimes(baseline === "omitted" ? 2 : 1);
+    expect(fetchMock.mock.calls.filter(isHostedWorkspaceReadFetch)).toHaveLength(baseline === "omitted" ? 1 : 0);
+    expect(fetchMock.mock.lastCall?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint");
+    const checkpointInit = fetchMock.mock.lastCall?.[1] as RequestInit | undefined;
     expect(JSON.parse(String(checkpointInit?.body))).toEqual(expect.objectContaining({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "5",
@@ -9648,7 +9706,9 @@ describe("handleRunnerOutboundRequest", () => {
     });
     runner.workspaceSnapshotUploadSessions.set(
       snapshotId,
-      createWorkspaceSnapshotUploadSession(snapshotRef, { replacedSnapshotRef }),
+      parseHostedWorkspaceSnapshotUploadSession(JSON.parse(JSON.stringify(
+        createWorkspaceSnapshotUploadSession(snapshotRef, { replacedSnapshotRef }),
+      ))),
     );
     const deleteObject = vi.fn(async () => {});
     const env = createRunnerOutboundEnv({
@@ -9687,7 +9747,8 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint failed.",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.filter(isHostedWorkspaceReadFetch)).toHaveLength(0);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
@@ -9788,7 +9849,7 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot cleanup state is unavailable.",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
       replacedSnapshotRef,
@@ -11504,12 +11565,14 @@ function createArtifactPutRequest(input: {
 
 function createWorkspaceSnapshotStartRequest(input: {
   expectedWorkspaceVersion: string;
+  replacedSnapshotRef?: unknown;
   reason?: "canonical_runtime_commit" | "idle_shutdown";
   workspaceVersion: string;
 }): Request {
   return new Request("http://workspace-snapshots.worker/workspace-snapshots/start", {
     body: JSON.stringify({
       expectedWorkspaceVersion: input.expectedWorkspaceVersion,
+      ...(input.replacedSnapshotRef === undefined ? {} : { replacedSnapshotRef: input.replacedSnapshotRef }),
       nextWakeAt: null,
       nextWakeReason: null,
       reason: input.reason ?? "idle_shutdown",
@@ -11717,7 +11780,7 @@ function createWorkspaceSnapshotUploadSession(
     expiresAt: input.expiresAt ?? "9999-01-01T00:00:00.000Z",
     leaseGeneration: "9",
     objectKey: snapshotRef.objectKey,
-    ...(input.replacedSnapshotRef ? { replacedSnapshotRef: input.replacedSnapshotRef } : {}),
+    ...(input.replacedSnapshotRef === undefined ? {} : { replacedSnapshotRef: input.replacedSnapshotRef }),
     schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
     snapshotId: snapshotRef.snapshotId,
     userId: snapshotRef.userId,

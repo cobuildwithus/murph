@@ -354,3 +354,15 @@ root complexity debt from 558 to 557, with maximum 252 unchanged. The runner's
 58 debt is unchanged and the independent owner remains below 20. All temporary
 diagnostic probes are removed. The accepted R4 correction and CI regressions are
 ready for current-base integration and the next full sensitive audit.
+
+Current-base integration preserves the upstream diagnostic deadline helper and
+moves the ready-effect image guard into it. The independent Browser Vault suffix
+now follows upstream freshness policy instead of forcing a rebuild. The index
+conflict combines the two owner summaries; no prior contract is removed. The
+integrated eight-file runtime group passes 174 cases, Web readiness/store passes
+145, and both runtime and Web typechecks pass. The complexity ratchet against
+current main passes: root debt 549 to 547 and max 252 unchanged, runner debt 59
+to 58 and max 71 to 70, independent owner max 16. The former final fixture failure
+is resolved by the eight-case delegated-owner/timer rerun. Parent review keeps the
+existing claims, bootstrap/connection authority, canonical locks, and exact
+acknowledgments; no new service, schema, dependency, or second executor was added.

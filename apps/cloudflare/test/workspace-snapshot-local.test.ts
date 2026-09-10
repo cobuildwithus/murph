@@ -913,6 +913,106 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
+  it.each([
+    ["tar", "missing"], ["zstd", "missing"],
+    ["tar", "early-exit"], ["zstd", "early-exit"],
+  ] as const)("cleans up snapshot creation when %s has a %s failure", async (label, failure) => {
+    const root = await mkdtemp(path.join(tmpdir(), "snapshot-create-process-failure-"));
+    const durableRoot = path.join(root, "source");
+    const outputDir = path.join(root, "scratch");
+    const bin = path.join(root, "bin");
+    const originalPath = process.env.PATH;
+    const peer = label === "tar" ? "zstd" : "tar";
+    const peerPath = (await execFileAsync("which", [peer])).stdout.trim();
+    try {
+      await mkdir(durableRoot);
+      await mkdir(bin);
+      const notePath = path.join(durableRoot, "note.bin");
+      // More than pipe capacity, so an early compressor exit also exercises
+      // the producer's blocked write and closure of every parent descriptor.
+      await writeFile(notePath, Buffer.alloc(4 * 1024 * 1024, 7));
+      if (failure === "missing") {
+        await symlink(peerPath, path.join(bin, peer));
+        process.env.PATH = bin;
+      } else {
+        await writeFile(path.join(bin, label), "#!/bin/sh\nprintf 'synthetic process failure\\n' >&2\nexit 17\n", { mode: 0o700 });
+        process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ""}`;
+      }
+      const error = await createEncryptedWorkspaceSnapshotFile({
+        aad: buildHostedWorkspaceSnapshotV2Aad({
+          objectKey: "users/hsn_test/workspace-snapshots/snapshot_create_failure.snapshot.enc",
+          snapshotId: "snapshot_create_failure", userId: "member_synthetic",
+        }),
+        archiveEntries: [{ absolutePath: notePath, archivePath: "note.bin", kind: "file" }],
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(Buffer.alloc(32, 7)),
+        durableRoot, outputDir, ivBase64: "AQIDBAUGBwgJCgsM",
+        maxEncryptedBytes: 8 * 1024 * 1024,
+        signal: AbortSignal.timeout(5_000),
+      }).catch((cause: unknown) => cause);
+      // A broken pipe or cleanup signal may make the peer fail too. Retain
+      // useful process diagnostics instead of masking failure with a timeout.
+      expect(readHostedWorkspaceSnapshotProcessFailureDiagnostics(error)).not.toBeNull();
+      await expect(readdir(outputDir)).resolves.toEqual([]);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("awaits both active archive children when snapshot creation is cancelled", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "snapshot-create-active-abort-"));
+    const durableRoot = path.join(root, "source");
+    const outputDir = path.join(root, "scratch");
+    const bin = path.join(root, "bin");
+    const originalPath = process.env.PATH;
+    const controller = new AbortController();
+    const reason = new Error("foreground wake interrupted active archive processes");
+    let construction: Promise<EncryptedWorkspaceSnapshotFile> | undefined;
+    try {
+      await mkdir(durableRoot);
+      await mkdir(bin);
+      const notePath = path.join(durableRoot, "note.md");
+      await writeFile(notePath, "synthetic note\n");
+      for (const label of ["tar", "zstd"]) {
+        await writeFile(path.join(bin, label), `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+process.on("SIGTERM", () => {
+  writeFileSync(__filename + ".stopped", "stopped");
+  process.exit(0);
+});
+writeFileSync(__filename + ".ready", "ready");
+setTimeout(() => process.exit(19), 10_000);
+`, { mode: 0o700 });
+      }
+      process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ""}`;
+      construction = createEncryptedWorkspaceSnapshotFile({
+        aad: buildHostedWorkspaceSnapshotV2Aad({
+          objectKey: "users/hsn_test/workspace-snapshots/snapshot_active_abort.snapshot.enc",
+          snapshotId: "snapshot_active_abort", userId: "member_synthetic",
+        }),
+        archiveEntries: [{ absolutePath: notePath, archivePath: "note.md", kind: "file" }],
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(Buffer.alloc(32, 7)),
+        durableRoot, outputDir, ivBase64: "AQIDBAUGBwgJCgsM",
+        maxEncryptedBytes: 1024 * 1024, signal: controller.signal,
+      });
+      construction.catch(() => undefined);
+      await vi.waitFor(async () => {
+        await access(path.join(bin, "tar.ready"));
+        await access(path.join(bin, "zstd.ready"));
+      }, { timeout: 5_000 });
+      controller.abort(reason);
+      await expect(construction).rejects.toBe(reason);
+      await expect(access(path.join(bin, "tar.stopped"))).resolves.toBeUndefined();
+      await expect(access(path.join(bin, "zstd.stopped"))).resolves.toBeUndefined();
+      await expect(readdir(outputDir)).resolves.toEqual([]);
+    } finally {
+      controller.abort(reason);
+      await construction?.catch(() => undefined);
+      process.env.PATH = originalPath;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("preserves a child-process failure when a wake arrives during process cleanup", async () => {
     const tempRoot = await mkdtemp(path.join(
       tmpdir(),
@@ -1182,6 +1282,66 @@ while :; do sleep 0.01; done
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
+    }
+  });
+
+  it.each([0, 127, 4095])(
+    "erases all received plaintext after an early stream failure (%i bytes)", async (receivedBytes) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "snapshot-restore-partial-clear-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const archiveBytes = 65_537;
+    const dataKey = Buffer.alloc(32, 7);
+    const ivBase64 = "AQIDBAUGBwgJCgsM";
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_partial.snapshot.enc";
+    const snapshotId = "snapshot_partial";
+    const userId = "member_synthetic";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+    const ref = createHostedWorkspaceSnapshotTestRef({
+      aad, objectKey, snapshotId, userId,
+      encrypted: {
+        compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+        encryptedByteSize: archiveBytes + 16, encryptedFilePath: "unused.snapshot.enc",
+        encryptedObjectSha256: "0".repeat(64), fileCount: 1, ivBase64,
+        plaintextArchiveSha256: "0".repeat(64), temporaryDirectoryPath: "unused",
+        totalPlainBytes: archiveBytes,
+      },
+    });
+    const cipher = createCipheriv("aes-256-gcm", dataKey, Buffer.from(ivBase64, "base64url"));
+    cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(aad)));
+    const plaintext = Buffer.alloc(receivedBytes, 0x3a);
+    const ciphertext = cipher.update(plaintext);
+    const streamFailure = new Error("synthetic object download interrupted");
+    const allocate = Buffer.allocUnsafe;
+    let archive: ReturnType<typeof Buffer.allocUnsafe> | undefined;
+    const allocation = vi.spyOn(Buffer, "allocUnsafe").mockImplementation((size) => {
+      if (size !== archiveBytes) return allocate(size);
+      // Observe plaintext erasure without reading uninitialized memory.
+      archive = Buffer.alloc(size, 0x7d);
+      return archive;
+    });
+    async function* interruptedStream() {
+      yield ciphertext;
+      expect(archive?.subarray(0, receivedBytes).equals(plaintext)).toBe(true);
+      throw streamFailure;
+    }
+    try {
+      await mkdir(durableRoot);
+      await writeFile(path.join(durableRoot, "existing.txt"), "existing workspace");
+      await expect(restoreEncryptedWorkspaceSnapshotFromEncryptedStream({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey), durableRoot,
+        encryptedStream: interruptedStream(), ref,
+      })).rejects.toBe(streamFailure);
+      expect(archive?.subarray(0, receivedBytes).equals(Buffer.alloc(receivedBytes))).toBe(true);
+      // The unwritten suffix never held snapshot plaintext. Failed downloads
+      // must not dirty pages proportional to the advertised full archive size.
+      expect(archive?.subarray(receivedBytes).every((byte) => byte === 0x7d)).toBe(true);
+      await expect(readFile(path.join(durableRoot, "existing.txt"), "utf8"))
+        .resolves.toBe("existing workspace");
+      await expect(readdir(tempRoot)).resolves.toEqual(["durable"]);
+    } finally {
+      allocation.mockRestore();
+      dataKey.fill(0);
+      await rm(tempRoot, { force: true, recursive: true });
     }
   });
 

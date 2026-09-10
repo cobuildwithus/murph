@@ -55,7 +55,7 @@ export interface HostedWorkspaceSnapshotUploadSession {
   objectKey: string;
   r2PutDrainUntil?: string;
   r2PutExpiresAt?: string;
-  replacedSnapshotRef?: NonNullable<HostedExecutionSnapshotRef>;
+  replacedSnapshotRef?: HostedExecutionSnapshotRef | null;
   schema: typeof HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA;
   snapshotId: string;
   userId: string;
@@ -163,7 +163,7 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
     ...(r2PutExpiresAt === null ? {} : { r2PutExpiresAt }),
     ...(r2PutDrainUntil === null ? {} : { r2PutDrainUntil }),
-    ...(replacedSnapshotRef ? { replacedSnapshotRef } : {}),
+    ...(record.replacedSnapshotRef === undefined ? {} : { replacedSnapshotRef }),
     schema,
     snapshotId: requireString(record.snapshotId, `${label}.snapshotId`),
     userId: requireString(record.userId, `${label}.userId`),

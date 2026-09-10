@@ -32,8 +32,16 @@ export function runnerApplicationSpecification(container: Record<string, unknown
 
 export type RunnerApplicationSpecification = ReturnType<typeof runnerApplicationSpecification>;
 
+export function runnerApplicationResources(value: unknown): { vcpu: number; memoryMiB: number; diskMB: number } {
+  if (!isObjectRecord(value)) throw invalid();
+  const expanded = expandNamedConfiguration(value);
+  if (!isObjectRecord(expanded.disk)) throw invalid();
+  return { vcpu: positive(expanded.vcpu), memoryMiB: positive(expanded.memory_mib), diskMB: positive(expanded.disk.size_mb) };
+}
+
 export function runnerApplicationExecutionIdentity(specification: RunnerApplicationSpecification): string {
-  return createHash("sha256").update(JSON.stringify(specification)).digest("hex");
+  const { max_instances: _capacity, ...execution } = specification;
+  return createHash("sha256").update(JSON.stringify(execution)).digest("hex");
 }
 
 /** Compare only requested native fields; provider timestamps and defaults are not release identity. */

@@ -30,6 +30,8 @@ import {
 } from '@murphai/contracts'
 import {
   addMeal,
+  appendBloodTest,
+  appendJsonlRecord,
   initializeVault,
   listGoals,
   listAutomations,
@@ -92,6 +94,11 @@ import {
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it } from 'vitest'
 import { upsertKnowledgePage } from '../src/knowledge/service.ts'
+import {
+  markAssistantContextSnapshotDirty,
+  readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshot,
+} from '../src/assistant/context-snapshot.ts'
 import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { upsertAssistantInputEvent, updateAssistantInputAttachmentEvidence } from '../src/assistant/input-store.js'
@@ -382,6 +389,9 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   ],
   minimal_identity_answer: [],
   minimal_identity_prompt: [],
+  wearable_source_awareness: [
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
+  ],
   wearable_connection_offer: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
@@ -540,6 +550,83 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
+
+async function prepareCorrectedAvailabilityContext(vaultRoot: string): Promise<string> {
+  const now = () => '2026-09-01T12:00:00.000Z'
+  await initializeVault({ vaultRoot, createdAt: now(), timezone: 'UTC' })
+  await appendBloodTest({
+    vaultRoot, occurredAt: '2026-08-01T12:00:00.000Z',
+    testName: 'synthetic-panel', title: 'Synthetic panel',
+  })
+  const observation = {
+    schemaVersion: 'murph.event.v1', id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F7',
+    kind: 'observation', source: 'device', title: 'Synthetic observation',
+    occurredAt: '2026-08-01T12:00:00.000Z', recordedAt: '2026-08-01T12:00:00.000Z',
+    dayKey: '2026-08-01', value: 72,
+    externalRef: { system: 'synthetic', resourceType: 'metric', resourceId: 'sample' },
+  }
+  const appendRevision = async (metric: string, revision: number) => {
+    await appendJsonlRecord({
+      vaultRoot, relativePath: 'ledger/events/2026/2026-08.jsonl',
+      record: { ...observation, metric, unit: metric === 'weight' ? 'kg' : 'count', lifecycle: { revision } },
+    })
+    await markAssistantContextSnapshotDirty({ vaultRoot, domains: ['blood_tests', 'health_context'] })
+    await refreshAssistantContextSnapshot({ vaultRoot, now })
+    const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+    expect(prompt).toContain('Blood test records are present (latest 2026-08-01)')
+    expect(prompt).not.toContain('currently unavailable in the snapshot')
+    return prompt!
+  }
+  expect(await appendRevision('weight', 1)).toContain('Body/scale measurement history is present')
+  const corrected = await appendRevision('daily-steps', 2)
+  expect(corrected).not.toContain('Body/scale measurement history is present')
+  return corrected
+}
+
+it('assembles corrected availability context for the focused real Codex journey', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-availability-context-'))
+  try {
+    await prepareCorrectedAvailabilityContext(root)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+describeRealCodex('real Codex canonical availability e2e', () => {
+  it('reports corrected canonical availability without reviving a superseded body measurement', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-availability-e2e-'))
+    try {
+      const context = await prepareCorrectedAvailabilityContext(workingDirectory)
+      const before = await snapshotRealCodexCanonicalVault(workingDirectory)
+      const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, context, [], '2026-09-01T12:00:00.000Z'),
+        dynamicTools: [], env: config.env, excludeResumeTurns: true,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'From your saved-context summary alone, which records are confirmed present: blood tests and body measurements? If a category is not listed, say it is not confirmed by the summary. Do not fetch or change anything.',
+        reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(`[canonical-availability-e2e] ${JSON.stringify({
+        model: config.model, actions: actions.length, reply: result.finalMessage,
+      })}\n`)
+      expect(result.finalMessage).toMatch(/blood[^\n]*(?:present|confirmed|yes)/iu)
+      expect(result.finalMessage).toMatch(/body[^\n]*(?:not confirmed|not listed|not shown|unconfirmed)/iu)
+      expect(actions).toEqual([])
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
+      expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
 
 describeRealCodex('real Codex retained image e2e', () => {
   it('finds and views an earlier image through the conversation media index', async () => {
@@ -1677,6 +1764,158 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(reply).not.toMatch(/bank\/|memory\.md|memory_document_invalid|\b(?:canonical|field|line \d+|invalid id)\b/iu)
         expect(reply).not.toMatch(/(?:you(?:['’]ll| will| need to| should)?|please) (?:fix|repair|edit)|\b(?:i|we)(?:['’]ll| will| have|['’]ve) (?:fix|repair|retry|escalate|contact|report|flag)|\b(?:support|team) (?:has been|was) (?:notified|contacted)/iu)
         expect(reply).not.toMatch(/what should i call you|how old|gender/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it.each([
+    { name: 'Apple Health with unknown wearable use', source: 'apple', knownNone: false, failure: false },
+    { name: 'Apple Health with wearable use already answered', source: 'apple', knownNone: true, failure: false },
+    { name: 'an identified wearable', source: 'oura', knownNone: false, failure: false },
+    { name: 'no connected sources', source: 'none', knownNone: false, failure: false },
+    { name: 'an unavailable account lookup', source: 'none', knownNone: false, failure: true },
+  ] as const)(
+    'onboarding source awareness: $name',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const temporaryPaths = [...config.temporaryPaths]
+      const deviceRequests: AssistantHostedDeviceToolRequest[] = []
+      try {
+        const workingDirectory = await prepareRealCodexOnboardingDirectory()
+        temporaryPaths.unshift(workingDirectory)
+        const resume = buildRealCodexOnboardingResumeContext('ordinary_records')
+        if (resume.memory.status !== 'ok') {
+          throw new Error('Expected available synthetic onboarding memory.')
+        }
+        const records = resume.memory.records.filter((record) =>
+          typeof record !== 'object' || record === null || !('id' in record)
+          || record.id !== 'ordinary_health_context'
+        )
+        const empty = { count: 0, items: [], status: 'ok', truncated: false } as const
+        await writeFile(
+          path.join(workingDirectory, 'onboarding-resume-context.json'),
+          `${JSON.stringify({
+            ...resume,
+            allergies: empty,
+            conditions: empty,
+            deviceAccounts: {
+              status: 'error',
+              code: 'invalid_option',
+              message: 'This onboarding context surface could not be read.',
+              retryable: false,
+            },
+            experiments: empty,
+            regimens: empty,
+            supplements: empty,
+            memory: { ...resume.memory, recordCount: records.length, records },
+          })}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const deviceTool: NonNullable<AssistantHostedToolContext['deviceTool']> = {
+          async request(request) {
+            deviceRequests.push(request)
+            if (request.action !== 'list_accounts') {
+              throw new Error('Onboarding discovery must not change a connection.')
+            }
+            if (scenario.failure) {
+              throw new Error('Synthetic account lookup unavailable.')
+            }
+            return {
+              action: 'list_accounts',
+              provider: null,
+              sourceProvider: null,
+              accounts: scenario.source === 'none' ? [] : [{
+                accountId: 'synthetic-connected-source',
+                displayName: scenario.source === 'apple' ? 'Apple Health' : 'Oura',
+                provider: scenario.source === 'apple' ? 'junction' : 'oura',
+                status: 'active',
+                lastErrorCode: null,
+                lastSyncCompletedAt: null,
+              }],
+            }
+          },
+        }
+        const result = await executeRealCodexOnboardingProbe({
+          ...buildRealCodexOnboardingTurnInput({ config, workingDirectory }),
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome, minimal identity, aspiration readiness, save, reflection, and park are complete. The visible conversation is at the data-source checkpoint. Movement, protocols, supplements, medical context, and recent labs are unresolved.',
+              'The last Murph message parked the saved sleep aspiration and explained that learning the health context comes next.',
+              ...(scenario.knownNone ? [
+                'Current operational evidence: Apple Health has an active connection. No completed sync is reported.',
+                'Earlier in this conversation, the member explicitly said they do not use a wearable.',
+              ] : []),
+            ].join('\n'),
+            [{ label: 'Oura', provider: 'oura' }],
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentInvocationScope: () => ({
+              conversationScope: 'direct',
+              origin: {
+                assistantInputId: 'ain_00000000000000000000000000000028',
+                kind: 'accepted_input',
+                sessionId: 'session-onboarding-source-awareness',
+              },
+              originSessionId: 'session-onboarding-source-awareness',
+            }),
+            deviceTool,
+            sendVaultFile: async () => {
+              throw new Error('File delivery is unavailable in this discovery journey.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt: 'Yes, let’s keep going.',
+          scenario: 'wearable_source_awareness',
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(`[onboarding-source-awareness-e2e] ${JSON.stringify({
+          scenario: scenario.name, deviceRequests, reply,
+        })}\n`)
+        expect(deviceRequests).toEqual(scenario.knownNone ? [] : [{ action: 'list_accounts' }])
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).not.toMatch(/https?:\/\/|\bjunction\b|list_accounts|vault-cli/iu)
+        expect(reply).not.toMatch(/(?:your|the) (?:steps|sleep|workouts|data) (?:are|is) (?:syncing|coming in|up to date)/iu)
+        expect(result.actions.filter((action) => action.kind === 'dynamic')).toHaveLength(
+          scenario.knownNone ? 0 : 1,
+        )
+        expect(result.actions.filter((action) =>
+          action.kind === 'command' && /vault-cli\s+device\b/iu.test(action.command)
+        )).toEqual([])
+        if (scenario.source === 'apple') {
+          expect(reply).toMatch(/apple health/iu)
+          expect(reply).toMatch(/connected|linked/iu)
+          expect(reply).not.toMatch(/do you use (?:a |any )?wearable or health app/iu)
+          expect(reply).not.toMatch(/(?:want|need|like|help)[^.!?\n]{0,40}(?:connect|app link)|reconnect/iu)
+          if (!scenario.knownNone) {
+            expect(reply).toMatch(/\bwatch\b/iu)
+            expect(reply).toMatch(/\bring\b/iu)
+            expect(reply).not.toMatch(/your (?:watch|ring)|voice memo|supplements|medical basics/iu)
+          }
+        }
+        if (scenario.knownNone || scenario.source === 'oura') {
+          expect(reply).toMatch(/voice memo|how you move|movement/iu)
+          expect(reply).not.toMatch(/do you (?:also )?(?:use|wear|have)|which (?:watch|ring|wearable)/iu)
+        }
+        if (scenario.source === 'oura') {
+          expect(reply).toMatch(/oura/iu)
+          expect(reply).toMatch(/connected|linked|I can see your Oura connection/iu)
+        }
+        if (scenario.source === 'none') {
+          expect(reply).toMatch(/wearable|watch|ring|health app/iu)
+          if (scenario.failure) {
+            expect(reply).toMatch(/couldn[’']t|can[’']t|unable|unavailable|trouble|could not/iu)
+            expect(reply).not.toMatch(/no (?:device|wearable|account|source|connection)|nothing connected|reconnect/iu)
+          }
+        }
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
       }

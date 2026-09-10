@@ -1,4 +1,4 @@
-import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
+import { isHostedRunnerImageTransition, readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
@@ -193,6 +193,8 @@ export function readHostedStandbyMode(
 export function readHostedStandbyTarget(
   source: Readonly<Record<string, unknown>>,
 ): number {
+  // Mixed images serve bound members, but never advertise pristine warm inventory.
+  if (isHostedRunnerImageTransition(source)) return 0;
   const raw = source.HOSTED_EXECUTION_STANDBY_TARGET;
   if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) {
     return 2;

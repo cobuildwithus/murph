@@ -9,9 +9,16 @@ Last verified: 2026-08-31
   access, and current line/chat egress policy. The existing runtime access owner
   must allow recovery both before content retrieval and at attempt claiming;
   explicit health-data consent withdrawal denies it at either checkpoint.
-  Provider retrieval must match the original
-  message, chat, outbound direction, failed status, iMessage service, and
-  sender. Never use provider content to select a recipient or line. The retry
+  Provider retrieval must match the original message, chat, outbound direction,
+  failed status, and sender. Retrieved service must be exactly `iMessage`, or
+  null/omitted with exact `iMessage` evidence on the matching failed-message
+  receipt. Use the matching child when children exist; only a parent-only
+  candidate may use its scalar receipt. Recheck that same authority under the
+  existing parent lock before consuming the attempt. Explicit non-iMessage or
+  unknown retrieved service and any non-null/non-omitted `preferred_service`
+  other than `iMessage` deny recovery; preferred service alone is not evidence.
+  The resend explicitly requests `iMessage`, never transport fallback. Never
+  use provider content to select a recipient or line. The retry
   stores only its timestamp and blinded original-message correlation on
   the existing delivery-message row. Retrieved bodies and attachment URLs stay
   request-local and never enter logs, mailbox input, or another content store.
@@ -26,8 +33,8 @@ Last verified: 2026-08-31
   is a transient allocation fact, not consent or execution authority. Temporal
   derives it only from Web-admitted conversation lag. The body-bound callback
   signature or existing Web OIDC and target-user binding remain mandatory;
-  default mode, live consent, pending-target reconciliation, immutable standby
-  binding, and runtime write fences still apply. Background processing modes
+  default mode, session-start consent, pending-target reconciliation, immutable
+  standby binding, and runtime write fences still apply. Background processing modes
   cannot carry the fact.
 - Hosted health-data withdrawal is authorized only by the durable
   `launch.health-data = revoked` grant. A missing legacy grant is not
@@ -36,11 +43,14 @@ Last verified: 2026-08-31
   sync, and companion-processing boundaries. The withdrawal response must wait
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
-  runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. Current Web producers no longer send member-specific shell
-  prewarm hints. The authenticated compatibility receiver accepts older callers
-  under its existing bounded admission barrier but creates no container or
-  member binding. Pristine global inventory is content-free and memberless;
+  runner. Every fresh or replacement session re-reads the grant before workspace
+  preparation or allocation. Active wakes use the existing write fence, with no
+  admission cache or repeated Web callback. A failed stop leaves that fence
+  cleared, so later wakes cannot restart a revoked member. Renewal waits behind
+  the stop before granting. Current Web producers no longer send member-specific
+  shell prewarm hints. The authenticated compatibility receiver ignores older
+  hints without reading admission, creating a container, or binding a member.
+  Pristine global inventory is content-free and memberless;
   only normal admitted execution binds it to a member. Web admission requires
   an extant, non-suspended member, and cleanup failure never restores authority.
   Keep Settings, export, and deletion available without waking the paused

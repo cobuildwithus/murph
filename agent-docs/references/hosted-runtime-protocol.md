@@ -236,6 +236,16 @@ serialized heartbeat attempts on a two-second start-to-start cadence for the
 full publication. This leaves the two-second heartbeat request inside the
 10-second stale boundary. A successful foreground preemption bypasses handoff
 preservation and stops heartbeat liveness before detached session cleanup.
+For a v2 or absent baseline, the snapshot bridge carries its existing snapshot
+reference with the expected workspace version into session start. The Worker
+validates the active fence and reference namespace, then persists the reference
+in the upload session's existing replaced-snapshot field before upload. Explicit
+null means no prior blob; an omitted field preserves the completion-time Web read
+for old containers and legacy snapshot formats. This avoids one Web read on the
+current path while retaining the cleanup obligation if a successful checkpoint
+response is lost. Remove the omitted-field fallback only after old producers and
+legacy baseline formats have drained; the old Worker ignores the additive start
+field and continues its existing read.
 If `/complete` loses its response at the transport boundary, the runtime replays
 that exact completion request at most once under the original heartbeat,
 stored write-fence headers, and remaining commit timeout; non-OK HTTP responses
@@ -1003,6 +1013,16 @@ only the hosted Codex `sessions/` directory as an optional second root. The
 operator child uses `murph-operator-diagnostic-read`, always returns a concrete
 diagnostic, and skips the member disclosure reviewer. The existing authenticated,
 encrypted, expiring Ops completion owner receives the result.
+
+An executing operator diagnostic defers routine idle checkpoints until it settles
+or reaches the admitted request expiry. Its existing controller aborts execution
+at that deadline; the ordinary requeue and Web prepare path settles expired work.
+Shutdown, owner handoff, fence loss, and workspace boundaries still drain the
+owned child before snapshot or release. Attempts emit buffered
+`assistant.pass_finished` logs with `executionKind: operator_diagnostic`, stage,
+outcome, elapsed time, attempt count, and a classified error code, without raw
+questions, answers, or errors. Ops and feedback readers derive expired queued or
+running tasks as failed from Web-owned expiry, without mutating rows on reads.
 
 Every child starts in an empty temporary directory with approval policy `never`,
 no inherited model-run environment, and no write, network, project
@@ -3742,6 +3762,10 @@ all other immutable-field mismatches still fail closed.
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content
 hashes; mtimes, generatedAt, user ids, and runtime cache paths are excluded.
+Ordinary background system work uses that existing source hash, generation, and
+max-age policy to skip a current replica. Only an exact Browser Vault refresh
+request forces reconstruction of a metadata-current replica, including its
+existing delayed retry. Workspace-version churn alone does not force a rebuild.
 Refresh reads one strict canonical source snapshot from the restored `vaultRoot`,
 derives its metric projection in memory, and does not read, rebuild, or mutate
 the local SQLite query projection. It recomputes the source hash before publish

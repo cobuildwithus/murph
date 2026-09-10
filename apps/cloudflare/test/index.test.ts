@@ -358,6 +358,7 @@ describe("cloudflare worker routes", () => {
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
+      "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
@@ -396,6 +397,7 @@ describe("cloudflare worker routes", () => {
       "test-direct-r2-locator-marker",
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
+      "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
@@ -434,6 +436,29 @@ describe("cloudflare worker routes", () => {
       standbyMode: "shadow",
       workerVersionId: "version-123",
     });
+  });
+
+  it("requires a deploy signature and isolates artifact smoke from all member inventory", async () => {
+    const memberAccess = vi.fn(() => { throw new Error("Artifact smoke touched a member namespace."); });
+    const release = { bank: "primary", id: "synthetic-serving", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: release, candidate: null, previous: null }),
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      HOSTED_EXECUTION_STANDBY_TARGET: "2",
+      RUNNER_CONTAINER: { getByName: memberAccess },
+      NEXT_RUNNER_CONTAINER: { getByName: memberAccess },
+      STANDBY_COORDINATOR: { getByName: memberAccess },
+    });
+    const url = new URL("https://runner.example.test/internal/deploy/artifact-smoke");
+    expect((await worker.fetch(new Request(url, { method: "POST" }), env)).status).toBe(401);
+    const headers = await createHostedWebCallbackSignatureHeaders({
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning,
+      method: "POST", path: url.pathname, payload: "", search: url.search,
+    });
+    const response = await worker.fetch(new Request(url, { method: "POST", headers }), env);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, runnerContainer: { ok: true, codexShell: createCodexShellSmokeResult() } });
+    expect(memberAccess).not.toHaveBeenCalled();
   });
 
   it("runs the deploy-signed managed container smoke route", async () => {
@@ -4048,8 +4073,6 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
@@ -4107,8 +4130,6 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),

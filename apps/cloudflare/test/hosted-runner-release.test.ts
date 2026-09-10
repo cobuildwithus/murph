@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  hostedRunnerImageMatches,
   readHostedRunnerDeployment,
   scopeHostedRunnerReleaseEnvironment,
 } from "../src/hosted-runner-release.ts";
 import {
+  readHostedStandbyTarget,
   createHostedRunnerContainerNamespaceRouter,
   createHostedRunnerSlotName,
   resolveHostedRunnerReleaseId,
@@ -20,6 +22,30 @@ const source = (promoted: boolean) => ({
 });
 
 describe("staged runner release", () => {
+  it("admits only complete old/new image pairs while pausing fresh standby inventory", () => {
+    const candidate = { ...primary, bundleFingerprint: "e".repeat(64), sourceFingerprint: "f".repeat(64), image: `registry.example.test/runner@sha256:${"a".repeat(64)}` };
+    const env = scopeHostedRunnerReleaseEnvironment({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: primary, candidate, previous: next }) }, "primary");
+    expect(readHostedStandbyTarget(env)).toBe(0);
+    expect(hostedRunnerImageMatches(env, primary.bundleFingerprint, primary.sourceFingerprint)).toBe(true);
+    expect(hostedRunnerImageMatches(env, candidate.bundleFingerprint, candidate.sourceFingerprint)).toBe(true);
+    expect(hostedRunnerImageMatches(env, primary.bundleFingerprint, candidate.sourceFingerprint)).toBe(false);
+    expect(hostedRunnerImageMatches(env, next.bundleFingerprint, next.sourceFingerprint)).toBe(false);
+    const promoted = scopeHostedRunnerReleaseEnvironment({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: candidate, candidate: null, previous: next }) }, "primary");
+    expect(readHostedStandbyTarget(promoted)).toBe(2);
+    expect(hostedRunnerImageMatches(promoted, primary.bundleFingerprint, primary.sourceFingerprint)).toBe(false);
+    expect(hostedRunnerImageMatches(promoted, candidate.bundleFingerprint, candidate.sourceFingerprint)).toBe(true);
+  });
+
+  it("keeps an exact warm binding usable through consecutive image promotions", () => {
+    const slotName = createHostedRunnerSlotName(primary.id);
+    const binding = { state: "bound" as const, claimId: "a".repeat(32), releaseId: primary.id, region: "GLOBAL" as const, slotName, userId: "member_test" };
+    for (const fingerprint of ["c", "e"]) {
+      const active = { ...primary, bundleFingerprint: fingerprint.repeat(64) };
+      const env = scopeHostedRunnerReleaseEnvironment({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, candidate: null, previous: next }) }, "primary");
+      expect(requireRetainedRunnerRequest(env, binding, { currentReleaseId: primary.id, region: "GLOBAL", slotName, userId: "member_test" })).toMatchObject({ targetReleaseId: primary.id, slotName });
+      expect(() => requireRetainedRunnerRequest(env, binding, { currentReleaseId: primary.id, region: "GLOBAL", slotName, userId: "member_other" })).toThrow("another member");
+    }
+  });
   it("holds the active release stable during preparation and changes it only on promotion", () => {
     expect(resolveHostedRunnerReleaseId(source(false))).toBe(primary.id);
     expect(resolveHostedRunnerReleaseId(source(true))).toBe(next.id);

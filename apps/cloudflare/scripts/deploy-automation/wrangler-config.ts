@@ -101,7 +101,8 @@ export function buildHostedWranglerDeployConfig(
       }),
       buildRunnerContainerConfig({
         className: "NextRunnerContainer",
-        maxInstances: environment.containerMaxInstances - environment.legacyStandbyContainerMaxInstances,
+        // Staging assigns the single member budget to the live physical bank.
+        maxInstances: 0,
         rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
       buildRunnerContainerConfig({
