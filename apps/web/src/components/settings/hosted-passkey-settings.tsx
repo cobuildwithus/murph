@@ -10,6 +10,7 @@ import { cn } from "@/src/lib/utils";
 
 import { ApprovalPasskeyStatus, ApprovalPasskeyUpdate } from "./approval-passkey-status";
 import { SettingsStatusLine } from "./connected-account-card";
+import { HostedApprovalRecoverySettings } from "./hosted-approval-recovery-settings";
 
 export function HostedPasskeySettings({
   authenticated,
@@ -25,7 +26,7 @@ export function HostedPasskeySettings({
   }
 
   if (secureApprovalStatus.method === "passkey") {
-    return <ApprovalPasskeyStatus />;
+    return <><ApprovalPasskeyStatus /><HostedApprovalRecoverySettings enabled={enrollmentEnabled} /></>;
   }
   if (secureApprovalStatus.method === "initial") return <InitialPasskeySetup enrollmentEnabled={enrollmentEnabled} />;
   return <PasskeySetup enrollmentEnabled={enrollmentEnabled} secureApprovalStatus={secureApprovalStatus} />;

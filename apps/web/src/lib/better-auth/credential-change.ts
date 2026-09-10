@@ -70,7 +70,7 @@ export async function readHostedLoginMethods(prisma: PrismaClient, memberId: str
   return { user, account, methods };
 }
 
-function credentialRecordOptions(prisma: PrismaClient) {
+export function credentialRecordOptions(prisma: PrismaClient) {
   return hostedBetterAuthOptions({ ...requireHostedBetterAuthConfig(), prisma, delivery: {
     email: async () => { throw new Error("Credential record operations cannot send codes."); },
     sms: async () => { throw new Error("Credential record operations cannot send codes."); },

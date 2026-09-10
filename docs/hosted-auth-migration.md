@@ -100,6 +100,46 @@ session. Legacy factor setup uses a separate provider dialog and checks the
 current member before provider mutations. Qualify passkey login in the existing
 provider configuration and real-device restoration before enabling migration.
 
+### Independent recovery
+
+PR 3 adds one nullable encrypted recovery-hash column to the existing approval
+aggregate. Apply `20260910040000_approval_recovery_key` before deploying its
+generated client; no backfill is needed. Existing readers tolerate this column.
+
+After migrating or setting up a Murph passkey, use **Save a recovery key** in
+Security. A current passkey approval authorizes generating one random 32-byte
+key, shown once. Only its SHA-256 digest, encrypted and bound to the member and
+field, is stored. Generation preserves sessions and replaces any prior recovery
+key. If delivery is lost, the current passkey can authorize a new key; no key
+retrieval endpoint exists. Keep the saved key separate from the passkey.
+
+**Use a recovery key** requires first-party primary authentication within five
+minutes and the previously saved key. A five-minute challenge binds the current
+member, browser session and exact recovery-key generation. Final registration
+requires a new user-verified WebAuthn credential. One transaction replaces all
+previous approval credentials, consumes the challenge/key, revokes other
+first-party and legacy browser sessions, and fences legacy native credentials.
+The authorizing browser stays signed in. The newly approved passkey can then
+authorize a fresh recovery key. Recovery does not change primary sign-in methods
+or contacts. Member/IP limits bound attempts; primary login
+alone, silent native exchange, and a provider wallet cannot redeem or provision
+this recovery path for an already protected member.
+
+Both issuance and enrollment switches gate recovery mutations. A pause preserves
+existing protection; the UI never falls back to provider login or a weaker
+reset. Local proof must include a failed database commit followed by retry,
+simultaneous redemption, another member/session, changed keys, revoked sessions,
+and provider-independent completion. Qualify storage/copying and WebAuthn on
+supported browsers before widening.
+
+A member who lost every legacy factor before enrolling cannot create a recovery
+key from an OTP. Keep that case unresolved in the retirement inventory until
+existing independent proof can restore protection through a separately reviewed
+operation. Support has no email/SMS-only override. Do not retire the provider
+while those accounts still depend on its factor; the deployment plan must not
+represent an unresolved account as migrated. Saved-key recovery follows the
+options described in [OWASP's MFA recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html#resetting-mfa).
+
 ## Credential settings
 
 The fixed `/api/settings/login-methods` reader and challenge, OTP send/verify,

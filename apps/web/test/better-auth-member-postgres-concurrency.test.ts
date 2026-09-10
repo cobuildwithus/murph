@@ -24,6 +24,10 @@ vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
 
 import { POST as initialPasskeyOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
 import { POST as registerPasskey } from "../app/api/settings/approval-passkeys/register/route";
+import { POST as rotateRecoveryKey } from "../app/api/settings/approval-passkeys/recovery-key/route";
+import { POST as recoveryOptions } from "../app/api/settings/approval-passkeys/recovery/options/route";
+import { POST as recoveryRegister } from "../app/api/settings/approval-passkeys/recovery/register/route";
+import { POST as settingsChallenge } from "../app/api/settings/sensitive-action-challenge/route";
 import { readApprovalPasskeyState, prepareApprovalPasskeyWrite, commitApprovalPasskeyWriteTx } from "../src/lib/sensitive-actions/passkey-store";
 import { lockHostedMemberRow } from "../src/lib/hosted-onboarding/shared";
 import { readHostedMailboxWakeByItemId } from "../src/lib/hosted-mailbox/store";
@@ -162,6 +166,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     loginAgain(): Promise<string>;
     authorize(change: HostedCredentialChange): Promise<{ method: "passkey"; token: string; assertion: ReturnType<ReturnType<typeof authenticator>["assertion"]> }>;
     send(change: HostedCredentialChange): Promise<string>;
+    recoveryKey(): Promise<string>;
   }) => Promise<void>, initialKind: "email" | "phone" = "email") {
     return withInitialPasskeyMember(async (f) => {
       vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
@@ -180,6 +185,14 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       const touchedCodes: HostedCredentialChange[] = [];
       try {
         await run({ ...f, email, request,
+          recoveryKey: async () => {
+            const challenge = await (await settingsChallenge(request("/api/settings/sensitive-action-challenge", { kind: "approval.recovery-key.rotate" }))).json();
+            const authorization = { method: "passkey", token: challenge.token, assertion: key.assertion({ counter: 0, customMessage: challenge.message }) };
+            const response = await rotateRecoveryKey(request("/api/settings/approval-passkeys/recovery-key", { authorization }));
+            const body = await response.json();
+            expect(body, `recovery key status ${response.status}`).toHaveProperty("key");
+            return body.key;
+          },
           authorize: async (change) => {
             const response = await credentialChallenge(request("/api/settings/login-methods/challenge", { change }));
             const challenge = await response.json();
@@ -224,6 +237,107 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const prepared = await prepareHostedAuthOtpMember({ prisma: f.prisma, contact: contact("phone", change.value!) });
     expect(prepared.memberId).toBe(f.memberId);
     expect(provider.read).not.toHaveBeenCalled();
+  }));
+
+  it("creates an independently approved recovery key without revoking sessions or retaining plaintext", () => withCredentialMember(async (f) => {
+    const otherCookie = await f.loginAgain();
+    expect((await rotateRecoveryKey(f.request("/api/settings/approval-passkeys/recovery-key", {}))).status).toBe(400);
+    expect((await rotateRecoveryKey(f.request("/api/settings/approval-passkeys/recovery-key", { authorization: null }))).status).toBe(400);
+    const key = await f.recoveryKey();
+    expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    const row = await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } });
+    expect(row.recoveryHashEncrypted).toBeTruthy();
+    expect(JSON.stringify(row)).not.toContain(key);
+    expect((await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie)))?.member.id).toBe(f.memberId);
+    expect(provider.read).not.toHaveBeenCalled();
+  }));
+
+  it("uses a saved key once to replace lost passkeys and revoke other first-party sessions", () => withCredentialMember(async (f) => {
+    const otherCookie = await f.loginAgain();
+    const old = await readApprovalPasskeyState({ memberId: f.memberId, prisma: f.prisma });
+    const key = await f.recoveryKey();
+    const result = await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }));
+    const options = await result.json();
+    expect(result.status).toBe(200);
+    const replacement = authenticator();
+    const payload = { key, token: options.token, response: replacement.registration(true, options.options.challenge) };
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(200);
+    const current = await readApprovalPasskeyState({ memberId: f.memberId, prisma: f.prisma });
+    expect(current.credentials.map((entry) => entry.id)).toEqual([replacement.credential.id]);
+    expect(current.credentials[0].id).not.toBe(old.credentials[0].id);
+    expect((await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).recoveryHashEncrypted).toBeNull();
+    expect(await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie))).toBeNull();
+    expect((await getHostedAppSessionFromRequest(f.request("/home", {})))?.member.id).toBe(f.memberId);
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(403);
+    const material = await (await settingsChallenge(f.request("/api/settings/sensitive-action-challenge", { kind: "approval.recovery-key.rotate" }))).json();
+    const authorization = { method: "passkey", token: material.token, assertion: replacement.assertion({ counter: 0, customMessage: material.message }) };
+    expect((await rotateRecoveryKey(f.request("/api/settings/approval-passkeys/recovery-key", { authorization }))).status).toBe(200);
+  }));
+
+  it("rejects a wrong key, foreign member, changed browser, and missing user verification without consuming recovery", () => withCredentialMember(async (f) => withCredentialMember(async (other) => {
+    const key = await f.recoveryKey();
+    expect((await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key: Buffer.alloc(32, 2).toString("base64url") }))).status).toBe(403);
+    expect((await recoveryOptions(other.request("/api/settings/approval-passkeys/recovery/options", { key }))).status).toBe(403);
+    const result = await (await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }))).json();
+    const replacement = authenticator();
+    const payload = { key, token: result.token, response: replacement.registration(true, result.options.challenge) };
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload, await f.loginAgain()))).status).toBe(403);
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", { ...payload, response: replacement.registration(false, result.options.challenge) }))).status).toBe(403);
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(200);
+  })));
+
+  it("invalidates a rotated key and its outstanding registration options", () => withCredentialMember(async (f) => {
+    const key = await f.recoveryKey();
+    const result = await (await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }))).json();
+    const newKey = await f.recoveryKey();
+    expect(newKey).not.toBe(key);
+    const payload = { key, token: result.token, response: authenticator().registration(true, result.options.challenge) };
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(403);
+    expect((await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key: newKey }))).status).toBe(200);
+  }));
+
+  it("admits one concurrent recovery and keeps only its new factor", () => withCredentialMember(async (f) => {
+    const key = await f.recoveryKey();
+    const result = await (await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }))).json();
+    const replacements = [authenticator(), authenticator()];
+    const responses = await Promise.all(replacements.map((replacement) => recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", {
+      key, token: result.token, response: replacement.registration(true, result.options.challenge),
+    }))));
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect((await readApprovalPasskeyState({ memberId: f.memberId, prisma: f.prisma })).credentials.map((entry) => entry.id))
+      .toEqual([replacements[responses.findIndex((response) => response.status === 200)].credential.id]);
+  }));
+
+  it("rolls back recovery-key consumption, factor replacement and revocation together on storage failure", () => withCredentialMember(async (f) => {
+    const otherCookie = await f.loginAgain();
+    const key = await f.recoveryKey();
+    const result = await (await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }))).json();
+    const payload = { key, token: result.token, response: authenticator().registration(true, result.options.challenge) };
+    const before = await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } });
+    if (!/^[A-Za-z0-9_-]+$/u.test(f.memberId)) throw new Error("Unsafe synthetic trigger target");
+    await f.prisma.$executeRawUnsafe("CREATE FUNCTION auth_test_reject_recovery() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = TG_ARGV[0] THEN RAISE EXCEPTION 'synthetic recovery failure'; END IF; RETURN NEW; END $$");
+    try {
+      await f.prisma.$executeRawUnsafe(`CREATE TRIGGER auth_test_reject_recovery BEFORE UPDATE ON hosted_auth_record FOR EACH ROW WHEN (NEW.model = 'user') EXECUTE FUNCTION auth_test_reject_recovery('${f.memberId}')`);
+      expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(500);
+      expect(await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).toEqual(before);
+      expect((await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie)))?.member.id).toBe(f.memberId);
+    } finally {
+      await f.prisma.$executeRawUnsafe("DROP TRIGGER IF EXISTS auth_test_reject_recovery ON hosted_auth_record");
+      await f.prisma.$executeRawUnsafe("DROP FUNCTION auth_test_reject_recovery()");
+    }
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(200);
+  }));
+
+  it.each(["stale", "silent", "suspended"] as const)("rejects %s recovery authority", (state) => withCredentialMember(async (f) => {
+    const key = await f.recoveryKey();
+    const session = await getHostedAppSessionFromRequest(f.request("/home", {}));
+    expect(session).not.toBeNull();
+    if (state === "suspended") await f.prisma.hostedMember.update({ where: { id: f.memberId }, data: { suspendedAt: new Date() } });
+    else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "id", value: session!.sessionId }], update: { primaryAuthenticatedAt: state === "silent" ? null : new Date(Date.now() - 6 * 60_000) },
+    });
+    expect((await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }))).status).toBe(403);
+    expect((await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).recoveryHashEncrypted).toBeTruthy();
   }));
 
   it.each([false, true])("replaces verified email atomically with existing reply alias = %s", (withAlias) => withCredentialMember(async (f) => {
@@ -625,7 +739,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     } finally { await prisma.hostedMember.deleteMany({ where: { id: memberId } }); }
   }
 
-  it("keeps imported native sessions on an addition, then fences old authority on credential removal", () => legacyFixture(async (memberId, phone) => {
+  it.each(["credential removal", "passkey recovery"])("keeps imported native sessions on an addition, then fences old authority on %s", (operation) => legacyFixture(async (memberId, phone) => {
     const prisma = getPrisma(); const baseURL = "https://www.withmurph.ai";
     const secret = Buffer.alloc(32, 29).toString("base64url");
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", secret); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
@@ -659,13 +773,25 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await readHostedNativeMemberAuth(legacyRequest, prisma)).member.id).toBe(memberId);
     expect((await getHostedAppSessionFromRequest(oldBrowser))?.member.id).toBe(memberId);
     const removal: HostedCredentialChange = { method: "phone", operation: "remove", expectedIdentity: phone, value: null };
-    expect((await removeCredential(request("/api/settings/login-methods/remove", { change: removal, authorization: await approve(removal) }))).status).toBe(200);
+    if (operation === "credential removal") {
+      expect((await removeCredential(request("/api/settings/login-methods/remove", { change: removal, authorization: await approve(removal) }))).status).toBe(200);
+    } else {
+      vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
+      const challenge = await (await settingsChallenge(request("/api/settings/sensitive-action-challenge", { kind: "approval.recovery-key.rotate" }))).json();
+      const authorization = { method: "passkey", token: challenge.token, assertion: key.assertion({ counter: 0, customMessage: challenge.message }) };
+      const recovery = await (await rotateRecoveryKey(request("/api/settings/approval-passkeys/recovery-key", { authorization }))).json();
+      expect(recovery).toHaveProperty("key");
+      expect((await readHostedNativeMemberAuth(legacyRequest, prisma)).member.id).toBe(memberId);
+      const options = await (await recoveryOptions(request("/api/settings/approval-passkeys/recovery/options", { key: recovery.key }))).json();
+      expect((await recoveryRegister(request("/api/settings/approval-passkeys/recovery/register", { key: recovery.key, token: options.token, response: authenticator().registration(true, options.options.challenge) }))).status).toBe(200);
+      expect((await removeCredential(request("/api/settings/login-methods/remove", { change: removal, authorization: await approve(removal) }))).status).toBe(403);
+    }
     expect((await readHostedLoginMethods(prisma, memberId)).user.credentialsChangedAt).toBeInstanceOf(Date);
     await expect(readHostedNativeMemberAuth(legacyRequest, prisma)).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
     expect(await getHostedAppSessionFromRequest(oldBrowser)).toBeNull();
     expect((await getHostedAppSessionFromRequest(request("/home", {})))?.member.id).toBe(memberId);
     expect(await importHostedAuthMember({ prisma, memberId })).toBe("already_owned");
-    expect((await readHostedLoginMethods(prisma, memberId)).methods.phone).toBeNull();
+    expect((await readHostedLoginMethods(prisma, memberId)).methods.phone).toBe(operation === "credential removal" ? null : phone);
     expect(provider.read).toHaveBeenCalledTimes(1);
   }));
 

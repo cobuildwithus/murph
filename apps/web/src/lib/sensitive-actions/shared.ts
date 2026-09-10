@@ -3,6 +3,7 @@ import type { AuthenticationResponseJSON } from "@simplewebauthn/browser";
 export const SETTINGS_SENSITIVE_ACTION_KINDS = [
   "vault.export",
   "approval.passkey.enroll",
+  "approval.recovery-key.rotate",
   // Legacy-only admission for Settings pages loaded before the deletion change.
   // The account-deletion route does not consume this authorization.
   "account.delete",
@@ -11,6 +12,7 @@ export const SETTINGS_SENSITIVE_ACTION_KINDS = [
 export const SENSITIVE_ACTION_KINDS = [
   ...SETTINGS_SENSITIVE_ACTION_KINDS,
   "account.credential.change",
+  "approval.passkey.recover",
   "assistant.action.approve",
 ] as const;
 

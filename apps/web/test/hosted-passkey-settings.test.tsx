@@ -126,7 +126,7 @@ test("renders the migrated approval passkey without asking for client reauthenti
     { requireButton: false },
   );
   expect(rendered.container.textContent).toContain("Enabled");
-  expect(rendered.container.querySelector("button")).toBeNull();
+  expect([...rendered.container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Save a recovery key", "Use a recovery key"]);
   expect(mocks.ensureConfigured).not.toHaveBeenCalled();
   expect(mocks.openAuthDialog).not.toHaveBeenCalled();
   await rendered.cleanup();

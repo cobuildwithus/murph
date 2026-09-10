@@ -2908,6 +2908,16 @@ transaction. Unmigrated members retain the legacy wallet verifier; enrolled
 members cannot fall back. The reader-first rollout and original browser-session
 drain are owned by `docs/hosted-auth-migration.md`.
 
+The same approval aggregate holds one optional encrypted digest for a saved
+recovery key. A current Murph passkey authorizes generation; fresh first-party
+primary proof plus the previously saved random key authorizes replacement.
+Recovery reuses the one-use challenge, atomically replaces all approval
+credentials, consumes the key and revokes other sessions through the existing
+auth owners. It creates no login session, contact claim, separate ledger or
+operator override. Existing protected accounts cannot bootstrap recovery from
+primary login alone. The rollout owner defines unresolved-factor retirement
+gates and the additive nullable-column deployment order.
+
 Hosted browser wearable OAuth is a same-browser, same-member, same-host
 boundary. Start issues one short-lived, host-only callback proof bound to the
 provider, OAuth state, member, and app-session generation. The provider callback

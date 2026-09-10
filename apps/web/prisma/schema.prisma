@@ -825,6 +825,7 @@ model HostedAddressBookContact {
 model HostedMemberApprovalCredentials {
   memberId             String       @id @map("member_id")
   credentialsEncrypted String       @map("credentials_encrypted")
+  recoveryHashEncrypted String?     @map("recovery_hash_encrypted")
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")
   member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)

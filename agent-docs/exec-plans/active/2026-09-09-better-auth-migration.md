@@ -347,3 +347,30 @@ available, while the action endpoints retain authorization authority.
 The focused sign-out/privacy run passes 57 tests, and the approval/Settings page
 run passes 79 tests. Web typecheck, changed-file lint and the five-source-file
 complexity check pass. The cleanup adds no persisted state or dependencies.
+
+Independent saved-key recovery now reuses the approval aggregate and one-use
+challenge owner. One nullable column holds a member/field-bound encrypted
+SHA-256 digest of a random 32-byte key. A current Murph passkey authorizes
+generation; fresh first-party primary proof plus the previously saved key
+authorizes a new user-verified passkey. The short commit replaces all old
+approval credentials, consumes the key/challenge, revokes other sessions and
+fences legacy native admission. Generation preserves sessions. This adds no
+service, session format, permit ledger, or contact-only support override.
+
+Settings exposes explicit create/save and recover controls. Keys remain in
+dialog memory, closing aborts further submission, late WebAuthn results cannot
+commit after dismissal, and uncertain commits refresh canonical state without
+automatic replay. The nullable-column migration was applied only to the
+isolated local task database. Existing members who lost every legacy factor
+before migrating remain an explicit retirement exception; no OTP downgrade is
+introduced to make that inventory appear complete.
+
+Recovery proof passes all 54 canonical-member PostgreSQL cases, including real
+WebAuthn, wrong/moved/rotated proof, simultaneous redemption, failed database
+commit with safe retry, stale/silent/suspended primary authority, and imported
+native/browser revocation. Seventeen focused client/enrollment cases pass. The
+ten-case existing approval PostgreSQL suite and ten schema/privacy checks pass.
+These totals overlap earlier runs. Web typecheck, changed-file lint and the ten
+changed-source complexity check pass. Full rendered journeys, final candidate
+review, Android/native qualification and retirement work remain outstanding;
+PR 3 is still unactivated.
