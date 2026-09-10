@@ -212,9 +212,12 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       env: { ...process.env, COPYFILE_DISABLE: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    // Let zstd read the archive pipe directly instead of copying the expanded
+    // archive through Node. The child duplicates the descriptor during spawn.
     const zstd = spawn("zstd", [...HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS], {
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: [tar.stdout, "pipe", "pipe"],
     });
+    tar.stdout?.destroy();
     const emittedTarEntries = collectHostedWorkspaceSnapshotVerboseTarEntries(
       tar.stderr,
       input.signal,
@@ -224,18 +227,10 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     const pipelineOptions = input.signal ? { signal: input.signal } : {};
 
     try {
-      if (!tar.stdout) {
-        throw new Error("Hosted workspace snapshot tar stdout is unavailable.");
+      if (!zstd.stdout) {
+        throw new Error("Hosted workspace snapshot zstd stdout is unavailable.");
       }
-      if (!zstd.stdin || !zstd.stdout) {
-        throw new Error("Hosted workspace snapshot zstd streams are unavailable.");
-      }
-      const archiveInputPipe = waitForHostedWorkspaceSnapshotProcessPipe(
-        pipeline(tar.stdout, zstd.stdin, pipelineOptions),
-        [tarExit, zstdExit],
-      );
-      const [, , , , tarEntries] = await Promise.all([
-        archiveInputPipe,
+      const [, , , tarEntries] = await Promise.all([
         pipeline(
           zstd.stdout,
           createHashTransform(plaintextArchiveHash),
@@ -1046,7 +1041,9 @@ function createFixedSizeArchiveBufferCollector(input: {
       offset = nextOffset;
     },
     clear: () => {
-      buffer.fill(0);
+      // An interrupted download may have initialized only a small prefix.
+      // Erase its plaintext without dirtying the untouched archive pages.
+      buffer.fill(0, 0, offset);
     },
     readBuffer: () => {
       if (offset !== buffer.byteLength) {

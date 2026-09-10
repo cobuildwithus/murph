@@ -287,6 +287,13 @@ export async function readEventLedgerShardText(input: {
   vaultRoot: string;
   relativePath: string;
 }): Promise<string> {
+  return (await readEventLedgerShardBytes(input)).toString("utf8");
+}
+
+async function readEventLedgerShardBytes(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<Buffer> {
   const logicalPath = requireEventLedgerLogicalPath(input.relativePath);
   const source = await resolveEventLedgerShardSource(input.vaultRoot, logicalPath);
   if (!source) {
@@ -296,7 +303,7 @@ export async function readEventLedgerShardText(input: {
       { relativePath: logicalPath },
     );
   }
-  return (await readBoundedEventLedgerSourceBytes(input.vaultRoot, source)).toString("utf8");
+  return await readBoundedEventLedgerSourceBytes(input.vaultRoot, source);
 }
 
 export async function readEventLedgerShardRecords(input: {
@@ -319,18 +326,27 @@ export async function visitEventLedgerShardRecordsInterruptible(input: {
   input.signal?.throwIfAborted();
   let visitedCount = 0;
   const logicalPath = requireEventLedgerLogicalPath(input.relativePath);
-  const content = await readEventLedgerShardText(input);
-  for (const [index, line] of content.split("\n").entries()) {
+  const bytes = await readEventLedgerShardBytes(input);
+  // Retain archive validation before callbacks, but decode only visited lines.
+  // Include the trailing empty physical line in the continuation checks.
+  for (let offset = 0, lineNumber = 1; offset <= bytes.length; lineNumber += 1) {
+    if ((input.signal || input.shouldContinue) && lineNumber > 1 && (lineNumber - 1) % 256 === 0) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
     input.signal?.throwIfAborted();
     if (input.shouldContinue?.() === false) {
       return { interrupted: true, visitedCount };
     }
+    const newline = bytes.indexOf(0x0a, offset);
+    const end = newline < 0 ? bytes.length : newline;
+    const line = bytes.toString("utf8", offset, end);
+    offset = end + 1;
     if (!line) {
       continue;
     }
     await input.visit(
-      parseEventLedgerRow(line, index + 1, logicalPath),
-      index + 1,
+      parseEventLedgerRow(line, lineNumber, logicalPath),
+      lineNumber,
     );
     visitedCount += 1;
   }

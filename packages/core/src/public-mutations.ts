@@ -657,6 +657,7 @@ export async function importDeviceBatch(
   input: Parameters<typeof importDeviceBatchInternal>[0],
   options: Parameters<typeof importDeviceBatchInternal>[1] = {},
 ): ReturnType<typeof importDeviceBatchInternal> {
+  options.signal?.throwIfAborted();
   return withCanonicalWriteLock(input.vaultRoot, () =>
     importDeviceBatchInternal(input, options),
   );

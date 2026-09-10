@@ -3143,10 +3143,44 @@ test("Junction daily aggregate alias repair remains atomic when a later event re
   }
 });
 
+test("createImporters rejects an already-aborted snapshot before normalization or canonical writes", async () => {
+  const controller = new AbortController();
+  const reason = new Error("synthetic foreground request");
+  controller.abort(reason);
+  let writes = 0;
+  const importers = createImporters({
+    corePort: { importDeviceBatch() { writes += 1; return { applied: true }; } },
+  });
+  await assert.rejects(importers.importDeviceProviderSnapshot(null, {
+    signal: controller.signal,
+  }), (error) => error === reason);
+  assert.equal(writes, 0);
+});
+
+test("createImporters preserves committed snapshot progress after the signal aborts", async () => {
+  const controller = new AbortController();
+  const importers = createImporters({
+    corePort: {
+      importDeviceBatch(_payload: DeviceBatchImportPayload, options?: DeviceBatchImportExecutionOptions) {
+        assert.equal(options?.signal, controller.signal);
+        controller.abort(new Error("synthetic foreground request"));
+        return { applied: true, events: [] };
+      },
+    },
+  });
+  const result = await importers.importDeviceProviderSnapshot({
+    provider: "whoop",
+    snapshot: { accountId: "synthetic-account", recoveries: [] },
+  }, { signal: controller.signal });
+  assert.deepEqual(result, { applied: true, events: [] });
+});
+
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {
   const calls: DeviceBatchImportPayload[] = [];
   const importSession = createDeviceProviderSnapshotImportSession();
   const observedSessions: unknown[] = [];
+  const controller = new AbortController();
+  const observedSignals: unknown[] = [];
 
   const result = await importDeviceProviderSnapshot<{
     deviceProviderSnapshotImportTiming: {
@@ -3180,6 +3214,7 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
       ) {
         calls.push(payload);
         observedSessions.push(options?.session);
+        observedSignals.push(options?.signal);
         options?.onTiming?.({
           canonicalWriteElapsedMs: 12,
           eventIdentityIndexCacheHit: true,
@@ -3193,11 +3228,13 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
       },
     },
     importSession,
+    signal: controller.signal,
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.provider, "whoop");
   assert.deepEqual(observedSessions, [importSession]);
+  assert.deepEqual(observedSignals, [controller.signal]);
   assert.deepEqual(result.deviceProviderSnapshotImportTiming, {
     canonicalCoreElapsedMs: 56,
     canonicalWriteElapsedMs: 12,
