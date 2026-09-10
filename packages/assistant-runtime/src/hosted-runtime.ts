@@ -5008,6 +5008,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       latencySeed: HostedRuntimeWakeLatencySeed;
       requestId: string;
     }): Promise<{
+      caughtUpToEveryLaneHighWater: boolean;
       containsOnlyBrowserVaultRefreshWakes: boolean;
       containsOnlyDeviceSyncWakes: boolean;
       wake: HostedVaultShareOfferWake;
@@ -5024,6 +5025,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             initialMailboxPrefetch,
           );
         return {
+          caughtUpToEveryLaneHighWater: inspection.caughtUpToEveryLaneHighWater,
           containsOnlyBrowserVaultRefreshWakes:
             inspection.containsOnlyBrowserVaultRefreshWakes,
           containsOnlyDeviceSyncWakes:
@@ -5035,8 +5037,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
         };
       } catch {
-        // Empty, mixed, or uninspectable wakes preserve foreground priority.
+        // Failed classification preserves foreground priority.
         return {
+          caughtUpToEveryLaneHighWater: false,
           containsOnlyBrowserVaultRefreshWakes: false,
           containsOnlyDeviceSyncWakes: false,
           wake: {
@@ -5049,6 +5052,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     let vaultShareWakeClassificationOrdinal = 0;
     const invocationWorkspaceVersion = input.request.workspaceVersion;
+    const invocationProcessingMode = input.request.processingMode ?? "default";
     const offerHostedVaultShareProjectionDuringIdle = async (input: {
       deferDeviceSyncWakes?: boolean;
       deferredDeviceSyncWake?: HostedVaultShareOfferWake | null;
@@ -5068,7 +5072,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         latencySeed: HostedRuntimeWakeLatencySeed,
       ): Promise<{
         mayWaitForProjection: boolean;
-        wake: HostedVaultShareOfferWake;
+        wake: HostedVaultShareOfferWake | null;
       }> => {
         const foregroundWake = {
           deferredForProjection: false,
@@ -5090,6 +5094,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           requestId:
             `${requestId}:vault-share-wake-classify:${vaultShareWakeClassificationOrdinal}`,
         });
+        // A fully caught-up empty prefix is a notification, not new work.
+        // Retaining it as a foreground wake would dirty the runtime again
+        // before checkpoint-backed completions can drain.
+        if (
+          !shutdownWasSignaled()
+          && !runtimeStateDirty
+          && !imageGenerationController?.hasCompleted()
+          && (latencySeed.requestedProcessingMode == null
+            || latencySeed.requestedProcessingMode === invocationProcessingMode)
+          && classification.caughtUpToEveryLaneHighWater
+        ) {
+          return { mayWaitForProjection: true, wake: null };
+        }
         return {
           mayWaitForProjection:
             !shutdownWasSignaled()
@@ -5101,9 +5118,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         };
       };
       const rememberDeferredDeviceSyncWake = (
-        wake: HostedVaultShareOfferWake,
+        wake: HostedVaultShareOfferWake | null,
       ): void => {
-        deferredDeviceSyncWake = wake;
+        if (wake) deferredDeviceSyncWake = wake;
       };
       const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
       const consumePendingProjectionWake = async (): Promise<

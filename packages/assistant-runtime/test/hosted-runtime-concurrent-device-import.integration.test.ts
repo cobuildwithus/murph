@@ -38,8 +38,8 @@ import * as maintenanceCancellation from "../src/hosted-runtime/background-maint
 import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgment"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
-  const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment";
+test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgment", "empty-wake"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+  const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment" || scenario === "empty-wake";
   const persistent = scenario === "persistent" || scenario === "cold";
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
   const controller = new AbortController();
@@ -226,6 +226,17 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
     };
     const basePlatform = createPlatform({
       artifactBytesByHash,
+      ...(scenario === "empty-wake" ? {
+        vaultSharePort: {
+          async listActiveProjectionScopes() {
+            vi.setSystemTime(Date.now() + 1_000);
+            runtimeWakeSignal.notify();
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            return { projectionKinds: [], projectionScopes: [] };
+          },
+          async deliver() { throw new Error("No projection scopes are active."); },
+        },
+      } : {}),
       mailboxPort: createMailboxPort({ events, items }),
       workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
       deviceSyncPort,
@@ -245,6 +256,9 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
       {
         vaultRoot, runtimeWakeSignal, signal: controller.signal,
         async createCheckpointSnapshot() {
+          if (scenario === "empty-wake") {
+            assert.ok(checkpointRequests.length < 4, "Empty wakes starved the device completion acknowledgment.");
+          }
           if (completesBeforeReply || persistent) await releaseSnapshot.promise;
           events.push("snapshot.completed");
           return { snapshotRef: createBundleRef({
