@@ -1,6 +1,6 @@
 # Remove unused snapshot manifest persistence and correct fixture root layouts
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -30,3 +30,4 @@ Apply the accepted single Complexity Collapse from PR #3190 round two: delete th
 - Runtime-state, assistant-runtime, and Cloudflare typechecks passed after the manifest deletion. All nine changed source owners pass complexity; the shared archive visitor remains 27 with debt 7 unchanged.
 - The two previous-head CI failures reproduced locally with missing nested vault state. Explicit fixture layout then made both original cases pass without deadline or semantic assertion changes. The final four-case run passed both original cases and flat/nested placement proof, with no unhandled errors. Assistant-runtime typecheck passed again after the fixture correction.
 - Parent reviewed the bounded production, test, and owner-document changes. Exact-head CI and same-thread round-three review remain parent-owned completion gates.
+Completed: 2026-09-10
