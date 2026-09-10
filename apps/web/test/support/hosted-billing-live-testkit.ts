@@ -106,7 +106,6 @@ export interface HostedBillingProjectionForTest {
 export interface HostedFamilyProjectionForTest {
   billingActive: boolean;
   billingStatus: HostedBillingStatusForTest | null;
-  billedSeatCount: number | null;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   groupId: string | null;
@@ -283,7 +282,6 @@ interface HostedFamilyPlanModule {
     groupId: string;
     prisma: HostedBillingTestPrisma;
   }): Promise<{
-    billedSeatCount: number | null;
     currentBillingPhase: string | null;
     currentBillingPlanCode: string | null;
     stripeCustomerId: string | null;
@@ -539,7 +537,6 @@ export async function readHostedFamilyProjectionForTest(input: {
       billingStatus: ownerSnapshot?.billingStatus
         ?? membership?.group.billingStatus
         ?? null,
-      billedSeatCount: billingRef?.billedSeatCount ?? null,
       currentBillingPhase: billingRef?.currentBillingPhase ?? null,
       currentBillingPlanCode: billingRef?.currentBillingPlanCode ?? null,
       groupId,

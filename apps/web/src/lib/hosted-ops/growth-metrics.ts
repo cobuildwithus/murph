@@ -109,13 +109,11 @@ const CHURN_STATUS_KEYS = [
 const paidHostedFamilyGroupWhere = {
   billingRef: {
     is: {
-      billedSeatCount: {
-        gte: 1,
-      },
       currentBillingPhase: "paid",
     },
   },
   billingStatus: HostedBillingStatus.active,
+  planCapacities: { some: {} },
   suspendedAt: null,
 } satisfies Prisma.HostedAccountGroupWhereInput;
 
@@ -165,7 +163,6 @@ export interface HostedGrowthPayingIndividualRow {
 export interface HostedGrowthPayingFamilyGroupRow {
   id: string;
   billingRef: {
-    billedSeatCount: number | null;
     currentBillingPhase: string | null;
   } | null;
   memberships: {
@@ -454,11 +451,7 @@ export function calculateHostedGrowthCurrentMetrics(
   let payingFamilySeats = 0;
   let familyMrrUsdCents = 0;
   for (const group of input.payingFamilyGroups) {
-    const billedSeatCount = group.billingRef?.billedSeatCount ?? 0;
-    const capacities = readHostedFamilyPlanCapacities(
-      group.planCapacities,
-      billedSeatCount > 0 ? billedSeatCount : null,
-    );
+    const capacities = readHostedFamilyPlanCapacities(group.planCapacities);
     if (group.billingRef?.currentBillingPhase !== "paid" || !capacities) {
       continue;
     }
@@ -2375,7 +2368,6 @@ async function readCurrentHostedGrowthMetrics(
       select: {
         billingRef: {
           select: {
-            billedSeatCount: true,
             currentBillingPhase: true,
           },
         },
