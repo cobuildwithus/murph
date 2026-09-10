@@ -8,8 +8,6 @@ import {
 
 import {
   isRecord,
-  readJsonErrorDetails,
-  readOptionalJsonObject,
   retrySyncOperation,
   toErrorMessage,
 } from "./hosted-settings-sync-helpers";
@@ -144,53 +142,18 @@ async function syncHostedEmailConnection(
   expectedEmailAddress: string,
   fetchImpl: typeof fetch,
 ): Promise<HostedEmailSyncResult> {
-  if (fetchImpl === fetch) {
-    try {
-      const payload = await requestHostedOnboardingJson<{
-        emailAddress: string;
-        runTriggered?: boolean;
-        verifiedAt: string;
-      }>({
-        payload: {
-          expectedEmailAddress,
-        },
-        url: "/api/settings/email/sync",
-      });
-
-      return {
-        emailAddress: payload.emailAddress,
-        runTriggered: payload.runTriggered !== false,
-        verifiedAt: payload.verifiedAt,
-      };
-    } catch (error) {
-      if (error instanceof HostedOnboardingApiError) {
-        throw new HostedEmailSyncError(
-          error.code,
-          error.message,
-        );
-      }
-      throw error;
+  let payload: unknown;
+  try {
+    payload = await requestHostedOnboardingJson<unknown>({
+      fetchImpl,
+      payload: { expectedEmailAddress },
+      url: "/api/settings/email/sync",
+    });
+  } catch (error) {
+    if (error instanceof HostedOnboardingApiError) {
+      throw new HostedEmailSyncError(error.code, error.message);
     }
-  }
-
-  const response = await fetchImpl("/api/settings/email/sync", {
-    body: JSON.stringify({
-      expectedEmailAddress,
-    }),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    method: "POST",
-  });
-  const payload = await readOptionalJsonObject(response);
-
-  if (!response.ok) {
-    const errorDetails = readJsonErrorDetails(payload);
-
-    throw new HostedEmailSyncError(
-      errorDetails.code,
-      errorDetails.message ?? "We couldn't finish connecting your email to Murph yet.",
-    );
+    throw error;
   }
 
   if (

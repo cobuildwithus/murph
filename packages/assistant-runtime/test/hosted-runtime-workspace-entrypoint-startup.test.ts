@@ -51,6 +51,7 @@ import {
   initializeVault,
   patchAutomation,
   readHabitatAspect,
+  readIntegrationIngestEntries,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -2593,11 +2594,12 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("repairs an exact interrupted integration ingest archive before serving the restored vault", async () => {
+  test("reaches mailbox import before recovering an interrupted archive on its first canonical read", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const snapshotRef = createWorkspaceSnapshotV2Ref("snapshot-interrupted-ingest-archive");
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logicalPath = "ledger/integration-ingests/2026/2026-03.jsonl";
+    let imported = false;
 
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
@@ -2618,10 +2620,15 @@ describe("hosted workspace runtime entrypoint", () => {
           };
         },
         async importItem() {
-          throw new Error("Interrupted archive recovery test should not import mailbox items.");
+          await access(path.join(vaultRoot, logicalPath));
+          await access(path.join(vaultRoot, `${logicalPath}.gz`));
+          const entries = await readIntegrationIngestEntries(vaultRoot);
+          assert.deepEqual(entries.map((entry) => entry.record.id), ["xfm_11111111111111111111111111"]);
+          imported = true;
+          return { status: "imported" };
         },
         platform: createPlatform({
-          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          mailboxPort: createMailboxPort({ events: [], items: [createMailboxItem()] }),
           workspacePort: createWorkspacePort({
             checkpointRequests,
             events: [],
@@ -2674,6 +2681,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await assert.rejects(access(path.join(vaultRoot, logicalPath)));
       await access(path.join(vaultRoot, `${logicalPath}.br`));
+      assert.equal(imported, true);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
     } finally {

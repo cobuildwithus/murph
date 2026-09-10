@@ -69,21 +69,6 @@ const providerMocks = vi.hoisted(() => ({
   resolveCodexAssistantCapabilities: vi.fn(),
   resolveCodexAssistantTargetCapabilities: vi.fn(),
   resolveCodexAssistantLabel: vi.fn(() => 'Codex CLI'),
-  resolveCodexStaticModels: vi.fn(() => [
-    {
-      id: 'gpt-5.4',
-      label: 'GPT-5.4',
-      description: 'Frontier model',
-      source: 'static',
-      capabilities: {
-        images: true,
-        pdf: false,
-        reasoning: true,
-        streaming: true,
-        tools: true,
-      },
-    },
-  ]),
 }))
 
 const providerTurnRunnerMocks = vi.hoisted(() => ({
@@ -110,7 +95,6 @@ vi.mock('../src/assistant/codex-runtime.js', () => ({
   resolveCodexAssistantCapabilities:
     providerMocks.resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel: providerMocks.resolveCodexAssistantLabel,
-  resolveCodexStaticModels: providerMocks.resolveCodexStaticModels,
 }))
 
 vi.mock('../src/assistant/codex-turn/planning.js', () => ({
@@ -201,7 +185,6 @@ afterEach(() => {
   providerMocks.resolveCodexAssistantCapabilities.mockReset()
   providerMocks.resolveCodexAssistantTargetCapabilities.mockReset()
   providerMocks.resolveCodexAssistantLabel.mockReset()
-  providerMocks.resolveCodexStaticModels.mockReset()
   providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockReset()
   providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockReset()
   providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort.mockReset()
@@ -455,27 +438,12 @@ describe('Codex model catalog', () => {
     })
   })
 
-  it('normalizes provider profiles and builds model catalogs with current and static models', () => {
+  it('normalizes provider profiles and displays only the explicit current model', () => {
     providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.resolveCodexStaticModels.mockReturnValue([
-      {
-        id: 'gpt-5.4',
-        label: 'GPT-5.4',
-        description: 'Frontier model',
-        source: 'static',
-        capabilities: {
-          images: true,
-          pdf: false,
-          reasoning: true,
-          streaming: true,
-          tools: true,
-        },
-      },
-    ])
 
     const profile = resolveCodexAssistantProfile({
       provider: 'codex-cli',
@@ -497,7 +465,6 @@ describe('Codex model catalog', () => {
     expect(catalog.providerLabel).toBe('Codex CLI')
     expect(catalog.models.map((model) => model.id)).toEqual([
       'custom-current',
-      'gpt-5.4',
     ])
     expect(catalog.selectedModel?.id).toBe('custom-current')
     expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
@@ -510,10 +477,6 @@ describe('Codex model catalog', () => {
         value: 'custom-current',
         description: 'Current Codex model.',
       },
-      {
-        value: 'gpt-5.4',
-        description: 'Frontier model',
-      },
     ])
   })
 
@@ -523,21 +486,6 @@ describe('Codex model catalog', () => {
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.resolveCodexStaticModels.mockReturnValue([
-      {
-        id: 'gpt-5.4',
-        label: 'GPT-5.4',
-        description: 'Frontier model',
-        source: 'static',
-        capabilities: {
-          images: true,
-          pdf: false,
-          reasoning: true,
-          streaming: true,
-          tools: true,
-        },
-      },
-    ])
 
     const catalog = resolveCodexModelCatalog({
       currentModel: null,
@@ -549,10 +497,8 @@ describe('Codex model catalog', () => {
       value: '',
       description: 'Use the model configured by Codex.',
     })
-    expect(catalog.modelOptions[1]).toEqual({
-      value: 'gpt-5.4',
-      description: 'Frontier model',
-    })
+    expect(catalog.models).toEqual([])
+    expect(catalog.modelOptions).toHaveLength(1)
     expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
   })
 
@@ -585,19 +531,14 @@ describe('Codex model catalog', () => {
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.resolveCodexStaticModels.mockReturnValue([])
-
     const catalog = resolveCodexModelCatalog({
       currentModel: 'custom-codex',
       provider: 'codex-cli',
     })
-
-    expect(catalog.models).toEqual([
-      expect.objectContaining({
-        id: 'custom-codex',
-        description: 'Current Codex model.',
-      }),
-    ])
+    expect(catalog.models).toEqual([expect.objectContaining({
+      id: 'custom-codex',
+      description: 'Current Codex model.',
+    })])
     expect(catalog.selectedModel?.id).toBe('custom-codex')
     expect(resolveCodexCatalogReasoningOptions(null)).toEqual([])
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)

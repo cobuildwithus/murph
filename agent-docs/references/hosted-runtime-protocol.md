@@ -1024,6 +1024,14 @@ operator child uses `murph-operator-diagnostic-read`, always returns a concrete
 diagnostic, and skips the member disclosure reviewer. The existing authenticated,
 encrypted, expiring Ops completion owner receives the result.
 
+Operator tasks keep Sol while selecting the generated hosted OpenAI provider,
+including its environment credential, independently of the member's provider.
+Runtime preparation registers that provider alongside alternate member providers.
+Local subscription and recorder modes retain their configured OpenAI aliases;
+operator turns never substitute the built-in OpenAI login provider for hosted
+credential configuration. This applies to diagnostics and operator messages;
+request authority, diagnostic permissions, and usage funding stay unchanged.
+
 An executing operator diagnostic defers routine idle checkpoints until it settles
 or reaches the admitted request expiry. Its existing controller aborts execution
 at that deadline; the ordinary requeue and Web prepare path settles expired work.
@@ -3553,7 +3561,7 @@ wakes from the post-side-effect state, not from a pre-side-effect base wake.
 Live hosted workspace restore accepts a v2 direct-R2 snapshot ref or null
 bootstrap state. Pre-v2 full/base, working `{base, delta}`, and layered
 `{base, hot}` refs fail before local mutation or artifact reads. Shared legacy
-ref decoders remain available only for stored-object cleanup. Live v2 snapshots
+ref decoders remain for stored-object cleanup and historical metadata compatibility. Live v2 snapshots
 are one encrypted zstd-compressed
 tar object uploaded directly from the container to R2 through a short-lived
 presigned `PUT` URL. The Worker handles only JSON start, presign, complete,

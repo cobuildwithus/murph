@@ -57,7 +57,7 @@ import {
   summarizeExperimentOutcomeEvidencePlan,
   validateExperimentSessionMetricValue,
 } from '@murphai/query'
-import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
+import type { IntegratedVaultServiceDependencies } from './types.js'
 import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
@@ -1605,7 +1605,7 @@ export async function logExperimentSessionRecordFromInput(input: {
   vault: string
   lookup: string
   inputFile: string
-}) {
+}, dependencies: IntegratedVaultServiceDependencies = {}) {
   const payload = experimentSessionPayloadSchema.parse(
     await readJsonPayload(input.inputFile, 'experiment session payload'),
   )
@@ -1614,7 +1614,7 @@ export async function logExperimentSessionRecordFromInput(input: {
     vault: input.vault,
     lookup: input.lookup,
     ...payload,
-  })
+  }, dependencies)
 }
 
 type ExperimentSessionRecordInput = {
@@ -1660,7 +1660,10 @@ const EXPERIMENT_REMINDER_REPLAY_EFFECT_FIELDS = [
   'fields',
 ] as const
 
-export async function logExperimentSessionRecord(input: ExperimentSessionRecordInput) {
+export async function logExperimentSessionRecord(
+  input: ExperimentSessionRecordInput,
+  dependencies?: IntegratedVaultServiceDependencies,
+) {
   const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const frontmatter = requireExperimentFrontmatter(experiment)
   const reminderProof = input.reminderIntentId === undefined
@@ -1669,7 +1672,7 @@ export async function logExperimentSessionRecord(input: ExperimentSessionRecordI
         experimentId: frontmatter.experimentId,
         reminderIntentId: input.reminderIntentId,
         vault: input.vault,
-      })
+      }, dependencies)
   if (reminderProof !== null) {
     assertExperimentReminderSessionInput(input)
   }
@@ -1821,7 +1824,7 @@ async function resolveExperimentReminderOccurrenceProof(input: {
   experimentId: string
   reminderIntentId: string
   vault: string
-}): Promise<ExperimentReminderOccurrenceProof> {
+}, dependencies: IntegratedVaultServiceDependencies | undefined): Promise<ExperimentReminderOccurrenceProof> {
   const parsedIntentId = assistantOutboxIntentIdSchema.safeParse(
     input.reminderIntentId,
   )
@@ -1832,12 +1835,14 @@ async function resolveExperimentReminderOccurrenceProof(input: {
     )
   }
   const intentId = parsedIntentId.data
-  const intentPath = path.join(
-    resolveAssistantStatePaths(input.vault).outboxDirectory,
-    `${intentId}.json`,
-  )
+  if (!dependencies?.readAssistantOutboxIntent) {
+    throw new VaultCliError(
+      'runtime_unavailable',
+      'Delivered reminder provenance requires the assistant outbox reader.',
+    )
+  }
   const parsedIntent = assistantOutboxIntentSchema.safeParse(
-    await readJsonPayload(intentPath, 'delivered reminder provenance'),
+    await dependencies.readAssistantOutboxIntent(input.vault, intentId),
   )
   if (!parsedIntent.success || parsedIntent.data.intentId !== intentId) {
     throw new VaultCliError(

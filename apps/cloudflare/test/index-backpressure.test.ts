@@ -155,61 +155,26 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("stamps prewarm-specific UserRunner activation before forwarding the hint", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-06T12:00:00.000Z"));
-    const prewarm = vi.spyOn(
-      HostedUserRunner.prototype,
-      "prewarmRuntimeShellForUser",
-    ).mockResolvedValue(undefined);
-    const bucket = createBucketStore();
-    const storage = createStorage();
-    const env = {
-      ...createHostedExecutionTestEnv(),
-      RUNNER_CONTAINER: storage.runnerContainerNamespace,
-      RUNNER_CONTAINER_SMOKE: storage.runnerContainerNamespace,
-    };
-    Object.defineProperty(env, "BUNDLES", {
-      enumerable: true,
-      get() {
-        vi.setSystemTime(new Date("2026-08-06T12:00:00.025Z"));
-        return bucket.api;
-      },
-    });
-    const durableObject = new UserRunnerDurableObject(storage.state, env as never);
+  it("accepts an old Worker's shell-prewarm RPC without runtime work", async () => {
+    const { durableObject, storage } = createUserRunnerDurableObject();
+    const addressContainer = vi.spyOn(storage.runnerContainerNamespace, "getByName");
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const bindUser = vi.spyOn(HostedUserRunner.prototype, "bindUser");
 
-    vi.setSystemTime(new Date("2026-08-06T12:00:01.000Z"));
-    await durableObject.prewarmRuntimeShellForUser(
-      "member_123",
-      "linq-message-routing",
-      {
-        shellPrewarmCloudflareRouteReceivedAtEpochMs:
-          Date.parse("2026-08-06T11:59:59.900Z"),
+    await expect(Reflect.apply(
+      durableObject.prewarmRuntimeShellForUser,
+      durableObject,
+      ["member_123", "linq-message-routing", {
         shellPrewarmOrchestrationAttemptId:
           "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        shellPrewarmRequestStartedAtEpochMs:
-          Date.parse("2026-08-06T11:59:59.800Z"),
-      },
-    );
+      }],
+    )).resolves.toBeUndefined();
 
-    expect(prewarm).toHaveBeenCalledWith(
-      "member_123",
-      "linq-message-routing",
-      {
-        shellPrewarmCloudflareRouteReceivedAtEpochMs:
-          Date.parse("2026-08-06T11:59:59.900Z"),
-        shellPrewarmOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        shellPrewarmRequestStartedAtEpochMs:
-          Date.parse("2026-08-06T11:59:59.800Z"),
-        shellPrewarmUserRunnerConstructorFinishedAtEpochMs:
-          Date.parse("2026-08-06T12:00:00.025Z"),
-        shellPrewarmUserRunnerConstructorStartedAtEpochMs:
-          Date.parse("2026-08-06T12:00:00.000Z"),
-        shellPrewarmUserRunnerRpcStartedAtEpochMs:
-          Date.parse("2026-08-06T12:00:01.000Z"),
-      },
-    );
+    expect(addressContainer).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(bindUser).not.toHaveBeenCalled();
+    expect(storage.state.storage.sql.exec("SELECT user_id FROM runner_meta").toArray())
+      .toEqual([]);
   });
 
   it("forwards managed AI revocation through the UserRunner Durable Object", async () => {

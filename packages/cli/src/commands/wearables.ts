@@ -4,11 +4,9 @@ import {
 } from '@murphai/contracts'
 import {
   normalizeWearableQueryProviderSlug,
-} from '@murphai/health-metrics'
-import {
   resolveWearableCanonicalMetricKey,
   wearableCanonicalMetricKeys,
-} from '@murphai/importers/device-providers/metric-catalog'
+} from '@murphai/health-metrics'
 import {
   emptyArgsSchema,
   requestIdFromOptions,
