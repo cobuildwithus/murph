@@ -15978,6 +15978,7 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
         )
         const sessionEvidenceBefore = await readFile(sessionEvidencePath, 'utf8')
 
+        let providerUsageReports = 0
         const result = await executeOperatorDiagnostic({
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
@@ -15988,6 +15989,7 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
           modelProvider: config.modelProvider,
           now: new Date('2026-06-15T12:00:00.000Z'),
           onProviderUsage: ({ usage }) => {
+            providerUsageReports += 1
             recordRealCodexProviderUsage(usage.usage)
           },
           question: [
@@ -16000,6 +16002,7 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
           workspaceRoot: vaultRoot,
         })
 
+        expect(providerUsageReports).toBeGreaterThan(0)
         expect(result.outcome).toBe('answered')
         if (result.outcome !== 'answered') {
           throw new Error('Expected the operator diagnostic to answer.')
@@ -16014,8 +16017,8 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
         expect(result.answer).not.toMatch(
           /(?:\.codex|bank\/|MCP|permission profile|read-only tools|workspace root)/iu,
         )
-        console.info(
-          `[real-codex operator diagnostic] ${result.answer.replaceAll(/\s+/gu, ' ').trim()}`,
+        process.stdout.write(
+          `[real-codex operator diagnostic] ${result.answer.replaceAll(/\s+/gu, ' ').trim()}\n`,
         )
         await expect(
           readFile(projectMcpMarker, 'utf8'),
