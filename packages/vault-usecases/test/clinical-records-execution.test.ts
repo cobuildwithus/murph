@@ -301,6 +301,38 @@ describe("importClinicalFhirSnapshot", () => {
     }
   });
 
+  it("keeps provider allergy history source-versioned across replay, correction and retraction", async () => {
+    const resource = {
+      resourceType: "AllergyIntolerance", id: "historical-allergy",
+      patient: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+      recordedDate: "2001-02-03",
+      code: { text: "Penicillin" },
+      clinicalStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }] },
+      verificationStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification", code: "confirmed" }] },
+      reaction: [{ manifestation: [{ text: "Hives" }] }],
+    };
+    const input = await createSnapshotInput({ pages: [{ resourceType: "AllergyIntolerance", content: fhirBundle([resource]) }], resourceTypes: ["AllergyIntolerance"] });
+    const lookup = { vaultRoot: input.vaultRoot, system: "epic-fhir-" + FHIR_BASE_URL_HASH + "-" + PATIENT_ID_HASH, resourceType: "allergy-intolerance", resourceId: resource.id };
+    expect((await importClinicalFhirSnapshot(input)).canonical.createdCount).toBe(1);
+    const original = await findEventByExternalRef(lookup);
+    expect(original).toMatchObject({ kind: "note", occurredAt: "2001-02-03T00:00:00.000Z" });
+    expect(original?.note).toContain("Hives");
+    expect((await importClinicalFhirSnapshot(input)).canonical.skippedExistingCount).toBe(1);
+    const corrected = { ...resource, meta: { lastUpdated: "2026-07-11T12:00:00.000Z" }, reaction: [{ manifestation: [{ text: "Rash" }] }] };
+    await importClinicalFhirSnapshot({ ...input, retrievalJobId: "allergy-correction", pages: [{ resourceType: "AllergyIntolerance", queryScopeId: "allergyintolerance", sliceId: "whole", content: fhirBundle([corrected]) }] });
+    const updated = await findEventByExternalRef(lookup);
+    expect(updated?.note).toContain("Rash");
+    expect(updated?.note).not.toContain("Hives");
+    await importClinicalFhirSnapshot(input);
+    expect((await findEventByExternalRef(lookup))?.note).toContain("Rash");
+    const retracted = { ...corrected, meta: { lastUpdated: "2026-07-12T12:00:00.000Z" }, verificationStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification", code: "entered-in-error" }] } };
+    await importClinicalFhirSnapshot({ ...input, retrievalJobId: "allergy-retraction", pages: [{ resourceType: "AllergyIntolerance", queryScopeId: "allergyintolerance", sliceId: "whole", content: fhirBundle([retracted]) }] });
+    expect(await findEventByExternalRef(lookup)).toBeNull();
+    await importClinicalFhirSnapshot(input);
+    expect(await findEventByExternalRef(lookup)).toBeNull();
+  });
+
   it("persists repeated resource types beneath query-aware raw evidence paths", async () => {
     const base = await createSnapshotInput({
       pages: [],
@@ -750,7 +782,6 @@ describe("importClinicalFhirSnapshot", () => {
         content: fhirBundle([{
           resourceType: "Condition",
           id: "condition-1",
-          meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
           subject: { reference: `Patient/${PATIENT_ID}` },
           code: { text: "Example condition" },
         }]),
@@ -790,7 +821,9 @@ describe("importClinicalFhirSnapshot", () => {
 
     const result = await importClinicalFhirSnapshot(input);
 
-    expect(result.executableDecisionCount).toBe(0);
+    // The individual source identity may be held/retracted; no absence assertion is created.
+    expect(result.executableDecisionCount).toBe(1);
+    expect(result.canonical.createdCount).toBe(0);
     expect(result.reviewDecisionCount).toBe(1);
   });
 
