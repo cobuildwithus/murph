@@ -1763,6 +1763,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   ENAM standby references retain their original namespace for recovery and drain;
   they are not fresh allocation paths. One fleet budget includes the temporary
   legacy application reservation until that application drains.
+- Runner-secret storage is read only when its effective configured key allowlist is nonempty. Disabled overrides require no R2 read or decoding; configured overrides and historical account-deletion cleanup retain their existing owners.
 - `UserRunner` remains the sole durable runtime write-fence owner when a
   `RunnerContainer` Durable Object activation is replaced. After a successful
   invocation, the container entrypoint first clears its wake and abort pointers,
@@ -3389,8 +3390,12 @@ in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 Hosted Linq typing-start events are verified, parsed strictly, and acknowledged
 without scheduling member lookup or runtime work. Current Web no longer sends
 member-specific shell-prewarm hints from typing, message routing, or instant
-start. The old authenticated receiver remains an accepting no-op during mixed
-Web/Worker deployment. The inventory coordinator owns speculative preparation;
+start. The old authenticated Worker receiver bounds and discards its request
+body, then returns success without resolving a Durable Object. A minimal inert
+UserRunner RPC remains only until Worker versions that still delegate old hints
+have drained. Two inert container RPCs likewise remain until pre-unified-fleet
+UserRunner producers drain. These compatibility methods return constants and
+perform no member binding, admission read, logging, or container work. The inventory coordinator owns speculative preparation;
 normal admitted execution remains the only member-binding path. The Temporal
 mailbox signal remains the durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner
@@ -3399,35 +3404,13 @@ Temporal pointer signal. Assistant Ask request and completion handlers likewise
 append their encrypted mailbox item before signaling Temporal. Only after
 Temporal accepts the applicable durable signal does Web
 start one best-effort direct `ensure-processing` request to Cloudflare (Vercel
-OIDC, fire and forget, no retries, no mailbox payload). Access denial, expiry,
+OIDC, fire and forget, with at most one bounded retry and no mailbox payload). Access denial, expiry,
 or Temporal acceptance failure starts no direct wake. The direct request exists
 only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
-fence coalesces runners that overlap in the same invocation. An established
-Linq message starts the same shell hint as soon as pre-transaction routing
-preparation resolves an active member, before KMS and transaction work. That
-request-local hint is advisory and may be dropped;
-the transaction repeats every authority check and the post-Temporal direct
-ensure remains the immediate processing owner. The separate
-first-contact instant-start shell hint obtains the named `UserRunner` stub
-without binding durable state, enters the same per-user consent-mutation barrier
-as authoritative ensures and withdrawal, and re-reads live Web-owned admission.
-The optional read has a fixed 250 ms deadline, well below the measured 693 ms
-provider-start p50 benefit; an unavailable admission abandons the hint and
-releases the barrier while authoritative and user-control reads keep their
-ordinary timeout. Only allowed admission reserves and binds the exact versioned
-container in the existing user-control stop-target field before awaiting the
-container's registration acknowledgement. The platform wait continues under
-the container's existing lifecycle owner after the barrier releases, so
-authoritative readiness or exact-target destruction can supersede it. A later
-current-version start destroys any different pending target before binding its
-fence. Web admits the hint only for an extant, non-suspended member whose
-health-data grant is not revoked; this preserves legacy missing-grant
-compatibility without letting a hint queued behind account deletion recreate
-runner state. The hint creates no workspace or processing authority; the later
-post-Temporal direct ensure remains authoritative.
+fence coalesces runners that overlap in the same invocation.
 
 Hosted Linq message edits are immutable correction inputs, not mutations of an
 accepted mailbox item or transcript. Each accepted inbound Linq conversation
