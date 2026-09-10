@@ -1307,7 +1307,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord).toMatchObject({
       assistantTargetOverride: {
         model: 'gpt-5.6-luna',
-        reasoningEffort: 'medium',
+        reasoningEffort: 'high',
       },
       schedule: { kind: 'cron', expression: '0 13 * * *' },
       slug: 'personal-patterns-update',

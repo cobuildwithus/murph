@@ -259,6 +259,12 @@ The account inventory owner rejects malformed pages instead of presenting them
 as empty. Journal and Personal Patterns retain the common hosted cron policy:
 eligible first attempts request Flex; failed-attempt retries use Standard, and
 the provider boundary validates model and catalog support before selecting Flex.
+The exact Personal Patterns recipe also performs a read-only precondition against
+its current query report and versioned notification Knowledge ledger. A completed
+first digest plus already-reviewed factors, graded identities, and grades can skip
+a clean scheduled model attempt. Unknown history, edited recipes, manual requests,
+and retries keep the ordinary model path. The existing ledger remains the only
+notification-history owner; no cron cache or new schedule state is introduced.
 
 Read-only hosted automation inspection also projects execution evidence from
 that automation's existing runtime state, its ten newest retained cron runs,
