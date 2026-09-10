@@ -59,9 +59,6 @@
       "path": "./packages/assistant-cli"
     },
     {
-      "path": "./packages/assistantd"
-    },
-    {
       "path": "./packages/setup-cli"
     },
     {

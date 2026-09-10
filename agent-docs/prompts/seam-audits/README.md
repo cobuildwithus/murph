@@ -60,5 +60,4 @@ Apply this contract with every seam prompt:
 - [32-cloudflare-runner-container.md](./32-cloudflare-runner-container.md)
 - [33-cloudflare-runtime-platform-callbacks.md](./33-cloudflare-runtime-platform-callbacks.md)
 - [34-cloudflare-hosted-email.md](./34-cloudflare-hosted-email.md)
-- [35-assistantd.md](./35-assistantd.md)
 - [36-health-commons.md](./36-health-commons.md)

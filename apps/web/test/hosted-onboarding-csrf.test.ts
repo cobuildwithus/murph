@@ -211,7 +211,6 @@ function createHostedOnboardingEnvironment(
     linqFirstContactAdmissionModel: "gpt-5.4-nano",
     linqFirstContactAdmissionOpenAiApiKey: null,
     linqInstantStartPhonePrefixes: ["+1"],
-    linqMaxActiveMembersPerConversationPhone: null,
     linqWebhookSecret: null,
     linqWebhookTimestampToleranceMs: 300_000,
     privyAppId: null,

@@ -24,7 +24,6 @@ const test = baseTest.sequential
 
 const commandMocks = vi.hoisted(() => ({
   access: vi.fn(),
-  assertAssistantInkInteractiveInputAvailable: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   clearAssistantSelfDeliveryTargets: vi.fn(),
   completeAssistantOnboarding: vi.fn(),
@@ -49,7 +48,6 @@ const commandMocks = vi.hoisted(() => ({
   })),
   resolveOperatorConfigPath: vi.fn(() => '/tmp/operator-config.json'),
   runAssistantAutomation: vi.fn(),
-  runAssistantChat: vi.fn(),
   runAssistantDoctor: vi.fn(),
   saveAssistantSelfDeliveryTarget: vi.fn(),
   sendAssistantMessage: vi.fn(),
@@ -62,14 +60,8 @@ vi.mock('node:fs/promises', () => ({
 
 vi.mock('../src/assistant-runtime.js', () => ({
   runAssistantAutomation: commandMocks.runAssistantAutomation,
-  runAssistantChat: commandMocks.runAssistantChat,
   sendAssistantMessage: commandMocks.sendAssistantMessage,
   stopAssistantAutomation: commandMocks.stopAssistantAutomation,
-}))
-
-vi.mock('../src/assistant-chat-ink.js', () => ({
-  assertAssistantInkInteractiveInputAvailable:
-    commandMocks.assertAssistantInkInteractiveInputAvailable,
 }))
 
 vi.mock('../src/assistant/doctor.js', () => ({
@@ -304,14 +296,12 @@ test('assistant command registration exposes the owned subcommands and root alia
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const ask = readCommand(assistant.commands, 'ask')
-  const chat = readCommand(assistant.commands, 'chat')
   const selfTarget = readCommandGroup(assistant.commands, 'self-target')
   const session = readCommandGroup(assistant.commands, 'session')
   const run = readCommand(commands, 'run')
 
   assert.deepEqual([...assistant.commands.keys()], [
     'ask',
-    'chat',
     'deliver',
     'run',
     'self-target',
@@ -326,10 +316,8 @@ test('assistant command registration exposes the owned subcommands and root alia
   assert.equal(Object.hasOwn(run.options?.shape ?? {}, 'skipDaemon'), false)
   assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'provider'), false)
   assert.equal(Object.hasOwn(ask.options?.shape ?? {}, 'oss'), false)
-  assert.equal(Object.hasOwn(chat.options?.shape ?? {}, 'provider'), false)
-  assert.equal(Object.hasOwn(chat.options?.shape ?? {}, 'oss'), false)
-  assert.equal(readCommand(assistant.commands, 'chat').outputPolicy, 'agent-only')
-  assert.equal(readCommand(commands, 'chat').description?.includes('assistant chat'), true)
+  assert.equal(assistant.commands.has('chat'), false)
+  assert.equal(commands.has('chat'), false)
   assert.equal(readCommand(commands, 'run').description?.includes('assistant run'), true)
   assert.equal(readCommand(commands, 'status').description?.includes('assistant status'), true)
   assert.equal(readCommand(commands, 'doctor').description?.includes('assistant doctor'), true)
@@ -673,85 +661,6 @@ test('assistant ask rejects saved Linq delivery routes for the local assistant s
   )
 
   assert.equal(commandMocks.sendAssistantMessage.mock.calls.length, 0)
-})
-
-test('assistant chat writes a resume hint only for human non-explicit output', async () => {
-  const commands = createAssistantCli()
-  const assistant = readCommandGroup(commands, 'assistant')
-  const chat = readCommand(assistant.commands, 'chat')
-  const stderrWrite = vi
-    .spyOn(process.stderr, 'write')
-    .mockImplementation(() => true)
-
-  commandMocks.runAssistantChat.mockResolvedValue({
-    session: TEST_SESSION,
-    startedAt: '2026-04-08T00:00:00.000Z',
-    stoppedAt: '2026-04-08T00:00:01.000Z',
-    turns: 1,
-    vault: '/tmp/vault',
-  })
-
-  await chat.run({
-    agent: false,
-    args: {
-      prompt: 'hello',
-    },
-    formatExplicit: false,
-    options: {
-      vault: '/tmp/vault',
-    },
-  })
-  await chat.run({
-    agent: true,
-    args: {
-      prompt: 'hello again',
-    },
-    formatExplicit: false,
-    options: {
-      vault: '/tmp/vault',
-    },
-  })
-
-  assert.equal(commandMocks.runAssistantChat.mock.calls.length, 2)
-  assert.equal(
-    commandMocks.assertAssistantInkInteractiveInputAvailable.mock.calls.length,
-    2,
-  )
-  assert.equal(stderrWrite.mock.calls.length, 1)
-  assert.equal(
-    String(stderrWrite.mock.calls[0]?.[0]),
-    'Resume chat by typing: murph chat --session "session-command-coverage"\n',
-  )
-})
-
-test('assistant chat fails before delegating to the runtime when interactive input is unavailable', async () => {
-  const commands = createAssistantCli()
-  const assistant = readCommandGroup(commands, 'assistant')
-  const chat = readCommand(assistant.commands, 'chat')
-  const inputError = new Error('interactive input unavailable')
-
-  commandMocks.assertAssistantInkInteractiveInputAvailable.mockImplementationOnce(
-    () => {
-      throw inputError
-    },
-  )
-
-  await assert.rejects(
-    () =>
-      chat.run({
-        agent: false,
-        args: {
-          prompt: 'hello',
-        },
-        formatExplicit: false,
-        options: {
-          vault: '/tmp/vault',
-        },
-      }),
-    inputError,
-  )
-
-  assert.equal(commandMocks.runAssistantChat.mock.calls.length, 0)
 })
 
 test('assistant deliver resolves saved routes unless a session is provided', async () => {

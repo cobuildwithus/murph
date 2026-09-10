@@ -55,9 +55,10 @@ describe("Cloudflare container rollout config", () => {
       { class_name: "NextRunnerContainer", max_instances: 0 },
       { class_name: "DeploySmokeRunnerContainer", max_instances: 1 },
       { class_name: "StandbyRunnerContainer", max_instances: expectedLegacy },
+      { class_name: "SmallRunnerContainer", max_instances: 1 },
     ]);
     expect(containers.reduce((sum, container) => sum + container.max_instances, 0))
-      .toBe(Number(total ?? "1000") + 1);
+      .toBe(Number(total ?? "1000") + 2);
     expect(containers[0]).not.toHaveProperty("constraints");
     expect(config.vars).toMatchObject({
       HOSTED_EXECUTION_STANDBY_MODE: "off",

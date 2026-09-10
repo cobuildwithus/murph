@@ -410,6 +410,93 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(500);
   });
 
+  it.each(["consent", "suspension", "missing"] as const)(
+    "shares one fresh member read across the real gates and observes next-request %s revocation",
+    async (revocation) => {
+      const { resolveHostedRuntimeAiUsageGate } = await vi.importActual<
+        typeof import("@/src/lib/hosted-orchestration/runtime-usage-decision")
+      >("@/src/lib/hosted-orchestration/runtime-usage-decision");
+      mocks.resolveHostedRuntimeAiUsageGate.mockImplementation(resolveHostedRuntimeAiUsageGate);
+      const member = {
+        ...buildRuntimeMailboxAccessRecord(),
+        billingRef: {
+          currentBillingPhase: "paid",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: null,
+          currentPeriodStart: new Date("2026-01-01T00:00:00Z"),
+          currentPeriodEnd: new Date("2027-01-01T00:00:00Z"),
+          stripeSubscriptionLookupKey: "synthetic_subscription",
+          usagePlanTransitionAt: null,
+          usagePlanTransitionFromCode: null,
+          usagePlanTransitionKind: null,
+          usagePlanTransitionToCode: null,
+        },
+        consentGrants: [{ scope: "launch.health-data", status: "granted" }],
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 0n,
+      };
+      mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(member);
+      const periodRead = vi.fn(async () => null);
+      mocks.getPrisma.mockReturnValue({
+        ...createPrismaClientStub(),
+        hostedAiUsagePeriod: { findUnique: periodRead },
+      });
+      mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValue({
+        consumedSeqByLane: [{ lane: "conversation", consumedSeq: "0" }],
+        maxSeqByLane: [{ lane: "conversation", maxSeq: "1" }],
+        items: [{
+          createdAt: FIXED_NOW,
+          dedupeKey: "synthetic-conversation",
+          expiresAt: null,
+          id: "synthetic-mailbox-item",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "1",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "synthetic-ciphertext",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        }],
+      });
+      const fetchMailbox = () => mailboxFetchRoute.POST(jsonRequest(
+        "/api/internal/hosted-mailbox/fetch",
+        { lanes: [{ importedSeq: "0", lane: "conversation" }], limitPerLane: 1,
+          requestId: "synthetic-fetch" },
+      ));
+      const allowed = await fetchMailbox();
+      expect(allowed.status).toBe(200);
+      expect(parseHostedMailboxFetchResponse(await allowed.json()).items).toHaveLength(1);
+      expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
+      expect(periodRead).toHaveBeenCalledTimes(1);
+      expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).not.toHaveBeenCalled();
+
+      mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+        revocation === "missing" ? null : {
+          ...member,
+          ...(revocation === "suspension"
+            ? { suspendedAt: new Date(FIXED_NOW) }
+            : { consentGrants: [{ scope: "launch.health-data", status: "revoked" }] }),
+        },
+      );
+      const denied = await fetchMailbox();
+      expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(2);
+      expect(periodRead).toHaveBeenCalledTimes(1);
+      if (revocation === "consent") {
+        expect(denied.status).toBe(200);
+        expect(parseHostedMailboxFetchResponse(await denied.json())).toMatchObject({
+          items: [], maxSeqByLane: [{ lane: "conversation", maxSeq: "0" }],
+        });
+        expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).toHaveBeenCalledTimes(1);
+      } else {
+        expect(denied.status).toBe(403);
+        expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
@@ -1402,6 +1489,8 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
+      memberState: expect.objectContaining({ id: "member_routes_1" }),
+      prisma: expect.objectContaining({ kind: "prisma" }),
       userId: "member_routes_1",
     });
     expect(
@@ -1602,6 +1691,8 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
+      memberState: expect.objectContaining({ id: "member_routes_1" }),
+      prisma: expect.objectContaining({ kind: "prisma" }),
       userId: "member_routes_1",
     });
   });

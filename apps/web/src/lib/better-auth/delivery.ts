@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readHostedResendPlainTextEmailConfig, sendHostedResendPlainTextEmail } from "../hosted-onboarding/resend-plain-text-email";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import type { HostedAuthDelivery } from "./auth";
+import { hostedAuthCodeEmail } from "./code-email";
 
 // Delivery only. Better Auth owns generation, storage, expiry and consumption.
 // Provider response bodies, codes, contacts and authorization never enter logs.
@@ -12,12 +13,11 @@ export function hostedAuthDelivery(signal?: AbortSignal): HostedAuthDelivery {
       const config = readHostedResendPlainTextEmailConfig({
         ...process.env, HOSTED_SIGNUP_WELCOME_EMAIL_FROM: process.env.HOSTED_AUTH_EMAIL_FROM,
       });
-      if (!config || !/^\d{6}$/u.test(code)) throw deliveryUnavailable();
+      if (!config) throw deliveryUnavailable();
       try {
         await sendHostedResendPlainTextEmail({
           config, idempotencyKey: `auth-${randomUUID()}`, signal, to: [address],
-          subject: "Your Murph sign-in code",
-          text: `Your Murph sign-in code is ${code}. It expires in 5 minutes. If you did not request this code, you can ignore this email.`,
+          ...hostedAuthCodeEmail(code),
         });
       } catch { throw deliveryUnavailable(); }
     },

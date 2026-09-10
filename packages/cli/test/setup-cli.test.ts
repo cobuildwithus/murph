@@ -1169,7 +1169,7 @@ test.sequential('onboard CLI keeps post-setup CTAs usable when invoked as murph'
   assert.equal(result.ok, true)
   assert.equal(
     result.meta.cta?.commands[0]?.command,
-    'murph assistant chat',
+    'murph assistant ask "Summarize my saved health context."',
   )
   assert.equal(
     result.meta.cta?.commands[1]?.command,
@@ -2060,8 +2060,7 @@ test('setup handoff launches assistant automation instead of chat when auto-repl
   )
 })
 
-
-test('setup handoff keeps the post-setup flow in assistant chat when a selected auto-reply channel is not fully configured yet', () => {
+test('setup handoff finishes when a selected auto-reply channel is not fully configured yet', () => {
   const context = {
     agent: false,
     format: 'toon' as const,
@@ -2087,7 +2086,7 @@ test('setup handoff keeps the post-setup flow in assistant chat when a selected 
       stdinIsTTY: true,
       stderrIsTTY: true,
     }),
-    'assistant-chat',
+    null,
   )
 })
 
@@ -2403,7 +2402,7 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
   }
 })
 
-test('setup auto-chat gating only enables the handoff for interactive default-format runs', () => {
+test('setup without auto-reply finishes without an assistant handoff', () => {
   const context = {
     agent: false,
     format: 'toon' as const,
@@ -2416,7 +2415,7 @@ test('setup auto-chat gating only enables the handoff for interactive default-fo
       stdinIsTTY: true,
       stderrIsTTY: true,
     }),
-    true,
+    false,
   )
   assert.equal(
     shouldAutoLaunchAssistantAfterSetup(
