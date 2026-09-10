@@ -1,6 +1,6 @@
 # Replace Privy with Better Auth through staged rollout
 
-Status: active
+Status: completed
 Created: 2026-09-09
 Updated: 2026-09-10
 
@@ -29,7 +29,7 @@ Entry and promise: existing Settings/passkey and approval surfaces, existing log
 Affected people: protected and unconfigured members, existing browser sessions, new and dormant logins, legacy/updated/offline native clients, pending/text-first/invited members, suspended/deleting members.
 Proof: complete user journeys plus real WebAuthn fixtures, Postgres concurrency, cross-format revocation, actual native restoration and explicit deployment compatibility.
 Done when: intended actions succeed with the same member and original authorization, failures preserve valid state, and supported old clients have a tested transition.
-Current verdict: PR 1 has a resolved ReviewGPT PASS and green exact-head CI at bc9f3728b12bcb54ab941505e34ff32cecde9c68. Later stages remain Hold.
+Current verdict: All implementation candidates have resolved source-review PASS and focused local proof. Final pushed-head CI remains the completion gate. Activation, native distribution and provider retirement retain the explicit hosted/device gates in the rollout owner.
 
 ## Tasks
 
@@ -520,3 +520,22 @@ The remaining CLI coverage failures were two guard tests still requiring removed
 Web adoption CI's actual Next TypeScript 5 compiler inferred a nested Promise from the Web Locks callback, although the source TypeScript 7 check passed. Marking the existing cookie-write helper async fixes the compiler contract without changing the lock owner or session policy. The same correction already has focused test, both compiler and ReviewGPT PASS evidence in retirement candidate #3134 at 87786eda0b935ac32614fc843665e0aadefa971c.
 
 Round 3's first attempt at 4dd15d07dabb7d37e1ae3763e79693d01150a42c produced only an initial inspection note after more than 75 minutes. Exact-thread exports and refresh showed no active generation, final verdict, completion marker or completed-response model evidence. This incomplete attempt is invalid and does not count as a substantive round. Its capture metadata and diagnostics are retained locally. Only its proven five-process watcher group was stopped; the managed browser and conversation were preserved. The independently known CI correction is being applied before the corrected candidate's full round-3 audit. The immutable first-reviewed head remains 3bbff6a97ccb5c30bff6d997c849aba9c27a38d0 and previous valid head remains 82d5147a74b274e222ca1cf5f9c32a11c741aa9a. No earlier finding or review baseline is reset.
+
+
+### 2026-09-10 resolved adoption reviews and retirement reconciliation
+
+Web adoption #3132 round 3 passes at 540a4ac11863970587139579edc9d5e19b2040bc with green CI. The completed full review verifies the snapshot's source blobs and all 23 dependency-source hashes, resolves the accepted cookie-ordering finding, and traces credential/recovery concurrency and authority. Exact committed-turn identity, ancestry and response hash validate. The response's UNKNOWN self-attestation is supplemented by actual requested/response gpt-6-pro metadata. Response SHA-256: 19433a8fcfb65fd2f446cfb3404db3a14cd1e72994400871db6d08163c5797a9. Its earlier incomplete attempt does not count as a substantive round and did not reset either baseline.
+
+Android adoption #39 round 3 passes at a589e0072bbcfc9efcce36471e0d4dce099bb4f7 with green CI. The old capture runner missed a completed response; the official exact-thread export, actual gpt-6-pro metadata, preceding nonce, exact head and context digest were validated against the unchanged PR before accepting it. Response SHA-256: dfa8cd36fe214ed58930ae1efa6da0f58fdc987a0fd2183ea200168a3cdd27c0. There are zero accepted or unresolved findings. The two-import AndroidX AtomicFile correction adds no dependency, format or version branch. Both old-framework interrupted-write cases fail on API 29; all nine corrected boundary/transport/composed recovery cases pass on each of API 28, 29 and 36. CI actually runs all 44 synthetic cases on each of API 28, 29 and 30.
+
+Backend retirement #3134 round 2 passes at 87786eda0b935ac32614fc843665e0aadefa971c with green CI. Response SHA-256: e4315aed0a3c3efa753d77f98f5a6820f79192b5e19ef487610012ac163a23aa. The subsequent ordinary base reconciliation at 49174b8d3e99ba77ef061f35fb3a43233cca175b changes only this plan; the incoming async helper correction was already present. There is no runtime delta requiring another substantive review. Final owner documentation and plan closure remain, with current-head CI required after the final push.
+
+The SDK-free Android candidate ffc5d97752b6c2c99ae73f9002201dfbbe4c562c carries the exact adoption secure-store owner. Full verification and the same nine instrumentation cases on API 28, 29 and 36 pass. Four current raw synthetic images were recaptured and inspected. Its round 2 now passes with zero findings after validating the exact thread, checked head, context digest and actual gpt-6-pro model metadata. Response SHA-256: ba3ca1fb5839f18c6412ce9d23bec5bd216edb043cb54faa2fd8869b8b1d375c. CI cleanup #41 at bf346f57a1f8aaef5d620bd359dc57a1bdad59dc has refreshed independent trusted PASS against that base: exactly two obsolete public placeholders removed, unchanged controls, 13 passing contract tests and syntax/diff proof. Its final emulator CI job remains a PR completion gate at this pre-push checkpoint.
+
+The composed Connect smoke fails identical desktop invalid-element server-render errors on retirement 87786eda0b935ac32614fc843665e0aadefa971c and earlier compatibility ca1c6a115aaf050df78a939c77f0590f0737e995. This establishes a pre-existing render failure, not a clean full-stack pass. The existing Frog entry now includes both observations without weakening the assertion. Focused auth/cookie browser proofs and canonical PostgreSQL proofs pass separately. Actual delivery, hosted KMS, production inventory, protected/dormant recovery, installed signed-device upgrades, vendor obligations and store publication remain rollout qualification work.
+
+
+### Implementation handoff
+
+All four Murph integration PRs and both native adoption/retirement pairs are prepared with resolved source reviews and focused runtime/storage proof. Android control changes remain isolated and independently reviewed. The durable rollout owner records the merge order, current candidate heads and review links, reader-first deployment, issuance/import sequencing, monotonic recovery floor, natural browser-session drain, secure native handoff, and guarded schema/vendor retirement. This final handoff changes documentation only; final pushed-head CI is checked separately before reporting task completion. No production merge, import, secret access, provider mutation or native publication occurred. Actual installed/signed-device and provider qualification remain explicit release work, not a claim of this implementation task.
+Completed: 2026-09-10

@@ -1,6 +1,6 @@
 # Hosted authentication migration
 
-Status: implementation in progress. This document is the rollout owner for removing Privy in favor of Better Auth. It is not evidence that any stage is deployed or ready to activate.
+Status: implementation prepared across the staged PRs below. This document owns the rollout from Privy to Better Auth. Final pushed-head CI remains a merge gate; source review and local proof do not establish deployment or activation.
 
 ## Target and boundaries
 
@@ -21,27 +21,26 @@ Use no planned service outage. Prefer natural compatibility drain over elaborate
 
 Four Murph PRs are integration boundaries. iOS and Android changes are reviewed in their own repositories and pinned to the corresponding backend protocol; native store publication is a separate event from merging code.
 
-Current implementation PRs: [approval migration #3127](https://github.com/cobuildwithus/murph/pull/3127),
-[backend compatibility #3128](https://github.com/cobuildwithus/murph/pull/3128), [Web adoption and recovery #3132](https://github.com/cobuildwithus/murph/pull/3132), and
-[gated retirement #3134](https://github.com/cobuildwithus/murph/pull/3134).
-Native adoption is [iOS #150](https://github.com/cobuildwithus/murph-ios/pull/150)
-and [Android #39](https://github.com/cobuildwithus/murph-android/pull/39).
-Android #39 is stacked on [review tooling #38](https://github.com/cobuildwithus/murph-android/pull/38),
-which only corrects the required reviewer model target. Merge that prerequisite
-before its product PR. iOS #150 has an independent PASS at
-`c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e`. Android #39's first review found an interrupted initial secure-write recovery defect. The correction passes real Keystore/AtomicFile instrumentation and full Android verification; its new exact-head review and CI are required.
-Web #3132 at `4dd15d07dabb7d37e1ae3763e79693d01150a42c` includes both response-header vault invalidation and origin-wide cookie-write ordering. Its third external review is running. CI found a TypeScript 5 inference incompatibility in the cookie-write helper; a runtime-equivalent async wrapper passes the actual compiler and is being integrated before current-head CI is rerun. Real Chromium proved OTP/Telegram ordering in one and two tabs; the rollout gates still require real delivery and installed-device qualification.
-Native SDK retirement is prepared in [iOS #151](https://github.com/cobuildwithus/murph-ios/pull/151)
-and [Android #40](https://github.com/cobuildwithus/murph-android/pull/40), stacked on their adoption PRs.
-The isolated [Android CI cleanup #41](https://github.com/cobuildwithus/murph-android/pull/41)
-follows #40 and has independent trusted review. Both native product candidates
-preserve the existing version-1 secure credential record and local member ownership. iOS passes 601 unit tests and a Release simulator build; Android passes
-full verification and eight real emulator auth-boundary tests. Final reviews,
-current-head CI and actual installed/signed-device upgrades remain required.
-These links identify candidates, not deployed versions. Do not merge the
-retirement candidates or distribute SDK-free apps until every retirement gate
-passes. Keep the transition app available while eligible installed sessions
-still need its one-time bridge.
+Current candidates and code qualification:
+
+| Stage | Candidate | Reviewed source and remaining preparation |
+| --- | --- | --- |
+| 1 | [Murph #3127](https://github.com/cobuildwithus/murph/pull/3127) | Round 2 PASS and green CI at `bc9f3728b12bcb54ab941505e34ff32cecde9c68` |
+| 2 | [Murph #3128](https://github.com/cobuildwithus/murph/pull/3128) | Round 3 PASS and green CI at `ca1c6a115aaf050df78a939c77f0590f0737e995` |
+| 3 | [Murph #3132](https://github.com/cobuildwithus/murph/pull/3132) | [Round 3 PASS](https://chatgpt.com/c/6aa27f48-2834-83ea-8988-d5c4ca137932) and green CI at `540a4ac11863970587139579edc9d5e19b2040bc` |
+| 3 | [iOS #150](https://github.com/cobuildwithus/murph-ios/pull/150) | Round 2 PASS and green CI at `c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e` |
+| 3 | [Android #39](https://github.com/cobuildwithus/murph-android/pull/39) | [Round 3 PASS](https://chatgpt.com/c/6aa27f77-4630-83ea-9bbd-fd92c0d39a01) and green CI at `a589e0072bbcfc9efcce36471e0d4dce099bb4f7` |
+| 4 | [Murph #3134](https://github.com/cobuildwithus/murph/pull/3134) | [Round 2 PASS](https://chatgpt.com/c/6aa26b77-4f88-83ea-83c6-b8d752026677) and green CI on runtime source `87786eda0b935ac32614fc843665e0aadefa971c`; later base reconciliation and handoff change only docs. Check final-head CI on the PR |
+| 4 | [iOS #151](https://github.com/cobuildwithus/murph-ios/pull/151) | Round 1 PASS and green CI at `4380c93cca8bd47fc4b8ddee0c41e1de58de1b72` |
+| 4 | [Android #40](https://github.com/cobuildwithus/murph-android/pull/40) | [Round 2 PASS](https://chatgpt.com/c/6aa28183-b694-83ea-92c1-a430aebc4552) and green CI at `ffc5d97752b6c2c99ae73f9002201dfbbe4c562c` |
+
+Android [#38](https://github.com/cobuildwithus/murph-android/pull/38) at `614cbc6cc05d2229c76148a3dd5bea1ed1c18bb5` is the independently reviewed tooling prerequisite before #39. After #40, [#41](https://github.com/cobuildwithus/murph-android/pull/41) at `bf346f57a1f8aaef5d620bd359dc57a1bdad59dc` removes two unused CI placeholders. Its refreshed trusted review passes against #40, including 13 contract tests and unchanged control-policy proof; check the PR for final CI. These control changes are isolated from product review and add no rollout stage.
+
+Web adoption now invalidates the previous decrypted vault at successful replacement-response headers and orders cookie writes across tabs. Its actual Next TypeScript 5 and Web TypeScript 7 checks and four real Chromium/HttpOnly-cookie OTP/Telegram scenarios pass. The first round-3 attempt produced only a preliminary note without a completed verdict or model evidence; it is invalid and does not count as a substantive round. The completed fresh full round 3 retains the original first-reviewed and previous valid heads; exact-turn, response hash and actual gpt-6-pro metadata validate its PASS.
+
+Android adoption uses the existing AndroidX Core AtomicFile to stage first writes consistently on supported platforms. Both empty and partial initial-write interruptions reproduce the old failure on API 29; all nine actual Keystore/storage/HTTP/composed recovery cases pass with the fix on API 28, 29 and 36. CI also passes all 44 synthetic cases on each of API 28/29/30. There is no new storage format, dependency or platform branch. The SDK-free release preserves this same secure-record owner, encryption key and local member binding. iOS retirement passes 601 unit tests and Debug/Release simulator builds.
+
+These are code candidates, not deployed versions. Do not merge retirement candidates or distribute SDK-free apps until every retirement gate passes. Keep the transition app available while eligible installed sessions still need its one-time bridge. Real delivery, installed/signed-device upgrades and dormant/skipped-version recovery remain release qualification work.
 
 ## Backend configuration and deployment
 
@@ -225,7 +224,7 @@ member ID. Duplicate or unknown companion parameters produce only the local
 `/join` link. A callback only asks native admission to reread canonical setup;
 it never proves successful account linking or changes the stored app principal.
 
-Both current native auth services call the SDK's access-token refresh before reading a Privy identity token. The transition release must retain that restore/refresh ability long enough to exchange a valid token for a same-member Better Auth session. Store new credentials through native secure storage; prove lost-response recovery, account switching, offline restoration and renewable background use. Never accept an expired token as fresh authority or fall back after failed new-token verification.
+Both native transition auth services call the SDK's access-token refresh before reading a Privy identity token. The transition release must retain that restore/refresh ability long enough to exchange a valid token for a same-member Better Auth session. Store new credentials through native secure storage; prove lost-response recovery, account switching, offline restoration and renewable background use. Never accept an expired token as fresh authority or fall back after failed new-token verification.
 
 Ship the usable backend first. Release native transition builds independently and measure supported-version adoption. Remove SDK restoration only after the migration journey and dormant-client recovery are qualified. Installed users who skip transition releases require a tested route; zero recent legacy traffic is not sufficient evidence. Expired or revoked credentials may require reauthentication.
 
@@ -338,6 +337,12 @@ hosted path after the last reader and obligation are gone.
 Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. Native proof uses actual apps/devices, including skipped-version upgrades.
 
 Final completion also inspects dependency graphs/bundles, schema/catalog, deployed configuration, operational jobs and durable cleanup outcomes. Startup without Privy configuration and cold/warm login must work. Static source review or a grep result alone does not establish vendor retirement.
+
+The final Web adoption response SHA-256 is `19433a8fcfb65fd2f446cfb3404db3a14cd1e72994400871db6d08163c5797a9`; Android adoption is `dfa8cd36fe214ed58930ae1efa6da0f58fdc987a0fd2183ea200168a3cdd27c0`. Android retirement response SHA-256 is `ba3ca1fb5839f18c6412ce9d23bec5bd216edb043cb54faa2fd8869b8b1d375c`; its exact-thread response, context digest, checked head and actual gpt-6-pro model metadata were validated. Native review bodies retain their reviewed context; this rollout owner records current cross-repository status.
+
+### Local browser proof limitation
+
+The composed `pnpm hosted-local e2e hosted-web-browser-smoke --profile e2e:stub` journey reaches authenticated Connect but reports the same invalid-element server-render failure on retirement source `87786eda0b935ac32614fc843665e0aadefa971c` and the earlier compatibility source `ca1c6a115aaf050df78a939c77f0590f0737e995`. Both pages recover through client rendering. This is an existing rendering defect, not a clean full-stack pass. The existing Frog entry `20260910003445-public-auth-smoke` owns the diagnostic gap. Focused real-browser auth/cookie proof, canonical PostgreSQL proof and native boundary tests pass independently; none substitutes for hosted delivery and installed-device qualification.
 
 ## Source contracts
 
