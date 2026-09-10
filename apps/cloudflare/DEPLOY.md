@@ -2554,15 +2554,26 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Retiring member shell-prewarm producers
+## Retired member shell-prewarm transport
 
-Current Web removes the optional typing, message-routing, and instant-start
-shell-prewarm calls. The new Worker accepts the old authenticated receiver
-contract as a no-op. Either deployment order preserves authoritative mailbox
-signaling and the post-Temporal direct ensure; an older Worker may simply receive
-fewer optional hints. Historical latency fields remain readable, while current
-Web stops producing their per-hint correlation metadata. Container identity and
-state rollback constraints remain those of the unified fleet migration above.
+The supported rollout starts from the unified fleet cutover: Web has retired
+typing, message-routing, and instant-start shell hints, and Worker and container
+receivers already treat them as no-ops. Confirm deployed source ancestry and
+the existing unified fleet rollback floor through the normal release evidence;
+this source contract does not establish current deployment or rollback eligibility.
+
+The member-specific HTTP endpoint now returns 404, and the control client plus
+UserRunner and RunnerContainer prewarm RPC methods are removed. A delayed older
+Web request may fail, but its best-effort helper catches that optional failure
+without rejecting durable mailbox signaling or the post-Temporal direct ensure.
+No queued hint is replayed or converted into runtime work. Memberless standby
+preparation and normal admitted ensure-processing remain unchanged.
+
+Historical latency fields remain readable, and exact legacy stop targets retain
+their recovery and deletion paths. This deletion writes no new persistent format
+and introduces no additional persisted-state rollback floor. Container identity,
+namespace recovery, and rollback constraints remain those of the unified fleet
+migration above.
 
 ## Container Operator Access
 

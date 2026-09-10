@@ -3522,33 +3522,9 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it.each(["stopped", "running"] as const)(
-    "accepts legacy shell hints without allocating or probing a %s container",
-    async (initialStatus) => {
-      const { container, containerFetch, getState, start, startAndWaitForPorts } =
-        createContainerDouble({ initialStatus });
-      const input = { timeoutMs: 7_500, userId: "member_123" };
-
-      await expect(container.prewarmShell(input)).resolves.toEqual({
-        action: "superseded",
-        kind: "superseded",
-      });
-      for (const source of ["linq-message-routing", "linq-typing-started"] as const) {
-        await expect(container.beginShellPrewarm({ ...input, source }))
-          .resolves.toEqual({ accepted: true });
-      }
-
-      expect(start).not.toHaveBeenCalled();
-      expect(startAndWaitForPorts).not.toHaveBeenCalled();
-      expect(containerFetch).not.toHaveBeenCalled();
-      expect(getState).not.toHaveBeenCalled();
-    },
-  );
-
-  it("starts through authoritative readiness after an inert legacy hint", async () => {
+  it("starts through authoritative readiness", async () => {
     const { container, start, startAndWaitForPorts } = createContainerDouble();
     const input = { timeoutMs: 7_500, userId: "member_123" };
-    await container.beginShellPrewarm(input);
 
     await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({
       action: "started",

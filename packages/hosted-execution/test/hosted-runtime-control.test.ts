@@ -64,7 +64,6 @@ import {
   resolveHostedAiUsageTokenPricingBasis,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
-  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -2443,26 +2442,6 @@ describe("hosted runtime control contracts", () => {
       directEnsureAction: "woken",
       directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       directEnsureRetryReason: "container_rpc_timeout",
-    })).toBeNull();
-  });
-
-  it("projects shell-prewarm diagnostics onto the narrow correlation schema", () => {
-    expect(sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics({
-      directEnsureRequestStartedAtEpochMs: 1_777_000_000_099,
-      shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_030,
-      shellPrewarmOrchestrationAttemptId:
-        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-      shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_000,
-      shellPrewarmSource: "linq-message-routing",
-    })).toEqual({
-      shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_030,
-      shellPrewarmOrchestrationAttemptId:
-        "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-      shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_000,
-    });
-
-    expect(sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics({
-      shellPrewarmOrchestrationAttemptId: "invalid",
     })).toBeNull();
   });
 

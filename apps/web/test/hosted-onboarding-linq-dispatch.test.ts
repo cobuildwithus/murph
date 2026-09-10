@@ -4470,10 +4470,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
-      prewarmRuntimeShell,
     });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
@@ -4605,7 +4603,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -7946,10 +7943,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
-      prewarmRuntimeShell,
     });
     mocks.startHostedLinqChatTypingIndicator.mockImplementation(
       (input: { chatId: string }) => {
@@ -8045,7 +8040,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(activationWakeIndex).toBeGreaterThan(signalIndex);
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
       expect.objectContaining({
         wakeHandoff: expect.not.objectContaining({
@@ -8214,10 +8208,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const ensureRuntimeProcessing = vi.fn<
       (input: { userId: string }) => Promise<{ accepted: boolean }>
     >(async () => ({ accepted: true }));
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
-      prewarmRuntimeShell,
     });
     mocks.startHostedLinqChatTypingIndicator.mockRejectedValueOnce(
       new Error("typing unavailable"),
@@ -8252,7 +8244,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {

@@ -3195,25 +3195,6 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
     : null;
 }
 
-export function sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
-  value: unknown,
-): HostedRuntimeShellPrewarmOrchestrationDiagnostics | null {
-  const orchestration = sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(value);
-  if (!orchestration) {
-    return null;
-  }
-  const diagnostics = Object.fromEntries(
-    HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS.flatMap(
-      (key) => orchestration[key] === undefined
-        ? []
-        : [[key, orchestration[key]]],
-    ),
-  ) as Partial<HostedRuntimeShellPrewarmOrchestrationDiagnostics>;
-  return Object.keys(diagnostics).length > 0
-    ? diagnostics as HostedRuntimeShellPrewarmOrchestrationDiagnostics
-    : null;
-}
-
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
 // stored leaves are dropped before the next write. Admission, legacy selection,

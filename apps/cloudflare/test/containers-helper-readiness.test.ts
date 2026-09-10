@@ -97,7 +97,7 @@ describe("patched Cloudflare container readiness probes", () => {
     }
   });
 
-  it("applies the bounded probe to the direct start path used by shell prewarm", async () => {
+  it("applies the bounded probe to the direct SDK start path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:01:30.000Z"));
     const harness = await createProbeHarness({

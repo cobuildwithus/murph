@@ -1749,30 +1749,21 @@ server-bound append checks. Web always awaits the applicable Temporal
 start the direct ensure. An access failure or Temporal acceptance failure starts
 no direct wake. Linq instant start follows the same rule: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
-of signaling it first. Once the instant-start planner has committed the member
-row, Web may fire one best-effort `runtime/shell-prewarm` request while trial
-enrollment runs. That endpoint obtains the member's named `UserRunner` without
-binding durable state, enters the same per-user consent-mutation barrier used by
-authoritative ensures and withdrawal, and re-reads live Web-owned admission
-with a fixed 250 ms deadline. Timeout or transport failure abandons the optional
-hint and releases the barrier; authoritative processing and user-control reads
-retain their ordinary timeout. Allowed admission reserves and binds the
-deterministic versioned container in the existing
-`active_runner_container_name` user-control stop-target field. It then awaits a
-narrow container acknowledgement that the shell-prewarm operation is registered
-before releasing the barrier;
-the platform wait continues under the existing container lifecycle owner. It
-does not select a mailbox owner, create a write fence, wait for health
-readiness, or invoke workspace work. Withdrawal and account deletion consume
-the reserved exact target, and `destroyInstance()` supersedes an in-progress
-hint before stopping that container. A denied admission starts nothing.
-When standby mode is `allocate`, this exact-user shell-prewarm hint is skipped.
-The standby coordinator is then the sole prewarm owner, so a hint cannot reserve
-the member stop target before the foreground request gets its one fresh claim
-opportunity. A standby miss still falls back to the ordinary exact-user start.
+of signaling it first. Web sends no member-specific shell-prewarm request during
+enrollment, message routing, or typing. The retired `runtime/shell-prewarm`
+endpoint returns 404 without resolving a runtime owner, and its control client
+and Durable Object RPC compatibility methods are removed. Older Web's
+best-effort helper catches that optional failure; durable mailbox signaling and
+the post-Temporal direct ensure retain their existing behavior. The memberless
+inventory coordinator owns speculative preparation in every mode, and only
+normal admitted execution binds a target to a member. Existing exact legacy
+stop targets keep their recovery and deletion paths. This removal starts from
+the supported unified fleet cutover and adds no persistent format or rollback
+floor; deployment constraints remain in
+[`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#retired-member-shell-prewarm-transport).
 
-The release-scoped ENAM standby is a separate optimization and does not trust
-that typing hint. A memberless coordinator maintains at most one advertised
+The release-scoped ENAM standby is a separate optimization. A memberless
+coordinator maintains at most one advertised
 pristine slot after exact release, image fingerprints, architecture,
 heavy-runtime, and content-free Codex App Server initialize/stop readiness all
 pass. In allocation mode, one storage transaction removes that slot from ready
@@ -1878,52 +1869,23 @@ targets, so the first exchange is available to later normal turns without
   the stale runtime outbox intent without a retry, failure input, or recovery
   wake while retaining the exact reason for diagnostics. An ambiguous provider
   outcome starts no runtime wake and retains the exact encrypted reply for
-  same-event recovery. The
-shell hint does not read the persisted
-container state; it delegates the already-running check and concurrent-start
-coalescing to Cloudflare's `Container.start()`. Concurrent shell hints coalesce.
-Authoritative readiness aborts an in-progress hint before entering the container
-lifecycle queue; if a start wait fails after the platform command may have been
-issued, the uncertain hint remains claimable so that owner completes the
-canonical port and health path within its own budget. A stalled platform wait
-therefore relinquishes the existing lifecycle boundary without leaving a stale
-hint or partially initialized start ahead of foreground work. If a Worker
-version changes before authoritative start, the `UserRunner` destroys and
-clears a different pending versioned target before binding the current fence.
-For an ordinary established direct Linq message, pre-transaction routing
-preparation may fire that same request immediately after it resolves an active
-member, before root KMS work and transaction entry. It threads
-one UUID-shaped attempt id through Web, the authenticated route, UserRunner
-activation and admission, and the container's first coalesced observation. The
-final wake carries the same id as expected evidence; the latency report treats
-the hint as causal only when the consumed observation matches it exactly. No
-attempt id is authority, and a retry that resolves another member starts a new
-hint while the planner remains authoritative.
+  same-event recovery.
 
-The existing Web helper carries its bounded `linq-instant-start`,
-`linq-message-routing`, or `linq-typing-started` source through the same request
-and RPC. During additive
-rollout an empty legacy request remains accepted and is recorded as `unknown`;
-unknown is never assumed to mean typing. Cloudflare logs one bounded admission outcome (`scheduled`,
-`skipped_consent_busy`, `skipped_admission_unavailable`,
-`skipped_processing_disallowed`, or `skipped_runtime_busy`) at the existing
-decision point. The runner container records one completion outcome for the
-coalesced operation after that asynchronous operation settles; the unawaited
-microtask log contains only the bounded trigger source, outcome, elapsed
-milliseconds, coalesced hint count, and whether the container lifecycle
-observed a cold start. These records
-do not imply port or health readiness.
-
-The container also consumes its in-memory hint observation on the next
-authoritative `ensureReadyForProcessing` call. One observation belongs to one
+Historical shell-prewarm diagnostics remain readable after transport retirement.
+Their bounded sources remain `linq-instant-start`, `linq-message-routing`,
+`linq-typing-started`, or `unknown`; unknown never implies typing.
+For compatibility, an authoritative `ensureReadyForProcessing` result may still
+carry a hint observation from an older container, and fresh runtime preparation
+forwards its bounded fields. One observation describes one historical
 shell-prewarm operation and carries its triggering source, bounded
 orchestration attempt and phase timestamps, first causal hint timestamp,
 completion time and duration, coalesced hint count, and one terminal
 outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
-After that operation settles, later hints may only increment its bounded hint
-count until readiness consumes it; they cannot launch a second operation or
-replace the causal timestamp. Fresh runtime preparation maps those bounded
-leaves into the existing orchestration latency phase breakdown; it adds no
+The historical producer allowed later hints only to increment that operation's
+bounded hint count until readiness consumed it; they could not launch a second
+operation or replace the causal timestamp. These observations do not imply port
+or health readiness. Fresh runtime preparation maps their bounded leaves into
+the existing orchestration latency phase breakdown; it adds no
 request, persisted state owner, awaited reporting step, or work on the
 message-ingress path. A stop, explicit destroy, or Durable Object eviction may
 erase the optional observation, so an absent observation means `no observed
@@ -1947,9 +1909,8 @@ minutes to redeliver. That exact-event retry observes active access, and its
 ordinary active-member conversation signal imports the pending activation item.
 If the provider exhausts its retry campaign, only later member traffic provides
 another wake, with no finite application-owned recovery bound. Enrollment
-failure returns no continuation; a previously issued shell command may leave an
-idle container to expire, but it cannot process runtime work. Both direct
-requests are latency hints, not a second durable wake authority:
+failure returns no continuation. The direct ensure is a latency hint, not a
+second durable wake authority:
 accepted Linq reply or reaction delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add
@@ -2301,20 +2262,11 @@ Version or prior reader eligible before Web can emit the signal. Once emission
 is possible, do not route an older private worker until Web and Cloudflare are
 disabled and every signal-bearing Workflow history has drained.
 
-Linq typing-start events are verified and parsed before any hint. Web returns
-the ordinary ignored acknowledgement before a post-response task uses only the
-private home-chat blind index to resolve an established direct member, then
-checks active access and complete crypto roots before calling the existing
-best-effort Cloudflare shell-prewarm route. Missing, ambiguous, inactive, or
-ineligible routes stop there. The Cloudflare runner independently repeats live
-admission under the consent-mutation barrier before starting its coalesced
-container lifecycle. The optional owner drops repeated hints, or any hint that
-arrives while authoritative ensure, withdrawal, or deletion owns the barrier,
-before they can queue on its FIFO; at most one admitted hint can precede later
-authoritative processing. Typing must not plan onboarding, bind routes, append
+Linq typing-start events are verified, parsed strictly, and receive the ordinary
+ignored acknowledgement. They schedule no member lookup, admission read, or
+shell-prewarm request. Typing must not plan onboarding, bind routes, append
 mailbox rows, signal Temporal, start runtime processing, send read receipts, or
-add reconciliation work; it is optional latency data and never durable wake
-authority.
+add reconciliation work; it is never durable wake authority.
 
 Mailbox processing must not wait behind Cloudflare container lifecycle
 locks.
@@ -3115,7 +3067,7 @@ This matches the runner readiness ceiling without weakening invalidated-shell
 or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
-Within that unchanged outer budget, the shell-prewarm, direct cold-start, and
+Within that unchanged outer budget, the memberless standby, direct cold-start, and
 deploy-smoke paths make each native TCP readiness request abortable after 1.5
 seconds and retry sequentially on the existing 250 ms interval. The helper
 awaits cancellation before another probe begins. A probe timeout is therefore

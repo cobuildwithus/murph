@@ -69,7 +69,6 @@ import {
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlRuntimeHealthDataConsentPath,
-  buildCloudflareHostedControlRuntimeShellPrewarmPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -276,12 +275,6 @@ export interface CloudflareHostedControlClient {
     signal?: AbortSignal;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
-  prewarmRuntimeShell(input: {
-    orchestrationAttemptId: string;
-    requestStartedAtEpochMs: number;
-    source: CloudflareHostedControlRuntimeShellPrewarmSource;
-    userId: string;
-  }): Promise<CloudflareHostedControlRuntimeShellPrewarmAcceptedAck>;
   reconcileRuntimeHealthDataConsent(
     userId: string,
   ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
@@ -314,10 +307,7 @@ export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
   accepted: true;
 }
 
-export interface CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
-  accepted: true;
-}
-
+// Retained for historical runner readiness observations; there is no hint client.
 export type CloudflareHostedControlRuntimeShellPrewarmSource =
   | "linq-instant-start"
   | "linq-message-routing"
@@ -664,31 +654,6 @@ export function createCloudflareHostedControlClient(
         runtimeEnsureProcessingOrchestrationAttemptId:
           input.orchestrationAttemptId,
         signal: input.signal,
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    prewarmRuntimeShell(input) {
-      const expectedUserId = requireCloudflareHostedControlUserId(input.userId);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: expectedUserId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "runtime shell prewarm",
-        parse: parseCloudflareHostedControlRuntimeShellPrewarmResponse,
-        path: buildCloudflareHostedControlRuntimeShellPrewarmPath(expectedUserId),
-        request: {
-          body: JSON.stringify({
-            orchestrationAttemptId: input.orchestrationAttemptId,
-            requestStartedAtEpochMs: input.requestStartedAtEpochMs,
-            source: input.source,
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -1948,18 +1913,6 @@ function readCloudflareHostedControlRuntimeEnsureProcessingTimingResult(
     directEnsureResultKind: response.kind,
     directEnsureRuntimeAttemptId: response.runtimeAttemptId,
   };
-}
-
-function parseCloudflareHostedControlRuntimeShellPrewarmResponse(
-  value: unknown,
-): CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
-  const record = requireRecord(value, "Cloudflare runtime shell prewarm response");
-  if (record.accepted !== true) {
-    throw new TypeError(
-      "Cloudflare runtime shell prewarm response accepted must be true.",
-    );
-  }
-  return { accepted: true };
 }
 
 function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(

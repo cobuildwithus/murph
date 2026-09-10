@@ -361,7 +361,6 @@ describe("cloudflare worker routes", () => {
       "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
-      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -400,7 +399,6 @@ describe("cloudflare worker routes", () => {
       "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
-      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -3824,121 +3822,14 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
-    it("routes shell startup through the consent-owning user runner", async () => {
-      const prewarmRuntimeShellForUser = vi.fn<
-        NonNullable<UserRunnerDurableObjectStubLike["prewarmRuntimeShellForUser"]>
-      >(async () => undefined);
-      const stub = createUserRunnerStub({ prewarmRuntimeShellForUser });
-      const runnerContainerGetByName = vi.fn();
-      const userRunnerGetByName = vi.fn(() => stub);
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
-        USER_RUNNER: { getByName: userRunnerGetByName },
-      });
-
-      const response = await worker.fetch(
-        await signControlRequest(new Request(
-          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-          {
-            body: JSON.stringify({
-              orchestrationAttemptId:
-                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-              requestStartedAtEpochMs: 1_788_000_000_000,
-              source: "linq-message-routing",
-            }),
-            headers: { "content-type": "application/json; charset=utf-8" },
-            method: "POST",
-          },
-        )),
-        env,
-      );
-
-      expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({ accepted: true });
-      expect(userRunnerGetByName).toHaveBeenCalledWith("test-user");
-      expect(stub.bindUser).not.toHaveBeenCalled();
-      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
-        "test-user",
-        "linq-message-routing",
-        expect.objectContaining({
-          shellPrewarmRuntimeControlAuthFinishedAtEpochMs: expect.any(Number),
-          shellPrewarmRuntimeControlAuthStartedAtEpochMs: expect.any(Number),
-          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
-          shellPrewarmOrchestrationAttemptId:
-            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-          shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
-        }),
-      );
-      const orchestration = prewarmRuntimeShellForUser.mock.calls[0]?.[2];
-      expect(orchestration?.shellPrewarmRuntimeControlAuthStartedAtEpochMs)
-        .toBeLessThanOrEqual(
-          orchestration?.shellPrewarmRuntimeControlAuthFinishedAtEpochMs
-            ?? Number.NEGATIVE_INFINITY,
-        );
-      expect(runnerContainerGetByName).not.toHaveBeenCalled();
-    });
-
-    it("does not recreate runner state for a delayed shell hint after account deletion", async () => {
-      const request = await signControlRequest(new Request(
-        "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-        {
-          body: "{}",
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "POST",
-        },
-      ));
-      const harness = createRuntimeControlRunnerHarness({
-        healthDataAdmission: {
-          consentState: "missing",
-          processingAllowed: false,
-        },
-      });
-      await harness.runner.bindUser("test-user");
-      await expect(
-        harness.runner.deleteHostedUserData("test-user"),
-      ).resolves.toMatchObject({ ok: true });
-      vi.mocked(harness.namespace.getByName).mockClear();
-      const bindUser = vi.fn(async (userId: string) =>
-        await harness.runner.bindUser(userId)
-      );
-      const prewarmRuntimeShellForUser = vi.fn(async (
-        userId: string,
-        source?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[1],
-        orchestration?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[2],
-      ) => await harness.runner.prewarmRuntimeShellForUser(
-        userId,
-        source,
-        orchestration,
-      ));
-      const stub = createUserRunnerStub({
-        bindUser,
-        prewarmRuntimeShellForUser,
-      });
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        USER_RUNNER: {
-          getByName: vi.fn(() => stub),
-        },
-      });
-
-      const response = await worker.fetch(request, env);
-
-      expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({ accepted: true });
-      expect(bindUser).not.toHaveBeenCalled();
-      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
-        "test-user",
-        undefined,
-        expect.objectContaining({
-          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
-        }),
-      );
-      expect(harness.namespace.getByName).not.toHaveBeenCalled();
-      expect(
-        harness.sql.exec("SELECT user_id FROM runner_meta").toArray(),
-      ).toEqual([]);
-    });
-
-    it("rejects nonempty shell-prewarm bodies without resolving a runtime owner", async () => {
+    it.each([
+      {},
+      {
+        orchestrationAttemptId: "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+        requestStartedAtEpochMs: 1_788_000_000_000,
+        source: "linq-message-routing",
+      },
+    ])("does not address a runtime owner for a retired shell hint: %j", async (body) => {
       const runnerContainerGetByName = vi.fn();
       const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
       const env = createWorkerEnv(createUserRunnerStub(), {
@@ -3950,7 +3841,7 @@ describe("cloudflare worker routes", () => {
         await signControlRequest(new Request(
           "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
           {
-            body: JSON.stringify({ wake: true }),
+            body: JSON.stringify(body),
             headers: { "content-type": "application/json; charset=utf-8" },
             method: "POST",
           },
@@ -3958,34 +3849,10 @@ describe("cloudflare worker routes", () => {
         env,
       );
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: "Not found" });
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
       expect(userRunnerGetByName).not.toHaveBeenCalled();
-    });
-
-    it("rejects shell prewarm when the only credential is a web callback signature", async () => {
-      const runnerContainerGetByName = vi.fn();
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
-      });
-
-      const response = await worker.fetch(
-        await signWebCallbackControlRequest(
-          new Request(
-            "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-            {
-              body: "{}",
-              headers: { "content-type": "application/json; charset=utf-8" },
-              method: "POST",
-            },
-          ),
-          env,
-        ),
-        env,
-      );
-
-      expect(response.status).toBe(401);
-      expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
     it("starts runtime processing without an active fence", async () => {
@@ -5379,7 +5246,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     })),
-    prewarmRuntimeShellForUser: vi.fn(async () => undefined),
     publishHostedPrivateMedia: vi.fn(async () => ({
       ok: false as const,
       reason: "not-configured" as const,

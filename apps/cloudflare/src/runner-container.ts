@@ -16,7 +16,6 @@ import {
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
-  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeFailurePhaseCode,
   type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedWorkspaceInvocationProcessingMode,
@@ -289,6 +288,7 @@ type RunnerContainerEnsureReadyResult = {
   >;
 };
 
+// Older readiness responses can still carry these diagnostic-only observations.
 export interface RunnerContainerShellPrewarmObservation {
   firstHintAtEpochMs: number;
   hintCount: number;
@@ -304,26 +304,6 @@ export type RunnerContainerShellPrewarmOutcome =
   | "failed"
   | "start_issued_warm"
   | "superseded";
-
-export interface RunnerContainerBeginShellPrewarmInput
-  extends RunnerContainerEnsureReadyForProcessingInput {
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  source?: CloudflareHostedControlRuntimeShellPrewarmSource;
-}
-
-export type RunnerContainerPrewarmShellResult =
-  | {
-      action: "start_issued";
-      kind: "started";
-    }
-  | {
-      action: "superseded";
-      kind: "superseded";
-    };
-
-export interface RunnerContainerBeginShellPrewarmResult {
-  accepted: true;
-}
 
 export interface RunnerContainerRuntimeCompletionRecordedInput {
   attemptId: string;
@@ -351,12 +331,6 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
-  beginShellPrewarm?(
-    input: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult>;
-  prewarmShell?(
-    input: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   onRuntimeCompletionRecorded?(
@@ -1313,23 +1287,6 @@ export class RunnerContainer extends Container {
       }
       throw error;
     }
-  }
-
-  // Accept queued calls from older workers without allocating member-specific shells.
-  async beginShellPrewarm(
-    payload: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult> {
-    const input = parseRunnerContainerBeginShellPrewarmInput(payload);
-    this.authorizeBoundUser(input.userId);
-    return { accepted: true };
-  }
-
-  async prewarmShell(
-    payload: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult> {
-    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    this.authorizeBoundUser(input.userId);
-    return { action: "superseded", kind: "superseded" };
   }
 
   async abortWorkspaceInvocation(input: {
@@ -4633,29 +4590,6 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
         }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
-  };
-}
-
-function parseRunnerContainerBeginShellPrewarmInput(
-  payload: RunnerContainerBeginShellPrewarmInput,
-): RunnerContainerBeginShellPrewarmInput {
-  const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-  const orchestration =
-    sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
-      payload.orchestration,
-    );
-  if (
-    payload.source !== undefined
-    && payload.source !== "linq-instant-start"
-    && payload.source !== "linq-message-routing"
-    && payload.source !== "linq-typing-started"
-  ) {
-    throw new TypeError("payload.source must be a supported shell-prewarm source.");
-  }
-  return {
-    ...input,
-    ...(orchestration === null ? {} : { orchestration }),
-    ...(payload.source === undefined ? {} : { source: payload.source }),
   };
 }
 
