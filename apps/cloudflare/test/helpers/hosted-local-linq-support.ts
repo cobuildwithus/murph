@@ -29,7 +29,7 @@ import {
 } from "../../src/runner-injected-credential.ts";
 
 export interface ObservedLinqRequest {
-  authorizationStatus: "expected" | "hosted-sentinel" | "missing" | "present" | "unexpected";
+  authorizationStatus: "expected" | "hosted-sentinel" | "missing" | "unexpected";
   body: string;
   host: string | null;
   method: string;
@@ -61,10 +61,11 @@ const linqIMessageCapabilityPath = "/capability/check_imessage";
 const linqAttachmentDownloadBasePath = "/attachment-downloads";
 const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
 const hostedLocalRunnerProviderHost = "host.docker.internal";
+export const HOSTED_LOCAL_LINQ_API_TOKEN = "linq-local-test-token";
 // Linq's production client makes three attempts for retry-safe POSTs. The
 // controls span that provider-local loop so one logical send fails. The
-// post-accept control records only its first provider acceptance; a later
-// logical retry observes that already-accepted result.
+// post-accept control hides acceptance; only the actual provider idempotency
+// key can make a later logical retry observe that already-accepted result.
 const hostedLocalLinqHttpAttemptsPerLogicalSend = 3;
 
 interface HostedLocalLinqArmedSendFailure {
@@ -253,6 +254,12 @@ export async function startHostedLocalLinqStub(input: {
   canonicalChats?: readonly HostedLocalLinqCanonicalChat[];
   expectedAuthorizationToken?: string | null;
 } = {}): Promise<HostedLocalLinqStub> {
+  const expectedAuthorizationToken =
+    (input.expectedAuthorizationToken ?? HOSTED_LOCAL_LINQ_API_TOKEN).trim();
+  if (!expectedAuthorizationToken
+    || expectedAuthorizationToken === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL) {
+    throw new Error("The Linq stub requires a synthetic upstream API token.");
+  }
   const observedRequests: ObservedLinqRequest[] = [];
   const acceptedSendRequests: ObservedLinqRequest[] = [];
   const acceptedMessagesByIdempotencyKey = new Map<
@@ -263,6 +270,7 @@ export async function startHostedLocalLinqStub(input: {
     (input.canonicalChats ?? []).map((chat) => [chat.chatId, chat] as const),
   );
   const observedChatIdsByRecipient = new Map<string, string>();
+  const observedChatIdsByRoute = new Map<string, string>();
   const canonicalGroupStateByChatId = new Map<string, boolean>();
   const observedMessageIdsByChat = new Map<string, string[]>();
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
@@ -276,7 +284,6 @@ export async function startHostedLocalLinqStub(input: {
   let nextPreAcceptDefinitiveSendFailure: HostedLocalLinqArmedSendFailure | null = null;
   let nextPreAcceptRetryableSendFailure: HostedLocalLinqArmedSendFailure | null = null;
   let nextRequestDelay: HostedLocalLinqArmedRequestDelay | null = null;
-  let postAcceptLostAcknowledgmentAcceptedMessage: HostedLocalLinqAcceptedMessage | null = null;
   let server: HttpServer | null = null;
 
   server = createServer(async (request, response) => {
@@ -285,7 +292,7 @@ export async function startHostedLocalLinqStub(input: {
     const observedRequest: ObservedLinqRequest = {
       authorizationStatus: classifyObservedLinqAuthorization(
         request.headers.authorization,
-        input.expectedAuthorizationToken,
+        expectedAuthorizationToken,
       ),
       body,
       host: request.headers.host?.trim() || null,
@@ -294,6 +301,15 @@ export async function startHostedLocalLinqStub(input: {
       url: request.url ?? "/",
     };
     observedRequests.push(observedRequest);
+    // Download URLs are a public byte-transfer boundary, separate from the API.
+    if (!observedRequest.url.startsWith(`${linqAttachmentDownloadBasePath}/`)
+      && observedRequest.authorizationStatus !== "expected") {
+      writeJsonResponse(response, 401, {
+        error: { code: 2004, message: "Invalid synthetic provider authentication.", status: 401 },
+        success: false,
+      });
+      return;
+    }
     if (
       nextRequestDelay
       && observedRequest.method === nextRequestDelay.expectedMethod
@@ -320,11 +336,32 @@ export async function startHostedLocalLinqStub(input: {
         return;
       }
 
-      const recipient = Array.isArray(parsedBody?.to) ? parsedBody.to[0] : "unknown";
-      const chatId = `chat_local_${++nextObservedChatSequence}`;
-      const messageId = `linq_msg_local_${++nextObservedMessageSequence}`;
-      observedChatIdsByRecipient.set(String(recipient ?? "unknown"), chatId);
-      observedMessageIdsByChat.set(chatId, [messageId]);
+      const idempotencyKey = readObservedLinqMessageIdempotencyKey(parsedBody);
+      const replay = idempotencyKey ? acceptedMessagesByIdempotencyKey.get(idempotencyKey) : undefined;
+      if (replay && (replay.request.body !== body || replay.request.url !== request.url)) {
+        writeJsonResponse(response, 409, { error: "Conflicting Linq idempotency-key reuse." });
+        return;
+      }
+      const recipients = Array.isArray(parsedBody?.to) ? parsedBody.to : [];
+      const routeKey = JSON.stringify([parsedBody?.from, [...recipients].sort()]);
+      const chatId = replay?.chatId ?? observedChatIdsByRoute.get(routeKey)
+        ?? `chat_local_${++nextObservedChatSequence}`;
+      const messageId = replay?.messageId ?? `linq_msg_local_${++nextObservedMessageSequence}`;
+      if (!replay) {
+        observedChatIdsByRoute.set(routeKey, chatId);
+        for (const recipient of recipients) {
+          observedChatIdsByRecipient.set(String(recipient), chatId);
+        }
+        const messageIds = observedMessageIdsByChat.get(chatId) ?? [];
+        messageIds.push(messageId);
+        observedMessageIdsByChat.set(chatId, messageIds);
+        acceptedSendRequests.push(observedRequest);
+        if (idempotencyKey) {
+          acceptedMessagesByIdempotencyKey.set(idempotencyKey, {
+            chatId, messageId, request: observedRequest,
+          });
+        }
+      }
       writeJsonResponse(response, 200, {
         chat: {
           id: chatId,
@@ -438,16 +475,7 @@ export async function startHostedLocalLinqStub(input: {
         });
         return;
       }
-      const replayedAcceptedMessage = acceptedIdempotencyReplay
-        ?? (
-          postAcceptLostAcknowledgmentAcceptedMessage
-          && postAcceptLostAcknowledgmentAcceptedMessage.chatId === chatId
-          && postAcceptLostAcknowledgmentAcceptedMessage.request.body === observedRequest.body
-          && postAcceptLostAcknowledgmentAcceptedMessage.request.url === observedRequest.url
-            ? postAcceptLostAcknowledgmentAcceptedMessage
-            : null
-        );
-      const acceptedMessage = replayedAcceptedMessage ?? (() => {
+      const acceptedMessage = acceptedIdempotencyReplay ?? (() => {
         const messageId = `linq_msg_local_${++nextObservedMessageSequence}`;
         const observedMessageIds = observedMessageIdsByChat.get(chatId) ?? [];
         observedMessageIds.push(messageId);
@@ -459,7 +487,7 @@ export async function startHostedLocalLinqStub(input: {
           request: observedRequest,
         };
       })();
-      if (idempotencyKey && !replayedAcceptedMessage) {
+      if (idempotencyKey && !acceptedIdempotencyReplay) {
         acceptedMessagesByIdempotencyKey.set(idempotencyKey, acceptedMessage);
       }
 
@@ -469,7 +497,6 @@ export async function startHostedLocalLinqStub(input: {
           observedRequest,
         )
       ) {
-        postAcceptLostAcknowledgmentAcceptedMessage = acceptedMessage;
         if (nextPostAcceptLostAcknowledgment?.remainingResponses === 0) {
           nextPostAcceptLostAcknowledgment = null;
         }
@@ -637,7 +664,6 @@ export async function startHostedLocalLinqStub(input: {
           "A post-accept Linq lost-acknowledgment control requires a positive response count.",
         );
       }
-      postAcceptLostAcknowledgmentAcceptedMessage = null;
       nextPostAcceptLostAcknowledgment = {
         expectedPath,
         matchRequest,
@@ -1011,10 +1037,6 @@ function writeHostedLocalLinqAcceptedMessage(
 ): void {
   writeJsonResponse(response, 200, {
     chat_id: acceptedMessage.chatId,
-    data: {
-      chat_id: acceptedMessage.chatId,
-      id: acceptedMessage.messageId,
-    },
     message: {
       id: acceptedMessage.messageId,
     },
@@ -1044,7 +1066,7 @@ function readObservedLinqMessageIdempotencyKey(
 
 function classifyObservedLinqAuthorization(
   authorization: string | string[] | undefined,
-  expectedToken: string | null | undefined,
+  expectedToken: string,
 ): ObservedLinqRequest["authorizationStatus"] {
   const value = Array.isArray(authorization)
     ? authorization.at(0)?.trim() ?? ""
@@ -1053,21 +1075,22 @@ function classifyObservedLinqAuthorization(
     return "missing";
   }
 
-  const expected = expectedToken?.trim() ?? "";
-  if (expected && value === `Bearer ${expected}`) {
+  if (value === `Bearer ${expectedToken}`) {
     return "expected";
   }
   if (value === `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`) {
     return "hosted-sentinel";
   }
-  return expected ? "unexpected" : "present";
+  return "unexpected";
 }
 
 function isObservedLinqCreateChatPayload(payload: Record<string, unknown> | null): boolean {
   return Boolean(
     payload
     && typeof payload.from === "string"
+    && /^\+[1-9]\d{7,14}$/u.test(payload.from)
     && Array.isArray(payload.to)
+    && payload.to.length > 0
     && payload.to.every((recipient) => typeof recipient === "string" && recipient.length > 0)
     && isObservedLinqMessagePayload(payload),
   );
@@ -1101,53 +1124,72 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
     "parts" in payload.message
       ? (payload.message as { parts?: unknown }).parts
       : null;
-  if (!Array.isArray(parts) || parts.length === 0) {
+  if (!Array.isArray(parts) || parts.length === 0 || parts.length > 100) {
     return false;
   }
-
-  return parts.some((part) => {
-    if (!part || typeof part !== "object" || !("type" in part)) {
-      return false;
-    }
-    if (part.type === "text") {
-      return "value" in part
-        && typeof part.value === "string"
-        && part.value.trim().length > 0;
-    }
-    if (part.type === "link") {
-      return parts.length === 1
-        && "value" in part
-        && typeof part.value === "string"
-        && part.value.startsWith("https://");
-    }
-    if (part.type === "imessage_app") {
-      return parts.length === 1
-        && "url" in part
-        && typeof part.url === "string"
-        && part.url.startsWith("https://")
-        && "fallback_text" in part
-        && typeof part.fallback_text === "string"
-        && part.fallback_text.trim().length > 0
-        && "app" in part
-        && Boolean(part.app)
-        && typeof part.app === "object"
-        && "layout" in part
-        && Boolean(part.layout)
-        && typeof part.layout === "object";
-    }
-    if (part.type !== "media") {
-      return false;
-    }
-    return (
-      "attachment_id" in part
-      && typeof part.attachment_id === "string"
-      && part.attachment_id.trim().length > 0
-    ) || (
-      "url" in part
-      && typeof part.url === "string"
-      && part.url.trim().length > 0
-    );
+  const message = payload.message as Record<string, unknown>;
+  if (message.idempotency_key !== undefined
+    && (!isNonemptyLinqString(message.idempotency_key) || message.idempotency_key.length > 255)) {
+    return false;
+  }
+  return parts.every((part, index) => {
+    if (!isObservedLinqMessagePart(part, parts.length)) return false;
+    // The provider requires a media boundary between text parts.
+    return part.type !== "text" || index === 0 || parts[index - 1]?.type !== "text";
   });
+}
+
+function isObservedLinqMessagePart(
+  part: unknown,
+  partCount: number,
+): part is Record<string, unknown> {
+  if (!part || typeof part !== "object" || Array.isArray(part) || !("type" in part)) return false;
+  const value = part as Record<string, unknown>;
+  switch (value.type) {
+    case "text":
+      return isNonemptyLinqString(value.value) && value.value.length <= 10_000;
+    case "link":
+      return partCount === 1 && isLinqHttpsUrl(value.value, 2048);
+    case "imessage_app":
+      return partCount === 1 && isObservedLinqAppPart(value);
+    case "media":
+      return value.url === undefined
+        ? isNonemptyLinqString(value.attachment_id)
+        : value.attachment_id === undefined && isLinqHttpsUrl(value.url);
+    default:
+      return false;
+  }
+}
+
+function isObservedLinqAppPart(part: Record<string, unknown>): boolean {
+  const app = part.app;
+  const layout = part.layout;
+  if (!app || typeof app !== "object" || Array.isArray(app)
+    || !layout || typeof layout !== "object" || Array.isArray(layout)) return false;
+  const identity = app as Record<string, unknown>;
+  const fields = layout as Record<string, unknown>;
+  if (!isNonemptyLinqString(identity.bundle_id) || identity.bundle_id.includes(":")
+    || !isNonemptyLinqString(identity.name)
+    || typeof identity.team_id !== "string" || !/^[A-Z0-9]{10}$/u.test(identity.team_id)) return false;
+  if (!["caption", "subcaption", "trailing_caption", "trailing_subcaption", "image_url"]
+    .some((field) => isNonemptyLinqString(fields[field]))) return false;
+  if (part.fallback_text !== undefined && !isNonemptyLinqString(part.fallback_text)) return false;
+  if (part.url === undefined) return true;
+  return isLinqHttpsUrl(part.url, 2048)
+    || (typeof part.url === "string" && part.url.startsWith("data:") && part.url.length <= 16_384);
+}
+
+function isNonemptyLinqString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isLinqHttpsUrl(value: unknown, maxLength = Number.POSITIVE_INFINITY): value is string {
+  if (!isNonemptyLinqString(value) || value.length > maxLength) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function readObservedLinqMessageLink(request: ObservedLinqRequest): string | null {
