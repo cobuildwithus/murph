@@ -1,3 +1,4 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -51,9 +52,6 @@ import {
   type HostedStandbySlotBinding,
 } from "../src/standby-runner-contract.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
-import {
-  createHostedBundleStore,
-} from "../src/bundle-store.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
 } from "../src/browser-vault-store.ts";
@@ -8935,7 +8933,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: getTestHostedRuntimeRootKey("runtime"),
       keyId: "udrk:runtime:test-root",

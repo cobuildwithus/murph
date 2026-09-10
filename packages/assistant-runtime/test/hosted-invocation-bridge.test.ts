@@ -71,7 +71,6 @@ import {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
   checkpointHostedRuntimeBridgeWebWorkspace,
-  checkpointHostedRuntimeBridgeWorkspace,
   type HostedRuntimeBridgeCheckpointLease,
   type HostedRuntimeBridgeCheckpointLeaseErrorCode,
   type HostedRuntimeBridgeCheckpointLeaseStage,
@@ -141,8 +140,6 @@ describe("checkpoint bridge post-Web lease diagnostics", () => {
       it(`projects checkpointed=${checkpointed}, matchesResponse=${matchesResponse} without new effects`, async () => {
         let liveLease: HostedRuntimeBridgeCheckpointLease = lease;
         const readCurrentLease = vi.fn(async () => liveLease);
-        const snapshotWorkspace = vi.fn(async () => new Uint8Array([1, 2, 3]));
-        const writeBundle = vi.fn(async () => null);
         const checkpointWorkspace = vi.fn(async () => {
           liveLease = {
             ...lease,
@@ -151,13 +148,11 @@ describe("checkpoint bridge post-Web lease diagnostics", () => {
           return { ...response, checkpointed };
         });
 
-        const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWorkspace({
+        const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWebWorkspace({
           checkpointWorkspace,
           readCurrentLease,
           request,
-          snapshotWorkspace,
           userId: lease.userId,
-          writeBundle,
         }), { code: "stale_workspace_version", stage: "after_web_checkpoint" });
 
         expect(error.postWebCheckpoint).toEqual({
@@ -167,9 +162,7 @@ describe("checkpoint bridge post-Web lease diagnostics", () => {
         expect(error.message).toBe(
           "Hosted runtime bridge checkpoint lease validation failed after_web_checkpoint.",
         );
-        expect(readCurrentLease).toHaveBeenCalledTimes(4);
-        expect(snapshotWorkspace).toHaveBeenCalledOnce();
-        expect(writeBundle).toHaveBeenCalledOnce();
+        expect(readCurrentLease).toHaveBeenCalledTimes(2);
         expect(checkpointWorkspace).toHaveBeenCalledExactlyOnceWith(request);
         for (const sensitive of [
           ...Object.values(lease), responseVersion, differentVersion,
@@ -193,28 +186,19 @@ describe("checkpoint bridge post-Web lease diagnostics", () => {
   }
 
   it.each([
-    [1, "before_snapshot"],
-    [2, "before_bundle_write"],
-    [3, "before_web_checkpoint"],
-  ] as const)("omits response metadata on lease read %i at %s", async (staleRead, stage) => {
-    let leaseReads = 0;
-    const readCurrentLease = vi.fn(async () => {
-      leaseReads += 1;
-      return leaseReads === staleRead
-        ? { ...lease, workspaceVersion: responseVersion }
-        : lease;
-    });
-    const snapshotWorkspace = vi.fn(async () => new Uint8Array([1]));
-    const writeBundle = vi.fn(async () => null);
+    ["missing_lease", null],
+    ["stale_user", { ...lease, userId: "member_synthetic_other" }],
+    ["stale_attempt", { ...lease, attemptId: "attempt_synthetic_other" }],
+    ["stale_lease_generation", { ...lease, leaseGeneration: "940000000000000002" }],
+    ["stale_workspace_version", { ...lease, workspaceVersion: responseVersion }],
+  ] as const)("rejects pre-Web %s before checkpointing", async (code, liveLease) => {
+    const readCurrentLease = vi.fn(async () => liveLease);
     const checkpointWorkspace = vi.fn(async () => response);
-    const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWorkspace({
-      checkpointWorkspace, readCurrentLease, request, snapshotWorkspace,
-      userId: lease.userId, writeBundle,
-    }), { code: "stale_workspace_version", stage });
+    const error = await expectLeaseFailure(checkpointHostedRuntimeBridgeWebWorkspace({
+      checkpointWorkspace, readCurrentLease, request, userId: lease.userId,
+    }), { code, stage: "before_web_checkpoint" });
     expect(error.postWebCheckpoint).toBeUndefined();
-    expect(readCurrentLease).toHaveBeenCalledTimes(staleRead);
-    expect(snapshotWorkspace).toHaveBeenCalledTimes(staleRead > 1 ? 1 : 0);
-    expect(writeBundle).toHaveBeenCalledTimes(staleRead > 2 ? 1 : 0);
+    expect(readCurrentLease).toHaveBeenCalledOnce();
     expect(checkpointWorkspace).not.toHaveBeenCalled();
   });
 
