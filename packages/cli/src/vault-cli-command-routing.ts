@@ -19,7 +19,6 @@ export async function registerScopedVaultCliCommand(input: {
       return
     }
     case 'assistant':
-    case 'chat':
     case 'doctor':
     case 'run':
     case 'status':

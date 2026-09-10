@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 101,
+  "item": {
+    "id": "direct-local-assistant",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A simpler local assistant",
+    "summary": "Local assistant commands now run directly. The terminal chat screen and optional assistant HTTP daemon have retired.",
+    "details": "Use assistant ask for a single turn and assistant run for configured auto-reply. Your saved vault, sessions, and transcripts remain in place.",
+    "sourcePullRequests": [],
+    "relevanceTags": [
+      "assistant"
+    ]
+  }
+}

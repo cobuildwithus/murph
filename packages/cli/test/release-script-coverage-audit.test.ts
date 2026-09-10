@@ -5206,7 +5206,6 @@ exit 1
       bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
-        '@murphai/assistantd',
         '@murphai/clinical-records',
         '@murphai/core',
         '@murphai/device-syncd',

@@ -14,7 +14,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 
 - a file-native vault with canonical writes owned by `packages/core`
 - the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
-- provider-backed local assistant chat and automation, with runtime state under `vault/.runtime/operations/assistant/**`
+- provider-backed local assistant turns and automation, with runtime state under `vault/.runtime/operations/assistant/**`
 - a public Health Commons in `packages/health-commons` for protocol pages, biomarker pages, source pages, exact revisions, and generated outcome summaries
 - a two-layer knowledge system: stable health reference pages under `bank/library/**` plus a non-canonical compiled personal wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
 - inbox capture, assistant attachment evidence, and parser-driven audio/video transcription
@@ -25,7 +25,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
   `cobuildwithus/murph-cloud` owns the worker implementation, integration CI,
   and production Render deployment
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
-- workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
+- workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/assistant-runtime`, plus the public contract package `@murphai/gateway-core`
 
 ## Install
 
@@ -133,11 +133,10 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/device-syncd`      | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon.                                                              |
 | `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
 | `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
-| `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI.                                                |
+| `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, and terminal logging.                                                |
 | `packages/setup-cli`         | Workspace-private CLI-only onboarding, host setup, and setup-wizard package.                                                               |
 | `packages/gateway-core`      | Headless transport-neutral gateway boundary.                                                                                               |
 | `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths.                                                       |
-| `packages/assistantd`        | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane.                                          |
 | `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
 | `packages/openclaw-plugin`   | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault.             |
 | `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, encrypted mailbox intake, workspace checkpoints, and hosted runtime status/logs. |
@@ -150,9 +149,8 @@ Murph now has three distinct runtime tiers:
 
 ### 1. Local operator surface
 
-- `vault-cli` / `murph` for vault operations, assistant chat, automation, onboarding, and diagnostics
+- `vault-cli` / `murph` for vault operations, assistant turns, automation, onboarding, and diagnostics
 - the workspace-private `packages/device-syncd` runtime for local wearable sync
-- the workspace-private `packages/assistantd` daemon for the local assistant control plane
 
 ### 2. Hosted control plane
 
