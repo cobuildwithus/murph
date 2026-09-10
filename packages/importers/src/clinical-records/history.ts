@@ -64,7 +64,11 @@ export function buildFhirHistoryNote(resource: Resource): ({
     `Provider ${resource.resourceType} record. Statuses and statements below are as recorded by the source.`,
     ...(resource.resourceType.startsWith("Medication") ? ["A medication order, statement or dispense does not establish that a dose was taken."] : []),
     clinicalDate ? `Clinical record date: ${clinicalDate}` : `Record updated: ${occurredAt}. Clinical event date is not available.`,
-    JSON.stringify(selected, null, 2),
+    JSON.stringify(selected, (_key, value: unknown) => {
+      // JSON object order is not clinical content; array order remains meaningful.
+      if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, Reflect.get(value, key)]));
+    }, 2),
   ].join("\n\n"));
   if (!note) return null;
   const label = ["code", "medicationCodeableConcept", "medicationReference", "vaccineCode", "description", "title", "type"]

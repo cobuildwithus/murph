@@ -246,6 +246,52 @@ describe("importClinicalFhirSnapshot", () => {
     }
   });
 
+  it("deduplicates reordered hospital records within a snapshot and across retrieval jobs", async () => {
+    const procedure = {
+      resourceType: "Procedure", id: "same-procedure", subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" }, status: "completed",
+      code: { coding: [{ system: "http://example.test/procedures", code: "synthetic", display: "Synthetic procedure" }] },
+      performedDateTime: "2010-04-02T12:00:00.000Z", note: [{ text: "First" }, { text: "Second" }],
+    };
+    const reordered = Object.fromEntries(Object.entries({
+      ...procedure, code: { coding: [{ display: "Synthetic procedure", code: "synthetic", system: "http://example.test/procedures" }] },
+    }).reverse());
+    const base = await createSnapshotInput({ pages: [], resourceTypes: ["Procedure", "Observation"] });
+    const slices: ClinicalFhirRetrievalSlice[] = [
+      { resourceType: "Procedure", queryScopeId: "procedure-orders", sliceId: "whole", coverage: "whole-family", queryFingerprint: "1".repeat(64) },
+      { resourceType: "Procedure", queryScopeId: "procedure-surgeries", sliceId: "whole", coverage: "whole-family", queryFingerprint: "2".repeat(64) },
+      { resourceType: "Observation", queryScopeId: "observation", sliceId: "whole", coverage: "whole-family", queryFingerprint: "3".repeat(64) },
+    ];
+    const input: ClinicalFhirSnapshotImportInput = {
+      ...base, retrievalSlices: slices,
+      completedRetrievalSlices: slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+      pages: slices.map(({ resourceType, queryScopeId, sliceId }, index) => ({
+        resourceType, queryScopeId, sliceId,
+        content: fhirBundle([index === 0 ? procedure : index === 1 ? reordered : heartRateObservation("unrelated-vital")]),
+      })),
+    };
+    expect((await importClinicalFhirSnapshot(input)).canonical)
+      .toMatchObject({ createdCount: 2, skippedExistingCount: 1 });
+    const lookup = { vaultRoot: input.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "procedure", resourceId: procedure.id };
+    const saved = await findEventByExternalRef(lookup);
+    expect(saved?.note).toContain('"text": "First"');
+    expect(saved?.note?.indexOf('"text": "First"')).toBeLessThan(saved?.note?.indexOf('"text": "Second"') ?? -1);
+    const repeat = { ...input, retrievalJobId: "reordered-repeat", pages: input.pages.map((page, index) => index < 2 ? { ...page, content: fhirBundle([index === 0 ? reordered : procedure]) } : page) };
+    expect((await importClinicalFhirSnapshot(repeat)).canonical)
+      .toMatchObject({ createdCount: 0, skippedExistingCount: 3 });
+    expect(await findEventByExternalRef(lookup)).toEqual(saved);
+    for (const [index, changed] of [
+      { ...procedure, status: "not-done" },
+      { ...procedure, note: [...procedure.note].reverse() },
+    ].entries()) {
+      await expect(importClinicalFhirSnapshot({
+        ...input, retrievalJobId: `genuine-conflict-${index}`,
+        pages: input.pages.map((page, pageIndex) => pageIndex === 0 ? { ...page, content: fhirBundle([changed]) } : page),
+      })).rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+      expect(await findEventByExternalRef(lookup)).toEqual(saved);
+    }
+  });
+
   it("keeps provider allergy history source-versioned across replay, correction and retraction", async () => {
     const resource = {
       resourceType: "AllergyIntolerance", id: "historical-allergy",
