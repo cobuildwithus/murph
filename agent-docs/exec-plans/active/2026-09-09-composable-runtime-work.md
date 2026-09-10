@@ -430,3 +430,24 @@ false-completion path and retains the existing authority, acknowledgment, and
 foreground-priority boundaries.
 The complexity guard passes: root debt equals main at 549 and max 252 is unchanged;
 mailbox debt 20 to 19, runner 59 to 58, independent owner max 16.
+
+
+### Round-six CI correction
+
+Broad platform-a CI exposed nine wake-projection failures in the round-six
+candidate. The moved cleanup was too broad: an arbitrary checkpoint could clear
+a due device wake even without a mailbox task owning it. Deferred-effect wakes,
+late continuations, and publication-only checkpoints must retain that authority.
+The parent narrowed replacement to an observed current device mailbox retry or
+completed-work recording. Both sites use one small pure wake-selection function;
+its extraction removes duplicate deadline conversion and adds no state owner.
+The exact existing failure tests are unchanged.
+
+The seven-file correction run passes 167 cases, including all nine CI failures,
+the closed-loop import proof, and both pre-service restore regressions. A second
+run passes all 260 cases in the remaining ten entrypoint files. Together they
+cover every runtime entrypoint test file plus concurrent imports: 427 passing
+cases. Runtime typecheck and complexity guard pass; root debt is 548 versus main's
+549, maximum 252 unchanged. ReviewGPT round six keeps its original capture owner
+and submitted head while this bounded CI correction is pushed; the next exact
+candidate review and CI remain required.

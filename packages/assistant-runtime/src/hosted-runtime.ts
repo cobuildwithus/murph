@@ -4951,20 +4951,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
         && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
         && Date.parse(durableWake.nextWakeAt) > Date.parse(pendingWake.nextWakeAt);
-      const followUpCheckpointWake = selectEarliestHostedRuntimeWake([
-        {
-          at: pendingWake.nextWakeAt,
-          reason: pendingWake.nextWakeReason,
-        },
-        {
-          at: durableWake.nextWakeAt,
-          reason: durableWake.nextWakeReason,
-        },
-      ]);
-      pendingWake = {
-        nextWakeAt: followUpCheckpointWake.nextWakeAt,
-        nextWakeReason: followUpCheckpointWake.nextWakeReason,
-      };
+      pendingWake = selectHostedRuntimeWakeAfterSystemWork(pendingWake, {
+        at: durableWake.nextWakeAt,
+        reason: durableWake.nextWakeReason,
+      });
       if (durableWake.nextWakeAt !== null) {
         // The selected predecessor is the next step required to expose a
         // masked durable continuation. Presenting it removes only that key;
@@ -7091,17 +7081,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             checkpointWakeInterruption.signal?.throwIfAborted();
             const quiescentMailboxWake = await resolveHostedIdleBoundarySystemMailboxWake({ vaultRoot: restored.vaultRoot });
             const idleWake = checkpointInput.idleCheckpointWake;
-            // Mailbox state owns due device work, including attempts that yielded
-            // before importing. Do not republish their consumed alarm.
-            const quiescentWake = selectEarliestHostedRuntimeWake([
-              {
-                at: idleWake.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-                    && hostedRuntimeWakeIsDue(idleWake.nextWakeAt)
-                  ? null : idleWake.nextWakeAt,
-                reason: idleWake.nextWakeReason,
-              },
-              quiescentMailboxWake,
-            ]);
+            const quiescentWake = quiescentMailboxWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+              ? selectHostedRuntimeWakeAfterSystemWork(idleWake, quiescentMailboxWake)
+              : selectEarliestHostedRuntimeWake([
+                  { at: idleWake.nextWakeAt, reason: idleWake.nextWakeReason },
+                  quiescentMailboxWake,
+                ]);
             const defaultProcessingWake =
               await resolveHostedSystemMailboxProcessingModeWake({
                 assistantExecutionBlocked,
@@ -9372,6 +9357,23 @@ function selectEarliestHostedRuntimeWake(
     nextWakeAt: selected.at,
     nextWakeReason: selected.reason,
   };
+}
+
+// Call only after recording completed work or observing its current mailbox
+// retry. An unrelated checkpoint does not prove that a device alarm was consumed.
+function selectHostedRuntimeWakeAfterSystemWork(
+  previous: HostedRuntimePendingWake,
+  next: HostedRuntimeWakeCandidate,
+): HostedRuntimePendingWake {
+  return selectEarliestHostedRuntimeWake([
+    {
+      at: previous.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+          && hostedRuntimeWakeIsDue(previous.nextWakeAt)
+        ? null : previous.nextWakeAt,
+      reason: previous.nextWakeReason,
+    },
+    next,
+  ]);
 }
 
 function resolveHostedSystemMailboxReturnCheckpointStage(input: {

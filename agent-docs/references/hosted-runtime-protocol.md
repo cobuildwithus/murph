@@ -836,7 +836,9 @@ suppress it. A device attempt that yields before service initialization keeps
 its exact hint pending with the requested retry deadline; no-retry unavailable
 results remain terminal. At the quiescent snapshot boundary, remaining mailbox
 work and returned provider deadlines replace the consumed alarm, including
-yields that have no acknowledgment effect.
+yields that have no acknowledgment effect. Clearing a due device carry requires
+completed-work recording or a current device mailbox retry; unrelated checkpoint
+publication preserves unconsumed device wakes and durable continuations.
 
 Both assistant and model-free wake deadlines remain independently available.
 Workspace metadata publication is serialized against the latest accepted version
