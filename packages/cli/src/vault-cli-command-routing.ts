@@ -137,12 +137,12 @@ export async function registerScopedVaultCliCommand(input: {
     case 'experiment': {
       const [
         { registerExperimentCommands },
-        services,
+        { createCliVaultUsecaseServices },
       ] = await Promise.all([
         import('./commands/experiment.js'),
-        createScopedVaultServices(),
+        import('./vault-cli-services.js'),
       ])
-      registerExperimentCommands(input.cli, services)
+      registerExperimentCommands(input.cli, createCliVaultUsecaseServices())
       return
     }
     case 'exercise': {
@@ -342,8 +342,8 @@ export async function registerScopedVaultCliCommand(input: {
 }
 
 async function createScopedVaultServices() {
-  const { createCliVaultUsecaseServices } = await import(
-    './vault-cli-services.js'
+  const { createIntegratedVaultServices } = await import(
+    '@murphai/vault-usecases/vault-services'
   )
-  return createCliVaultUsecaseServices()
+  return createIntegratedVaultServices()
 }

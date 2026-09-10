@@ -1,6 +1,6 @@
 # Restore assistant ownership of reminder provenance reads
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -45,6 +45,8 @@ Updated: 2026-09-10
 ## Decisions
 
 - Reuse `readAssistantOutboxIntent` through a lazy CLI-owned callback.
+- Only the scoped experiment route loads that CLI composition helper; other
+  scoped commands retain the direct neutral service factory and import budget.
 - Keep experiment-specific validation in vault usecases; do not add a reverse dependency.
 - No member-visible behavior or provider input change is intended.
 
@@ -58,4 +60,19 @@ Updated: 2026-09-10
   for ordinary logging, and fail-closed missing or mismatched owner evidence.
 - Existing complexity hotspots are unchanged; the new owner forwarding adds no
   product branches to the canonical experiment writer.
-- Pending: pushed candidate, required PR CI, and final ReviewGPT.
+- Full CI found that loading the helper for every scoped command added one
+  module beyond the condition-list ceiling. Narrowing composition to the
+  experiment route restores the existing budget without weakening its guard.
+- Passed after that correction: explicit runtime artifact rebuild, CLI
+  typecheck, and all 11 import-surface, provenance, and wiring tests across
+  three suites. Complexity and workspace boundary guards passed again.
+
+## Completion
+
+- Implementation and parent candidate review are complete in PR #3145.
+- ReviewGPT round 1 passed at `89459fdc790c2df4a2a3ba011f9d875bf8a55792`
+  with zero qualifying findings; the captured model identity is verified.
+- The final scoped-loading correction requires the next ReviewGPT round and
+  required CI on the final pushed head. Those remain PR merge-readiness gates;
+  this plan records implementation completion, not permission to merge or deploy.
+Completed: 2026-09-10
