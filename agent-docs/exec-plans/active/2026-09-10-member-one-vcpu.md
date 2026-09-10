@@ -70,6 +70,14 @@ Updated: 2026-09-10
 - Passed: Cloudflare typecheck, complexity diff (no increased hotspot debt),
   and the real public/private environment forwarding contract (90 variables,
   37 secrets). Full workspace/private verification and PR gates remain pending.
+- Full workspace typecheck passed. Public final ReviewGPT round 1 passed on
+  the initial candidate with verified Pro evidence and 366-second capture.
+- CI exposed missing local harness namespace parity and stale capacity
+  expectations. The correction changes isolated local proof scaffolding only;
+  142 focused tests, both affected typechecks and complexity diff passed.
+- Private exact-head CI verification passed. Local umbrella verification reached
+  four timeouts in unchanged Temporal deploy-controller tests; focused contract
+  coverage and private typecheck passed. Deployment and final CI remain pending.
 
 - Focused allocation, slot lifecycle, namespace, configuration, staging and
   deployment tests; Cloudflare typecheck and complexity diff.
