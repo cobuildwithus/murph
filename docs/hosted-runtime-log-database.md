@@ -696,6 +696,146 @@ retained sample. Histograms merge by summing corresponding counts; never compute
 per-call percentiles from per-profile averages. Truncation/loss means even those
 bounds describe the retained samples, not the complete population.
 
+### Finite CLI failure counts (optional, same timing identity)
+
+Each non-successful invocation from a new producer contributes at most one
+`failures: [{ code, stage, count }]` observation inside its existing
+command/outcome entry. For example, a synthetic `experiment session log` throw
+with code `invalid_payload` and context stage `validation` produces that exact
+pair with count 1. A successful invocation has no failure fields. An observed
+nonzero exit without original error detail contributes `unknown / unknown`, not
+an apparent success. EPIPE keeps its existing `unknown` outcome; it is not
+reclassified as a product failure.
+
+The sole portable vocabulary, validation and merge owner is
+`packages/runtime-state/src/cli-timing.ts`. Codes and stages use exact finite
+membership, never pattern-admitted provider strings. It admits the actionable
+CLI/knowledge codes, fixed validation types and selected Node/transport codes;
+other values collapse to `unknown`. Capture reads only own data properties for
+`code`, `context.stage`, direct `stage`, and (when code is absent) three exact
+validation type names. It does not call getters, enumerate objects, inspect
+messages/field errors, follow prototypes/causes, or retain original errors or
+contexts. Code-only observations are diagnostic hints, not authorization or a
+claim that a reported stage is independently verified. Existing dynamic-tool
+finite stage/reason/category diagnostics remain separate and unchanged.
+
+The existing Incur error bridge observes ordinary handler throws **before** its
+public error projection can discard typed fields. Dispatch and invocation
+catches provide a fallback only: first observation wins, with no per-catch
+increment and no cross-invocation error-object cache. Recursive batch children
+retain their own scopes; the container is not an additional failure sample.
+Stop-on-error and the existing rejection of nested batch before child entry are
+unchanged. An unentered child has no invented diagnostic.
+
+There are at most **8 code/stage pairs per command/outcome**, within the existing
+32-command limit. Additional distinct pairs increment optional `droppedFailures`
+by their observation count; repeats of already-retained pairs still aggregate.
+`sum(failures.count) + droppedFailures <= calls`. These are safe positive counts
+(or a safe nonnegative drop count), not extra CLI calls. Malformed optional
+failure details are removed independently, retaining valid timing and usage.
+Unknown future codes/stages normalize to constants; resulting duplicate pairs
+coalesce. Old entries without these fields remain unchanged, including mixed
+old/new merges: missing old detail is **not** backfilled with fabricated unknown
+observations. Counts can therefore cover fewer than the entry's error calls.
+
+Existing UDP/HTTP fitting still removes whole command entries and charges their
+calls to `droppedCalls`; it does not reinterpret `droppedFailures` or split a
+command into duplicate identities. Whole-entry omission also loses that entry's
+failure details. The 8 KiB envelope, 16 KiB complete usage body, packet budget,
+retention, clocks, outcomes and all legacy accounting are unchanged. There is no
+new stream, collector, marker, DB field/table, retry, awaited operation or
+model-visible output. Without the existing timing transport, capture is inert.
+
+**Coverage limits:** Incur 0.5.1's `internal/command.ts` puts `Parser.parse`
+for resolved command arguments/options and command-level environment validation
+inside the middleware chain. Murph's `patches/incur@0.5.1.patch` at base
+`4949045492c` preserves that ordering and maps both `Errors.ValidationError` and
+`Errors.ParseError` to `VALIDATION_ERROR / validation`; the repository's
+`incur-smoke.test.ts` also checks this recovery contract. Capture uses those
+exact type names when no code is available, not the unpatched upstream
+ParseError fallback. A direct ZodError maps to `invalid_payload / validation`,
+matching the CLI projection. Qualify with the real-entry tests against the
+installed patched dependency, not upstream source alone.
+Global/configuration parsing, CLI-level environment and vars validation, and
+routing can precede middleware; some failures expose only an exit or reach the invocation
+fallback without a resolved path (`other`). Returned `c.error(...)` sentinels
+are not throws. Stream-consumption errors are handled outside the suspended
+middleware chain. Those paths may provide only an unknown observation, or no
+completion at all. Later asynchronous failures, hard kills and lost datagrams
+retain the existing missingness. No output parsing or additional Incur runtime
+hook is introduced to fill those gaps.
+
+**Compatible rollout:** admit this optional extension in downstream Web/hosted
+usage parsers, usage-body fitting and the engine receiver/profile consumer
+before updating CLI producers. They all use the portable normalizer; no second
+schema tree or new bundler ownership is needed. Older timing-aware consumers
+accept the same command/outcome identity and strip the new fields, preserving
+calls/phases and usage accounting. Older producers remain readable unchanged.
+A producer-first or consumer rollback loses detail, not billing validity. The
+history-backed test uses `MURPH_CLI_FAILURE_COMPAT_BASE=4949045492c` to load both
+actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains a
+separate, pre-timing rollout proof.
+
+### Bounded failure-frequency inspection and decision threshold
+
+Run on the **primary usage database** after compatible consumers and producers
+are present. This query caps input at 10,000 usage rows over 72 hours and output
+at 50 finite command/code/stage groups. It uses existing turn IDs only internally
+for aggregation; no IDs or private content are returned. The maximum observed
+count per turn/pair avoids adding repeated provider-request/profile snapshots;
+`observed_failures_lower_bound` is conservative, not an exact all-attempt total.
+A row-cap hit requires a narrower fixed window before making coverage claims.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT turn_id, turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= (now() AT TIME ZONE 'UTC') - interval '72 hours'
+    AND occurred_at < (now() AT TIME ZONE 'UTC')
+  ORDER BY occurred_at DESC
+  LIMIT 10000
+), commands AS (
+  SELECT turn_id, c
+  FROM rows
+  CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+    AND c ->> 'command' IN ('experiment session log', 'knowledge upsert', 'other')
+    AND c ->> 'outcome' = 'error'
+), per_turn AS (
+  SELECT turn_id, c ->> 'command' AS command,
+         f ->> 'code' AS code, f ->> 'stage' AS stage,
+         max((f ->> 'count')::numeric) AS observations
+  FROM commands
+  CROSS JOIN LATERAL jsonb_array_elements(c -> 'failures') f
+  GROUP BY turn_id, c ->> 'command', f ->> 'code', f ->> 'stage'
+)
+SELECT command, code, stage, count(*) AS independent_turns,
+       sum(observations) AS observed_failures_lower_bound,
+       (code <> 'unknown' AND count(*) >= 2) AS investigate,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM per_turn
+GROUP BY command, code, stage
+ORDER BY independent_turns DESC, observed_failures_lower_bound DESC, command, code, stage
+LIMIT 50;
+```
+
+Investigate an implementation change only when the **same finite command/code/
+stage failure occurs in at least two independent turns**, then reproduce that
+specific path synthetically. One noisy loop is one turn, however high its count.
+Unknowns are a coverage signal, not evidence for a particular product fix. Check
+rollout version, absent diagnostics, `droppedFailures`, `droppedCalls` and
+transport completeness before treating frequencies as representative. This
+telemetry does not by itself establish bad input, missing ownership, a conflict,
+or a product defect; do not presume or repair experiment behavior from it.
+
+Failure-extension regression coverage additionally includes real shell/entry
+fake handlers and real Incur errors over loopback, first-observation dedup,
+private/hostile properties, mixed successes/errors/stages, current usage parsing,
+actual old-reader skew, usage-body fitting and Web persisted normalization. These
+are synthetic local tests; no real-model journey or production destination is
+needed for this extension's unchanged output contract.
+
 ### Bounded latest-72h / prior-72h inspection
 
 Run on the **primary usage database**. This example uses one stable UTC anchor,

@@ -9,7 +9,6 @@ import {
   type CsvSampleImportResult,
   type CsvSampleImportWriteResult,
   CsvSampleImportError,
-  parseDelimitedRows,
   prepareCsvSampleImport,
   profileCsvSampleFile,
 } from "./csv-sample-import-planner.ts";
@@ -221,4 +220,4 @@ function normalizeWriteResult(value: unknown): CsvSampleImportWriteResult {
   };
 }
 
-export { parseDelimitedRows, prepareCsvSampleImport, profileCsvSampleFile };
+export { prepareCsvSampleImport, profileCsvSampleFile };

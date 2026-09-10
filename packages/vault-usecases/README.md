@@ -31,6 +31,12 @@ When an exact read feeds a mutation, carry the observed lifecycle revision or
 source revision into the canonical core writer rather than treating projection
 state as write authority.
 
+Experiment edit option compilation lives in `src/experiment-onboarding-options.ts`
+alongside onboarding capture and assistant-support options. The pure builders
+validate protocol references, run logging, analysis, and dates. The experiment
+usecase owns schedule-file reads, current frontmatter, canonical locking, and
+updates, preserving date and logging validation before schedule reads.
+
 ## Clinical FHIR snapshots
 
 `@murphai/vault-usecases/clinical-records` is the explicit execution seam for a

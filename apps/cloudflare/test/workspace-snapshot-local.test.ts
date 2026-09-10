@@ -38,12 +38,12 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   createEncryptedWorkspaceSnapshotFile,
-  readHostedWorkspaceSnapshotProcessFailureDiagnostics,
   type EncryptedWorkspaceSnapshotFile,
   restoreEncryptedWorkspaceSnapshot,
   restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
   waitForHostedWorkspaceSnapshotProcessPipe,
 } from "../src/workspace-snapshot-local.js";
+import { readHostedWorkspaceSnapshotProcessFailureDiagnostics } from "../src/workspace-snapshot-process-diagnostics.ts";
 
 const execFileAsync = promisify(execFile);
 

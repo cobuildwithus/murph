@@ -48,6 +48,7 @@ import type {
   BrowserVaultSummaryConfidence,
 } from "./shared.ts";
 import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
+import { cloneJson, isBrowserSafeJson } from "./json-values.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -2897,27 +2898,6 @@ function cloneRecord(record: JsonRecord): JsonRecord {
   }
 
   return output;
-}
-
-function cloneJson(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function isBrowserSafeJson(value: unknown): boolean {
-  if (value === null) {
-    return true;
-  }
-
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-
-  if (Array.isArray(value)) {
-    return value.every(isBrowserSafeJson);
-  }
-
-  const record = readRecord(value);
-  return record ? Object.values(record).every(isBrowserSafeJson) : false;
 }
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {

@@ -378,9 +378,12 @@ every visible item is a system-lane `device-sync.wake`. This includes dirty,
 connection, disconnect, manual-reconcile, and scheduled-reconcile maintenance;
 none is human conversation work. A full page whose high-water lies beyond its
 visible suffix is incomplete and remains foreground work because later rows are
-not yet classified. A conversation row, another system kind, an empty or
-uninspectable prefix, or a failed classification fetch likewise remains
-foreground. A successful classification prefetch is reused by the foreground
+not yet classified. A completely empty response that proves every fetched lane
+is caught up is consumed without preempting projection or scheduling another
+assistant pass when no local state mutation, ready image completion, or owner
+handoff requires service; otherwise repeated notifications can starve
+checkpoint-backed completion. A conversation row, another system kind, an incomplete or
+uninspectable prefix, or a failed classification fetch remains foreground. A successful classification prefetch is reused by the foreground
 import instead of fetched a second time. An invocation that exhausts its mailbox
 budget returns the existing durable continuation before making another
 projection offer. Once graceful shutdown is observed, the retiring runtime
@@ -4037,6 +4040,16 @@ routing.
   size, and warning threshold)
 
 ### Cloudflare Owns
+
+The optional single-account size experiment allocates opaque
+`runner-small--v-<release>--<random>` targets in `SmallRunnerContainer`.
+Selection is private and consulted only for fresh allocation; the container
+independently validates initial member eligibility. Namespace routing, retained
+sessions, cleanup and deletion use the stored exact target even after selection
+is disabled. Small runners share the serving release and existing binding/fence
+lifecycle, but never enter shared standby inventory. Resource shape, protected
+provisioning and the reader rollback floor are owned by
+[`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#selected-account-size-experiment).
 
 - per-user Durable Object routing
 - lease/fencing generation

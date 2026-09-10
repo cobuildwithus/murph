@@ -32,6 +32,45 @@ additional deploy-smoke slot. The unused member application stays at zero.
 The scaffold declares the budget on `RunnerContainer`; staging moves that budget
 to `NextRunnerContainer` when the live release selects that namespace.
 
+### Selected-account size experiment
+
+`SmallRunnerContainer` reserves one additional slot outside the regular fleet
+budget: 1 vCPU, 3,072 MiB memory and 6,000 MB disk. It uses the serving runner
+image, release identity, egress policy and member lifecycle. Include this slot
+in account quota accounting. It never supplies shared standby inventory.
+
+The protected Worker secret `HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256` holds
+the lowercase SHA-256 of the selected member ID. Keep both the ID and digest
+out of source, ordinary variables and deployment summaries. Selection defaults
+off through `HOSTED_EXECUTION_SMALL_RUNNER_ENABLED=false`; enabling requires
+the private secret and secret synchronization. Only fresh allocations consult
+selection. Existing targets remain exact-member owned through normal idle,
+checkpointing and retirement, including after disabling selection.
+
+Merge the public runtime and matching private environment mappings before the
+first protected full deployment. That deployment alone requires
+`CF_BOOTSTRAP_SMALL_RUNNER=true`: migration `v9` creates the SQLite namespace
+using a full Worker deploy with selection off and every existing application
+pinned to its live image, resources and capacity. Native before/after receipts
+must remain unchanged. This is the bounded namespace-bootstrap exception to
+the ordinary version-only release flow; no application image rollout belongs
+in that bootstrap. Missing live authority, a pending candidate or an active
+native rollout stops provisioning. Clear the bootstrap control after success.
+
+Normal full releases keep selection off in the compatibility Worker, distribute
+both serving and small images, prove native convergence and smoke, then promote
+the requested selection. Worker-only releases retain an existing small image
+and cannot introduce its application. A failure leaves selection off; retry the
+same release under the existing pending-image rules. Once small targets exist,
+retain the `SmallRunnerContainer` binding and `runner-small--v-...` reader even
+when selection is disabled. An older Worker cannot recover those targets; this
+release is the rollback floor, and any rollback needs separate approval.
+
+After deployment, verify the protected native resource receipt and selected
+account's next cold allocation after normal idle. Compare existing warm ingress
+latency and matched vault CLI timing aggregates, keeping cold starts and missing
+timing coverage separate. Deployment success alone is not latency evidence.
+
 ### Migration and release order
 
 1. Read one authoritative live Worker version, its release manifest, the existing
