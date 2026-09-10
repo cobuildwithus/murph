@@ -131,10 +131,6 @@ import {
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
-  recordHostedMaterializedArtifactPaths,
-  resolveHostedMaterializedArtifactStateRelativePath,
-} from "../src/hosted-runtime/materialized-artifact-state.ts";
-import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/environment.ts";
@@ -2509,12 +2505,6 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 0x0a,
               ]),
             );
-            await recordHostedMaterializedArtifactPaths({
-              materializedArtifactPaths: new Set([
-                `vault:${referenceImageRef}`,
-              ]),
-              vaultRoot: restoredVaultRoot,
-            });
           },
           async startSnapshotSession() {
             throw new Error("Image failure route should not start snapshots.");

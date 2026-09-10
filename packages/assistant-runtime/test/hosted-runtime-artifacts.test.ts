@@ -111,7 +111,6 @@ test("v2 materialization derives bounded local file availability without a cache
   const root = await mkdtemp(path.join(tmpdir(), "murph-local-artifact-proof-"));
   const vaultRoot = path.join(root, "vault");
   const operatorHomeRoot = path.join(root, "home");
-  const materializedArtifactPaths = new Set<string>();
   try {
     await mkdir(vaultRoot);
     await mkdir(operatorHomeRoot);
@@ -121,16 +120,21 @@ test("v2 materialization derives bounded local file availability without a cache
     await writeFile(path.join(root, "outside.txt"), "outside");
     await symlink(root, path.join(vaultRoot, "linked"));
     await symlink(path.join(root, "outside.txt"), path.join(vaultRoot, "linked-file"));
-    const materialize = createHostedArtifactMaterializer({ materializedArtifactPaths, operatorHomeRoot, vaultRoot });
+    const materialize = createHostedArtifactMaterializer({ operatorHomeRoot, vaultRoot });
     const available = await materialize(["existing.txt", "operator-home:rollout.jsonl"]);
     assert.deepEqual([...available.materializedArtifactPaths].sort(), ["operator-home:rollout.jsonl", "vault:existing.txt"]);
     assert.equal(available.missingArtifactPaths.size, 0);
-    assert.equal(materializedArtifactPaths.size, 0);
+    const indexPath = path.join(vaultRoot, ".runtime/operations/assistant/hosted-materialized-artifacts.json");
+    await assert.rejects(stat(indexPath), { code: "ENOENT" });
+    await mkdir(path.dirname(indexPath), { recursive: true });
+    await writeFile(indexPath, "obsolete index contents");
+    const reconstructed = createHostedArtifactMaterializer({ operatorHomeRoot, vaultRoot });
+    assert.equal((await reconstructed(["existing.txt"])).missingArtifactPaths.size, 0);
+    assert.equal(await readFile(indexPath, "utf8"), "obsolete index contents");
     const rejected = ["missing.txt", "directory", "../outside.txt", "linked/outside.txt", "linked-file"];
     const missing = await materialize(rejected);
     assert.equal(missing.materializedArtifactPaths.size, 0);
     assert.deepEqual([...missing.missingArtifactPaths], rejected.map((p) => `vault:${p}`));
-    materializedArtifactPaths.add("vault:existing.txt");
     const oversized = await materialize(["existing.txt"], { maxFileBytes: 4 });
     assert.deepEqual([...oversized.missingArtifactPaths], ["vault:existing.txt"]);
     await rm(path.join(vaultRoot, "existing.txt"));
@@ -330,10 +334,7 @@ test.each([false, true])("hosted artifact materializer restores retained inbox m
       recursive: true,
     });
 
-    const { artifactStore } = createHostedRuntimeArtifactStoreStub();
-    const materializedArtifactPaths = new Set<string>();
     const materialize = createHostedArtifactMaterializer({
-      materializedArtifactPaths,
       mediaStore,
       operatorHomeRoot,
       vaultRoot,
@@ -348,10 +349,6 @@ test.each([false, true])("hosted artifact materializer restores retained inbox m
     const deniedLocalMedia = await materialize([imagePath], { maxFileBytes: 1 });
     assert.deepEqual([...deniedLocalMedia.missingArtifactPaths], [`vault:${imagePath}`]);
     assert.equal(deniedLocalMedia.materializedArtifactPaths.size, 0);
-    assert.deepEqual([...materializedArtifactPaths].sort(), [
-      `vault:${imagePath}`,
-      `vault:${videoPath}`,
-    ].sort());
     assert.deepEqual(
       await readFile(path.join(vaultRoot, imagePath)),
       imageBytes,
@@ -378,6 +375,7 @@ test.each([false, true])("hosted artifact materializer restores retained inbox m
     assert.equal(expired.missingArtifactPaths.size, 2);
     await assert.rejects(readFile(path.join(vaultRoot, imagePath)), { code: "ENOENT" });
     assert.equal(getCalls.length, 2);
+    await assert.rejects(stat(path.join(vaultRoot, ".runtime/operations/assistant/hosted-materialized-artifacts.json")), { code: "ENOENT" });
   } finally {
     clock.mockRestore();
     pendingProtectionRead.mockRestore();
@@ -478,9 +476,8 @@ test("ordinary canonical captures have no transient media deadline", async () =>
     const entry = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
     assert.equal(entry.recordedAt, "2025-01-01T00:00:00.000Z");
     await rm(path.join(vaultRoot, entry.relativePath));
-    const { artifactStore } = createHostedRuntimeArtifactStoreStub();
     const materialize = createHostedArtifactMaterializer({
-      materializedArtifactPaths: new Set(), mediaStore,
+      mediaStore,
       operatorHomeRoot: vaultRoot, vaultRoot,
     });
     assert.equal((await materialize([entry.relativePath])).missingArtifactPaths.size, 0);
@@ -611,15 +608,29 @@ test("acknowledged capture receipts recover media references without a newer sna
     }
     assert.deepEqual(getCalls, []);
     await assert.rejects(readFile(path.join(restoredRoot, relativePath)), { code: "ENOENT" });
-    const { artifactStore } = createHostedRuntimeArtifactStoreStub();
     const materialize = createHostedArtifactMaterializer({
-      materializedArtifactPaths: new Set(), mediaStore, operatorHomeRoot: path.join(root, "home"), vaultRoot: restoredRoot,
+      mediaStore, operatorHomeRoot: path.join(root, "home"), vaultRoot: restoredRoot,
     });
     assert.equal((await materialize([relativePath])).missingArtifactPaths.size, 0);
     assert.deepEqual(await readFile(path.join(restoredRoot, relativePath)), bytes);
     assert.equal(getCalls.length, 1);
-    await materialize([relativePath]);
+    const indexPath = path.join(restoredRoot, ".runtime/operations/assistant/hosted-materialized-artifacts.json");
+    await assert.rejects(stat(indexPath), { code: "ENOENT" });
+    const reconstructed = createHostedArtifactMaterializer({
+      mediaStore, operatorHomeRoot: path.join(root, "home"), vaultRoot: restoredRoot,
+    });
+    assert.equal((await reconstructed([relativePath])).missingArtifactPaths.size, 0);
     assert.equal(getCalls.length, 1);
+    assert.deepEqual([...(await reconstructed([relativePath], { maxFileBytes: 1 })).missingArtifactPaths], [`vault:${relativePath}`]);
+    assert.equal(getCalls.length, 1);
+    await writeFile(path.join(restoredRoot, relativePath), Buffer.alloc(bytes.length));
+    assert.equal((await reconstructed([relativePath])).missingArtifactPaths.size, 0);
+    assert.deepEqual(await readFile(path.join(restoredRoot, relativePath)), bytes);
+    assert.equal(getCalls.length, 2);
+    await rm(path.join(restoredRoot, relativePath));
+    vi.spyOn(mediaStore, "get").mockResolvedValueOnce(null);
+    assert.deepEqual([...(await reconstructed([relativePath])).missingArtifactPaths], [`vault:${relativePath}`]);
+    await assert.rejects(stat(indexPath), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

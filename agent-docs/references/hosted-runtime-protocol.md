@@ -3719,7 +3719,9 @@ replay and its artifact reads remain required recovery paths. Ordinary restored
 file availability is derived from a regular file within the selected root and
 the caller's size budget; it does not require a materialized-artifact cache entry.
 Media catalogue missing, expiry, and size decisions take precedence over local
-bytes. The materializer no longer reads legacy workspace bundles.
+bytes. Per-call materialization results remain transient; the runtime no longer
+reads or writes the obsolete materialized-artifact index. Existing index files
+remain inert. The materializer no longer reads legacy workspace bundles.
 
 Foreground assistant turns do not publish a separate Codex continuity artifact
 or snapshot pointer. Provider-native continuity remains an idle workspace

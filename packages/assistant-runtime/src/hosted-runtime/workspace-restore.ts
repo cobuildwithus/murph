@@ -58,9 +58,6 @@ import type {
   HostedRestoredExecutionContext,
 } from "./models.ts";
 import {
-  readHostedMaterializedArtifactPaths,
-} from "./materialized-artifact-state.ts";
-import {
   HostedRuntimeArtifactReadError,
   type HostedRuntimePlatform,
   type HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
@@ -83,7 +80,6 @@ export interface HostedWorkspaceRuntimeRestoreResult
   canonicalWriteReceiptCount: number;
   canonicalWriteReceiptRecoveryFailed: boolean;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
-  materializedArtifactPaths: ReadonlySet<string>;
   mode: HostedWorkspaceRuntimeRestoreMode;
   restoreWasCold: boolean;
   restoreTiming: HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | null;
@@ -232,11 +228,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       assistantStateRoot: restored.assistantStateRoot,
       operatorHomeRoot: restored.operatorHomeRoot,
     });
-    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-      vaultRoot: restored.vaultRoot,
-    });
     const materializeWorkspaceArtifacts = createHostedWorkspaceRuntimeArtifactMaterializer({
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
       platform: input.platform,
       restored,
     });
@@ -252,7 +244,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       canonicalWriteReceiptCount: receiptRecovery.count,
       canonicalWriteReceiptRecoveryFailed: false,
       materializeWorkspaceArtifacts,
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "snapshot",
       restoreWasCold: true,
       restoreTiming: restoreTiming ?? null,
@@ -265,20 +256,15 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (receiptRecovery.restored) {
     return receiptRecovery.restored;
   }
-  const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-    vaultRoot: restored.vaultRoot,
-  });
 
   return {
     ...restored,
     canonicalWriteReceiptCount: receiptRecovery.count,
     canonicalWriteReceiptRecoveryFailed: false,
     materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
       platform: input.platform,
       restored,
     }),
-    materializedArtifactPaths: restoredMaterializedArtifactPaths,
     mode: "null-bootstrap",
     restoreWasCold: true,
     restoreTiming: null,
@@ -308,7 +294,6 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
 }): Promise<
   | (HostedRestoredExecutionContext & {
       materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
-      materializedArtifactPaths: ReadonlySet<string>;
     })
   | null
 > {
@@ -349,17 +334,12 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
       assistantStateRoot: input.restored.assistantStateRoot,
       operatorHomeRoot: input.restored.operatorHomeRoot,
     });
-    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-      vaultRoot: input.restored.vaultRoot,
-    });
     return {
       ...input.restored,
       materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
         restored: input.restored,
       }),
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
     };
   } catch {
     await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.restored.vaultRoot);
@@ -834,12 +814,10 @@ function readRecordStringProperty(
 }
 
 function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
-  materializedArtifactPaths: Set<string>;
   platform: HostedWorkspaceRuntimeRestorePlatform;
   restored: HostedRestoredExecutionContext;
 }): HostedWorkspaceArtifactMaterializer {
   return createHostedArtifactMaterializer({
-    materializedArtifactPaths: input.materializedArtifactPaths,
     mediaStore: input.platform.mediaStore ?? null,
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,

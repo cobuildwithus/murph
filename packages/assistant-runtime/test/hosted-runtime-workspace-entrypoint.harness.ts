@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -498,10 +498,6 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
-import {
-  recordHostedMaterializedArtifactPaths,
-  resolveHostedMaterializedArtifactStateRelativePath,
-} from "../src/hosted-runtime/materialized-artifact-state.ts";
 import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
@@ -1077,11 +1073,18 @@ function createPlatform(input: {
         // Encrypted tar transport and staged installation are covered by Cloudflare tests.
         const bytes = await platform.artifactStore.get(ref.archive.plaintextArchiveSha256, { purpose: "workspace_restore" });
         if (!bytes) throw new Error("Workspace snapshot fixture is unavailable.");
-        await restoreHostedBundleRoots({
-          bytes,
-          expectedKind: "vault",
-          roots: { vault: durableRoot },
-        });
+        const stagedRoot = await mkdtemp(path.join(path.dirname(durableRoot), ".snapshot-fixture-"));
+        try {
+          await restoreHostedBundleRoots({
+            bytes,
+            expectedKind: "vault",
+            roots: { vault: stagedRoot },
+          });
+          await rm(durableRoot, { force: true, recursive: true });
+          await rename(stagedRoot, durableRoot);
+        } finally {
+          await rm(stagedRoot, { force: true, recursive: true });
+        }
       },
     },
   };

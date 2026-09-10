@@ -13,9 +13,6 @@ import type {
 } from "./models.ts";
 import { toHostedArtifactPathKey } from "./artifact-paths.ts";
 import {
-  recordHostedMaterializedArtifactPaths,
-} from "./materialized-artifact-state.ts";
-import {
   materializeHostedWorkspaceMediaReferences,
 } from "./media-references.ts";
 
@@ -36,14 +33,12 @@ export function createHostedArtifactUploadSink(input: {
 }
 
 export function createHostedArtifactMaterializer(input: {
-  materializedArtifactPaths: Set<string>;
   mediaStore?: HostedRuntimeMediaStore | null;
   operatorHomeRoot: string;
   vaultRoot: string;
 }): HostedWorkspaceArtifactMaterializer {
   return async (relativePaths, options) => {
     const mediaResult = await materializeHostedWorkspaceMediaReferences({
-      materializedArtifactPaths: input.materializedArtifactPaths,
       mediaStore: input.mediaStore ?? null,
       relativePaths,
       signal: null,
@@ -69,10 +64,6 @@ export function createHostedArtifactMaterializer(input: {
         missingArtifactPaths.add(key);
       }
     }
-    await recordHostedMaterializedArtifactPaths({
-      materializedArtifactPaths: mediaResult.materializedArtifactPaths,
-      vaultRoot: input.vaultRoot,
-    });
     return { materializedArtifactPaths, missingArtifactPaths };
   };
 }

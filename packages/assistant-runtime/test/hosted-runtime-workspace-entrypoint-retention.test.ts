@@ -135,10 +135,6 @@ import {
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
-  recordHostedMaterializedArtifactPaths,
-  resolveHostedMaterializedArtifactStateRelativePath,
-} from "../src/hosted-runtime/materialized-artifact-state.ts";
-import {
   createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
@@ -572,8 +568,6 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
               roots: [{
                 root: liveVaultRoot,
                 rootKey: "vault",
-                shouldIncludeRelativePath: (relativePath) =>
-                  relativePath !== resolveHostedMaterializedArtifactStateRelativePath(),
               }],
             });
             assert.ok(bundle);
@@ -643,6 +637,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       ]);
 
       await assert.rejects(access(path.join(finalVaultRoot, inboxPath)), { code: "ENOENT" });
+      await assert.rejects(access(path.join(finalVaultRoot, ".runtime/operations/assistant/hosted-materialized-artifacts.json")), { code: "ENOENT" });
       assert.deepEqual(
         await readFile(path.join(finalVaultRoot, importedRawRef)),
         documentBytes,
@@ -837,8 +832,6 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
               roots: [{
                 root: restoredVaultRoot,
                 rootKey: "vault",
-                shouldIncludeRelativePath: (relativePath) =>
-                  relativePath !== resolveHostedMaterializedArtifactStateRelativePath(),
               }],
             });
             assert.ok(bundle);

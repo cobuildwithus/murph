@@ -107,7 +107,6 @@ describe("hosted workspace restore Codex continuity", () => {
 
       assert.equal(restored.mode, "null-bootstrap");
       assert.equal(restored.restoreWasCold, true);
-      assert.equal(restored.materializedArtifactPaths.size, 0);
       await assert.rejects(readFile(path.join(restoredVaultRoot, "dirty-local-mailbox-state.txt"), "utf8"), {
         code: "ENOENT",
       });
