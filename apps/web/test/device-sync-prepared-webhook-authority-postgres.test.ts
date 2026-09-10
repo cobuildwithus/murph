@@ -2741,8 +2741,7 @@ describe.skipIf(!runPostgresProof)(
             lastWebhookAt: true,
             metadataJson: true,
             nextReconcileAt: true,
-            providerApplicationId: true,
-            providerApplicationRevision: true,
+
             refreshTokenEncrypted: true,
             scopesJson: true,
             setupExpiresAt: true,

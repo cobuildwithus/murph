@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 110,
+  "item": {
+    "id": "fewer-checks-before-message-processing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting before message processing",
+    "summary": "Murph reuses current account information within each message fetch, reducing repeated checks before processing your message.",
+    "details": "Each new fetch still checks current access, consent and usage allowance.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3192
+    ]
+  }
+}

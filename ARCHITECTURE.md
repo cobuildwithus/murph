@@ -259,6 +259,12 @@ The account inventory owner rejects malformed pages instead of presenting them
 as empty. Journal and Personal Patterns retain the common hosted cron policy:
 eligible first attempts request Flex; failed-attempt retries use Standard, and
 the provider boundary validates model and catalog support before selecting Flex.
+The exact Personal Patterns recipe also performs a read-only precondition against
+its current query report and versioned notification Knowledge ledger. A completed
+first digest plus already-reviewed factors, graded identities, and grades can skip
+a clean scheduled model attempt. Unknown history, edited recipes, manual requests,
+and retries keep the ordinary model path. The existing ledger remains the only
+notification-history owner; no cron cache or new schedule state is introduced.
 
 Read-only hosted automation inspection also projects execution evidence from
 that automation's existing runtime state, its ten newest retained cron runs,
@@ -905,31 +911,28 @@ The summary keeps total sleep distinct from session duration and leaves provider
 read-only Labs discovery. It reads `JUNCTION_API_KEY`, targets the fixed
 production US Junction origin, and projects live provider-declared panels,
 biomarkers, catalog prices, ZIP coverage, and patient service centers into the
-strict `@murphai/hosted-execution/labs` contract. The authenticated Labs
-browser API at `POST /api/labs` and the signed hosted-runtime callback at
-`POST /api/internal/hosted-execution/labs/tool` call the same stateless service;
-neither path introduces a database, cache, sync job, search index, search
+strict `@murphai/hosted-execution/labs` contract. The signed hosted-runtime callback at
+`POST /api/internal/hosted-execution/labs/tool` calls the stateless service;
+it introduces no database, cache, sync job, search index, search
 history, or ZIP persistence. Junction's catalog and location read APIs require
 GET query parameters, so the Web owner sends the bounded catalog term or ZIP
 only to the fixed Junction origin and never records or logs the full outbound
-URL. The browser and Cloudflare boundaries remain semantic POST bodies.
+URL. The Cloudflare boundary remains a semantic POST body.
 
 Cloudflare carries only an optional semantic Labs port over the existing signed
 `web-control.worker` boundary. `packages/assistant-runtime` passes that port
 into `packages/assistant-engine`, which registers the read-only `murph.labs`
 dynamic tool only for a verified private direct turn when the capability is
-present. Group and unverified contexts do not receive the tool. The assistant
-and browser receive only bounded normalized facts with provider provenance and
+present. Group and unverified contexts do not receive the tool. The assistant receives only bounded normalized facts with provider provenance and
 check time; the provider credential, authorization header, raw body, and raw
 error remain inside Web.
 
-The authenticated, unlinked `/labs` page is a second consumer, not another
-catalog owner. It supports live search, offering detail, and a ZIP-based
-location list. Ordering, payment, booking, eligibility, requisitions, results,
-custom panels, maps, and navigation exposure remain absent. Provider amounts
-are current catalog prices rather than quotes, and a returned collection site
-is not an appointment or proof that a selected offering can be collected
-there. The behavior and deploy contract live in
+The experimental Labs browser page and browser API are retired. `/labs` redirects
+to Home; private conversational discovery remains available. Ordering, payment,
+booking, eligibility, requisitions, results, custom panels, and maps remain absent.
+Provider amounts are catalog prices rather than quotes; a collection site is not
+an appointment or proof that a selected offering can be collected there.
+The behavior and deploy contract live in
 `agent-docs/product-specs/labs-discovery.md`.
 
 ## Hosted Clinical Records
@@ -1313,7 +1316,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/operator-config`: workspace-private operator and setup configuration surface that owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider-preset/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and CLI/shared command contracts
 - `packages/assistant-cli`: workspace-private CLI-only assistant surface that owns the daemon-aware assistant wrappers, assistant command registration, foreground terminal logging, and the Ink chat UI
 - `packages/setup-cli`: workspace-private CLI-only onboarding and host-setup surface that owns the setup wizard, host provisioning helpers, and assistant/channel/wearable onboarding flows
-- `packages/gateway-core`: published transport-neutral gateway boundary package that owns the shared gateway contracts, route helpers, projection/snapshot logic, opaque ids, and event-log helpers used by hosted and future transport adapters
+- `packages/gateway-core`: published transport-neutral gateway boundary package that owns the shared gateway contracts, route helpers, and opaque ids used by transport adapters; projection snapshots and event polling are retired and their public API removal requires the next shared major release
 - `packages/assistantd`: workspace-private local assistant daemon package with a bearer-authenticated loopback-only control plane bound to one vault; it fronts steady-state local assistant session/message/status/automation entrypoints directly through `@murphai/assistant-engine` and no longer exposes a local gateway projection/control API
 - `packages/assistant-runtime`: workspace-private headless hosted assistant execution surface that exposes one-shot inbox/bootstrap/assistant/outbox/device-sync runtime behavior behind explicit runtime context, owns the canonical hosted runtime launch spec for semantic env splitting, forwarded env profiles, platform-only runtime config, typed resolved config, typed parser toolchain validation, commit timeout, runtime-env projection, and hosted runner executable PATH entries, consumes `@murphai/assistant-engine` and explicit `@murphai/operator-config/*` owner subpaths instead of the umbrella config root, now treats the durable operator `hostedAssistant` config as the only persisted hosted assistant source of truth, consumes shared messaging ingress contracts from `@murphai/messaging-ingress` rather than defining provider semantics itself, stages hosted conversation mailbox input into `AssistantInputEvent` records, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground assistant phase once before the idle floor without publishing a snapshot, and keeps dirty hosted runtime state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds. It stamps sanitized pending assistant-runtime issues at occurrence with the authenticated invocation attempt, stable `cloudflare-hosted-runner` identity, and public release SHA embedded in the runner bundle, then exports those records through the injected runtime platform instead of persisting raw hosted diagnostics in Cloudflare; a later export retry never replaces the occurrence attempt. Hosted semantic behavior such as channel readiness and device-sync enablement arrives as typed runtime config rather than being rediscovered from ambient env in lower layers while Cloudflare's container runner binds image-owned native parser paths inside the container.
 - `apps/web`: hosted Next.js integration control plane for Vercel-style
@@ -1403,19 +1406,6 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   so a cold runner reconstructs unfinished work from those existing durable
   owners. Mailbox ordering is per connection, preventing one connection's future
   retry from blocking due work for another. This adds no scheduler or queue.
-
-  Member-owned device provider applications are also Web-owned control facts.
-  Web stores one encrypted, revisioned application per personal member and
-  provider, binds OAuth state and each resulting connection to the exact
-  application id plus revision, and supplies decrypted provider configuration
-  only in a credential-bearing hosted runtime snapshot. The runner consumes
-  that configuration for the current invocation without adding it to workspace
-  state or ambient environment configuration. Credential replacement is
-  rejected while an exact-bound connection is active; disconnected bindings
-  and stale OAuth state are cleared before the revision advances. The shared
-  provider webhook endpoint admits work only for unbound connections; an
-  app-bound connection relies on scheduled reconciliation until an explicit
-  private-application webhook authority is designed.
 
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display

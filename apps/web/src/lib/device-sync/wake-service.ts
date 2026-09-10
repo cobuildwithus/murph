@@ -1964,8 +1964,6 @@ async function prepareHostedWebhookSourceObservation(input: {
           || current.provider !== input.provider
           || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
           || current.connectedAt.toISOString() !== input.account.connectedAt
-          || current.providerApplicationId !== null
-          || current.providerApplicationRevision !== null
         ) {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
@@ -3251,8 +3249,6 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     select: {
       connectedAt: true,
       provider: true,
-      providerApplicationId: true,
-      providerApplicationRevision: true,
       setupExpiresAt: true,
       setupPhase: true,
       status: true,
@@ -3265,19 +3261,6 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     || current.provider !== input.provider
     || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
     || current.connectedAt.toISOString() !== input.expectedConnectedAt
-  ) {
-    await completeHostedWebhookTraceTx(input, tx);
-    return { kind: "completed" };
-  }
-  // The hosted webhook endpoint authenticates only the shared/operator
-  // provider application. A provider-account row may have been rebound to
-  // a private application after the webhook's initial account lookup, so
-  // the durable admission owner must reject that stale authority while it
-  // holds the connection lock. Private connections continue through their
-  // scheduled reconciliation path until private webhook ownership exists.
-  if (
-    current.providerApplicationId !== null
-    || current.providerApplicationRevision !== null
   ) {
     await completeHostedWebhookTraceTx(input, tx);
     return { kind: "completed" };

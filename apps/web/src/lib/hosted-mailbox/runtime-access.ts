@@ -191,13 +191,16 @@ export function isHostedRuntimeInactiveAccessError(error: unknown): boolean {
 
 export async function requireHostedRuntimeMailboxActiveAccess(
   userId: string,
-  options: HostedRuntimeActiveAccessOptions = {},
+  options: HostedRuntimeActiveAccessOptions & {
+    memberState?: Parameters<typeof readActiveHostedMemberAccessState>[0]["memberState"];
+  } = {},
 ): Promise<{
   assistantProvider: HostedAssistantProvider;
   isThreadContainer: boolean;
 }> {
   const member = await readActiveHostedMemberAccessState({
     memberId: userId,
+    memberState: options.memberState,
     prisma: options.prisma ?? getPrisma(),
   });
   if (!member) {

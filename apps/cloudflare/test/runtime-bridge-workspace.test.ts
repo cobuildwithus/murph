@@ -2407,7 +2407,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     })).toThrow("Hosted mailbox payload decoder is required for this invocation.");
   });
 
-  it("imports conversation mailbox items with empty platform env when a decoder is provided", async () => {
+  it.each([false, true])("imports conversation mailbox items with empty platform env (decoded in fetch: %s)", async (decodedInFetch) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
@@ -2459,6 +2459,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expect(options.importItem({
       item,
       payload: {
+        ...(decodedInFetch ? { decodedWake: wake } : {}),
         payloadCiphertext: "opaque-conversation-ciphertext",
         payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         requestId: "request_bridge_decoder_conversation",
@@ -2490,21 +2491,25 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         type: "assistant_input_staged",
       }),
     });
-    expect(decodeMailboxPayload.decode).toHaveBeenCalledWith({
-      itemRef: {
-        dedupeKey: item.dedupeKey,
-        id: item.id,
-        kind: item.kind,
-        lane: item.lane,
-        laneSeq: item.laneSeq,
-        occurredAt: item.occurredAt,
-        userId: item.userId,
-      },
-      payloadCiphertext: "opaque-conversation-ciphertext",
-      payloadRequestId: "request_bridge_decoder_conversation",
-      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-      payloadSource: "inline",
-    });
+    if (decodedInFetch) {
+      expect(decodeMailboxPayload.decode).not.toHaveBeenCalled();
+    } else {
+      expect(decodeMailboxPayload.decode).toHaveBeenCalledWith({
+        itemRef: {
+          dedupeKey: item.dedupeKey,
+          id: item.id,
+          kind: item.kind,
+          lane: item.lane,
+          laneSeq: item.laneSeq,
+          occurredAt: item.occurredAt,
+          userId: item.userId,
+        },
+        payloadCiphertext: "opaque-conversation-ciphertext",
+        payloadRequestId: "request_bridge_decoder_conversation",
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        payloadSource: "inline",
+      });
+    }
   });
 
   it("captures server-owned return targets from decoded conversation wakes", async () => {

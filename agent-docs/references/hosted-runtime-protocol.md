@@ -77,13 +77,24 @@ The live ownership split is:
   separation lets paused-member retention and an explicitly authorized
   Settings export restore encrypted workspace state without reopening ordinary
   assistant or model work.
-  During active mailbox import, the runner container calls a Worker-owned
-  mailbox-payload decode route over the invocation outbound proxy. That route
-  requires the runtime write fence, decrypts the mailbox payload with the
-  Worker-owned ingress crypto context, and returns only a parsed hosted wake or
-  a semantic blocked result. Legacy active-invocation RPC names remain only for
-  deployed-caller compatibility and must be deleted after 2026-05-25. The
-  container must not receive ingress root keys, callback-signing private
+  During active mailbox import, the container opts into Worker-side inline
+  conversation decryption on its existing mailbox fetch. The Worker validates
+  the current write fence, forwards the signed fetch to Web, and decrypts fresh
+  inline conversation items using one ingress context per batch. It returns an
+  ephemeral parsed `decodedWake` beside the original ciphertext. Only the
+  Cloudflare runtime port accepts that field; canonical Web mailbox parsing
+  discards it. Runtime keeps its existing identity, routing and import checks.
+  Consumed, system and sidecar items retain lazy processing. An unsuccessful
+  optional decode retains the original item so one bad payload cannot fail
+  unrelated lanes; ordinary import still owns that item's decode failure/retry.
+  Old containers omit the opt-in; old Workers return the original ciphertext,
+  and new containers keep the existing decode endpoint for that response and
+  for sidecars. Both directions of Worker/container skew are supported, with no
+  Web deployment dependency or persisted schema change. After convergence,
+  fresh inline messages omit the second request and its write-fence RPC.
+  Retire the opt-in once the supported Worker/runner rollback floor and all warm
+  callers consume decodedWake; the decoder remains for lazy sidecar/system work.
+  The container must not receive ingress root keys, callback-signing private
   material, private JWKs, or a root-fetch capability for mailbox import.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
   rows, stages assistant input, runs assistant/device work, and checkpoints the
@@ -118,6 +129,14 @@ fail. Mailbox access and usage-denial bookkeeping remain
 Web-owned and independent of the invocation's provider. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
+
+For eligible Linq appends, Web starts its existing payloadless direct wake when
+its authorized Temporal signal request begins. Current member/participant access,
+exact mailbox ownership, and cancellation checks precede both requests. The hint
+overlaps acknowledgement, while webhook success still waits for Temporal. A
+failed acknowledgement keeps the provider retry path; durable mailbox input and
+consumption evidence continue to suppress duplicate replies. No payload is pushed
+into the hint and no new queue, cache, or retry owner is introduced.
 
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
@@ -378,9 +397,12 @@ every visible item is a system-lane `device-sync.wake`. This includes dirty,
 connection, disconnect, manual-reconcile, and scheduled-reconcile maintenance;
 none is human conversation work. A full page whose high-water lies beyond its
 visible suffix is incomplete and remains foreground work because later rows are
-not yet classified. A conversation row, another system kind, an empty or
-uninspectable prefix, or a failed classification fetch likewise remains
-foreground. A successful classification prefetch is reused by the foreground
+not yet classified. A completely empty response that proves every fetched lane
+is caught up is consumed without preempting projection or scheduling another
+assistant pass when no local state mutation, ready image completion, or owner
+handoff requires service; otherwise repeated notifications can starve
+checkpoint-backed completion. A conversation row, another system kind, an incomplete or
+uninspectable prefix, or a failed classification fetch remains foreground. A successful classification prefetch is reused by the foreground
 import instead of fetched a second time. An invocation that exhausts its mailbox
 budget returns the existing durable continuation before making another
 projection offer. Once graceful shutdown is observed, the retiring runtime
@@ -755,6 +777,18 @@ preserve a second wire version, retry owner, or projection watermark for rollout
 convenience.
 
 ## Current Protocol
+
+### Mailbox Fetch Member Projection
+
+Web loads one fresh member projection per mailbox fetch and passes it explicitly
+to the existing access, consent and read-first allowance owners. No projection
+survives the request. Empty, consumed-replay and system-only batches still skip
+AI usage evaluation. Conversation batches still read current usage periods;
+denials are confirmed by the mutating allowance owner with a new member read.
+Group owner/participant authority and Family sponsorship keep their canonical
+readers. Read-only group allowance derives owner access from its supplied member
+state rather than reloading the same container. Locking and spend accounting are
+unchanged. The encrypted mailbox response and runtime contract are unchanged.
 
 ### Foreground Priority Rule
 
@@ -4028,6 +4062,16 @@ routing.
   size, and warning threshold)
 
 ### Cloudflare Owns
+
+The optional single-account size experiment allocates opaque
+`runner-small--v-<release>--<random>` targets in `SmallRunnerContainer`.
+Selection is private and consulted only for fresh allocation; the container
+independently validates initial member eligibility. Namespace routing, retained
+sessions, cleanup and deletion use the stored exact target even after selection
+is disabled. Small runners share the serving release and existing binding/fence
+lifecycle, but never enter shared standby inventory. Resource shape, protected
+provisioning and the reader rollback floor are owned by
+[`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#selected-account-size-experiment).
 
 - per-user Durable Object routing
 - lease/fencing generation

@@ -25,6 +25,7 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionWake,
   HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
@@ -763,6 +764,8 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
 }
 
 export interface HostedMailboxItem {
+  /** Ephemeral Worker decryption; never written to the canonical mailbox. */
+  decodedWake?: HostedExecutionWake;
   causalSeq?: string | null;
   consumedAt?: string | null;
   createdAt: string;

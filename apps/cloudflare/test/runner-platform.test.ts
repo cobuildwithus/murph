@@ -8604,6 +8604,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("POST");
     expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     await expect(request.json()).resolves.toEqual({
+      decodeInlinePayloads: true,
       lanes: [
         {
           importedSeq: "0",
