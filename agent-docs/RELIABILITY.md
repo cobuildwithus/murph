@@ -2870,11 +2870,20 @@ Last verified: 2026-09-04
   classification; the six per-pass `blockedCaptureCounts` start at zero and stay
   ephemeral. The warning emits all six counts, which sum to the blocked total.
   These describe the caught code, not a diagnosed production cause: changed or
-  absent image bytes share the precondition category; `VAULT_FILE_MISSING` stays
+  unreported absent image bytes share the precondition category; `VAULT_FILE_MISSING` stays
   separate. No error objects, messages, IDs, paths, or arbitrary keys enter these
   details. Successful passes stay silent; warning frequency, abort/unknown-error
   propagation, protection, batching, canonical writes, and retention/retry timing
   are unchanged.
+- A due generated-image capture whose exact attachment path is reported missing
+  by the hosted materializer can complete canonical retirement without restoring
+  expired bytes. Core still validates the generated-image event, manifest owner,
+  path and original attachment hash. A present file must match that hash even if
+  reported missing. Absent files receive a create-only raw tombstone; present
+  files retain their inspected-preimage replacement guard. The existing receipt
+  format replays both forms idempotently and rejects conflicting bytes. Already
+  absent bytes contribute zero to retired-byte counts. Unreported loss, invalid
+  metadata, protected captures and fresh captures keep their existing disposition.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
   start the selected requests, then use ordinary shell waits and exact replay to
   poll every accepted request until it returns completed or unavailable. The
