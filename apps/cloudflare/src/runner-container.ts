@@ -1,8 +1,5 @@
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
@@ -16,9 +13,7 @@ import {
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
-  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeFailurePhaseCode,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
@@ -259,12 +254,10 @@ export type RunnerContainerEnsureReadyForProcessingResult =
       action?: "already_warm" | "started";
       coldStartTiming?: RunnerContainerColdStartTiming;
       kind: "ready";
-      shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
     }
   | {
       action?: never;
       kind: "cleanup_unsettled";
-      shellPrewarmObservation?: never;
     };
 
 export interface RunnerContainerColdStartTiming {
@@ -288,42 +281,6 @@ type RunnerContainerEnsureReadyResult = {
     "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
   >;
 };
-
-export interface RunnerContainerShellPrewarmObservation {
-  firstHintAtEpochMs: number;
-  hintCount: number;
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  finishedAtEpochMs?: number;
-  operationElapsedMs?: number;
-  outcome?: RunnerContainerShellPrewarmOutcome;
-  source: CloudflareHostedControlRuntimeShellPrewarmSource | "unknown";
-}
-
-export type RunnerContainerShellPrewarmOutcome =
-  | "cold_start_observed"
-  | "failed"
-  | "start_issued_warm"
-  | "superseded";
-
-export interface RunnerContainerBeginShellPrewarmInput
-  extends RunnerContainerEnsureReadyForProcessingInput {
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  source?: CloudflareHostedControlRuntimeShellPrewarmSource;
-}
-
-export type RunnerContainerPrewarmShellResult =
-  | {
-      action: "start_issued";
-      kind: "started";
-    }
-  | {
-      action: "superseded";
-      kind: "superseded";
-    };
-
-export interface RunnerContainerBeginShellPrewarmResult {
-  accepted: true;
-}
 
 export interface RunnerContainerRuntimeCompletionRecordedInput {
   attemptId: string;
@@ -351,12 +308,6 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
-  beginShellPrewarm?(
-    input: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult>;
-  prewarmShell?(
-    input: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   onRuntimeCompletionRecorded?(
@@ -1315,20 +1266,12 @@ export class RunnerContainer extends Container {
     }
   }
 
-  // Accept queued calls from older workers without allocating member-specific shells.
-  async beginShellPrewarm(
-    payload: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult> {
-    const input = parseRunnerContainerBeginShellPrewarmInput(payload);
-    this.authorizeBoundUser(input.userId);
+  // Remove after UserRunner versions predating the unified fleet have drained.
+  async beginShellPrewarm(): Promise<{ accepted: true }> {
     return { accepted: true };
   }
 
-  async prewarmShell(
-    payload: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult> {
-    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    this.authorizeBoundUser(input.userId);
+  async prewarmShell(): Promise<{ action: "superseded"; kind: "superseded" }> {
     return { action: "superseded", kind: "superseded" };
   }
 
@@ -4633,29 +4576,6 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
         }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
-  };
-}
-
-function parseRunnerContainerBeginShellPrewarmInput(
-  payload: RunnerContainerBeginShellPrewarmInput,
-): RunnerContainerBeginShellPrewarmInput {
-  const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-  const orchestration =
-    sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
-      payload.orchestration,
-    );
-  if (
-    payload.source !== undefined
-    && payload.source !== "linq-instant-start"
-    && payload.source !== "linq-message-routing"
-    && payload.source !== "linq-typing-started"
-  ) {
-    throw new TypeError("payload.source must be a supported shell-prewarm source.");
-  }
-  return {
-    ...input,
-    ...(orchestration === null ? {} : { orchestration }),
-    ...(payload.source === undefined ? {} : { source: payload.source }),
   };
 }
 

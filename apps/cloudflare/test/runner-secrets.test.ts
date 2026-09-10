@@ -1,10 +1,70 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   decodeHostedRunnerSecretsPayload,
 } from "../src/runner-secrets.js";
+import { buildHostedStorageAad } from "../src/crypto-context.js";
+import { writeEncryptedR2Payload } from "../src/crypto.js";
+import { hostedRunnerSecretsObjectKey } from "../src/storage-paths.js";
+import { RunnerSecretsService } from "../src/user-runner/runner-secrets.js";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 const HOSTED_RUNNER_SECRETS_SCHEMA = "murph.hosted-runner-secrets.v1";
+
+describe("hosted runner secrets reads", () => {
+  it.each([
+    undefined,
+    "",
+    " , \n , ",
+    "OPENAI_API_KEY, NODE_OPTIONS, HOSTED_EXECUTION_CONTROL_TOKEN",
+  ])("skips unavailable storage when no permitted keys are configured: %s", async (allowedKeys) => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const get = vi.spyOn(bucket, "get").mockRejectedValue(new Error("Storage unavailable"));
+
+    await expect(createRunnerSecretsService(bucket, allowedKeys).readRunnerSecrets("member_test"))
+      .resolves.toEqual({});
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("ignores a corrupt stored object when the capability is disabled", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    await bucket.put(await hostedRunnerSecretsObjectKey({ userId: "member_test" }), "corrupt envelope");
+    const get = vi.spyOn(bucket, "get");
+
+    await expect(createRunnerSecretsService(bucket).readRunnerSecrets("member_test"))
+      .resolves.toEqual({});
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("reads and decrypts configured custom secrets with the existing allowlist normalization", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    await writeRunnerSecrets(bucket, { CUSTOM_API_KEY: "custom-secret" });
+    const get = vi.spyOn(bucket, "get");
+
+    await expect(createRunnerSecretsService(bucket, " custom_api_key, OPENAI_API_KEY ")
+      .readRunnerSecrets("member_test")).resolves.toEqual({ CUSTOM_API_KEY: "custom-secret" });
+    expect(get).toHaveBeenCalledOnce();
+  });
+
+  it("still rejects forbidden stored keys when custom secrets are enabled", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    await writeRunnerSecrets(bucket, { OPENAI_API_KEY: "forbidden-secret" });
+    const get = vi.spyOn(bucket, "get");
+
+    await expect(createRunnerSecretsService(bucket, "CUSTOM_API_KEY")
+      .readRunnerSecrets("member_test")).rejects.toThrow("Hosted runner secret key is not allowed: OPENAI_API_KEY");
+    expect(get).toHaveBeenCalledOnce();
+  });
+
+  it("still fails when storage is unavailable for configured custom secrets", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const get = vi.spyOn(bucket, "get").mockRejectedValue(new Error("Storage unavailable"));
+
+    await expect(createRunnerSecretsService(bucket, "CUSTOM_API_KEY")
+      .readRunnerSecrets("member_test")).rejects.toThrow("Storage unavailable");
+    expect(get).toHaveBeenCalledOnce();
+  });
+});
 
 describe("hosted runner secrets payload decoding", () => {
   it("returns an empty record when no payload is stored", () => {
@@ -112,6 +172,37 @@ describe("hosted runner secrets payload decoding", () => {
     );
   });
 });
+
+function createRunnerSecretsService(
+  bucket: MemoryEncryptedR2Bucket,
+  allowedKeys?: string,
+): RunnerSecretsService {
+  return new RunnerSecretsService(
+    bucket,
+    createTestRootKey(),
+    "test-root",
+    { "test-root": createTestRootKey() },
+    async () => null,
+    { HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: allowedKeys },
+  );
+}
+
+async function writeRunnerSecrets(
+  bucket: MemoryEncryptedR2Bucket,
+  env: Record<string, string>,
+): Promise<void> {
+  const userId = "member_test";
+  const key = await hostedRunnerSecretsObjectKey({ userId });
+  await writeEncryptedR2Payload({
+    aad: buildHostedStorageAad({ key, purpose: "runner-secrets", userId }),
+    bucket,
+    cryptoKey: createTestRootKey(),
+    key,
+    keyId: "test-root",
+    plaintext: encodeRunnerSecretsPayload(env),
+    scope: "runner-secrets",
+  });
+}
 
 function encodeRunnerSecretsPayload(
   env: Record<string, string>,

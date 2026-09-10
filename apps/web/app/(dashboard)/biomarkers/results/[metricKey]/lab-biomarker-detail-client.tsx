@@ -4,7 +4,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-commons/biomarker-fallback-ranges";
+import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-metrics";
 import {
   selectBrowserVaultLabBiomarkerDetail,
   type BrowserVaultLabsCapableQueryClient,

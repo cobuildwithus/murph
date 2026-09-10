@@ -46,6 +46,7 @@ import {
 } from "./launch-spec.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+  resolveHostedOperatorModelProvider,
 } from "./codex-runtime-env.ts";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
@@ -575,27 +576,16 @@ function requireHostedCustomInferenceContextWindowTokens(value: unknown): number
   return parsed;
 }
 
-export function buildHostedCodexConfigToml(input: {
-  chatGptAuth?: boolean;
-  contextWindowTokens?: number | null;
-  exposeSpawnAgentModelOverrides: boolean;
-  model: string | null;
+function buildHostedCodexProviderTomlLines(input: {
   provider: AssistantCodexModelProviderConfig;
-  reasoningEffort: string | null;
-}): string {
+  chatGptAuth?: boolean;
+}): string[] {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
   const customInferenceProvider =
     input.provider.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
-  const autoCompactTokenLimit = input.contextWindowTokens === null
-      || input.contextWindowTokens === undefined
-    ? DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT
-    : Math.min(
-        DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT,
-        Math.max(4_096, Math.floor(input.contextWindowTokens * 0.75)),
-      );
-  const providerConfigLines = [
+  return [
     `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
     ...(input.chatGptAuth
@@ -615,6 +605,39 @@ export function buildHostedCodexConfigToml(input: {
     }`,
     `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
     "",
+  ];
+}
+
+export function buildHostedCodexConfigToml(input: {
+  chatGptAuth?: boolean;
+  contextWindowTokens?: number | null;
+  exposeSpawnAgentModelOverrides: boolean;
+  model: string | null;
+  provider: AssistantCodexModelProviderConfig;
+  reasoningEffort: string | null;
+}): string {
+  const modelProviderId = input.chatGptAuth
+    ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
+    : input.provider.id;
+  const autoCompactTokenLimit = input.contextWindowTokens === null
+      || input.contextWindowTokens === undefined
+    ? DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT
+    : Math.min(
+        DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT,
+        Math.max(4_096, Math.floor(input.contextWindowTokens * 0.75)),
+      );
+  const operatorModelProvider = resolveHostedOperatorModelProvider(modelProviderId);
+  const providerConfigLines = [
+    ...buildHostedCodexProviderTomlLines(input),
+    ...(operatorModelProvider === modelProviderId ? [] : buildHostedCodexProviderTomlLines({
+      provider: {
+        ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+        id: operatorModelProvider,
+        ...(operatorModelProvider === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+          ? { baseUrl: input.provider.baseUrl }
+          : {}),
+      },
+    })),
   ];
 
   return [
