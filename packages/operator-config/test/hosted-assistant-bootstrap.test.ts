@@ -208,6 +208,7 @@ test('hosted assistant bootstrap maps OpenAI env to Codex model provider config'
   })
 
   assert.deepEqual(seeded, {
+    config: hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0],
     configured: true,
     provider: 'codex-cli',
     seeded: true,
@@ -275,6 +276,7 @@ test('hosted assistant bootstrap returns missing or invalid states and throws re
       provider: null,
       seeded: false,
       source: 'missing',
+      config: null,
     },
   )
 
@@ -307,6 +309,7 @@ test('hosted assistant bootstrap returns missing or invalid states and throws re
       provider: null,
       seeded: false,
       source: 'invalid',
+      config: null,
     },
   )
 
@@ -352,6 +355,7 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
     },
   })
   assert.deepEqual(updated, {
+    config: updatedModule.saveHostedAssistantConfig.mock.calls[0]?.[0],
     configured: true,
     provider: 'codex-cli',
     seeded: true,
@@ -389,12 +393,15 @@ test('hosted assistant bootstrap updates platform Codex profiles from hosted env
       HOSTED_ASSISTANT_PROVIDER: 'openai',
     },
   })
-  assert.deepEqual(unchanged, {
+  const { config: unchangedConfig, ...unchangedState } = unchanged
+  assert.deepEqual(unchangedState, {
     configured: true,
     provider: 'codex-cli',
     seeded: false,
     source: 'saved',
   })
+  assertCodexOpenAiProfile(unchangedConfig?.profiles[0])
+  assert.equal(unchangedModule.readOperatorConfig.mock.calls.length, 1)
   assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 0)
 })
 

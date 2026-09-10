@@ -170,8 +170,9 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 async function assertAccessibleCodexHomeDirectory(
   resolvedHome: string,
 ): Promise<void> {
+  let resolvedStats: Awaited<ReturnType<typeof stat>>
   try {
-    await stat(resolvedHome)
+    resolvedStats = await stat(resolvedHome)
   } catch {
     throw new VaultCliError(
       'ASSISTANT_CODEX_HOME_INVALID',
@@ -179,13 +180,11 @@ async function assertAccessibleCodexHomeDirectory(
     )
   }
 
-  let resolvedStats
   try {
     await access(
       resolvedHome,
       fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK,
     )
-    resolvedStats = await stat(resolvedHome)
   } catch {
     throw new VaultCliError(
       'ASSISTANT_CODEX_HOME_INVALID',

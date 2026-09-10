@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "startup-without-archive-sweep",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Resuming a chat does less background work",
+    "summary": "Murph can start your reply without first sweeping older imported records.",
+    "details": "Interrupted archive cleanup is handled when the affected records are needed, while checks for conflicting records stay in place.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

@@ -310,7 +310,6 @@ export async function executeCodexAssistantTurnAttempt(
     requireHostedPrivateImageDelivery:
       input.requireHostedPrivateImageDelivery ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
-    excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots ?? null,
     sandbox: input.permissions
