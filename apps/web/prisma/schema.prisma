@@ -243,7 +243,7 @@ model DeviceSyncDirtyPayload {
   provider              String
   dirtyRevision         BigInt           @map("dirty_revision")
   resourceEncrypted     String           @map("resource_encrypted")
-  credentialIndependent Boolean?         @map("credential_independent")
+  credentialIndependent Boolean          @map("credential_independent")
   createdAt             DateTime         @default(now()) @map("created_at")
   connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 

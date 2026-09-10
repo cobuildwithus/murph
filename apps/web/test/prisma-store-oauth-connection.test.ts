@@ -23,7 +23,7 @@ const {
   readHostedMemberSuspensionAfterLockTxMock: vi.fn(
     async (): Promise<"active" | "missing" | "suspended"> => "active",
   ),
-  supersedeDirtyStateMock: vi.fn(async (): Promise<"classification_pending" | void> => undefined),
+  supersedeDirtyStateMock: vi.fn(async (): Promise<void> => undefined),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
@@ -1269,90 +1269,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       httpStatus: 409,
     });
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
-  });
-
-  it("commits legacy classification before retrying connection replacement", async () => {
-    let stored = createConnection({
-      accessTokenEncrypted: null,
-      id: "dsc_classification_retry",
-      keyVersion: null,
-      provider: "whoop",
-      refreshTokenEncrypted: null,
-      status: "disconnected",
-      tokenVersion: null,
-      userId: "user-123",
-    });
-    const tx = {
-      $executeRaw: vi.fn(async () => 0),
-      deviceConnection: {
-        findFirst: vi.fn(async () => cloneConnection(stored)),
-        findUnique: vi.fn(async () => cloneConnection(stored)),
-        update: vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
-          stored = {
-            ...stored,
-            ...data,
-            updatedAt: new Date("2026-03-26T04:00:00.000Z"),
-          };
-          return cloneConnection(stored);
-        }),
-      },
-    };
-    const transaction = vi.fn(async <TResult>(
-      callback: (transactionClient: typeof tx) => Promise<TResult>,
-    ) => {
-      const snapshot = cloneConnection(stored)!;
-      try {
-        return await callback(tx);
-      } catch (error) {
-        stored = snapshot;
-        throw error;
-      }
-    });
-    const store = new PrismaDeviceSyncControlPlaneStore({
-      codec: TEST_CODEC,
-      prisma: {
-        $transaction: transaction,
-        deviceConnection: createRootConnectionPreflight(() => stored),
-      } as never,
-      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
-    });
-    supersedeDirtyStateMock
-      .mockResolvedValueOnce("classification_pending")
-      .mockResolvedValueOnce(undefined);
-
-    await expect(store.upsertConnection({
-      ownerId: "user-123",
-      existingAccountPolicy: "replace",
-      provider: "whoop",
-      externalAccountId: "acct_456",
-      displayName: "WHOOP",
-      scopes: ["read:recovery"],
-      tokens: {
-        accessToken: "new-access-token",
-        refreshToken: "new-refresh-token",
-      },
-      metadata: {},
-      connectedAt: "2026-03-26T03:00:00.000Z",
-      nextReconcileAt: null,
-    })).resolves.toEqual(expect.objectContaining({
-      id: "dsc_classification_retry",
-      status: "active",
-    }));
-
-    expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(2);
-    expect(supersedeDirtyStateMock).toHaveBeenNthCalledWith(1, {
-      connectionId: "dsc_classification_retry",
-      tx,
-      userId: "user-123",
-    });
-    expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
-      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[1] ?? 0,
-    );
-    expect(readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0]).toBeLessThan(
-      supersedeDirtyStateMock.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(transaction).toHaveBeenCalledTimes(2);
-    expect(tx.deviceConnection.update).toHaveBeenCalledOnce();
   });
 
   it("bounds repeated connection unique-conflict recovery to one retry", async () => {
