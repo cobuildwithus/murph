@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 110,
+  "item": {
+    "id": "clinical-lifetime-history",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Connect medical records across your history",
+    "summary": "New hospital connections request available records across your history, including older visits, notes, vaccinations and vital signs.",
+    "details": "Searches no longer start at a 90-day or one-year cutoff. Availability still depends on the hospital, your authorization and whether retrieval finishes successfully.",
+    "relevanceTags": [
+      "medical-records"
+    ],
+    "sourcePullRequests": [
+      3174
+    ],
+    "tryIt": {
+      "label": "View connected records",
+      "href": "/records"
+    }
+  }
+}
