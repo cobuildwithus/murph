@@ -628,10 +628,11 @@ in-memory diagnostics. `prewarm_typing_start_issued_warm` and
 `prewarm_message_routing_start_issued_warm` mean the platform start call
 completed without a newly observed lifecycle start;
 their corresponding `*_cold_start_observed` cohorts mean the same container
-lifecycle did observe a cold start. Neither means health readiness completed. One observation contains
-one terminal operation outcome; later hints may increase only its bounded
-coalesced-hint count and never launch another operation before readiness
-consumes it.
+lifecycle did observe a cold start. Neither means health readiness completed.
+Historical observations recorded one terminal operation outcome; later hints
+could increase only its bounded coalesced-hint count before readiness consumed
+it. Current runtime preparation no longer forwards hint observations; stored
+fields remain readable by the latency schema and report.
 
 The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only

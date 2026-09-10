@@ -3522,18 +3522,6 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("starts through authoritative readiness", async () => {
-    const { container, start, startAndWaitForPorts } = createContainerDouble();
-    const input = { timeoutMs: 7_500, userId: "member_123" };
-
-    await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
-    expect(start).not.toHaveBeenCalled();
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-  });
-
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 

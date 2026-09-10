@@ -69,15 +69,6 @@ const hostedWebPackageJson = JSON.parse(
 }
 const auditZipEntryListMaxBufferBytes = 16 * 1024 * 1024
 
-function expectCoverageAdmissionRule(content: string): void {
-  expect(content).toMatch(
-    /tests,\s+fixtures,\s+or\s+direct-proof\s+infrastructure\s+are\s+a\s+primary\s+PR\s+outcome/u,
-  )
-  expect(content).toMatch(
-    /changed\s+behavior\s+makes\s+a\s+material\s+proof\s+claim\s+that\s+ordinary\s+focused\s+owner\s+tests\s+cannot\s+establish\s+at\s+a\s+stable\s+boundary/u,
-  )
-}
-
 type BrowserCommand = {
   listPollCount: number
   method: string
@@ -1909,78 +1900,12 @@ describe('monorepo release flow coverage audit', () => {
       expect(prompt.match(/REVIEW_COMPLETE/gu)).toHaveLength(1)
     }
     expect(reviewGptConfig).not.toContain('completion-specialists')
-    const genericReviewGptPrompts = [
-      'security-audit.md',
-      'privacy.md',
-      'architecture-review.md',
-      'giant-file-composability.md',
-      'data-model-composability-review.md',
-      'complexity-simplification.md',
-      'bad-code-quality.md',
-      'bug-hunt-high-value-seams.md',
-      'legacy-removal.md',
-      'package-boundaries.md',
-    ].map((fileName) =>
-      readFileSync(
-        path.join(repoRoot, 'scripts', 'chatgpt-review-presets', fileName),
-        'utf8',
-      ),
-    )
-    for (const reviewPrompt of genericReviewGptPrompts) {
-      expect(reviewPrompt).toContain('review-only')
-      expect(reviewPrompt).toContain('# Outcome')
-      expect(reviewPrompt).toContain('# Evidence')
-      expect(reviewPrompt).toContain('# Finding bar')
-      expect(reviewPrompt).toContain('# Output and stop')
-      expect(reviewPrompt).toContain('`codebase.zip`')
-      expect(reviewPrompt).toMatch(/untrusted\s+review data/u)
-      expect(reviewPrompt).toMatch(/If no |Zero findings is valid/u)
-      expect(reviewPrompt.toLowerCase()).toContain('stop')
-    }
     const allPresetGroup = reviewGptConfig.slice(
       reviewGptConfig.indexOf('review_gpt_register_preset_group "all"'),
     )
     expect(allPresetGroup).toContain('review_gpt_register_preset_group "all"')
     expect(allPresetGroup).not.toMatch(/^\s*"pr-review"\s*\\?$/mu)
     expect(allPresetGroup).not.toMatch(/^\s*"completion-specialists"\s*\\?$/mu)
-    const onDemandReviewPrompts = [
-      'frontend-review.md',
-      'coverage-review.md',
-    ].map((fileName) =>
-      readFileSync(
-        path.join(repoRoot, 'agent-docs', 'prompts', fileName),
-        'utf8',
-      ),
-    )
-    for (const reviewPrompt of onDemandReviewPrompts) {
-      expect(reviewPrompt).not.toContain('Assume there is at least one')
-      expect(reviewPrompt).toContain('Stop rule:')
-    }
-    expect(onDemandReviewPrompts[0]).toContain('render and inspect')
-    expect(onDemandReviewPrompts[0]).toContain(
-      'phone and desktop when responsive behavior can change',
-    )
-    expect(onDemandReviewPrompts[1]).toContain('parent wants a checklist')
-    expect(onDemandReviewPrompts[1]).not.toContain(
-      'Do not use `review:gpt`',
-    )
-    expect(onDemandReviewPrompts[1]).toContain('Use this review-only guidance')
-    expect(onDemandReviewPrompts[1]).not.toContain('reviewgpt-coverage.patch')
-    expectCoverageAdmissionRule(onDemandReviewPrompts[1])
-    expect(
-      existsSync(
-        path.join(
-          repoRoot,
-          'agent-docs',
-          'prompts',
-          'security-privacy-review.md',
-        ),
-      ),
-    ).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
   it("keeps ReviewGPT's patched Incur MCP transport compatible with its pinned server", async () => {

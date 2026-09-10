@@ -1,8 +1,5 @@
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
@@ -17,7 +14,6 @@ import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
   type HostedRuntimeFailurePhaseCode,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
@@ -258,12 +254,10 @@ export type RunnerContainerEnsureReadyForProcessingResult =
       action?: "already_warm" | "started";
       coldStartTiming?: RunnerContainerColdStartTiming;
       kind: "ready";
-      shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
     }
   | {
       action?: never;
       kind: "cleanup_unsettled";
-      shellPrewarmObservation?: never;
     };
 
 export interface RunnerContainerColdStartTiming {
@@ -287,23 +281,6 @@ type RunnerContainerEnsureReadyResult = {
     "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
   >;
 };
-
-// Older readiness responses can still carry these diagnostic-only observations.
-export interface RunnerContainerShellPrewarmObservation {
-  firstHintAtEpochMs: number;
-  hintCount: number;
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  finishedAtEpochMs?: number;
-  operationElapsedMs?: number;
-  outcome?: RunnerContainerShellPrewarmOutcome;
-  source: CloudflareHostedControlRuntimeShellPrewarmSource | "unknown";
-}
-
-export type RunnerContainerShellPrewarmOutcome =
-  | "cold_start_observed"
-  | "failed"
-  | "start_issued_warm"
-  | "superseded";
 
 export interface RunnerContainerRuntimeCompletionRecordedInput {
   attemptId: string;

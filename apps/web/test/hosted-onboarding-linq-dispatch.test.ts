@@ -8040,13 +8040,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(activationWakeIndex).toBeGreaterThan(signalIndex);
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
-    expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
-      expect.objectContaining({
-        wakeHandoff: expect.not.objectContaining({
-          runtimeShellPrewarmOrchestrationAttemptId: expect.any(String),
-        }),
-      }),
-    );
     expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
       userId: memberId,

@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 
 import { test } from "vitest";
-import { normalizeWearableMetricValue } from "../src/device-providers/metric-catalog.ts";
+import {
+  normalizeWearableMetricValue,
+  resolveWearableCanonicalMetricKey,
+  resolveWearableMetricTolerance,
+} from "@murphai/health-metrics";
 import { pushDeletionObservation } from "../src/device-providers/shared-normalization.ts";
 
 import {
   createDeviceProviderRegistry,
   prepareDeviceProviderSnapshotImport,
-  resolveWearableCanonicalMetricKey,
-  resolveWearableMetricTolerance,
   type DeviceBatchImportPayload,
   type DeviceEventPayload,
   type DeviceProviderAdapter,

@@ -1,3 +1,4 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -18,9 +19,6 @@ import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
 } from "../src/browser-vault-store.ts";
-import {
-  createHostedBundleStore,
-} from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import hostedLocalTestWorker from "../src/hosted-local-test-index.ts";
 import worker from "../src/index.ts";
@@ -1849,7 +1847,7 @@ describe("cloudflare worker routes", () => {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       NODE_ENV: "test",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: env.BUNDLES,
       key: getTestHostedRuntimeRootKey("runtime"),
       keyId: "udrk:runtime:test-root",
@@ -3823,15 +3821,20 @@ describe("cloudflare worker routes", () => {
     });
 
     it.each([
-      {},
-      {
-        orchestrationAttemptId: "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        requestStartedAtEpochMs: 1_788_000_000_000,
-        source: "linq-message-routing",
-      },
-    ])("does not address a runtime owner for a retired shell hint: %j", async (body) => {
+      "",
+      "{}",
+      ...["linq-instant-start", "linq-message-routing", "linq-typing-started"].map(
+        (source) => JSON.stringify({
+          orchestrationAttemptId: "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+          requestStartedAtEpochMs: 1_788_000_000_000,
+          source,
+        }),
+      ),
+      '{"obsoleteField":true}',
+      "ignored legacy body",
+    ])("does not address a runtime owner for a retired shell hint: %s", async (body) => {
       const runnerContainerGetByName = vi.fn();
-      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
+      const userRunnerGetByName = vi.fn();
       const env = createWorkerEnv(createUserRunnerStub(), {
         RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
         USER_RUNNER: { getByName: userRunnerGetByName },
@@ -3841,7 +3844,7 @@ describe("cloudflare worker routes", () => {
         await signControlRequest(new Request(
           "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
           {
-            body: JSON.stringify(body),
+            body,
             headers: { "content-type": "application/json; charset=utf-8" },
             method: "POST",
           },
@@ -3851,8 +3854,8 @@ describe("cloudflare worker routes", () => {
 
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({ error: "Not found" });
-      expect(runnerContainerGetByName).not.toHaveBeenCalled();
       expect(userRunnerGetByName).not.toHaveBeenCalled();
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
     it("starts runtime processing without an active fence", async () => {

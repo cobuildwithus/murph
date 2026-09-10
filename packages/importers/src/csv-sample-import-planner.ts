@@ -16,7 +16,7 @@ import {
   summarizeSampleSeries,
   type SampleSummaryProfile,
   type SampleWindowSummary,
-} from "./sample-series-summary.ts";
+} from "@murphai/health-metrics";
 import {
   assertPlainObject,
   inspectFileAsset,

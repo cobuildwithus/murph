@@ -1607,6 +1607,16 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("fetches a mailbox payload sidecar through the separate signed route", async () => {
+    const item = {
+      id: "mailbox_item_2",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "12",
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      userId: "member_routes_1",
+    };
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce(item);
     mocks.fetchHostedMailboxPayload.mockResolvedValue({
       fetchedAt: FIXED_NOW,
       payload: {
@@ -1631,12 +1641,13 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedMailboxPayloadFetchResponse(await response.json());
 
     expect(response.status).toBe(200);
-    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledExactlyOnceWith({
       dedupeKey: "dedupe_item_2",
-      mailboxItemId: "mailbox_item_2",
-      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-      requestId: "request_payload_fetch_1",
       userId: "member_routes_1",
+    });
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      item,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
     });
     expect(payload.payload?.payloadCiphertext).toBe("cipher_ref_2");
     expect(JSON.stringify(payload)).not.toContain(UNSAFE_SENTINEL);
@@ -1778,11 +1789,12 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
-      dedupeKey: "dedupe_item_2",
-      mailboxItemId: "mailbox_item_2",
+      item: expect.objectContaining({
+        id: "mailbox_item_2",
+        laneSeq: "14",
+        userId: "member_routes_1",
+      }),
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-      requestId: "request_payload_fetch_replay_denied",
-      userId: "member_routes_1",
     });
   });
 
@@ -1816,11 +1828,8 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
-      dedupeKey: "dedupe_item_2",
-      mailboxItemId: "mailbox_item_2",
+      item: null,
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-      requestId: "request_payload_fetch_mismatched_metadata",
-      userId: "member_routes_1",
     });
   });
 
@@ -1857,11 +1866,12 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
-      dedupeKey: "dedupe_browser_vault",
-      mailboxItemId: "mailbox_browser_vault",
+      item: expect.objectContaining({
+        id: "mailbox_browser_vault",
+        lane: "system",
+        userId: "member_routes_1",
+      }),
       payloadRef: "hosted-mailbox-payload:mailbox_browser_vault",
-      requestId: "request_payload_fetch_browser_vault",
-      userId: "member_routes_1",
     });
   });
 

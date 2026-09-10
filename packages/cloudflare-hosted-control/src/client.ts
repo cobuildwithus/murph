@@ -307,12 +307,6 @@ export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
   accepted: true;
 }
 
-// Retained for historical runner readiness observations; there is no hint client.
-export type CloudflareHostedControlRuntimeShellPrewarmSource =
-  | "linq-instant-start"
-  | "linq-message-routing"
-  | "linq-typing-started";
-
 export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
   | HostedRuntimeEnsureProcessingResponse
   | CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck;

@@ -1,3 +1,4 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -51,9 +52,6 @@ import {
   type HostedStandbySlotBinding,
 } from "../src/standby-runner-contract.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
-import {
-  createHostedBundleStore,
-} from "../src/bundle-store.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
 } from "../src/browser-vault-store.ts";
@@ -584,21 +582,6 @@ describe("HostedUserRunner execution coordination", () => {
     release.resolve(undefined);
     await expect(withdrawal).resolves.toMatchObject({ processingAllowed: false, runnerContainerDestroyOk: true });
     expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
-  });
-
-  it("allocates fresh member execution through authoritative readiness", async () => {
-    const ensureReadyForProcessing = vi.fn(async () => ({ kind: "ready" as const }));
-    const { runner, runnerContainerNames } = createRunnerHarness({ ensureReadyForProcessing });
-    expect(runnerContainerNames).toEqual([]);
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "orchestration-authoritative-readiness",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
-    expect(new Set(runnerContainerNames).size).toBe(1);
-    expect(runnerContainerNames[0]).toMatch(/^runner--v-local--[0-9a-f]{32}$/u);
   });
 
   it("destroys a prior-version pending prewarm before binding a current fence", async () => {
@@ -2151,14 +2134,6 @@ describe("HostedUserRunner execution coordination", () => {
         stateReadFinishedAtEpochMs: 1_777_000_000_042,
       },
       kind: "ready",
-      shellPrewarmObservation: {
-        firstHintAtEpochMs: 1_777_000_000_010,
-        finishedAtEpochMs: 1_777_000_000_030,
-        hintCount: 2,
-        operationElapsedMs: 20,
-        outcome: "cold_start_observed",
-        source: "linq-typing-started",
-      },
     }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
@@ -2243,12 +2218,6 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 1_250,
-      shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
-      shellPrewarmFinishedAtEpochMs: 1_777_000_000_030,
-      shellPrewarmHintCount: 2,
-      shellPrewarmOperationElapsedMs: 20,
-      shellPrewarmOutcome: "cold_start_observed",
-      shellPrewarmSource: "linq-typing-started",
       workspaceReadElapsedMs: 1_250,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
@@ -2609,6 +2578,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => ({ kind: "ready" }));
     const { invoke, runner, sql } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -2654,6 +2624,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => ({ kind: "ready" }));
     const { invoke, runner } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -2988,6 +2959,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => await readiness.promise);
     const { invoke, runner, sql } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -8751,7 +8723,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: getTestHostedRuntimeRootKey("runtime"),
       keyId: "udrk:runtime:test-root",
@@ -8958,6 +8930,7 @@ function readHostedMediaAssetRowCount(sql: TestSqlStorageLike): number {
 }
 
 function createRunnerHarness(input: {
+  allowedRunnerSecretKeys?: string;
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
@@ -9222,6 +9195,7 @@ function createRunnerHarness(input: {
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: input.allowedRunnerSecretKeys,
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",

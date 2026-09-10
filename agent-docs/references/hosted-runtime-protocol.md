@@ -1024,6 +1024,14 @@ operator child uses `murph-operator-diagnostic-read`, always returns a concrete
 diagnostic, and skips the member disclosure reviewer. The existing authenticated,
 encrypted, expiring Ops completion owner receives the result.
 
+Operator tasks keep Sol while selecting the generated hosted OpenAI provider,
+including its environment credential, independently of the member's provider.
+Runtime preparation registers that provider alongside alternate member providers.
+Local subscription and recorder modes retain their configured OpenAI aliases;
+operator turns never substitute the built-in OpenAI login provider for hosted
+credential configuration. This applies to diagnostics and operator messages;
+request authority, diagnostic permissions, and usage funding stay unchanged.
+
 An executing operator diagnostic defers routine idle checkpoints until it settles
 or reaches the admitted request expiry. Its existing controller aborts execution
 at that deadline; the ordinary requeue and Web prepare path settles expired work.
@@ -1874,23 +1882,21 @@ targets, so the first exchange is available to later normal turns without
 Historical shell-prewarm diagnostics remain readable after transport retirement.
 Their bounded sources remain `linq-instant-start`, `linq-message-routing`,
 `linq-typing-started`, or `unknown`; unknown never implies typing.
-For compatibility, an authoritative `ensureReadyForProcessing` result may still
-carry a hint observation from an older container, and fresh runtime preparation
-forwards its bounded fields. One observation describes one historical
-shell-prewarm operation and carries its triggering source, bounded
-orchestration attempt and phase timestamps, first causal hint timestamp,
+Stored observations describe historical shell-prewarm operations and retain
+their triggering source, bounded orchestration attempt and phase timestamps,
+first causal hint timestamp,
 completion time and duration, coalesced hint count, and one terminal
 outcome (`cold_start_observed`, `start_issued_warm`, `superseded`, or `failed`).
 The historical producer allowed later hints only to increment that operation's
 bounded hint count until readiness consumed it; they could not launch a second
 operation or replace the causal timestamp. These observations do not imply port
-or health readiness. Fresh runtime preparation maps their bounded leaves into
-the existing orchestration latency phase breakdown; it adds no
-request, persisted state owner, awaited reporting step, or work on the
-message-ingress path. A stop, explicit destroy, or Durable Object eviction may
-erase the optional observation, so an absent observation means `no observed
-prewarm`, not proof that no hint occurred. The aggregate cold-start report
-includes chronology-safe typing hints and exact-id-matched message-routing
+or health readiness. Current runtime preparation no longer forwards readiness
+hint observations. The latency schema, merge sanitizers, and aggregate report
+retain the stored historical fields without adding runtime work. Historical
+stops, explicit destruction, or Durable Object eviction could erase an optional
+observation, so absent evidence means `no observed prewarm`, not proof that no
+hint occurred. The aggregate cold-start report includes chronology-safe typing
+hints and exact-id-matched message-routing
 hints on uniquely matched Web-direct traces whose reply belongs to the same
 runtime attempt. It omits instant-start, unknown-source, ambiguous, backlog,
 and attempt-handoff rows rather than guessing, and returns no member, mailbox,

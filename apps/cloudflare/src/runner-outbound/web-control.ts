@@ -39,10 +39,10 @@ import {
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
   applyRunnerRuntimeUsageSettlement,
-  requireRunnerRuntimeWriteFenceWrite,
+  requireRunnerRuntimeWriteFence,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
   RunnerRuntimeWriteFenceError,
-  type RunnerRuntimeWriteFenceWriteAuthority,
+  type RunnerRuntimeWriteFenceHeaders,
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./write-fence.ts";
 import {
@@ -153,7 +153,7 @@ export async function handleRunnerWebControlRequest(input: {
     || policy.operation === "clinical_records_read_run"
     || policy.operation === "clinical_records_record_outcome"
   ) && input.request.method === "POST";
-  let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  let writeAuthority: RunnerRuntimeWriteFenceHeaders;
   try {
     writeAuthority = await (
       isBrowserVaultReplicaPublishRequest
@@ -162,7 +162,7 @@ export async function handleRunnerWebControlRequest(input: {
           request: input.request,
           userId: input.userId,
         })
-        : requireRunnerRuntimeWriteFenceWrite({
+        : requireRunnerRuntimeWriteFence({
           env: input.env,
           request: input.request,
           userId: input.userId,
@@ -329,7 +329,7 @@ async function revokeRuntimePlatformAiUsageUnlessAllowed(input: {
   env: RunnerOutboundEnvironmentSource;
   response: Response;
   userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<void> {
   let settlement: ReturnType<typeof parseHostedRuntimeUsageRecordResponse> | null = null;
   if (input.response.ok) {
@@ -361,7 +361,7 @@ function requireHostedVaultShareSettlementDeadlineAtEpochMs(
 }
 
 function createRunnerRuntimeWriteFenceForwardHeaders(
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority,
+  writeAuthority: RunnerRuntimeWriteFenceHeaders,
   workspaceVersion: string | null,
 ): Headers {
   const headers = new Headers();
