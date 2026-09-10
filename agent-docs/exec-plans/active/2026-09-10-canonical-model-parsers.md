@@ -39,5 +39,7 @@ Contracts remain the shape owner; core remains the canonical writer. Health metr
 - Contracts: 2 browser generation tests passed.
 - Core, query, and contracts package typechecks passed.
 - Complexity guard passed: four changed source files, zero functions above 20; goal parser maximum falls from 20 to 11.
-- Exact-head CI and ReviewGPT are pending PR admission. A small changelog item will describe saved goal-rule preservation.
+- Changelog: `2026-09-10 / goal-progress-saved-rules`, linked to PR #3138. All 10 changelog archive tests passed.
+- Continuation confirmed the worktree and pushed PR head match the implementation handoff. Parent candidate review found no additional required source edits.
+- Exact-head CI and ReviewGPT are pending Ready admission. Initial CI failures explicitly rejected draft proof; they did not run the runtime suites.
 
