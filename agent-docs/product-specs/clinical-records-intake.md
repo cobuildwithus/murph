@@ -31,16 +31,6 @@ Incompatible units, ambiguous values and missing comparable revisions retain
 their existing explicit review/retraction behavior. These mappings do not
 change provider acquisition windows; lifetime retrieval is a separate owner change.
 
-Mapping upgrades may promote an unseen Observation's importer-created unsupported
-code/unit marker at the same provider revision. The clinical adapter verifies
-the retained manifest's source/patient identity, page hash and exact source
-resource against the newly admitted evidence. Core evaluates that proof against
-the latest deleted import marker under its canonical write lock. Genuine
-withdrawals, invalid semantics, newer revisions, changed source content and
-retractions of previously accepted facts retain their existing fences. Missing
-or corrupt evidence fails closed; retained reads are cached within the existing
-page and aggregate snapshot byte bounds. No provider revision is fabricated.
-
 ### Hospital history and source notes
 
 Supported allergies, conditions, medication requests/statements/dispenses,
@@ -54,9 +44,8 @@ source-update date rather than presenting it as the clinical event date.
 
 Inline clinical note text beyond 4,000 characters uses existing ordered note
 sections (up to 50 sections of 12,000 characters) with Unicode-safe boundaries.
-Oversized or invalid evidence remains explicitly held. Previously unsupported
-long-note markers can upgrade only through the same retained-evidence proof as
-measurement markers; provider withdrawals and conflicting revisions stay fenced.
+Oversized or invalid evidence remains explicitly held. Provider withdrawals
+and conflicting revisions retain the existing revision checks.
 Linked Binary bodies and additional provider query variants remain acquisition
 work owned separately from these retained-snapshot mappings.
 

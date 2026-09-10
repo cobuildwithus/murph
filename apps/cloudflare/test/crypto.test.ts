@@ -1,8 +1,8 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createHostedArtifactStore,
-  createHostedBundleStore,
 } from "../src/bundle-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
@@ -187,7 +187,7 @@ describe("hosted storage object keys", () => {
     const rootKey = createTestRootKey(31);
     const keyId = "k-current";
 
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: rootKey,
       keyId,

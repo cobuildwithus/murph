@@ -1,5 +1,10 @@
 import { importClinicalFhirSnapshot } from '@murphai/vault-usecases/clinical-records'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
+import {
+  ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+  readTrustedHostedImageCompletion,
+  renderAssistantHostedImageCompletionSystemText,
+} from '../src/assistant/hosted-image-completion.js'
 import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
 import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
@@ -268,7 +273,7 @@ import {
   buildAssistantCliSurfaceContract,
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
-  readAssistantCliLlmsFullManifest,
+  readAssistantCliLlmsFullManifestFromCliEntry,
   type AssistantCliLlmsManifestCommandSchema,
 } from '../src/assistant/cli-surface-manifest.ts'
 import {
@@ -606,7 +611,7 @@ describeRealCodex('real Codex canonical availability e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildDirectConversationDeveloperInstructions(false, context, [], '2026-09-01T12:00:00.000Z'),
-        dynamicTools: [], env: config.env, excludeResumeTurns: true,
+        dynamicTools: [], env: config.env,
         model: config.model, modelProvider: config.modelProvider,
         prompt: 'From your saved-context summary alone, which records are confirmed present: blood tests and body measurements? If a category is not listed, say it is not confirmed by the summary. Do not fetch or change anything.',
         reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
@@ -1066,7 +1071,6 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(),
           dynamicTools: [],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: prepared.prompt,
@@ -1122,7 +1126,6 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
         developerInstructions: buildDirectConversationDeveloperInstructions(),
         dynamicTools: [MURPH_ASSISTANT_CONFIGURATION_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         hostedToolContext: {
           assistantConfigurationTool: {
             async request(request) {
@@ -1181,7 +1184,6 @@ describeRealCodex('real Codex child model selection e2e', () => {
           codexHome: config.codexHome,
           configOverrides: CHILD_MODEL_SELECTION_CONFIG_OVERRIDES,
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           onAdditionalUsage: async (usage) => {
@@ -1282,7 +1284,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             MURPH_ONBOARDING_TEST_VAULT: workingDirectory,
             TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -1405,7 +1406,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
 
         const immediateNeedFirst = await executeRealCodexOnboardingProbe({
           ...turnInput,
-          excludeResumeTurns: true,
           prompt: [
             'Earlier I asked about a meal and you helped with that first.',
             'We never did your intro or the getting-to-know-me questions.',
@@ -1467,7 +1467,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         )
         const ordinaryRecords = await executeRealCodexOnboardingProbe({
           ...turnInput,
-          excludeResumeTurns: true,
           prompt: "Let's continue.",
           scenario: 'generic_records_vague_opener',
         })
@@ -1489,7 +1488,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         )
         const missingProgress = await executeRealCodexOnboardingProbe({
           ...turnInput,
-          excludeResumeTurns: true,
           prompt: "Let's keep going with the health-background questions we started after talking about my sleep goal.",
           scenario: 'missing_progress_resume',
         })
@@ -1523,7 +1521,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         )
         const missingIdentity = await executeRealCodexOnboardingProbe({
           ...turnInput,
-          excludeResumeTurns: true,
           prompt: [
             'I remember your intro that you help me follow through, keep this private, and make your help fit better as you learn more.',
             'We finished the health questions after talking through what better sleep would mean and why it matters.',
@@ -1547,7 +1544,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         await writeRealCodexOnboardingResumeContext(workingDirectory, 'later')
         const later = await executeRealCodexOnboardingProbe({
           ...turnInput,
-          excludeResumeTurns: true,
           prompt: "We finished the health questions after talking through what better sleep would mean and why it matters. Let's continue with my sleep goal.",
           scenario: 'later_stage_resume',
         })
@@ -1588,7 +1584,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         })
         const welcome = await executeRealCodexOnboardingProbe({
           ...turnInput,
-          excludeResumeTurns: true,
           prompt: 'Hey',
           scenario: 'fresh_greeting',
         })
@@ -1722,7 +1717,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         })
         const result = await executeRealCodexAppServerTurn({
           ...turnInput,
-          excludeResumeTurns: true,
           prompt: [
             "I'd like to continue setting up Murph.",
             'Please pick up from the saved onboarding context without repeating earlier questions.',
@@ -1854,7 +1848,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             [{ label: 'Oura', provider: 'oura' }],
           ),
           dynamicTools: [MURPH_DEVICE_TOOL],
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -2045,7 +2038,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             supportedProviders,
           ),
           dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
-          excludeResumeTurns: true,
           hostedToolContext,
           progressDelivery,
           prompt: "I use Oura, but I'd rather connect it later.",
@@ -2091,7 +2083,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             supportedProviders,
           ),
           dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
-          excludeResumeTurns: true,
           hostedToolContext,
           progressDelivery,
           prompt: 'I use Oura. Send me the connection link now.',
@@ -2218,7 +2209,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             supportedProviders,
           ),
           dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
-          excludeResumeTurns: true,
           hostedToolContext,
           progressDelivery,
           prompt: "Let's pause onboarding until next week.",
@@ -3163,7 +3153,6 @@ describeRealCodex('real Codex personal archive e2e', () => {
         developerInstructions: buildDirectConversationDeveloperInstructions(),
         dynamicTools: [MURPH_SEND_VAULT_FILE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         hostedToolContext: {
           ...createRealCodexSupportHostedToolContext('direct'),
           vaultFileSendAvailable: true,
@@ -3270,7 +3259,7 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
         }),
         dynamicTools: [],
         env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
-        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        model: config.model, modelProvider: config.modelProvider,
         prompt: 'What does my saved Weekend packing wiki page say? Its slug is weekend-packing.',
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
@@ -3367,7 +3356,6 @@ describeRealCodex('real Codex workout capture default e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -3850,7 +3838,6 @@ describeRealCodex('real Codex routine chat readiness e2e', () => {
         }),
         dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
         env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
-        excludeResumeTurns: true,
         groupConversation: false,
         model: config.model,
         modelProvider: config.modelProvider,
@@ -3996,7 +3983,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -4170,7 +4156,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -4372,7 +4357,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           groupConversation: false,
           hostedToolContext: {
             automationTool: {
@@ -4583,7 +4567,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           groupConversation: false,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -5355,7 +5338,6 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           }),
           dynamicTools: [MURPH_ANALYZE_VIDEO_TOOL, MURPH_CONVERSATION_ATTACHMENTS_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext,
           materializeWorkspaceArtifacts: 'followup' in scenario ? async (relativePaths) => {
             expect(relativePaths).toEqual([rawPath])
@@ -5546,7 +5528,6 @@ describeRealCodex('real Codex member-local current clock e2e', () => {
           developerInstructions,
           dynamicTools: [],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: resolveAssistantProviderPrompt({
@@ -5617,7 +5598,6 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
             buildDirectConversationDeveloperInstructions(),
           dynamicTools: [MURPH_ASSISTANT_STYLE_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
@@ -5740,7 +5720,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -5976,7 +5955,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           }),
           dynamicTools: [MURPH_ANALYZE_VIDEO_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -6060,7 +6038,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions(),
           dynamicTools: [],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
@@ -6148,7 +6125,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions(),
           dynamicTools: [],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
@@ -6218,7 +6194,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions(),
           dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
@@ -6408,7 +6383,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           developerInstructions:
             buildDirectConversationDeveloperInstructions(),
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -6498,7 +6472,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               ...config.env,
               [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             },
-            excludeResumeTurns: true,
             model: config.model,
             modelProvider: config.modelProvider,
             reasoningEffort: 'low',
@@ -6650,7 +6623,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               ...config.env,
               [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             },
-            excludeResumeTurns: true,
             groupConversation: conversationScope === 'group',
             model: config.model,
             modelProvider: config.modelProvider,
@@ -6944,7 +6916,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
@@ -7148,7 +7119,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               ? `${binDirectory}${path.delimiter}${inheritedPath}`
               : binDirectory,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: preparedInput.instructions,
@@ -7284,7 +7254,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             OPENAI_API_KEY: '',
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
@@ -7516,7 +7485,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
@@ -8289,7 +8257,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -8386,7 +8353,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           developerInstructions: scenario === 'private' ? buildDirectConversationDeveloperInstructions() : buildHostedGroupStatusDeveloperInstructions(),
           dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL, ...(scenario === 'private' ? [MURPH_GROUP_CONSULT_TOOL] : [MURPH_GROUP_DATA_TOOL]), MURPH_FINISH_WITHOUT_REPLY_TOOL],
           env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
-          excludeResumeTurns: true, groupConversation: scenario !== 'private',
+          groupConversation: scenario !== 'private',
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -8520,7 +8487,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -8714,7 +8680,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions({
               hostedRuntime: true,
             }),
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentAssistantInputId: () => originInputId,
@@ -8782,15 +8747,31 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           throw new Error('Expected the generation turn to return a session.')
         }
 
-        const completionTurnContext = buildTrustedHostedImageCompletionTurnContext([{
-          inputId: completionInputId,
-          trustedHostedImageCompletion: {
-            media: [media],
+        const completionIdentity = `image-completion:${'7'.repeat(64)}`
+        const trustedHostedImageCompletion = readTrustedHostedImageCompletion({
+          sourceRef: {
+            dedupeKey: completionIdentity,
+            eventId: completionIdentity,
+            itemId: completionIdentity,
+            kind: 'hosted-mailbox',
+            lane: 'system',
+            laneSeq: completionIdentity,
+            payloadSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+            payloadSource: 'inline',
+            source: 'hosted-mailbox',
+            wakeSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+          },
+          text: renderAssistantHostedImageCompletionSystemText({
             originAssistantInputId: originInputId,
             originAssistantInputIdExact: true,
-            savedImageRef: media.ref,
-            status: 'ready',
-          },
+            result: { media, runtimeIssue: null, savedImageRef: media.ref },
+          }),
+          transcriptText: null,
+        })
+        expect(trustedHostedImageCompletion?.status).toBe('ready')
+        const completionTurnContext = buildTrustedHostedImageCompletionTurnContext([{
+          inputId: completionInputId,
+          trustedHostedImageCompletion,
         }])
         if (!completionTurnContext) {
           throw new Error('Expected trusted image completion turn context.')
@@ -8991,7 +8972,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -9133,7 +9113,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -9302,7 +9281,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -9548,7 +9526,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -9677,7 +9654,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -10129,7 +10105,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
           dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -10302,7 +10277,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
           dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -10499,7 +10473,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
           dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: buildHostedToolContext(
             requestMessageRef,
@@ -10559,7 +10532,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
           dynamicTools: [MURPH_GROUP_CONSULT_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: buildHostedToolContext(
             clarificationMessageRef,
@@ -10695,7 +10667,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => ({
@@ -10788,7 +10759,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => ({
@@ -10902,7 +10872,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => ({
@@ -11080,7 +11049,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => ({
@@ -11266,7 +11234,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -11535,7 +11502,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                 ...config.env,
                 [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
               },
-              excludeResumeTurns: true,
               hostedToolContext: {
                 computerToolsAvailable: false,
                 currentHostedDeliveryContext: () => ({
@@ -11796,7 +11762,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => ({
@@ -12027,7 +11992,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -12144,7 +12108,6 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
         ].join('\n\n'),
         dynamicTools: [MURPH_GENERATE_SONG_TOOL],
         env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
-        excludeResumeTurns: true,
         fetchImpl: async () => forbidEffect('fetch'),
         publicInternetFetch: async () => forbidEffect('public-fetch'),
         groupConversation: false,
@@ -12241,7 +12204,6 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: explicitSkillsRoot,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -12335,7 +12297,6 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: ordinarySkillsRoot,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -12408,7 +12369,6 @@ describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
         developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
         dynamicTools: [],
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -12557,7 +12517,6 @@ describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
                 buildScheduledAutomationDeveloperInstructions('direct', 'none'),
               dynamicTools: [MURPH_AUTOMATION_TOOL],
               env: config.env,
-              excludeResumeTurns: true,
               hostedToolContext: {
                 automationTool: {
                   request: async (request) => {
@@ -12753,7 +12712,6 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
                 ...config.env,
                 [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
               },
-              excludeResumeTurns: true,
               hostedToolContext: {
                 computerToolsAvailable: false,
                 connectedApps: {
@@ -12923,7 +12881,6 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
         }),
         dynamicTools: [MURPH_DEVICE_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         hostedToolContext: {
           computerToolsAvailable: false,
           currentHostedDeliveryContext: () => null,
@@ -13154,7 +13111,6 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
                 ...(probe.scheduled ? [MURPH_FINISH_WITHOUT_REPLY_TOOL] : []),
               ],
               env: config.env,
-              excludeResumeTurns: true,
               hostedToolContext: {
                 computerToolsAvailable: false,
                 currentHostedDeliveryContext: () => null,
@@ -13336,7 +13292,6 @@ describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () =
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
         fixtureBinDirectory: binDirectory,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -13458,7 +13413,6 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
         fixtureBinDirectory: binDirectory,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -13601,7 +13555,6 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
-        excludeResumeTurns: true,
         hostedToolContext: {
           computerToolsAvailable: false,
           connectedApps: {
@@ -13727,7 +13680,6 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
-        excludeResumeTurns: true,
         hostedToolContext: {
           automationTool: {
             request: async (request) => {
@@ -13952,7 +13904,6 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
-        excludeResumeTurns: true,
         hostedToolContext: {
           automationTool: {
             request: async (request) => {
@@ -14147,7 +14098,6 @@ describeRealCodex(
                 ...config.env,
                 PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
               },
-              excludeResumeTurns: true,
               model: config.model,
               modelProvider: config.modelProvider,
               prompt: [
@@ -14304,7 +14254,6 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
               EXA_API_KEY: 'synthetic-fixture-only',
               RESEARCH_FIXTURE_RESOLVER: fileURLToPath(new URL('../package.json', import.meta.url)),
             },
-            excludeResumeTurns: true,
             model: config.model,
             modelProvider: config.modelProvider,
             prompt: [
@@ -14389,7 +14338,6 @@ describeRealCodex('real Codex weekly health insight Journal evidence e2e', () =>
           ...config.env,
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -14458,7 +14406,6 @@ describeRealCodex('real Codex Journal and Patterns help e2e', () => {
           ...config.env,
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -14535,7 +14482,7 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
         dynamicTools: [],
         env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
-        excludeResumeTurns: true, groupConversation: false,
+        groupConversation: false,
         model: config.model, modelProvider: config.modelProvider,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       }
@@ -14613,7 +14560,7 @@ describeRealCodex('real Codex private Journal capture recovery boundaries e2e', 
         dynamicTools: [],
         env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
-        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        model: config.model, modelProvider: config.modelProvider,
         prompt: prompts[scenario], reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       const after = await readVaultRawTolerant(workingDirectory)
@@ -14671,7 +14618,7 @@ describeRealCodex('real Codex private Journal note quality e2e', () => {
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
         },
-        excludeResumeTurns: true, groupConversation: false,
+        groupConversation: false,
         model: config.model, modelProvider: config.modelProvider,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       }
@@ -14793,7 +14740,6 @@ describeRealCodex('real Codex private group Journal capture e2e', () => {
             MURPH_FINISH_WITHOUT_REPLY_TOOL,
           ],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -14920,7 +14866,6 @@ describeRealCodex('real Codex private group Journal capture e2e', () => {
           ...config.env,
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
-        excludeResumeTurns: true,
         hostedToolContext: {
           computerToolsAvailable: false,
           currentHostedDeliveryContext: () => null,
@@ -15031,7 +14976,6 @@ describeRealCodex('real Codex on-demand updates after product-note retirement e2
             ...config.env,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -15089,8 +15033,8 @@ describeRealCodex('real Codex memory compact receipt e2e', () => {
       const binDirectory = path.join(workingDirectory, 'bin')
       const commandLogPath = path.join(workingDirectory, 'commands.log')
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
-      const manifest = await readAssistantCliLlmsFullManifest({
-        timeoutMs: 5 * 60_000,
+      const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
         workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
       })
       const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
@@ -15111,7 +15055,7 @@ describeRealCodex('real Codex memory compact receipt e2e', () => {
         }),
         dynamicTools: [],
         env: { ...config.env, PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
-        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        model: config.model, modelProvider: config.modelProvider,
         prompt: 'Replace my saved weekly-summary preference: use exactly three concise bullets instead of a paragraph. Verify the saved change, then confirm briefly.',
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
@@ -15160,8 +15104,8 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
           vaultRoot: workingDirectory,
         })
         const [manifest] = await Promise.all([
-          readAssistantCliLlmsFullManifest({
-            timeoutMs: 5 * 60_000,
+          readAssistantCliLlmsFullManifestFromCliEntry({
+            cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
             workingDirectory: fileURLToPath(
               new URL('../../../', import.meta.url),
             ),
@@ -15221,7 +15165,6 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
               ? `${binDirectory}${path.delimiter}${inheritedPath}`
               : binDirectory,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt,
@@ -15309,8 +15252,8 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
           vaultRoot: workingDirectory,
         })
         const [manifest] = await Promise.all([
-          readAssistantCliLlmsFullManifest({
-            timeoutMs: 5 * 60_000,
+          readAssistantCliLlmsFullManifestFromCliEntry({
+            cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
             workingDirectory: fileURLToPath(
               new URL('../../../', import.meta.url),
             ),
@@ -15388,7 +15331,6 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
               ? `${binDirectory}${path.delimiter}${inheritedPath}`
               : binDirectory,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt,
@@ -15539,7 +15481,6 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
           fixtureBinDirectory: binDirectory,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
@@ -15795,7 +15736,6 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
                 [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
                 PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
               },
-              excludeResumeTurns: true,
               model: config.model,
               modelProvider: config.modelProvider,
               prompt: probe.prompt,
@@ -15848,7 +15788,6 @@ describeRealCodex('real Codex member runtime troubleshooting e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildDirectConversationDeveloperInstructions(),
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -16040,6 +15979,7 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
         )
         const sessionEvidenceBefore = await readFile(sessionEvidencePath, 'utf8')
 
+        let providerUsageReports = 0
         const result = await executeOperatorDiagnostic({
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
@@ -16050,6 +15990,7 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
           modelProvider: config.modelProvider,
           now: new Date('2026-06-15T12:00:00.000Z'),
           onProviderUsage: ({ usage }) => {
+            providerUsageReports += 1
             recordRealCodexProviderUsage(usage.usage)
           },
           question: [
@@ -16062,6 +16003,7 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
           workspaceRoot: vaultRoot,
         })
 
+        expect(providerUsageReports).toBeGreaterThan(0)
         expect(result.outcome).toBe('answered')
         if (result.outcome !== 'answered') {
           throw new Error('Expected the operator diagnostic to answer.')
@@ -16076,8 +16018,8 @@ describeRealCodex('real Codex direct operator diagnostic e2e', () => {
         expect(result.answer).not.toMatch(
           /(?:\.codex|bank\/|MCP|permission profile|read-only tools|workspace root)/iu,
         )
-        console.info(
-          `[real-codex operator diagnostic] ${result.answer.replaceAll(/\s+/gu, ' ').trim()}`,
+        process.stdout.write(
+          `[real-codex operator diagnostic] ${result.answer.replaceAll(/\s+/gu, ' ').trim()}\n`,
         )
         await expect(
           readFile(projectMcpMarker, 'utf8'),
@@ -16176,7 +16118,6 @@ describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', ()
           developerInstructions: buildScheduledAutomationDeveloperInstructions(),
           dynamicTools: [],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -16364,7 +16305,6 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         developerInstructions: buildScheduledAutomationDeveloperInstructions(),
         dynamicTools: [],
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -16536,7 +16476,6 @@ describeRealCodex('real Codex automation context before questions e2e', () => {
           developerInstructions: buildScheduledAutomationDeveloperInstructions(scope),
           dynamicTools: [],
           env: config.env,
-          excludeResumeTurns: true,
           groupConversation: scope === 'group',
           model: config.model,
           modelProvider: config.modelProvider,
@@ -16614,7 +16553,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
           codexHome: config.codexHome, developerInstructions: buildScheduledAutomationDeveloperInstructions(scenario.scope),
-          dynamicTools: [], env: config.env, excludeResumeTurns: true, groupConversation: scenario.scope === 'group',
+          dynamicTools: [], env: config.env, groupConversation: scenario.scope === 'group',
           model: config.model, modelProvider: config.modelProvider,
           prompt: prepared.instructions, reasoningEffort: 'medium', sandbox: 'read-only', workingDirectory,
         })
@@ -16643,7 +16582,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, developerInstructions: buildMidnightLinqReminderDeveloperInstructions(),
-        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env, excludeResumeTurns: true,
+        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env,
         hostedToolContext: {
           ...createRealCodexSupportHostedToolContext('direct'),
           automationTool: {
@@ -16775,7 +16714,6 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           buildScheduledAutomationDeveloperInstructions('group'),
         dynamicTools: [],
         env: config.env,
-        excludeResumeTurns: true,
         groupConversation: true,
         model: config.model,
         modelProvider: config.modelProvider,
@@ -16891,7 +16829,6 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           buildScheduledAutomationDeveloperInstructions(scope),
         dynamicTools: [],
         env: config.env,
-        excludeResumeTurns: true,
         groupConversation: scope === 'group',
         model: config.model,
         modelProvider: config.modelProvider,
@@ -17152,7 +17089,6 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         buildScheduledAutomationDeveloperInstructions('group'),
       dynamicTools: [],
       env: config.env,
-      excludeResumeTurns: true,
       groupConversation: true,
       model: config.model,
       modelProvider: config.modelProvider,
@@ -17343,7 +17279,6 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
           dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
           env: config.env,
           ephemeral: true,
-          excludeResumeTurns: true,
           memberMemoryMaintenanceAuthorized: true,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -17588,7 +17523,6 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
           dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
           env: config.env,
           ephemeral: true,
-          excludeResumeTurns: true,
           memberMemoryMaintenanceAuthorized: true,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -17716,7 +17650,6 @@ describeRealCodex('real Codex bounded current-state memory e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(),
           dynamicTools,
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           progressDelivery: {
@@ -17822,7 +17755,6 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
             HABITAT_E2E_VAULT: vaultRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: buildHabitatVoiceE2ePrompt(transcript),
@@ -18136,7 +18068,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
               ? `${binDirectory}${path.delimiter}${inheritedPath}`
               : binDirectory,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: publicGoal.startPrompt,
@@ -18309,7 +18240,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
               ? `${binDirectory}${path.delimiter}${inheritedPath}`
               : binDirectory,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -19593,7 +19523,6 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
               ? `${binDirectory}${path.delimiter}${inheritedPath}`
               : binDirectory,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -20228,7 +20157,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         codexHome: config.codexHome,
         dynamicTools: [],
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         processLifetime: 'warm' as const,
@@ -20431,7 +20359,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           groupConversation: true,
           hostedToolContext: {
             computerToolsAvailable: false,
@@ -20644,7 +20571,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             claimSubscriptionAssistantInputId: () => {
               if (subscriptionActionClaimed) {
@@ -20882,7 +20808,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: privateSkillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -20994,7 +20919,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: groupSkillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -21100,7 +21024,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: fundingPrivacySkillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -21201,7 +21124,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -21388,7 +21310,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: healthySkillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -21449,7 +21370,6 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: oneTimeSkillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -21641,7 +21561,6 @@ describeRealCodex('real Codex proactive physical-note address e2e', () => {
                 .filter((value): value is string => Boolean(value))
                 .join(path.delimiter),
             },
-            excludeResumeTurns: true,
             hostedToolContext,
             model: config.model,
             modelProvider: config.modelProvider,
@@ -21762,7 +21681,6 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
               .filter((value): value is string => Boolean(value))
               .join(path.delimiter),
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
@@ -22157,7 +22075,6 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
               ...config.env,
               [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             },
-            excludeResumeTurns: true,
             hostedToolContext,
             model: config.model,
             modelProvider: config.modelProvider,
@@ -22288,7 +22205,6 @@ describeRealCodex('real Codex physical-note stuck recovery e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -22501,7 +22417,6 @@ async function runRealCodexCalendarLinkTurn(prompt: string) {
         ...config.env,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
       },
-      excludeResumeTurns: true,
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
@@ -22568,7 +22483,6 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
         developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
         dynamicTools: [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         reasoningEffort: 'low',
@@ -22723,6 +22637,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           toolCallCount: calls.length,
         })}\n`,
       )
+      expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(2)
       expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
       const firstCall = calls[0]
       const correctedCall = calls[1]
@@ -23094,7 +23009,6 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               : binDirectory,
             VAULT: workingDirectory,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -23241,7 +23155,6 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               : binDirectory,
             VAULT: workingDirectory,
           },
-          excludeResumeTurns: true,
           fetchImpl: async (
             request: string | URL | Request,
             init?: RequestInit,
@@ -23984,7 +23897,6 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
               : binDirectory,
             VAULT: workingDirectory,
           },
-          excludeResumeTurns: true,
           fetchImpl: async (
             request: string | URL | Request,
             init?: RequestInit,
@@ -24189,7 +24101,6 @@ describeRealCodex('real Codex proactive progress e2e', () => {
               .filter((value): value is string => Boolean(value))
               .join(path.delimiter),
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           progressDelivery: {
@@ -24294,7 +24205,6 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           fetchImpl: async (
             request: string | URL | Request,
             init?: RequestInit,
@@ -24562,7 +24472,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
               .filter((value): value is string => Boolean(value))
               .join(path.delimiter),
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -24817,7 +24726,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             buildMidnightLinqReminderDeveloperInstructions(),
           dynamicTools: [],
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
@@ -24894,7 +24802,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           }),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -25018,7 +24925,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
           dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
           env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalogPath },
-          excludeResumeTurns: true, groupConversation: false, model: config.model, modelProvider: config.modelProvider,
+          groupConversation: false, model: config.model, modelProvider: config.modelProvider,
           prompt: [layers.dynamicTurnContextPrompt, 'Make a small comparison card using only these facts: a short walk takes 10 minutes; a longer walk takes 20 minutes. Show the two options and durations. I only want the card.'].join('\n\n'),
           reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
         })
@@ -25129,7 +25036,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         ].join('\n\n'),
         dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
-        excludeResumeTurns: true,
         fetchImpl: async () => forbidEffect('fetch'),
         publicInternetFetch: async () => forbidEffect('public-fetch'),
         groupConversation: false,
@@ -25251,7 +25157,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
-        dynamicTools: [], env: config.env, excludeResumeTurns: true, groupConversation: true,
+        dynamicTools: [], env: config.env, groupConversation: true,
         model: config.model, modelProvider: config.modelProvider,
         prompt: [layers.dynamicTurnContextPrompt, 'I have a familiar chronic-pain flare and very little energy today, with no new symptoms. What is one low-effort way to handle today? Also, rename this group to Morning Walkers and set a daily 9 AM reminder for us to walk.'].join('\n\n'),
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
@@ -25306,7 +25212,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         ].join('\n\n'),
         dynamicTools: [MURPH_AUTOMATION_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         hostedToolContext: {
           automationTool: {
             request: async (request) => {
@@ -25391,7 +25296,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       paused = true
       const followUp = await executeRealCodexAppServerTurn({
         ...turnInput,
-        excludeResumeTurns: false,
         resumeSessionId: result.sessionId,
         prompt: [layers.dynamicTurnContextPrompt, 'Is that reminder still tomorrow morning? Just tell me its current timing; do not change it.'].join('\n\n'),
       })
@@ -25431,7 +25335,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             buildMidnightLinqReminderDeveloperInstructions(),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -25566,7 +25469,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -25840,7 +25742,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             buildMidnightLinqReminderDeveloperInstructions(),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -25954,7 +25855,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             buildMidnightLinqReminderDeveloperInstructions(),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -26123,7 +26023,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
               .filter((value): value is string => Boolean(value))
               .join(path.delimiter),
           },
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: automationFixture.request,
@@ -26329,7 +26228,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             buildMidnightLinqReminderDeveloperInstructions(),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: automationFixture.request,
@@ -26444,7 +26342,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           ].join('\n\n'),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: automationFixture.request,
@@ -26530,7 +26427,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             buildMidnightLinqReminderDeveloperInstructions(),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: config.env,
-          excludeResumeTurns: true,
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
@@ -26642,7 +26538,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           env: config.env,
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
@@ -27383,7 +27278,6 @@ describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
           ...config.env,
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt:
@@ -27499,7 +27393,6 @@ describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
-          excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: input.prompt,
@@ -27686,7 +27579,6 @@ describeRealCodex('real Codex strict meal import recovery e2e', () => {
             ? `${binDirectory}${path.delimiter}${inheritedPath}`
             : binDirectory,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -27843,7 +27735,6 @@ describeRealCodex('real Codex strict meal import recovery e2e', () => {
             ? `${binDirectory}${path.delimiter}${inheritedPath}`
             : binDirectory,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -28151,7 +28042,6 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
             ? `${binDirectory}${path.delimiter}${inheritedPath}`
             : binDirectory,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -28369,8 +28259,8 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
       const operationsBefore =
         await listWriteOperationMetadataPaths(vaultRoot)
       const [manifest] = await Promise.all([
-        readAssistantCliLlmsFullManifest({
-          timeoutMs: 5 * 60_000,
+        readAssistantCliLlmsFullManifestFromCliEntry({
+          cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
           workingDirectory: fileURLToPath(
             new URL('../../../', import.meta.url),
           ),
@@ -28423,7 +28313,6 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
             ? `${binDirectory}${path.delimiter}${inheritedPath}`
             : binDirectory,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -28573,7 +28462,6 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
             ? `${binDirectory}${path.delimiter}${inheritedPath}`
             : binDirectory,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -28689,7 +28577,6 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
             ? `${binDirectory}${path.delimiter}${inheritedPath}`
             : binDirectory,
         },
-        excludeResumeTurns: true,
         fetchImpl: async (
           request: string | URL | Request,
           init?: RequestInit,
@@ -28870,7 +28757,6 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
             ? `${binDirectory}${path.delimiter}${inheritedPath}`
             : binDirectory,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -29111,7 +28997,6 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
               [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
               PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
             },
-            excludeResumeTurns: true,
             model: config.model,
             modelProvider: config.modelProvider,
             prompt: [
@@ -29247,7 +29132,6 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
           [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -29571,7 +29455,6 @@ describeRealCodex('real Codex live native reply prefix e2e', () => {
         developerInstructions: buildGroupPointOfViewDeveloperInstructions(),
         dynamicTools: [MURPH_SELECT_REPLY_TARGET_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         onLiveTurn: (turn) => {
@@ -29633,7 +29516,6 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
         developerInstructions: buildDirectConversationDeveloperInstructions(),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         onTraceEvent: ({ rawEvent }) => {
@@ -29733,7 +29615,6 @@ describeRealCodex('real Codex provider-cleanup continuation silence e2e', () => 
         developerInstructions: buildDirectConversationDeveloperInstructions(),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
-        excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
@@ -30594,7 +30475,6 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -30694,7 +30574,6 @@ async function runRealCompactMemoryReadJourney(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -30792,7 +30671,6 @@ async function runRealDegradedKnowledgeReadJourney(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -30863,7 +30741,6 @@ async function runRealNumericSuitabilityMemoryRecovery(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -31059,7 +30936,6 @@ async function runRealNumericContextJourney(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -31286,7 +31162,6 @@ async function runRealDefaultMealAttachmentBoundary(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -31430,7 +31305,6 @@ async function runRealPriorMealNutritionRecovery(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -31634,7 +31508,6 @@ async function runRealAutomaticMealClarificationScenario(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
@@ -31955,7 +31828,6 @@ async function runRealNutritionCardAuthorityScenario(input: {
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
           : binDirectory,
       },
-      excludeResumeTurns: true,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
       onLiveTurn: input.liveSteerPrompt
@@ -32712,7 +32584,6 @@ async function runResumeCacheProbeAttempt(input: {
       codexHome: input.config.codexHome,
       developerInstructions: buildResumeCacheProbeInstructions(),
       env: input.config.env,
-      excludeResumeTurns: true,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
       reasoningEffort: 'low',
@@ -33522,7 +33393,6 @@ async function runAppointmentIdentityRequirementProbe(
           : binDirectory,
         VAULT: workingDirectory,
       },
-      excludeResumeTurns: true,
       fetchImpl: async (
         request: string | URL | Request,
         init?: RequestInit,
@@ -33843,8 +33713,8 @@ async function runRepeatedSetResolutionProbe(
             : 'If the saved records do not uniquely identify today\'s exercise, ask only the one clarification needed and do not change any saved plan.',
         ].join(' ')
     const assistantCliContract = mode === 'group' ? null : buildAssistantCliSurfaceContract(
-      await readAssistantCliLlmsFullManifest({
-        timeoutMs: 5 * 60_000,
+      await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
         workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
       }),
     )
@@ -33896,7 +33766,6 @@ async function runRepeatedSetResolutionProbe(
         MURPH_REPEATED_SET_E2E_COMMAND_LOG: commandLogPath,
         PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
       },
-      excludeResumeTurns: true,
       model: config.model,
       modelProvider: config.modelProvider,
       prompt,
@@ -34519,8 +34388,8 @@ async function runLiveWorkoutRepetitionRecoveryProbe(
     if (saved) expect(currentStatePrompt).toContain(saved.record.text)
     const contextReferences = [{ entityKind: 'activity_session' as const, entityId: started.eventId }]
     const dynamicTools = [MURPH_ATTACH_RESPONSE_CARD_TOOL]
-    const assistantCliContract = buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifest({
-      timeoutMs: 5 * 60_000,
+    const assistantCliContract = buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifestFromCliEntry({
+      cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
       workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
     }))
     const developerInstructions = buildAssistantSystemPrompt({
@@ -34543,7 +34412,7 @@ async function runLiveWorkoutRepetitionRecoveryProbe(
         ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
         PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
       },
-      excludeResumeTurns: true, groupConversation: false,
+      groupConversation: false,
       model: config.model, modelProvider: config.modelProvider,
       reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
     }
@@ -34734,7 +34603,6 @@ async function runNameFirstExperimentStartProbe(input: {
         PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
       },
-      excludeResumeTurns: true,
       model: config.model,
       modelProvider: config.modelProvider,
       prompt: input.exactTitleAvailable
@@ -34790,7 +34658,6 @@ async function runHealthCommonsKnowledgeProbe(prompt: string): Promise<{
           HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
         PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
       },
-      excludeResumeTurns: true,
       model: config.model,
       modelProvider: config.modelProvider,
       prompt,
@@ -36229,7 +36096,6 @@ async function runGroupSharedStepsReadJourney(input: {
         ...config.env,
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
       },
-      excludeResumeTurns: true,
       groupConversation: true,
       hostedToolContext: {
         computerToolsAvailable: false,
@@ -38410,7 +38276,7 @@ describeRealCodex('real Codex Murph service discovery e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, developerInstructions: buildWeatherAlertDeveloperInstructions(false),
         dynamicTools: [MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL],
-        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, excludeResumeTurns: true,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
         hostedToolContext: {
           computerToolsAvailable: false,
           connectedApps: { request: async (request) => {
@@ -38470,7 +38336,7 @@ describeRealCodex('real Codex reminder execution inspection e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, developerInstructions: buildMidnightLinqReminderDeveloperInstructions(),
-        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env, excludeResumeTurns: true,
+        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env,
         hostedToolContext: {
           computerToolsAvailable: false,
           automationTool: { request: async (request) => {

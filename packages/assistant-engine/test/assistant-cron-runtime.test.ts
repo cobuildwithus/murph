@@ -84,7 +84,6 @@ const cronMocks = vi.hoisted(() => ({
   nextAutomationId: 1,
   persistDueExperimentOutcomes: vi.fn(),
   prepareExperimentLifecycleAutomations: vi.fn(),
-  renderAutoLoggedFoodMealNote: vi.fn(),
   readAutomationByRelativePath: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   runExperimentLifecycleDeliveryAuthorityPrecondition: vi.fn(),
@@ -139,10 +138,6 @@ vi.mock('@murphai/query', async (importOriginal) => {
 vi.mock('@murphai/vault-usecases/runtime', () => ({
   loadImporterRuntime: cronMocks.loadImporterRuntime,
   loadRuntimeModule: cronMocks.loadRuntimeModule,
-}))
-
-vi.mock('@murphai/vault-usecases/records', () => ({
-  renderAutoLoggedFoodMealNote: cronMocks.renderAutoLoggedFoodMealNote,
 }))
 
 vi.mock('../src/assistant-service.ts', () => ({
@@ -414,9 +409,6 @@ beforeEach(() => {
     })),
     withCanonicalWriteLockScope: vi.fn(async (_vaultRoot: string, run: () => Promise<unknown>) => await run()),
   })
-  cronMocks.renderAutoLoggedFoodMealNote
-    .mockReset()
-    .mockImplementation((food: { title: string }) => `Meal note for ${food.title}`)
   cronMocks.executeScheduledLogOccurrence.mockReset().mockResolvedValue({
     message: 'Auto-logged scheduled log "Morning measurement" as event evt_1.',
   })

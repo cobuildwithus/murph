@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  ensureHostedAssistantOperatorDefaults,
+  type HostedAssistantBootstrapResult,
+} from "@murphai/operator-config/hosted-assistant-config";
+
+import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeLatencyPhaseBreakdown,
@@ -25,7 +30,6 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
-  recoverInterruptedClosedIntegrationIngestArchives,
   CURRENT_VAULT_FORMAT_VERSION,
   runIntegrationIngestMigration,
   VaultError,
@@ -503,10 +507,9 @@ function hasHostedVaultMetadata(vaultRoot: string): boolean {
 
 async function prepareHostedVaultForRuntime(input: {
   assertRuntimeNotAborted: () => void;
-  runtimeAbortSignal: AbortSignal;
   vaultRoot: string;
 }): Promise<HostedVaultStartupPreparationResult> {
-  const { assertRuntimeNotAborted, runtimeAbortSignal, vaultRoot } = input;
+  const { assertRuntimeNotAborted, vaultRoot } = input;
   if (!hasHostedVaultMetadata(vaultRoot)) {
     return { mutated: false };
   }
@@ -540,20 +543,6 @@ async function prepareHostedVaultForRuntime(input: {
     }
   }
 
-  assertRuntimeNotAborted();
-  const archiveRecovery = await recoverInterruptedClosedIntegrationIngestArchives({
-    signal: runtimeAbortSignal,
-    vaultRoot,
-  });
-  assertRuntimeNotAborted();
-  if (archiveRecovery.blockedConflictCount > 0) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT",
-      "Hosted vault startup found conflicting integration ingest shard representations that could not be repaired safely.",
-      { blockedConflictCount: archiveRecovery.blockedConflictCount },
-    );
-  }
-  mutated ||= archiveRecovery.repairedShardCount > 0;
   return { mutated };
 }
 
@@ -571,6 +560,7 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 }
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
+  plan: HostedInitialMailboxImportPlan;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   lanes: readonly HostedMailboxLane[];
   mailboxFetchSignal?: AbortSignal | null;
@@ -578,9 +568,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
 }): Promise<HostedInitialMailboxImportResult> {
-  const plan = resolveHostedInitialMailboxImportPlan({
-    vaultRoot: input.runnerInput.vaultRoot,
-  });
+  const { plan } = input;
   const prefetch = plan.bootstrapRequired
     ? null
     : await createHostedForegroundMailboxPrefetch({
@@ -817,6 +805,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  assistantBootstrap?: HostedAssistantBootstrapResult | null;
   assistantTarget?: AssistantModelTarget | null;
   assistantAskRequestTargetKind?: "joined_group";
   onConversationActivityObserved?: (() => void) | null;
@@ -1840,6 +1829,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
+      assistantBootstrap: context?.assistantBootstrap ?? null,
       ...(invocationAssistantTarget
         ? { assistantTarget: invocationAssistantTarget }
         : {}),
@@ -1965,7 +1955,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     assertRuntimeNotAborted();
     const hostedVaultStartupPreparation = await prepareHostedVaultForRuntime({
       assertRuntimeNotAborted,
-      runtimeAbortSignal: runtimeAbortController.signal,
       vaultRoot: restored.vaultRoot,
     });
     assertRuntimeNotAborted();
@@ -2437,9 +2426,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       });
       return preparedCodexRuntime;
     };
+    let initialAssistantBootstrap: HostedAssistantBootstrapResult | null = null;
     if (!systemMailboxProcessingMode) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
+      initialAssistantBootstrap = await ensureHostedAssistantOperatorDefaults({
+        allowMissing: true,
+        env: hostedCodexRuntime.runtimeEnv,
+        homeDirectory: restored.operatorHomeRoot,
+      });
       invocationAssistantTarget = await readHostedAssistantExecutionDefaultTarget({
+        assistantBootstrap: initialAssistantBootstrap,
         homeDirectory: restored.operatorHomeRoot,
         runtimeEnv: hostedCodexRuntime.runtimeEnv,
       });
@@ -2567,12 +2563,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         initialPendingRuntimeWake.requestedProcessingMode ?? null,
       );
     }
-    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
-      mergeHostedRuntimeWakeLatencySeeds(
-        initialPendingRuntimeWake,
-        invocationOrchestrationLatencySeed,
+    const initialMailboxImportContext: HostedWorkspaceRunnerMailboxImportContext = {
+      ...createHostedRuntimeWakeInitialImportContext(
+        mergeHostedRuntimeWakeLatencySeeds(
+          initialPendingRuntimeWake,
+          invocationOrchestrationLatencySeed,
+        ),
       ),
-    );
+      assistantBootstrap: initialAssistantBootstrap,
+    };
     emitPhaseLog({
       details: {
         initialMailboxImportLanes: [...initialMailboxImportLanes],
@@ -2589,6 +2588,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let initialMailboxImportResult: HostedInitialMailboxImportResult;
     if (returnSystemMailboxBeforeInitialImport === null) {
       initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+        plan: initialMailboxImportPlan,
         importItemContext: initialMailboxImportContext,
         lanes: initialMailboxImportLanes,
         prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
@@ -2625,6 +2625,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       try {
         initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+          plan: initialMailboxImportPlan,
           importItemContext: initialMailboxImportContext,
           lanes: initialMailboxImportLanes,
           mailboxFetchSignal: initialMailboxFetchWakeInterruption.signal,

@@ -3523,20 +3523,16 @@ describe("RunnerContainer", () => {
   });
 
   it.each(["stopped", "running"] as const)(
-    "accepts legacy shell hints without allocating or probing a %s container",
+    "accepts pre-unified UserRunner hint RPCs without touching a %s container",
     async (initialStatus) => {
       const { container, containerFetch, getState, start, startAndWaitForPorts } =
         createContainerDouble({ initialStatus });
-      const input = { timeoutMs: 7_500, userId: "member_123" };
+      const args = [{ timeoutMs: 7_500, userId: "member_123", source: "linq-typing-started" }];
 
-      await expect(container.prewarmShell(input)).resolves.toEqual({
-        action: "superseded",
-        kind: "superseded",
-      });
-      for (const source of ["linq-message-routing", "linq-typing-started"] as const) {
-        await expect(container.beginShellPrewarm({ ...input, source }))
-          .resolves.toEqual({ accepted: true });
-      }
+      await expect(Reflect.apply(container.beginShellPrewarm, container, args))
+        .resolves.toEqual({ accepted: true });
+      await expect(Reflect.apply(container.prewarmShell, container, args))
+        .resolves.toEqual({ action: "superseded", kind: "superseded" });
 
       expect(start).not.toHaveBeenCalled();
       expect(startAndWaitForPorts).not.toHaveBeenCalled();
@@ -3544,19 +3540,6 @@ describe("RunnerContainer", () => {
       expect(getState).not.toHaveBeenCalled();
     },
   );
-
-  it("starts through authoritative readiness after an inert legacy hint", async () => {
-    const { container, start, startAndWaitForPorts } = createContainerDouble();
-    const input = { timeoutMs: 7_500, userId: "member_123" };
-    await container.beginShellPrewarm(input);
-
-    await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
-    expect(start).not.toHaveBeenCalled();
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-  });
 
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();

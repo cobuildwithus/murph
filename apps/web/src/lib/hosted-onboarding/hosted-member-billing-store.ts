@@ -1211,76 +1211,32 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
   const privateState = await readHostedMemberBillingPrivateState(billingRef, prisma);
 
   return {
-    ...(billingRef.checkoutAttemptId !== undefined
-      ? { checkoutAttemptId: billingRef.checkoutAttemptId }
-      : {}),
-    ...(billingRef.checkoutCreatedAt !== undefined
-      ? { checkoutCreatedAt: billingRef.checkoutCreatedAt }
-      : {}),
-    ...(billingRef.checkoutIntentHash !== undefined
-      ? { checkoutIntentHash: billingRef.checkoutIntentHash }
-      : {}),
-    ...(billingRef.lastStripeEventCreatedAt !== undefined
-      ? {
-          lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
-        }
-      : {}),
-    ...(billingRef.usagePlanTransitionAt !== undefined
-      ? { usagePlanTransitionAt: billingRef.usagePlanTransitionAt }
-      : {}),
-    ...(billingRef.usagePlanTransitionFromCode !== undefined
-      ? { usagePlanTransitionFromCode: billingRef.usagePlanTransitionFromCode }
-      : {}),
-    ...(billingRef.usagePlanTransitionKind !== undefined
-      ? { usagePlanTransitionKind: billingRef.usagePlanTransitionKind }
-      : {}),
-    ...(billingRef.usagePlanTransitionToCode !== undefined
-      ? { usagePlanTransitionToCode: billingRef.usagePlanTransitionToCode }
-      : {}),
-    ...(billingRef.currentBillingPlanCode !== undefined
-      ? { currentBillingPlanCode: billingRef.currentBillingPlanCode }
-      : {}),
-    ...(billingRef.currentBillingPhase !== undefined
-      ? { currentBillingPhase: billingRef.currentBillingPhase }
-      : {}),
-    ...(billingRef.currentCheckoutOffer !== undefined
-      ? { currentCheckoutOffer: billingRef.currentCheckoutOffer }
-      : {}),
-    ...(billingRef.currentPeriodEnd !== undefined
-      ? { currentPeriodEnd: billingRef.currentPeriodEnd }
-      : {}),
-    ...(billingRef.currentPeriodStart !== undefined
-      ? { currentPeriodStart: billingRef.currentPeriodStart }
-      : {}),
-    ...(billingRef.currentTrialEndsAt !== undefined
-      ? { currentTrialEndsAt: billingRef.currentTrialEndsAt }
-      : {}),
-    ...(billingRef.currentTrialStartedAt !== undefined
-      ? { currentTrialStartedAt: billingRef.currentTrialStartedAt }
-      : {}),
+    checkoutAttemptId: billingRef.checkoutAttemptId,
+    checkoutCreatedAt: billingRef.checkoutCreatedAt,
+    checkoutIntentHash: billingRef.checkoutIntentHash,
+    lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
+    usagePlanTransitionAt: billingRef.usagePlanTransitionAt,
+    usagePlanTransitionFromCode: billingRef.usagePlanTransitionFromCode,
+    usagePlanTransitionKind: billingRef.usagePlanTransitionKind,
+    usagePlanTransitionToCode: billingRef.usagePlanTransitionToCode,
+    currentBillingPlanCode: billingRef.currentBillingPlanCode,
+    currentBillingPhase: billingRef.currentBillingPhase,
+    currentCheckoutOffer: billingRef.currentCheckoutOffer,
+    currentPeriodEnd: billingRef.currentPeriodEnd,
+    currentPeriodStart: billingRef.currentPeriodStart,
+    currentTrialEndsAt: billingRef.currentTrialEndsAt,
+    currentTrialStartedAt: billingRef.currentTrialStartedAt,
     memberId: billingRef.memberId,
-    ...(billingRef.pulseTrialPolicyVersion !== undefined
-      ? { pulseTrialPolicyVersion: billingRef.pulseTrialPolicyVersion }
-      : {}),
-    ...(billingRef.pulseTrialRedeemedAt !== undefined
-      ? { pulseTrialRedeemedAt: billingRef.pulseTrialRedeemedAt }
-      : {}),
-    ...(billingRef.pulseTrialStartSource !== undefined
-      ? {
-          pulseTrialStartSource: parseHostedPulseTrialStartSource(
-            billingRef.pulseTrialStartSource,
-          ),
-        }
-      : {}),
+    pulseTrialPolicyVersion: billingRef.pulseTrialPolicyVersion,
+    pulseTrialRedeemedAt: billingRef.pulseTrialRedeemedAt,
+    pulseTrialStartSource: parseHostedPulseTrialStartSource(billingRef.pulseTrialStartSource),
     ...(billingRef.scheduledBillingEffectiveAt
       ? { scheduledBillingEffectiveAt: billingRef.scheduledBillingEffectiveAt }
       : {}),
     ...(billingRef.scheduledBillingPlanCode
       ? { scheduledBillingPlanCode: billingRef.scheduledBillingPlanCode }
       : {}),
-    ...(billingRef.stripeCheckoutSessionIdEncrypted !== undefined
-      ? { stripeCheckoutSessionId: privateState.stripeCheckoutSessionId }
-      : {}),
+    stripeCheckoutSessionId: privateState.stripeCheckoutSessionId,
     stripeCustomerId: privateState.stripeCustomerId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,
     ...(privateState.stripeSubscriptionScheduleId

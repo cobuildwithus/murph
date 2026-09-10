@@ -1,6 +1,6 @@
 import type { BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 
-import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
+import type { BiomarkerOverviewProjection } from "@/src/lib/health-commons/biomarker-projections";
 
 export interface TrendComparison {
   baselineValue: number;
@@ -16,7 +16,7 @@ export type BrowserVaultMetricRowWithValue = BrowserVaultMetricRow & {
 
 export function buildTrendComparison(
   rows: BrowserVaultMetricRowWithValue[],
-  biomarker: BiomarkerPageModel,
+  biomarker: BiomarkerOverviewProjection,
 ): TrendComparison | null {
   const latest = rows.at(-1);
 

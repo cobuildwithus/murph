@@ -1,3 +1,4 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -51,9 +52,6 @@ import {
   type HostedStandbySlotBinding,
 } from "../src/standby-runner-contract.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
-import {
-  createHostedBundleStore,
-} from "../src/bundle-store.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
 } from "../src/browser-vault-store.ts";
@@ -423,93 +421,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
-  it("ignores legacy shell hints without reading consent or addressing a container", async () => {
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "revoked",
-    });
-
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toEqual([]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "unknown",
-        },
-        message: "Hosted runner shell prewarm admission decided.",
-      }),
-    );
-  });
-
-  it("accepts legacy shell hints without allocating a member-specific shell", async () => {
-    const prewarmShell = vi.fn(async () => ({
-      action: "start_issued" as const,
-      kind: "started" as const,
-    }));
-    const { runner } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "granted",
-    });
-
-    await runner.prewarmRuntimeShellForUser(
-      TEST_USER_ID,
-      "linq-message-routing",
-      {
-        shellPrewarmOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
-      },
-    );
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          orchestrationAttemptId:
-            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "linq-message-routing",
-        },
-      }),
-    );
-  });
-
-  it("leaves fresh foreground container selection to the standby pool in allocate mode", async () => {
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "granted",
-      runnerRuntimeEnvSource: {
-        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      },
-    });
-
-    await runner.prewarmRuntimeShellForUser(
-      TEST_USER_ID,
-      "linq-message-routing",
-    );
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toEqual([]);
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "linq-message-routing",
-        },
-        message: "Hosted runner shell prewarm admission decided.",
-      }),
-    );
-  });
-
   it.each(["timer", "late_response"] as const)("bounds consent admission inside the runtime command deadline: %s", async (expiry) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -673,24 +584,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
   });
 
-  it("lets authoritative readiness allocate after an inert legacy shell hint", async () => {
-    const prewarmShell = vi.fn();
-    const ensureReadyForProcessing = vi.fn(async () => ({ kind: "ready" as const }));
-    const { runner, runnerContainerNames } = createRunnerHarness({ prewarmShell, ensureReadyForProcessing });
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    expect(runnerContainerNames).toEqual([]);
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "orchestration-after-inert-shell-hint",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
-    expect(new Set(runnerContainerNames).size).toBe(1);
-    expect(runnerContainerNames[0]).toMatch(/^runner--v-local--[0-9a-f]{32}$/u);
-  });
-
   it("destroys a prior-version pending prewarm before binding a current fence", async () => {
     const runnerRuntimeEnvSource: Record<string, unknown> = {
       ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
@@ -699,10 +592,6 @@ describe("HostedUserRunner execution coordination", () => {
     const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
     const priorDestroyInstance = vi.fn(async () => undefined);
     const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      prewarmShell: vi.fn(async () => ({
-        action: "start_issued" as const,
-        kind: "started" as const,
-      })),
       readHealthDataConsentState: () => "granted",
       runnerContainerStubForName(name, defaultStub) {
         if (name !== priorRunnerContainerName) {
@@ -726,62 +615,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
     expect(runnerContainerNames.slice(1).every(name => /^runner--v-current--[0-9a-f]{32}$/u.test(name))).toBe(true);
     expect(priorDestroyInstance).toHaveBeenCalledOnce();
-  });
-
-  it("does not replace a pending prior-version stop target with another hint", async () => {
-    const runnerRuntimeEnvSource: Record<string, unknown> = {
-      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-      CF_VERSION_METADATA: { id: "prior" },
-    };
-    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
-    const prewarmShell = vi.fn(async () => ({
-      action: "start_issued" as const,
-      kind: "started" as const,
-    }));
-    const { runner, sql } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "granted",
-      runnerRuntimeEnvSource,
-    });
-
-    await runner.bindUser(TEST_USER_ID);
-    sql.exec("UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1", priorRunnerContainerName);
-    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
-      priorRunnerContainerName,
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "unknown",
-        },
-      }),
-    );
-  });
-
-  it("does not recreate a shell after completed consent withdrawal", async () => {
-    const prewarmShell = vi.fn();
-    const destroyInstance = vi.fn(async () => undefined);
-    const { runner } = createRunnerHarness({
-      destroyInstance,
-      prewarmShell,
-      readHealthDataConsentState: () => "revoked",
-    });
-
-    await expect(
-      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
-    ).resolves.toMatchObject({
-      consentState: "revoked",
-      processingAllowed: false,
-    });
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-
-    expect(destroyInstance).toHaveBeenCalledOnce();
-    expect(prewarmShell).not.toHaveBeenCalled();
   });
 
   it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
@@ -2301,14 +2134,6 @@ describe("HostedUserRunner execution coordination", () => {
         stateReadFinishedAtEpochMs: 1_777_000_000_042,
       },
       kind: "ready",
-      shellPrewarmObservation: {
-        firstHintAtEpochMs: 1_777_000_000_010,
-        finishedAtEpochMs: 1_777_000_000_030,
-        hintCount: 2,
-        operationElapsedMs: 20,
-        outcome: "cold_start_observed",
-        source: "linq-typing-started",
-      },
     }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
@@ -2393,12 +2218,6 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 1_250,
-      shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
-      shellPrewarmFinishedAtEpochMs: 1_777_000_000_030,
-      shellPrewarmHintCount: 2,
-      shellPrewarmOperationElapsedMs: 20,
-      shellPrewarmOutcome: "cold_start_observed",
-      shellPrewarmSource: "linq-typing-started",
       workspaceReadElapsedMs: 1_250,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
@@ -2759,6 +2578,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => ({ kind: "ready" }));
     const { invoke, runner, sql } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -2804,6 +2624,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => ({ kind: "ready" }));
     const { invoke, runner } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -3138,6 +2959,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => await readiness.promise);
     const { invoke, runner, sql } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -7198,10 +7020,6 @@ describe("HostedUserRunner execution coordination", () => {
     const currentDestroyInstance = vi.fn(async () => undefined);
     const { runner, runnerContainerNames, sql } = createRunnerHarness({
       bucket: new ListableMemoryEncryptedR2Bucket(),
-      prewarmShell: vi.fn(async () => ({
-        action: "start_issued" as const,
-        kind: "started" as const,
-      })),
       runnerContainerStubForName(name, defaultStub) {
         return {
           ...defaultStub,
@@ -7224,36 +7042,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(runnerContainerNames).toEqual([priorRunnerContainerName]);
     expect(priorDestroyInstance).toHaveBeenCalledOnce();
     expect(currentDestroyInstance).not.toHaveBeenCalled();
-  });
-
-  it("drops shell prewarm while account deletion owns the consent lock", async () => {
-    const destroyStarted = createDeferred<void>();
-    const releaseDestroy = createDeferred<void>();
-    const destroyInstance = vi.fn(async () => {
-      destroyStarted.resolve(undefined);
-      await releaseDestroy.promise;
-    });
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      bucket: new ListableMemoryEncryptedR2Bucket(),
-      destroyInstance,
-      healthDataProcessingAllowed: false,
-      prewarmShell,
-      readHealthDataConsentState: () => "missing",
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
-    await destroyStarted.promise;
-    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
-      .resolves.toBeUndefined();
-
-    releaseDestroy.resolve(undefined);
-    await expect(deletion).resolves.toMatchObject({ ok: true });
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toHaveLength(1);
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
@@ -8935,7 +8723,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: getTestHostedRuntimeRootKey("runtime"),
       keyId: "udrk:runtime:test-root",
@@ -9142,6 +8930,7 @@ function readHostedMediaAssetRowCount(sql: TestSqlStorageLike): number {
 }
 
 function createRunnerHarness(input: {
+  allowedRunnerSecretKeys?: string;
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
@@ -9169,7 +8958,6 @@ function createRunnerHarness(input: {
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   workspaceResponse?: () => Promise<Response> | Response;
   platformAiUsageAllowed?: boolean | (() => boolean);
-  prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
@@ -9312,37 +9100,6 @@ function createRunnerHarness(input: {
           ),
         }
       : {}),
-    ...(input.prewarmShell
-      ? {
-          beginShellPrewarm: createDirectOnlyRpcMethod<
-            NonNullable<HostedExecutionContainerStubLike["beginShellPrewarm"]>
-          >(
-            async function (
-              this: HostedExecutionContainerStubLike,
-              prewarmInput,
-            ) {
-              expect(this).toBe(stub);
-              const operation = input.prewarmShell?.call(this, prewarmInput);
-              void operation?.catch(() => undefined);
-              return { accepted: true };
-            },
-          ),
-          prewarmShell: createDirectOnlyRpcMethod<
-            NonNullable<HostedExecutionContainerStubLike["prewarmShell"]>
-          >(
-            async function (
-              this: HostedExecutionContainerStubLike,
-              prewarmInput,
-            ) {
-              expect(this).toBe(stub);
-              return await input.prewarmShell?.call(this, prewarmInput) ?? {
-                action: "start_issued",
-                kind: "started",
-              };
-            },
-          ),
-        }
-      : {}),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: createDirectOnlyRpcMethod<
@@ -9438,6 +9195,7 @@ function createRunnerHarness(input: {
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: input.allowedRunnerSecretKeys,
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
