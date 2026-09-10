@@ -9,10 +9,13 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import {
   addCapture,
+  addCaptureWithLookup,
   applyCanonicalWriteBatch,
   appendJsonlRecord,
   initializeVault,
+  findCaptureByLookup,
   readEvent,
+  runGeneratedImageCaptureRetention,
   upsertEvent,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePersistenceInput,
@@ -54,6 +57,68 @@ import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
   readHostedMediaReferenceCatalogue,
 } from "../src/hosted-runtime/media-references.ts";
+
+test.each(["warm", "restored"])("retires an expired generated capture in a %s workspace", async (workspace) => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-expired-generated-capture-"));
+  const recordedAt = "2030-01-01T00:00:00.000Z";
+  const expiresAt = "2030-01-15T00:00:00.000Z";
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(recordedAt));
+  try {
+    await initializeVault({ vaultRoot, title: "Generated capture expiry", timezone: "UTC" });
+    const sourcePath = path.join(vaultRoot, "source.png");
+    await writeFile(sourcePath, "synthetic image payload");
+    const capture = await addCaptureWithLookup({
+      vaultRoot,
+      lookupKey: "generated:hosted-expiry",
+      lookupAttachmentRole: "media_1",
+      attachments: [{ role: "media_1", sourcePath }],
+      draft: {
+        recordedAt,
+        occurredAt: recordedAt,
+        source: "derived",
+        tags: ["assistant-generated-image", "generated-image"],
+        title: "Synthetic generated capture",
+        note: "Synthetic retention proof.",
+      },
+      rawImport: {
+        importKind: "capture",
+        importedAt: recordedAt,
+        source: "murph.generate_image",
+        provenance: { generatedImage: { schema: "murph.generated-image.v1" } },
+      },
+    });
+    const attachmentRef = capture.event.attachments![0]!.relativePath;
+    const { mediaStore, getCalls } = createHostedRuntimeMediaStoreStub();
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ mediaStore, vaultRoot });
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries)
+      .toEqual([expect.objectContaining({ relativePath: attachmentRef, expiresAt })]);
+    // Hosted snapshots omit externalized bytes; the warm path still has them.
+    if (workspace === "restored") await rm(path.join(vaultRoot, attachmentRef));
+    clock.mockReturnValue(Date.parse(expiresAt));
+    const materialize = createHostedArtifactMaterializer({
+      mediaStore,
+      operatorHomeRoot: path.join(vaultRoot, ".operator-home"),
+      vaultRoot,
+    });
+    const materializeCandidatePaths = async (paths: readonly string[]) => {
+      const result = await materialize(paths);
+      return { missingStoredPaths: [...result.missingArtifactPaths].map((key) => key.slice("vault:".length)) };
+    };
+    const input = { vaultRoot, now: new Date(expiresAt), materializeCandidatePaths };
+    expect(await runGeneratedImageCaptureRetention(input)).toMatchObject({
+      blockedCaptureCount: 0, retiredCaptureCount: 1, retiredByteCount: 0, nextEligibleAt: null,
+    });
+    expect(getCalls).toHaveLength(0);
+    expect(await findCaptureByLookup({ vaultRoot, lookupKey: "generated:hosted-expiry" }))
+      .toMatchObject({ status: "deleted" });
+    expect(await runGeneratedImageCaptureRetention(input)).toMatchObject({
+      blockedCaptureCount: 0, retiredCaptureCount: 0, nextEligibleAt: null,
+    });
+  } finally {
+    clock.mockRestore();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("hosted artifact upload sink skips known and already uploaded hashes", async () => {
   const { artifactStore, putCalls } = createHostedRuntimeArtifactStoreStub();
