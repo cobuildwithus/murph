@@ -7,7 +7,7 @@ import {
   resolveWearableCanonicalMetricKey,
   resolveWearableMetricCatalogEntry,
   resolveWearableMetricTolerance,
-} from "../src/device-providers/metric-catalog.ts";
+} from "../src/index.ts";
 
 test("metric catalog resolves aliases and returns catalog metadata", () => {
   assert.equal(resolveWearableCanonicalMetricKey(" active_calories "), "activeCalories");
