@@ -389,7 +389,12 @@ native resolution. Web typecheck, the verified-contact/last-method regression,
 changed-file lint and full PR complexity guard pass; no new hotspot exceeds 20.
 
 The broader public-loading run also reported a recoverable server-render error
-on the unchanged experiment library. A baseline run is checking whether that
-error predates this change. No authentication failure appeared in the six
-journeys. Final review, exact-head CI, native qualification and retirement
-remain outstanding.
+on the unchanged experiment library. The same error reproduces on the clean
+parent branch in its existing public-auth smoke test, which still passes.
+Recorded this existing diagnostic gap through Frog. No authentication failure
+appeared in the six journeys. Final review, exact-head CI, native qualification
+and retirement remain outstanding.
+
+The Web adoption candidate is PR #3132, stacked on #3128. Its release note uses
+the existing archive renderer; all ten fragment/page cases and Web typecheck
+pass. Public preview and final review are being prepared on the stable candidate.

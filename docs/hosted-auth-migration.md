@@ -21,6 +21,12 @@ Use no planned service outage. Prefer natural compatibility drain over elaborate
 
 Four Murph PRs are integration boundaries. iOS and Android changes are reviewed in their own repositories and pinned to the corresponding backend protocol; native store publication is a separate event from merging code.
 
+Current implementation PRs: [approval migration #3127](https://github.com/cobuildwithus/murph/pull/3127),
+[backend compatibility #3128](https://github.com/cobuildwithus/murph/pull/3128), and
+[Web adoption and recovery #3132](https://github.com/cobuildwithus/murph/pull/3132).
+These links identify review candidates, not deployed versions. Native and final
+retirement candidates will be pinned here before rollout qualification is complete.
+
 ## Backend configuration and deployment
 
 PR 2 is an additive compatibility release. Apply both additive schema migrations
