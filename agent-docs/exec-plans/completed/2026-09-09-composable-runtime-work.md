@@ -1,6 +1,6 @@
 # Decouple hosted work from assistant turns
 
-Status: active
+Status: completed
 Created: 2026-09-09
 
 ## Outcome and protected invariants
@@ -86,8 +86,8 @@ completed environment interview can become useful while that source is slow.
 
 Prove new and established member paths, no-data and delayed-provider behavior,
 retry and restart, newer dirty revisions, and authority loss. Preserve model-free
-processing when assistant execution is unavailable. The selected journeys are
-on hold until composed delivery, canonical readback, and recovery proofs pass.
+processing when assistant execution is unavailable. Result: Ready. Composed delivery, canonical readback, recovery, and the focused
+real-Codex wearable-arrival journey pass; production latency is not measured.
 
 ## Proof and completion
 
@@ -493,3 +493,39 @@ entrypoint cases preserve post-snapshot exact acknowledgments and failure retry
 diagnostics; no generic shutdown or delivery behavior is removed. The cleanup
 deletes over 800 net production lines and adds no state, dependency, or service.
 Parent diff and privacy review pass; proceed to the next full sensitive review.
+
+
+## Final review and readiness
+
+ReviewGPT round seven passed on
+3eddee214944d85f204e0f12c1eff0e663f26705 with no qualifying Critical, High, or
+material Complexity Collapse finding. It confirmed the R6 executor deletion and
+narrowed consumed-wake replacement, and rechecked the R5 retry, R4 receipt, R1
+reply, and query-lock corrections. Parent accepts the substantive full-snapshot
+review: it traces current production owners and distinguishes its 23 stubbed
+source checks from the repository's integrated proof. No accepted findings
+remain. The model capture confirms requested and response gpt-6-pro, the exact
+submitted user turn, and response SHA-256
+e17c7b8d4bae66994b8cb4ca0fe82996b333a03ff792f1f746162f6a78013dd1.
+Response capture took over 15 minutes. The full sensitive packet preserves the
+immutable first head, previous reviewed head, current head, and valid ancestry;
+the authorized redesign-and-continue retrospective was not reset.
+
+All 32 successful CI statuses on the reviewed head are green; skipped jobs and a
+superseded evidence job are not failures. The current-base merge-tree succeeds.
+The final cleanup removes 811 net production lines; the complete PR removes more
+production source than it adds. Typecheck, focused behavior proof, and complexity
+review pass as recorded above. Final parent review confirms one workspace owner
+for independent attempts, existing claims and canonical writes, accepted-snapshot
+acknowledgments, and foreground reply independence. No new service, schema,
+dependency, generic scheduler, or persisted lifecycle was added.
+
+Close this plan in a documentation-only final commit. That archival/evidence
+change does not alter the reviewed implementation or require another substantive
+ReviewGPT round; its required final-head CI remains the last completion check.
+PR #3090 stays open for merge. Deployment remains separate: runtime/Worker first,
+then broader Web readiness after old warm containers drain; Temporal wire modes
+are unchanged. No production latency measurement, deployment, merge, or member
+message is claimed.
+Updated: 2026-09-10
+Completed: 2026-09-10
