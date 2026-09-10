@@ -1,6 +1,6 @@
 # Prevent device completion starvation after checkpoint
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -32,4 +32,12 @@ Proof: Synthetic completion and canonical mailbox readback, foreground delivery 
 
 ## Verification
 
-Local reproduction established in two tests before the fix. The callback regression passes after the fix; isolated device and adjacent priority verification are in progress. CI and ReviewGPT remain required. The public/private runtime protocol and durable data format must remain compatible without migration.
+- Corrected real device-import fixture: the same synthetic scenario fails against base `b80bd40f84d1` at its fourth idle snapshot with no acknowledgment, and passes with the patch. The base source was restored only for the negative check and the patched source was restored afterward.
+- Callback regression: caught-up empty wakes complete without another assistant pass; incomplete and unknown high-water evidence preserve foreground service. All three pass.
+- Adjacent focused cases pass: interrupted acknowledgment, durable effects after successful checkpoint, repeated device wakes, incomplete prefix, failed classification, shutdown during projection, and foreground delivery during an owned projection. The original checkpoint-wakes suite also passed.
+- Assistant-runtime and Web typechecks pass. Changelog generation and all 10 focused archive tests pass.
+- Complexity guard passes with unchanged debt 547 and maximum 252. Existing owner hotspots were reviewed; no new state owner or protocol is needed.
+- Parent review confirms synthetic fixtures, no private evidence in artifacts, and preserved checkpoint/acknowledgment order. The two-reply test setup allowance increased to 20 seconds after reproduced shared-host timeouts; its independent two-second delivery bound remains unchanged. The Frog record is included.
+
+Implementation and local verification are complete. PR #3196 owns the remaining exact-head CI and required ReviewGPT gates; these are pending at candidate closure and must pass before the PR task is reported complete. Merge and deployment remain outside scope.
+Completed: 2026-09-10

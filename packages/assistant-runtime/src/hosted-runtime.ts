@@ -5052,7 +5052,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     let vaultShareWakeClassificationOrdinal = 0;
     const invocationWorkspaceVersion = input.request.workspaceVersion;
-    const invocationProcessingMode = input.request.processingMode ?? "default";
+    const invocationProcessingMode = input.request.processingMode;
     const offerHostedVaultShareProjectionDuringIdle = async (input: {
       deferDeviceSyncWakes?: boolean;
       deferredDeviceSyncWake?: HostedVaultShareOfferWake | null;
@@ -5102,7 +5102,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && !runtimeStateDirty
           && !imageGenerationController?.hasCompleted()
           && (latencySeed.requestedProcessingMode == null
-            || latencySeed.requestedProcessingMode === invocationProcessingMode)
+            || latencySeed.requestedProcessingMode === (invocationProcessingMode ?? "default"))
           && classification.caughtUpToEveryLaneHighWater
         ) {
           return { mayWaitForProjection: true, wake: null };

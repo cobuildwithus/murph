@@ -56,6 +56,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
   const releaseDownload = createDeferred<void>();
   const dirtyAcks: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0][] = [];
   let replySent = false;
+  let idleSnapshotCount = 0;
   let modelFinishedAt = 0;
   const connectionId = "synthetic-concurrent-connection";
   const deviceItem = createMailboxItem({
@@ -256,8 +257,9 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
       {
         vaultRoot, runtimeWakeSignal, signal: controller.signal,
         async createCheckpointSnapshot() {
+          idleSnapshotCount += 1;
           if (scenario === "empty-wake") {
-            assert.ok(checkpointRequests.length < 4, "Empty wakes starved the device completion acknowledgment.");
+            assert.ok(idleSnapshotCount <= 3, "Empty wakes starved the device completion acknowledgment.");
           }
           if (completesBeforeReply || persistent) await releaseSnapshot.promise;
           events.push("snapshot.completed");
@@ -331,7 +333,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
       await withRealTimeout(Promise.race([
         secondReply.promise,
         runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
-      ]), 5_000, () => events.join(","));
+      ]), 20_000, () => events.join(","));
       assert.equal(dirtyAcks.length, 0);
       if (persistent) {
         assert.equal(events.includes("provider.aborted"), false, events.join(","));

@@ -147,12 +147,14 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
-  test("empty projection wakes cannot starve a checkpointed completion", async () => {
+  test.each(["caught-up", "incomplete", "unknown"] as const)("classifies %s empty projection wakes before completing checkpointed work", async (coverage) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-ready-completion-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let assistantPasses = 0;
+    let scopeReads = 0;
+    const mailboxPort = createMailboxPort({ events, items: [] });
     const durableEffect = vi.fn(async () => {
       events.push("completion");
       return { requiresFollowUpCheckpoint: true };
@@ -170,11 +172,26 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           return { snapshotRef: createBundleRef({ hash: "a".repeat(64), key: "users/bundles/member-synthetic/ready-completion.bundle.json", size: 512 }) };
         },
         platform: createPlatform({
-          mailboxPort: createMailboxPort({ events, items: [] }),
+          mailboxPort: {
+            ...mailboxPort,
+            async fetch(request) {
+              const response = await mailboxPort.fetch(request);
+              if (scopeReads === 1 && coverage !== "caught-up") {
+                return {
+                  ...response,
+                  maxSeqByLane: coverage === "unknown" ? [] : response.maxSeqByLane.map((entry) => ({
+                    ...entry, maxSeq: entry.lane === "conversation" ? "1" : entry.maxSeq,
+                  })),
+                };
+              }
+              return response;
+            },
+          },
           workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
           vaultSharePort: {
             async listActiveProjectionScopes() {
-              runtimeWakeSignal.notify();
+              scopeReads += 1;
+              if (coverage === "caught-up" || scopeReads === 1) runtimeWakeSignal.notify();
               await new Promise((resolve) => setTimeout(resolve, 10));
               return { projectionKinds: [], projectionScopes: [] };
             },
@@ -198,7 +215,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         },
       });
       assert.equal(durableEffect.mock.calls.length, 1);
-      assert.equal(assistantPasses, 1);
+      assert.equal(assistantPasses, coverage === "caught-up" ? 1 : 2);
       assert.ok(events.indexOf("workspace.checkpoint") < events.indexOf("completion"));
     } finally {
       await removeTempRoot(vaultRoot);
