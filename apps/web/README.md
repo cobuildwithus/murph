@@ -970,10 +970,6 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
-- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only while an
-  older rollback build may still populate the deprecated
-  `HostedLinqLine.activeMemberLimit` column; current weighted assignment does
-  not read it
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
   `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
   `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
@@ -1512,9 +1508,7 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   `payment_notification_email_sent_at` column before or with the Web build.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
-- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
-  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only for an
-  older rollback build; current weighted assignment does not read it.
+- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
@@ -1686,9 +1680,13 @@ The backfill decrypts only through the existing thread-delivery-route owner,
 emits aggregate counts only, and updates rows with an optimistic authority
 check. Do not run `--apply` before the final alias proof and prior-function
 drain, do not treat a dry-run as readiness, and do not drop the legacy
-`HostedLinqLine.activeMemberLimit` column in the same rollout. The complete
-assignment and deployment contract is in
-`docs/hosted-linq-db-home-lines-migration.md`.
+physical `hosted_linq_line.active_member_limit` column in the same rollout.
+Current application code and generated Prisma clients omit that retired field;
+the nullable physical column remains for older Web builds and operator scripts.
+A separate contract cleanup must establish the replacement rollback floor and
+prove old HTTP requests, deployment-pinned Workflows, and operator CLI
+invocations have drained before dropping it. The complete assignment and
+deployment contract is in `docs/hosted-linq-db-home-lines-migration.md`.
 
 New routed Linq and Telegram groups materialize their ordinary unnamed hosted
 group and route-owner membership inside the canonical route transaction. The
