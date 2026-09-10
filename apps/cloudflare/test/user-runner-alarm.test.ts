@@ -340,6 +340,64 @@ describe("HostedUserRunner execution coordination", () => {
     expect(emitted).not.toContain(oversizedDetail);
   });
 
+  it("checks admission once for startup and never for subsequent active wakes", async () => {
+    const completion = createDeferred<HostedWorkspaceInvocationResult>();
+    const readAdmission = vi.fn(() => "granted" as const);
+    const ensureProcessing = vi.fn(async () => ({
+      action: "woken" as const, kind: "accepted" as const,
+    }));
+    const { runner, invoke, flushWaitUntil } = createRunnerHarness({
+      readHealthDataConsentState: readAdmission,
+      ensureProcessing,
+      invocationResults: [completion.promise],
+    });
+    await expect(runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "session-start",
+    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readAdmission).toHaveBeenCalledOnce();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockClear();
+    readAdmission.mockImplementation(() => { throw new Error("Redundant admission callback"); });
+    for (const orchestrationAttemptId of ["warm-wake-one", "warm-wake-two"]) {
+      await expect(runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId,
+      })).resolves.toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    }
+    expect(readAdmission).toHaveBeenCalledOnce();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
+    completion.resolve({ nextWakeAt: null, status: "idle" });
+    await flushWaitUntil();
+  });
+
+  it.each(["revoked", "unavailable"] as const)(
+    "rechecks admission before replacing an inactive session: %s",
+    async (admission) => {
+      const readAdmission = vi.fn(() => {
+        if (admission === "unavailable") throw new Error("Admission unavailable");
+        return "revoked" as const;
+      });
+      const { runner, sql, invoke } = createRunnerHarness({
+        readHealthDataConsentState: readAdmission,
+        ensureProcessing: async () => ({ kind: "start-required", reason: "no-active-child" }),
+        readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      });
+      await runner.bindUser(TEST_USER_ID);
+      writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+      const replacement = runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId: "replacement-admission",
+      });
+      if (admission === "unavailable") {
+        await expect(replacement).rejects.toThrow("Admission unavailable");
+      } else {
+        await expect(replacement).resolves.toMatchObject({ kind: "retry_later" });
+      }
+      expect(readAdmission).toHaveBeenCalledOnce();
+      expect(invoke).not.toHaveBeenCalled();
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    },
+  );
+
   it("denies runtime processing when the authoritative consent read is revoked", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -362,11 +420,10 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
     expect(writeDataPoint).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
-  it("does not address the runner container when shell prewarm observes revoked consent", async () => {
+  it("ignores legacy shell hints without reading consent or addressing a container", async () => {
     const prewarmShell = vi.fn();
     const { runner, runnerContainerNames } = createRunnerHarness({
       prewarmShell,
@@ -375,12 +432,14 @@ describe("HostedUserRunner execution coordination", () => {
 
     await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
 
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+
     expect(prewarmShell).not.toHaveBeenCalled();
     expect(runnerContainerNames).toEqual([]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: {
-          shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
           shellPrewarmSource: "unknown",
         },
         message: "Hosted runner shell prewarm admission decided.",
@@ -451,191 +510,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("abandons a slow shell hint admission before authoritative processing begins", async () => {
-    vi.useFakeTimers();
-    let admissionReads = 0;
-    const firstAdmissionStarted = createDeferred<void>();
-    const authoritativeAdmissionStarted = createDeferred<void>();
-    const releaseAuthoritativeAdmission = createDeferred<"granted">();
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: ({ timeoutMs }) => {
-        admissionReads += 1;
-        if (admissionReads === 1) {
-          expect(timeoutMs).toBe(250);
-          firstAdmissionStarted.resolve(undefined);
-          return new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
-          });
-        }
-        expect(timeoutMs).toBe(30_000);
-        authoritativeAdmissionStarted.resolve(undefined);
-        return releaseAuthoritativeAdmission.promise;
-      },
-    });
-
-    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    await firstAdmissionStarted.promise;
-    const ensure = runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "authoritative-after-slow-hint-admission",
-      userId: TEST_USER_ID,
-    });
-
-    await vi.advanceTimersByTimeAsync(249);
-    expect(admissionReads).toBe(1);
-    expect(runnerContainerNames).toEqual([]);
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(prewarm).resolves.toBeUndefined();
-    await authoritativeAdmissionStarted.promise;
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toEqual([]);
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
-          shellPrewarmSource: "unknown",
-        },
-        level: "warn",
-      }),
-    );
-
-    releaseAuthoritativeAdmission.resolve("granted");
-    await expect(ensure).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-  });
-
-  it("drops repeated shell hints instead of queuing them ahead of authoritative processing", async () => {
-    let admissionReads = 0;
-    const firstAdmissionStarted = createDeferred<void>();
-    const releaseFirstAdmission = createDeferred<"granted">();
-    const authoritativeAdmissionStarted = createDeferred<void>();
-    const releaseAuthoritativeAdmission = createDeferred<"granted">();
-    const prewarmShell = vi.fn(async () => ({
-      action: "start_issued" as const,
-      kind: "started" as const,
-    }));
-    const { runner } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: ({ timeoutMs }) => {
-        admissionReads += 1;
-        if (admissionReads === 1) {
-          expect(timeoutMs).toBe(250);
-          firstAdmissionStarted.resolve(undefined);
-          return releaseFirstAdmission.promise;
-        }
-        expect(timeoutMs).toBe(30_000);
-        authoritativeAdmissionStarted.resolve(undefined);
-        return releaseAuthoritativeAdmission.promise;
-      },
-    });
-
-    const firstPrewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    await firstAdmissionStarted.promise;
-    let settledDuplicateCount = 0;
-    const duplicatePrewarms = Array.from({ length: 4 }, () =>
-      runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
-        settledDuplicateCount += 1;
-      })
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(settledDuplicateCount).toBe(4);
-    expect(admissionReads).toBe(1);
-
-    const ensure = runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "authoritative-after-repeated-hints",
-      userId: TEST_USER_ID,
-    });
-    releaseFirstAdmission.resolve("granted");
-    await expect(firstPrewarm).resolves.toBeUndefined();
-    await authoritativeAdmissionStarted.promise;
-
-    expect(admissionReads).toBe(2);
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "unknown",
-        },
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
-      ([entry]) =>
-        entry.details?.shellPrewarmAdmissionOutcome === "skipped_consent_busy",
-    )).toHaveLength(4);
-    await expect(Promise.all(duplicatePrewarms)).resolves.toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
-
-    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
-      .resolves.toBeUndefined();
-    expect(admissionReads).toBe(2);
-    expect(prewarmShell).not.toHaveBeenCalled();
-
-    releaseAuthoritativeAdmission.resolve("granted");
-    await expect(ensure).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-  });
-
-  it("releases consent withdrawal after the bounded shell hint admission budget", async () => {
-    vi.useFakeTimers();
-    let admissionReads = 0;
-    const firstAdmissionStarted = createDeferred<void>();
-    const withdrawalAdmissionStarted = createDeferred<void>();
-    const destroyInstance = vi.fn(async () => undefined);
-    const prewarmShell = vi.fn();
-    const { runner } = createRunnerHarness({
-      destroyInstance,
-      prewarmShell,
-      readHealthDataConsentState: ({ timeoutMs }) => {
-        admissionReads += 1;
-        if (admissionReads === 1) {
-          expect(timeoutMs).toBe(250);
-          firstAdmissionStarted.resolve(undefined);
-          return new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
-          });
-        }
-        expect(timeoutMs).toBe(30_000);
-        withdrawalAdmissionStarted.resolve(undefined);
-        return "revoked";
-      },
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    await firstAdmissionStarted.promise;
-    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(
-      TEST_USER_ID,
-    );
-
-    await vi.advanceTimersByTimeAsync(249);
-    expect(admissionReads).toBe(1);
-    expect(destroyInstance).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(prewarm).resolves.toBeUndefined();
-    await withdrawalAdmissionStarted.promise;
-    await expect(withdrawal).resolves.toMatchObject({
-      consentState: "revoked",
-      processingAllowed: false,
-      runnerContainerDestroyOk: true,
-    });
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(destroyInstance).toHaveBeenCalledOnce();
-  });
-
-  it("bounds consent admission inside the runtime command deadline", async () => {
+  it.each(["timer", "late_response"] as const)("bounds consent admission inside the runtime command deadline: %s", async (expiry) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const admissionStarted = createDeferred<void>();
@@ -643,7 +518,7 @@ describe("HostedUserRunner execution coordination", () => {
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => ({ kind: "ready" }));
-    const { runner, sql } = createRunnerHarness({
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       readHealthDataConsentState: async () => {
         admissionStarted.resolve(undefined);
@@ -659,13 +534,19 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     await admissionStarted.promise;
-    await vi.advanceTimersByTimeAsync(4_000);
+    if (expiry === "timer") {
+      await vi.advanceTimersByTimeAsync(4_000);
+    } else {
+      vi.setSystemTime(Date.now() + 4_000);
+      releaseAdmission.resolve(undefined);
+    }
 
     await expect(response).resolves.toEqual({
       kind: "retry_later",
       retryAt: "2026-04-27T00:00:14.000Z",
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
       failure_count: 0,
@@ -910,7 +791,7 @@ describe("HostedUserRunner execution coordination", () => {
     const writeDataPoint = vi.fn();
     const { invoke, runner } = createRunnerHarness({
       readHealthDataConsentState: () => {
-        vi.setSystemTime(fixedNowMs + 10);
+        vi.setSystemTime(fixedNowMs + 40);
         return "granted";
       },
       runtimeRetryAnalytics: { writeDataPoint },
@@ -940,10 +821,10 @@ describe("HostedUserRunner execution coordination", () => {
       cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
       userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
       runtimeConsentLockAcquiredAtEpochMs: fixedNowMs,
-      healthDataAdmissionReadStartedAtEpochMs: fixedNowMs,
-      healthDataAdmissionReadFinishedAtEpochMs: fixedNowMs + 10,
-      userRunnerEnsureStartedAtEpochMs: fixedNowMs + 10,
-      runnerStateBindStartedAtEpochMs: fixedNowMs + 10,
+      healthDataAdmissionReadStartedAtEpochMs: fixedNowMs + 30,
+      healthDataAdmissionReadFinishedAtEpochMs: fixedNowMs + 40,
+      userRunnerEnsureStartedAtEpochMs: fixedNowMs,
+      runnerStateBindStartedAtEpochMs: fixedNowMs,
       runnerStateBindFinishedAtEpochMs: fixedNowMs + 20,
       runnerStateReadStartedAtEpochMs: fixedNowMs + 20,
       runnerStateReadFinishedAtEpochMs: fixedNowMs + 30,
@@ -1343,6 +1224,12 @@ describe("HostedUserRunner execution coordination", () => {
     ).rejects.toThrow("health-data consent withdrawal");
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
     expect(readActiveRunnerContainerNameForTest(sql)).toBe(priorRunnerContainerName);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "wake-after-failed-withdrawal-stop",
+    })).resolves.toMatchObject({ kind: "retry_later" });
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
 
     await expect(
       runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
@@ -3491,6 +3378,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     firstInvocationResult.resolve({ nextWakeAt: null, status: "idle" });
     await flushWaitUntil();
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-restored-owner-recheck",
@@ -3950,8 +3838,6 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
-          healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-          healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
           runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
           runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
@@ -4008,8 +3894,6 @@ describe("HostedUserRunner execution coordination", () => {
         activeFenceTargetWasPriorVersion: false,
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
         runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
-        healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-        healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
         runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),

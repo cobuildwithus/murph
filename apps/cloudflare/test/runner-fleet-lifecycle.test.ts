@@ -518,6 +518,9 @@ function allocationHarness(options: {
     standby: { getByName() { calls.legacy++; throw new Error("Fresh allocation reached legacy namespace"); } },
   });
   const controller = new RuntimeProcessingController({
+    readHealthDataAdmission: async (userId) => ({
+      userId, consentState: "granted", processingAllowed: true,
+    }),
     env: controllerEnvironment(), stateStore: store, runnerContainerNamespace: namespace,
     runnerRuntimeEnvSource: { ...version, ...options.environment, HOSTED_EXECUTION_STANDBY_MODE: options.mode ?? "allocate" },
     invocationService: {
@@ -598,12 +601,6 @@ describe("fleet allocation policy and ambiguous-outcome recovery", () => {
       assert.equal(binding.state, "bound");
       assert.equal(binding.userId, MEMBER);
       assert.equal(binding.region, HOSTED_RUNNER_REGION);
-    });
-    it(`never creates a member-named shell from a ${mode} prewarm hint`, async () => {
-      const h = allocationHarness({ mode });
-      await h.controller.beginShellPrewarmForUser(MEMBER);
-      assert.deepEqual(h.names, []);
-      assert.equal(h.calls.bind, 0);
     });
   }
 
