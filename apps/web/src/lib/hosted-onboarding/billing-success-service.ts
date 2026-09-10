@@ -3,7 +3,6 @@ import type Stripe from "stripe";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { getPrisma } from "../prisma";
-import { HOSTED_PULSE_TRIAL_OFFER } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
@@ -32,9 +31,7 @@ import {
   applyStripeCheckoutCompleted,
   cleanupHostedFamilySponsoredDirectSubscription,
   cleanupHostedStandardCheckoutAndRetireAttempt,
-  cancelHostedPulseTrialCheckoutLoserSubscription,
   type HostedStripeCheckoutCleanup,
-  prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeCheckoutCompletion,
 } from "./stripe-billing-events";
 
@@ -104,13 +101,6 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
         activationOutcome.cleanupFamilySponsoredCheckout.subscriptionId,
     });
   }
-  if (activationOutcome.cleanupPulseTrialStripeSubscriptionId) {
-    await cancelHostedPulseTrialCheckoutLoserSubscription({
-      memberId: invite.memberId,
-      prisma,
-      subscriptionId: activationOutcome.cleanupPulseTrialStripeSubscriptionId,
-    });
-  }
   if (activationOutcome.cleanupStandardCheckout) {
     await cleanupHostedStandardCheckoutAndRetireAttempt({
       checkoutSessionId:
@@ -145,7 +135,6 @@ type HostedCheckoutSessionSuccessInput = {
 
 type HostedCheckoutSessionSuccessOutcome = {
   activatedMemberId: string | null;
-  cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
@@ -165,13 +154,6 @@ async function applyHostedCheckoutSessionSuccess(
 async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
   input: HostedCheckoutSessionSuccessInput,
 ): Promise<HostedCheckoutSessionSuccessOutcome> {
-  const preparedCryptoDomainRoots =
-    input.session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
-      ? await prepareHostedStripeDirectMemberActivationCrypto({
-          memberId: input.memberId,
-          prisma: input.prisma,
-        })
-      : null;
   const preparedCheckoutCompletion =
     await prepareHostedStripeCheckoutCompletion({
       memberId: input.memberId,
@@ -207,18 +189,10 @@ async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
           input.session,
           tx,
           undefined,
-          preparedCryptoDomainRoots ?? undefined,
           preparedCheckoutCompletion,
         );
       }
-      return preparedCryptoDomainRoots
-        ? applyStripeCheckoutCompleted(
-            input.session,
-            tx,
-            undefined,
-            preparedCryptoDomainRoots,
-          )
-        : applyStripeCheckoutCompleted(input.session, tx);
+      return applyStripeCheckoutCompleted(input.session, tx);
     },
   });
 

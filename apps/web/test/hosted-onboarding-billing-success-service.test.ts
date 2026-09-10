@@ -5,7 +5,6 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboardi
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import {
   getHostedDefaultBillingPlanCode,
-  HOSTED_PULSE_TRIAL_OFFER,
   listHostedBillingPlanPresentations,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
@@ -25,14 +24,11 @@ const mocks = vi.hoisted(() => {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
     applyStripeCheckoutCompleted: vi.fn(),
     cleanupHostedFamilySponsoredDirectSubscription: vi.fn(),
-    cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
     cleanupHostedStandardCheckoutLoser: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
-    prepareHostedStripeDirectMemberActivationCrypto: vi.fn(),
     prepareHostedStripeCheckoutCompletion: vi.fn(),
-    preparedCryptoDomainRoots: new Map(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
     scheduleHostedSignupNotificationEmails: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
@@ -109,10 +105,6 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cleanupHostedFamilySponsoredDirectSubscription,
   cleanupHostedStandardCheckoutAndRetireAttempt:
     mocks.cleanupHostedStandardCheckoutLoser,
-  cancelHostedPulseTrialCheckoutLoserSubscription:
-    mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
-  prepareHostedStripeDirectMemberActivationCrypto:
-    mocks.prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeCheckoutCompletion:
     mocks.prepareHostedStripeCheckoutCompletion,
 }));
@@ -146,9 +138,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(createMemberSnapshot().core);
     mocks.findMemberForStripeObject.mockResolvedValue(createMemberSnapshot());
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
-    mocks.prepareHostedStripeDirectMemberActivationCrypto.mockResolvedValue(
-      mocks.preparedCryptoDomainRoots,
-    );
     mocks.prepareHostedStripeCheckoutCompletion.mockResolvedValue(
       null,
     );
@@ -172,7 +161,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       welcomeEmailMemberId: null,
     });
     mocks.cleanupHostedFamilySponsoredDirectSubscription.mockResolvedValue(undefined);
-    mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
+    mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.scheduleHostedSignupNotificationEmails.mockReturnValue(undefined);
@@ -243,101 +232,12 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         }),
         tx,
       );
-      expect(
-        mocks.prepareHostedStripeDirectMemberActivationCrypto,
-      ).not.toHaveBeenCalled();
       expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
       expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
       expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
       expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
     },
   );
-
-  it("prepares Pulse Trial provider, binding, and activation inputs before opening the checkout transaction", async () => {
-    let cacheWasActiveDuringCryptoPreflight = false;
-    const tx = {
-      __tag: "tx",
-      $queryRaw: vi.fn(async () => []),
-    };
-    const prisma = {
-      $transaction: vi.fn(
-        async (callback: (innerTx: typeof tx) => Promise<unknown>) =>
-          callback(tx),
-      ),
-    };
-    mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
-      client_reference_id: "member_123",
-      customer: "cus_123",
-      id: "cs_pulse_trial",
-      metadata: {
-        checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-        memberId: "member_123",
-      },
-      status: "complete",
-      subscription: {
-        id: "sub_pulse_trial",
-        status: "trialing",
-      },
-    });
-    const preparedCheckoutCompletion = {
-      billingCompletion: {
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeCustomerIdEncrypted: "encrypted-customer",
-        stripeCustomerLookupKey: "customer-lookup",
-        stripeSubscriptionId: "sub_pulse_trial",
-        stripeSubscriptionIdEncrypted: "encrypted-subscription",
-        stripeSubscriptionLookupKey: "subscription-lookup",
-      },
-      canonicalSubscription: {
-        id: "sub_pulse_trial",
-        status: "trialing",
-      },
-      memberId: "member_123",
-      stripeCheckoutEmail: null,
-    };
-    mocks.prepareHostedStripeDirectMemberActivationCrypto.mockImplementationOnce(
-      async () => {
-        cacheWasActiveDuringCryptoPreflight =
-          getHostedDomainRootUnwrapCache() !== undefined;
-        return mocks.preparedCryptoDomainRoots;
-      },
-    );
-    mocks.prepareHostedStripeCheckoutCompletion.mockResolvedValueOnce(
-      preparedCheckoutCompletion,
-    );
-
-    await reconcileHostedBillingCheckoutSuccess({
-      inviteCode: "invite-code",
-      member: createAuthenticatedMember(),
-      prisma: prisma as never,
-      sessionId: "cs_pulse_trial",
-    });
-
-    expect(
-      mocks.prepareHostedStripeDirectMemberActivationCrypto,
-    ).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma,
-    });
-    expect(
-      mocks.prepareHostedStripeDirectMemberActivationCrypto.mock
-        .invocationCallOrder[0],
-    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
-    expect(
-      mocks.prepareHostedStripeCheckoutCompletion.mock.invocationCallOrder[0],
-    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
-    expect(cacheWasActiveDuringCryptoPreflight).toBe(true);
-    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "cs_pulse_trial",
-      }),
-      tx,
-      undefined,
-      mocks.preparedCryptoDomainRoots,
-      preparedCheckoutCompletion,
-    );
-  });
 
   it("prepares direct Checkout bindings before opening the member transaction", async () => {
     let cacheWasActiveDuringPreparation = false;
@@ -394,7 +294,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       expect.objectContaining({ id: "cs_123" }),
       tx,
       undefined,
-      undefined,
       preparedCheckoutCompletion,
     );
   });
@@ -439,61 +338,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
-  it("retries delayed paid-winner loser cleanup on the browser success path", async () => {
-    const tx = {
-      __tag: "tx",
-      $queryRaw: vi.fn(async () => []),
-    };
-    const prisma = {
-      $transaction: vi.fn(async (
-        callback: (innerTx: typeof tx) => Promise<unknown>,
-      ) => callback(tx)),
-    };
-    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
-      activatedMemberId: null,
-      cleanupPulseTrialStripeSubscriptionId: "sub_delayed_trial",
-      hostedExecutionEventId: null,
-      newlyActivatedMemberIds: [],
-      welcomeEmailMemberId: null,
-    });
-    mocks.cancelHostedPulseTrialCheckoutLoserSubscription
-      .mockRejectedValueOnce(Object.assign(new Error("Stripe unavailable"), {
-        code: "HOSTED_PULSE_TRIAL_CLEANUP_FAILED",
-        retryable: true,
-      }))
-      .mockResolvedValueOnce(undefined);
-
-    const reconcile = () => reconcileHostedBillingCheckoutSuccess({
-      inviteCode: "invite-code",
-      member: createAuthenticatedMember(),
-      prisma: prisma as never,
-      sessionId: "cs_123",
-    });
-
-    await expect(reconcile()).rejects.toMatchObject({
-      code: "HOSTED_PULSE_TRIAL_CLEANUP_FAILED",
-      retryable: true,
-    });
-    await expect(reconcile()).resolves.toEqual(createStatus({
-      stage: "activating",
-    }));
-
-    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledTimes(2);
-    expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).toHaveBeenCalledTimes(2);
-    expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).toHaveBeenNthCalledWith(1, {
-      memberId: "member_123",
-      prisma,
-      subscriptionId: "sub_delayed_trial",
-    });
-    expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).toHaveBeenNthCalledWith(2, {
-      memberId: "member_123",
-      prisma,
-      subscriptionId: "sub_delayed_trial",
-    });
-    expect(mocks.getHostedInviteStatus).toHaveBeenCalledOnce();
-    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
-  });
 
   it("cancels a direct checkout superseded by Family sponsorship on the browser path", async () => {
     const tx = {
@@ -531,7 +375,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         "checkout-success:cs_123:family-sponsored-checkout-cleanup",
       subscriptionId: "sub_superseded",
     });
-    expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
+    expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
   });
 
   it("cleans up a superseded standard checkout on the browser path", async () => {
@@ -622,7 +466,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       tx,
     );
     expect(mocks.cleanupHostedFamilySponsoredDirectSubscription).not.toHaveBeenCalled();
-    expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
+    expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
     expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
   });
 
@@ -721,12 +565,12 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     };
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: "member_123",
-      cleanupPulseTrialStripeSubscriptionId: "sub_cleanup_123",
+      cleanupStandardCheckout: { checkoutSessionId: "cs_123", subscriptionId: "sub_cleanup_123" },
       hostedExecutionEventId: "wake_123",
       newlyActivatedMemberIds: ["member_123"],
       welcomeEmailMemberId: "member_123",
     });
-    mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockRejectedValueOnce(
+    mocks.cleanupHostedStandardCheckoutLoser.mockRejectedValueOnce(
       new Error("cleanup unavailable"),
     );
 
@@ -745,7 +589,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(
       mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mock
+      mocks.cleanupHostedStandardCheckoutLoser.mock
         .invocationCallOrder[0],
     );
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)

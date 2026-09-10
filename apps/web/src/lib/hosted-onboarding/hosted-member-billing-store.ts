@@ -711,53 +711,6 @@ export async function clearHostedMemberStripeCheckoutAttemptTx(input: {
   return updated.count === 1;
 }
 
-export async function clearHostedMemberLegacyTrialBillingUnderLockTx(input: {
-  billingStatusAfterClear?: HostedBillingStatus;
-  memberId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await input.tx.hostedMemberBillingRef.updateMany({
-    data: {
-      checkoutAttemptId: null,
-      checkoutCreatedAt: null,
-      checkoutIntentHash: null,
-      currentBillingPhase: null,
-      currentBillingPlanCode: null,
-      currentCheckoutOffer: null,
-      currentPeriodEnd: null,
-      currentPeriodStart: null,
-      currentTrialEndsAt: null,
-      currentTrialStartedAt: null,
-      pulseTrialPolicyVersion: null,
-      pulseTrialRedeemedAt: null,
-      pulseTrialStartSource: null,
-      scheduledBillingEffectiveAt: null,
-      scheduledBillingPlanCode: null,
-      stripeCheckoutSessionIdEncrypted: null,
-      stripeCheckoutSessionLookupKey: null,
-      stripeSubscriptionIdEncrypted: null,
-      stripeSubscriptionLookupKey: null,
-      stripeSubscriptionScheduleIdEncrypted: null,
-      stripeSubscriptionScheduleLookupKey: null,
-      usagePlanTransitionAt: null,
-      usagePlanTransitionFromCode: null,
-      usagePlanTransitionKind: null,
-      usagePlanTransitionToCode: null,
-    },
-    where: { memberId: input.memberId },
-  });
-  await input.tx.hostedMemberSubscriptionCheckout.deleteMany({
-    where: { memberId: input.memberId },
-  });
-  await input.tx.hostedMember.update({
-    data: {
-      billingStatus:
-        input.billingStatusAfterClear ?? HostedBillingStatus.active,
-    },
-    where: { id: input.memberId },
-  });
-}
-
 export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: {
   memberId: string;
   sessionId: string;
@@ -787,14 +740,11 @@ export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: 
 }
 
 /**
- * Owns exactly one completed direct Checkout. Standard Checkout preserves an
- * existing billing identity. Pulse Trial may replace an identity only after
- * its caller classifies that identity as stale while holding the same member
- * lock. A terminal provider candidate is never bound, but the same owner must
- * distinguish an already-accepted replay from an unaccepted cleanup target.
+ * Owns exactly one completed direct Checkout while preserving any existing
+ * billing identity. A terminal provider candidate is never bound, but this owner
+ * distinguishes an already-accepted replay from an unaccepted cleanup target.
  */
 export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
-  allowBillingIdentityReplacement?: boolean;
   billingIdentityDisposition: "bind" | "terminal";
   checkoutAttemptId: string | null;
   checkoutIntentHash: string | null;
@@ -839,8 +789,7 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     where: { memberId: input.memberId },
   });
   if (
-    !input.allowBillingIdentityReplacement
-    && currentRecord?.stripeSubscriptionLookupKey
+    currentRecord?.stripeSubscriptionLookupKey
     && !subscriptionLookupKeys.includes(
       currentRecord.stripeSubscriptionLookupKey,
     )
@@ -848,8 +797,7 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     return { kind: "cleanup_superseded" };
   }
   if (
-    !input.allowBillingIdentityReplacement
-    && currentRecord?.stripeCustomerLookupKey
+    currentRecord?.stripeCustomerLookupKey
     && !customerLookupKeys.includes(currentRecord.stripeCustomerLookupKey)
   ) {
     return { kind: "cleanup_superseded" };
