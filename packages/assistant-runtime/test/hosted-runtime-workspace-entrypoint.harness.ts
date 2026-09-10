@@ -979,7 +979,7 @@ function createPlatform(input: {
       ? null
       : input.assistantConfigurationToolPort
         ?? defaultAssistantConfigurationToolPort;
-  return {
+  const platform: HostedRuntimePlatform = {
     ...(input.assistantAskPort ? { assistantAskPort: input.assistantAskPort } : {}),
     ...(assistantConfigurationToolPort
       ? { assistantConfigurationToolPort }
@@ -1067,8 +1067,25 @@ function createPlatform(input: {
       : {}),
     ...(input.vaultSharePort ? { vaultSharePort: input.vaultSharePort } : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
-    ...(input.workspaceSnapshotPort ? { workspaceSnapshotPort: input.workspaceSnapshotPort } : {}),
+    workspaceSnapshotPort: input.workspaceSnapshotPort === null ? null : input.workspaceSnapshotPort ?? {
+      async abortSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
+      async completeSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
+      async putSnapshotObjectDirect() { throw new Error("Snapshot publication is injected by each test."); },
+      async startSnapshotSession() { throw new Error("Snapshot publication is injected by each test."); },
+      async restoreWorkspaceSnapshot({ durableRoot, ref }) {
+        // Fixture archives use the portable codec; the runtime sees only the v2 port.
+        // Encrypted tar transport and staged installation are covered by Cloudflare tests.
+        const bytes = await platform.artifactStore.get(ref.archive.plaintextArchiveSha256, { purpose: "workspace_restore" });
+        if (!bytes) throw new Error("Workspace snapshot fixture is unavailable.");
+        await restoreHostedBundleRoots({
+          bytes,
+          expectedKind: "vault",
+          roots: { vault: durableRoot },
+        });
+      },
+    },
   };
+  return platform;
 }
 
 interface StageTimingSample {
@@ -1193,12 +1210,11 @@ function createMailboxImportStateBundle(input: HostedMailboxImportState): {
 }
 
 async function createVaultSnapshotBundle(input: {
-  key: string;
   vaultRoot: string;
 }): Promise<{
   bytes: Uint8Array;
   hash: string;
-  snapshotRef: HostedExecutionBundleRef;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
 }> {
   const bytes = await snapshotHostedBundleRoots({
     kind: "vault",
@@ -1217,9 +1233,8 @@ async function createVaultSnapshotBundle(input: {
   return {
     bytes,
     hash,
-    snapshotRef: createBundleRef({
+    snapshotRef: createSnapshotFixtureRef({
       hash,
-      key: input.key,
       size: bytes.byteLength,
     }),
   };
@@ -2284,16 +2299,18 @@ async function assertPrivateDirectoryMode(directoryPath: string): Promise<void> 
   assert.equal(directoryMode, 0o700);
 }
 
-function createBundleRef(input: {
+function createSnapshotFixtureRef(input: {
   hash: string;
-  key: string;
   size: number;
-}): HostedExecutionBundleRef {
+}): HostedWorkspaceSnapshotV2Ref {
+  const ref = createWorkspaceSnapshotV2Ref(input.hash);
   return {
-    hash: input.hash,
-    key: input.key,
-    size: input.size,
-    updatedAt: TEST_NOW,
+    ...ref,
+    archive: {
+      ...ref.archive,
+      plaintextArchiveSha256: input.hash,
+      totalPlainBytes: input.size,
+    },
   };
 }
 
@@ -2619,7 +2636,7 @@ export {
   createAssistantProviderUsageDraft,
   createAssistantUsageRecord,
   createBrowserVaultReplicaRef,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createConsentedMemberAssistantAskRequestedWake,
   createCanonicalReceiptLogArtifacts,
   createDeferred,

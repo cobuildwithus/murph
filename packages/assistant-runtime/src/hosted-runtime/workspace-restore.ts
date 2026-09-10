@@ -13,9 +13,6 @@ import {
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
-import type {
-  HostedExecutionBundleRef,
-} from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
@@ -23,9 +20,6 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  readHostedExecutionSnapshotBaseRef,
-  readHostedExecutionSnapshotDeltaRef,
-  readHostedExecutionSnapshotHotRef,
   isHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -33,17 +27,8 @@ import {
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
-  clearHostedAssistantRuntimeHotState,
-  clearHostedCodexHomeRestoreRoot,
-  createHostedPortableWorkspaceManifestFromBundle,
-  readHostedPortableWorkspaceManifestFromBundle,
   resolveAssistantStatePaths,
-  restoreHostedBundleRoots,
-  restoreHostedWorkspaceWorkingDelta,
-  readHostedWorkspaceSkippedInlineFiles,
   pruneHostedCodexHomeToSessionReferencedRollouts,
-  writeHostedWorkspaceSkippedInlineFiles,
-  type HostedWorkspaceSkippedInlineFile,
 } from "@murphai/runtime-state/node";
 import {
   normalizeCodexResumeState,
@@ -67,7 +52,6 @@ import { applyHostedCanonicalWriteReceiptWithMedia } from "./canonical-write-med
 
 import {
   createHostedArtifactMaterializer,
-  createHostedArtifactResolver,
 } from "./artifacts.ts";
 import type {
   HostedWorkspaceArtifactMaterializer,
@@ -82,22 +66,11 @@ import {
   type HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
 } from "./platform.ts";
 
-const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
 const HOSTED_CANONICAL_WRITE_RECEIPT_RESTORE_FETCH_CONCURRENCY = 8;
-const HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS = [
-  "derived/vault-share",
-  "vault-share",
-] as const;
 const HOSTED_CODEX_THREAD_ID_PATTERN =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u;
 
-// Legacy restore-only compatibility for pre-v2 workspace refs. Production v2
-// checkpoints no longer create base, hot, working, bundle, or delta refs; these
-// caches and paths are deletable after the v2 migration window.
-const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-restore-cache.json";
-const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-hot-restore-cache.json";
-const HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-working-restore-cache.json";
 const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
 const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_FILE_NAME = ".hosted-workspace-clean-checkpoint.json";
 const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA =
@@ -121,26 +94,6 @@ export type HostedWorkspaceRuntimeRestorePlatform = Pick<
   "artifactStore" | "logPort" | "mediaStore" | "workspaceSnapshotPort"
 >;
 
-export type HostedWorkspaceWarmIdleCheckpointOpenResult =
-  | {
-      ok: true;
-      restored: HostedRestoredExecutionContext;
-    }
-  | {
-      ok: false;
-      reason: "warm_workspace_missing" | "workspace_version_mismatch";
-    };
-
-export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
-  readonly snapshotHash: string;
-
-  constructor(snapshotHash: string) {
-    super("Hosted workspace runtime job snapshot restore failed.");
-    this.name = "HostedWorkspaceRuntimeSnapshotRestoreError";
-    this.snapshotHash = snapshotHash;
-  }
-}
-
 export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   logContext?: HostedRuntimeLogContext | null;
   platform: HostedWorkspaceRuntimeRestorePlatform;
@@ -150,11 +103,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 }): Promise<HostedWorkspaceRuntimeRestoreResult> {
   const restored = readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
   const snapshotRef = input.workspace?.snapshotRef ?? null;
-  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
-  const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
-  const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
-  const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
-
+  if (snapshotRef !== null && !isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+    throw new Error("Hosted workspace restore requires a v2 snapshot reference.");
+  }
   const restoreLastKnownGoodAfterReceiptFailure = async (
     error: unknown,
   ): Promise<HostedWorkspaceRuntimeRestoreResult> => {
@@ -279,7 +230,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     ]);
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: restored.assistantStateRoot,
-      nativeMemoryRetention: "read-artifacts",
       operatorHomeRoot: restored.operatorHomeRoot,
     });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
@@ -289,7 +239,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       platform: input.platform,
       restored,
-      readBundles: materializerBundles,
     });
     const receiptRecovery = await recoverCanonicalWriteReceipts(
       restored.vaultRoot, materializeWorkspaceArtifacts,
@@ -310,145 +259,28 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     };
   }
 
-  if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
-    await clearHostedWorkspaceRuntimeLocalRoots(restored);
-    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-    const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
-    if (receiptRecovery.restored) {
-      return receiptRecovery.restored;
-    }
-    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-      vaultRoot: restored.vaultRoot,
-    });
-
-    return {
-      ...restored,
-      canonicalWriteReceiptCount: receiptRecovery.count,
-      canonicalWriteReceiptRecoveryFailed: false,
-      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths: restoredMaterializedArtifactPaths,
-        platform: input.platform,
-        restored,
-        readBundles: materializerBundles,
-      }),
-      materializedArtifactPaths: restoredMaterializedArtifactPaths,
-      mode: "null-bootstrap",
-      restoreWasCold: true,
-      restoreTiming: null,
-    };
-  }
-
-  // Legacy refs still restore from durable truth. Reusing local bundle restore
-  // caches would preserve cross-lease dirty state, so every pre-v2 restore starts
-  // from clean roots just like the v2 snapshot path.
   await clearHostedWorkspaceRuntimeLocalRoots(restored);
   await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-
-  let restoreWasCold = false;
-  // Legacy restore-only compatibility for old base bundle refs. This branch is
-  // not on the v2 production checkpoint path and can be removed after migration.
-  if (baseSnapshotRef) {
-    restoreWasCold = true;
-    const baseBundle = await readHostedWorkspaceRuntimeBundle({
-      platform: input.platform,
-      ref: baseSnapshotRef,
-    });
-    materializerBundles.push(async () => baseBundle);
-    await restoreHostedWorkspaceRuntimeBundle({
-      bundle: baseBundle,
-      platform: input.platform,
-      ref: baseSnapshotRef,
-      restored,
-      trackSkippedInlineFiles: true,
-    });
-  }
-
-  // Legacy restore-only compatibility for old hot-layer bundle refs. This
-  // restores the authoritative hot state only for pre-v2 snapshots.
-  if (hotSnapshotRef) {
-    restoreWasCold = true;
-    const restoredHotBundle = await restoreHostedWorkspaceRuntimeHotLayer({
-      hotSnapshotRef,
-      input,
-      restored,
-    });
-    materializerBundles.push(async () => restoredHotBundle);
-  }
-
-  // Legacy restore-only compatibility for old working deltas. New v2 snapshots
-  // restore above and should never reach this path.
-  if (deltaSnapshotRef) {
-    restoreWasCold = true;
-    if (!baseSnapshotRef) {
-      throw new HostedWorkspaceRuntimeSnapshotRestoreError(deltaSnapshotRef.hash);
-    }
-    const baseBundle = await readHostedWorkspaceRuntimeBundle({
-      platform: input.platform,
-      ref: baseSnapshotRef,
-    });
-    const baseManifest =
-      readHostedPortableWorkspaceManifestFromBundle(baseBundle)
-        ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
-    const deltaBundle = await readHostedWorkspaceRuntimeBundle({
-      platform: input.platform,
-      ref: deltaSnapshotRef,
-    });
-    materializerBundles.push(async () => deltaBundle);
-    const skippedInlineFiles: HostedWorkspaceSkippedInlineFile[] = [];
-    await restoreHostedWorkspaceWorkingDelta({
-      artifactResolver: createHostedArtifactResolver({
-        artifactStore: input.platform.artifactStore,
-      }),
-      baseManifest,
-      baseSnapshotHash: baseSnapshotRef.hash,
-      bundle: deltaBundle,
-      onSkippedInlineFile: (file) => {
-        skippedInlineFiles.push(file);
-      },
-      roots: {
-        [HOSTED_OPERATOR_HOME_ROOT_KEY]: restored.operatorHomeRoot,
-        vault: restored.vaultRoot,
-      },
-      shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
-      shouldRestoreInlineFile: shouldRestoreHostedRuntimeInlineFile,
-    });
-    if (skippedInlineFiles.length > 0) {
-      await appendHostedWorkspaceSkippedInlineFiles({
-        files: skippedInlineFiles,
-        vaultRoot: restored.vaultRoot,
-      });
-    }
-    await sanitizeRestoredHostedCodexResumeState({
-      assistantStateRoot: restored.assistantStateRoot,
-      nativeMemoryRetention: "none",
-      operatorHomeRoot: restored.operatorHomeRoot,
-    });
-  }
-
-  const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-    vaultRoot: restored.vaultRoot,
-  });
-  const materializeWorkspaceArtifacts = createHostedWorkspaceRuntimeArtifactMaterializer({
-    materializedArtifactPaths: restoredMaterializedArtifactPaths,
-    platform: input.platform,
-    restored,
-    readBundles: materializerBundles,
-  });
-  const receiptRecovery = await recoverCanonicalWriteReceipts(
-    restored.vaultRoot, materializeWorkspaceArtifacts,
-  );
+  const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
   if (receiptRecovery.restored) {
     return receiptRecovery.restored;
   }
+  const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
+    vaultRoot: restored.vaultRoot,
+  });
 
   return {
     ...restored,
     canonicalWriteReceiptCount: receiptRecovery.count,
     canonicalWriteReceiptRecoveryFailed: false,
-    materializeWorkspaceArtifacts,
+    materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+      materializedArtifactPaths: restoredMaterializedArtifactPaths,
+      platform: input.platform,
+      restored,
+    }),
     materializedArtifactPaths: restoredMaterializedArtifactPaths,
-    mode: "snapshot",
-    restoreWasCold,
+    mode: "null-bootstrap",
+    restoreWasCold: true,
     restoreTiming: null,
   };
 }
@@ -515,7 +347,6 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
     await assertHostedWorkspaceWarmCleanRoots(input.restored);
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: input.restored.assistantStateRoot,
-      nativeMemoryRetention: "read-artifacts",
       operatorHomeRoot: input.restored.operatorHomeRoot,
     });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
@@ -527,7 +358,6 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
         materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
         restored: input.restored,
-        readBundles: [],
       }),
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
     };
@@ -745,7 +575,6 @@ async function assertHostedWorkspaceWarmCleanFile(filePath: string): Promise<voi
 
 async function sanitizeRestoredHostedCodexResumeState(input: {
   assistantStateRoot: string;
-  nativeMemoryRetention: "none" | "read-artifacts";
   operatorHomeRoot: string;
 }): Promise<void> {
   const sessionsRoot = path.join(input.assistantStateRoot, "sessions");
@@ -781,7 +610,7 @@ async function sanitizeRestoredHostedCodexResumeState(input: {
   await visit(sessionsRoot);
   await pruneHostedCodexHomeToSessionReferencedRollouts({
     assistantStateRoot: input.assistantStateRoot,
-    nativeMemoryRetention: input.nativeMemoryRetention,
+    nativeMemoryRetention: "read-artifacts",
     operatorHomeRoot: input.operatorHomeRoot,
   });
 }
@@ -1004,60 +833,12 @@ function readRecordStringProperty(
     : null;
 }
 
-export async function tryOpenExistingWarmWorkspaceForIdleCheckpoint(input: {
-  vaultRoot: string;
-  workspace: HostedWorkspaceState | null;
-}): Promise<HostedWorkspaceWarmIdleCheckpointOpenResult> {
-  void input.workspace;
-  await clearHostedWorkspaceLiveRuntimeStateBestEffort(
-    readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot).vaultRoot,
-  );
-  return {
-    ok: false,
-    reason: "warm_workspace_missing",
-  };
-}
-
-// Legacy hot-layer bundle restore helper. Restore-only compatibility for
-// pre-v2 `{base, hot}` snapshots; remove with the legacy snapshot readers.
-async function restoreHostedWorkspaceRuntimeHotLayer(input: {
-  hotSnapshotRef: HostedExecutionBundleRef;
-  input: {
-    logContext?: HostedRuntimeLogContext | null;
-    platform: HostedWorkspaceRuntimeRestorePlatform;
-  };
-  restored: HostedRestoredExecutionContext;
-}): Promise<Uint8Array | ArrayBuffer> {
-  const hotBundle = await readHostedWorkspaceRuntimeBundle({
-    platform: input.input.platform,
-    ref: input.hotSnapshotRef,
-  });
-  await clearHostedAssistantRuntimeHotState({
-    operatorHomeRoot: input.restored.operatorHomeRoot,
-    vaultRoot: input.restored.vaultRoot,
-  });
-  await restoreHostedWorkspaceRuntimeBundle({
-    bundle: hotBundle,
-    platform: input.input.platform,
-    ref: input.hotSnapshotRef,
-    restored: input.restored,
-    appendSkippedInlineFiles: true,
-    trackSkippedInlineFiles: true,
-  });
-  return hotBundle;
-}
-
 function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
   materializedArtifactPaths: Set<string>;
   platform: HostedWorkspaceRuntimeRestorePlatform;
-  readBundles: readonly (() => Promise<Uint8Array | ArrayBuffer | null>)[];
   restored: HostedRestoredExecutionContext;
 }): HostedWorkspaceArtifactMaterializer {
   return createHostedArtifactMaterializer({
-    artifactResolver: createHostedArtifactResolver({
-      artifactStore: input.platform.artifactStore,
-    }),
-    bundles: input.readBundles,
     materializedArtifactPaths: input.materializedArtifactPaths,
     mediaStore: input.platform.mediaStore ?? null,
     operatorHomeRoot: input.restored.operatorHomeRoot,
@@ -1174,16 +955,6 @@ function isMissingPathError(error: unknown): boolean {
   return isPlainObject(error) && error.code === "ENOENT";
 }
 
-// Legacy restore cache cleanup helpers. The cache-hit restore paths are disabled
-// so pre-v2 refs cannot reuse cross-lease dirty local state.
-async function clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
-  try {
-    await rm(resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot), { force: true });
-  } catch {
-    // A stale base cache marker should not block cold restore from the source bundle.
-  }
-}
-
 export async function markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort(input: {
   snapshotRef: HostedWorkspaceState["snapshotRef"];
   vaultRoot: string;
@@ -1215,43 +986,6 @@ export async function clearHostedWorkspaceCleanCheckpointMarkerBestEffort(
   }
 }
 
-async function clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
-  try {
-    await rm(resolveHostedWorkspaceHotRestoreCachePath(vaultRoot), { force: true });
-  } catch {
-    // A stale or missing cache marker only affects performance, not correctness.
-  }
-}
-
-async function clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot: string): Promise<void> {
-  try {
-    await rm(resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot), { force: true });
-  } catch {
-    // A stale or missing cache marker only affects performance, not correctness.
-  }
-}
-
-function resolveHostedWorkspaceBaseRestoreCachePath(vaultRoot: string): string {
-  return path.join(
-    path.dirname(path.resolve(vaultRoot)),
-    HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME,
-  );
-}
-
-function resolveHostedWorkspaceHotRestoreCachePath(vaultRoot: string): string {
-  return path.join(
-    path.dirname(path.resolve(vaultRoot)),
-    HOSTED_WORKSPACE_HOT_RESTORE_CACHE_FILE_NAME,
-  );
-}
-
-function resolveHostedWorkspaceWorkingRestoreCachePath(vaultRoot: string): string {
-  return path.join(
-    path.dirname(path.resolve(vaultRoot)),
-    HOSTED_WORKSPACE_WORKING_RESTORE_CACHE_FILE_NAME,
-  );
-}
-
 function resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot: string): string {
   return path.join(
     path.dirname(path.resolve(vaultRoot)),
@@ -1264,172 +998,6 @@ function resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot: string): str
     path.dirname(path.resolve(vaultRoot)),
     HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_FILE_NAME,
   );
-}
-
-// Legacy bundle restore helper for pre-v2 snapshot refs. The current v2 path
-// uses workspaceSnapshotPort.restoreWorkspaceSnapshot instead.
-async function restoreHostedWorkspaceRuntimeBundle(input: {
-  appendSkippedInlineFiles?: boolean;
-  bundle?: Uint8Array | ArrayBuffer | null;
-  platform: HostedWorkspaceRuntimeRestorePlatform;
-  ref: HostedExecutionBundleRef;
-  restored: HostedRestoredExecutionContext;
-  trackSkippedInlineFiles: boolean;
-}): Promise<void> {
-  const bundle = input.bundle ?? await readHostedWorkspaceRuntimeBundle({
-    platform: input.platform,
-    ref: input.ref,
-  });
-  const skippedInlineFiles: HostedWorkspaceSkippedInlineFile[] = [];
-
-  await clearHostedCodexHomeRestoreRoot(input.restored.operatorHomeRoot);
-  try {
-    await restoreHostedBundleRoots({
-      artifactResolver: createHostedArtifactResolver({
-        artifactStore: input.platform.artifactStore,
-      }),
-      bytes: bundle,
-      expectedKind: "vault",
-      roots: {
-        [HOSTED_OPERATOR_HOME_ROOT_KEY]: input.restored.operatorHomeRoot,
-        vault: input.restored.vaultRoot,
-      },
-      onSkippedInlineFile: input.trackSkippedInlineFiles
-        ? (file) => {
-            skippedInlineFiles.push(file);
-          }
-        : undefined,
-      shouldRestoreArtifact: shouldRestoreHostedRuntimeEagerArtifact,
-      shouldRestoreInlineFile: shouldRestoreHostedRuntimeInlineFile,
-    });
-    if (input.trackSkippedInlineFiles) {
-      if (input.appendSkippedInlineFiles) {
-        await appendHostedWorkspaceSkippedInlineFiles({
-          files: skippedInlineFiles,
-          vaultRoot: input.restored.vaultRoot,
-        });
-      } else {
-        await writeHostedWorkspaceSkippedInlineFiles({
-          files: skippedInlineFiles,
-          vaultRoot: input.restored.vaultRoot,
-        });
-      }
-    }
-    await sanitizeRestoredHostedCodexResumeState({
-      assistantStateRoot: input.restored.assistantStateRoot,
-      nativeMemoryRetention: "none",
-      operatorHomeRoot: input.restored.operatorHomeRoot,
-    });
-  } catch (error) {
-    await clearHostedCodexHomeRestoreRoot(input.restored.operatorHomeRoot);
-    throw error;
-  }
-}
-
-async function appendHostedWorkspaceSkippedInlineFiles(input: {
-  files: readonly HostedWorkspaceSkippedInlineFile[];
-  vaultRoot: string;
-}): Promise<void> {
-  if (input.files.length === 0) {
-    return;
-  }
-
-  let existing: HostedWorkspaceSkippedInlineFile[] = [];
-  try {
-    existing = await readHostedWorkspaceSkippedInlineFiles({
-      vaultRoot: input.vaultRoot,
-    });
-  } catch (error) {
-    if (!isMissingPathError(error)) {
-      throw error;
-    }
-  }
-
-  const files = new Map<string, HostedWorkspaceSkippedInlineFile>();
-  for (const file of existing) {
-    files.set(`${file.root}:${file.path}`, file);
-  }
-  for (const file of input.files) {
-    files.set(`${file.root}:${file.path}`, file);
-  }
-
-  await writeHostedWorkspaceSkippedInlineFiles({
-    files: [...files.values()],
-    vaultRoot: input.vaultRoot,
-  });
-}
-
-async function readHostedWorkspaceRuntimeBundle(input: {
-  platform: HostedWorkspaceRuntimeRestorePlatform;
-  ref: HostedExecutionBundleRef;
-}): Promise<Uint8Array | ArrayBuffer> {
-  const bundle = await input.platform.artifactStore.get(input.ref.hash, {
-    purpose: "workspace_restore",
-  });
-  if (!bundle) {
-    throw new HostedWorkspaceRuntimeSnapshotRestoreError(input.ref.hash);
-  }
-
-  return bundle;
-}
-
-function shouldRestoreHostedRuntimeEagerArtifact(input: {
-  path: string;
-  root: string;
-}): boolean {
-  if (input.root === HOSTED_OPERATOR_HOME_ROOT_KEY) {
-    return hasHostedRuntimeEagerArtifactPrefix(
-      input.path,
-      HOSTED_CODEX_HOME_RELATIVE_PATH,
-    );
-  }
-
-  if (input.root !== "vault") {
-    return false;
-  }
-
-  if (isHostedLegacySharedProjectionVaultPath(input.path)) {
-    return false;
-  }
-
-  return !isHostedRuntimeLazyVaultContentPath(input.path);
-}
-
-function shouldRestoreHostedRuntimeInlineFile(input: {
-  path: string;
-  root: string;
-}): boolean {
-  if (input.root !== "vault") {
-    return true;
-  }
-
-  if (isHostedLegacySharedProjectionVaultPath(input.path)) {
-    return false;
-  }
-
-  return !isHostedRuntimeLazyVaultContentPath(input.path);
-}
-
-function isHostedLegacySharedProjectionVaultPath(relativePath: string): boolean {
-  return HOSTED_LEGACY_SHARED_PROJECTION_VAULT_PATHS.some(
-    (excludedPath) =>
-      relativePath === excludedPath
-      || relativePath.startsWith(`${excludedPath}/`),
-  );
-}
-
-function isHostedRuntimeLazyVaultContentPath(relativePath: string): boolean {
-  return (
-    hasHostedRuntimeEagerArtifactPrefix(relativePath, "raw")
-    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "derived")
-  );
-}
-
-function hasHostedRuntimeEagerArtifactPrefix(
-  relativePath: string,
-  prefix: string,
-): boolean {
-  return relativePath === prefix || relativePath.startsWith(`${prefix}/`);
 }
 
 function readHostedWorkspaceRuntimeLocalRoots(
@@ -1494,10 +1062,7 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
 
 async function clearHostedWorkspaceRestoreCachesBestEffort(vaultRoot: string): Promise<void> {
   await Promise.all([
-    clearHostedWorkspaceBaseRestoreCacheBestEffort(vaultRoot),
     clearHostedWorkspaceCleanCheckpointMarkerBestEffort(vaultRoot),
-    clearHostedWorkspaceHotRestoreCacheBestEffort(vaultRoot),
-    clearHostedWorkspaceWorkingRestoreCacheBestEffort(vaultRoot),
     clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot),
   ]);
 }

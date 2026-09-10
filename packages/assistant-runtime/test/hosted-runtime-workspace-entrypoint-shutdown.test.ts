@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -158,9 +158,8 @@ describe("hosted runtime shutdown signal", () => {
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-signal-pre.bundle.json",
                 size: 512,
               }),
             };
@@ -259,9 +258,8 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-preserved-due-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -340,9 +338,8 @@ describe("hosted runtime shutdown signal", () => {
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
       artifactBytesByHash.set(baseHash, baseBundle);
-      const baseSnapshotRef = createBundleRef({
+      const baseSnapshotRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: `synthetic/generated-retention-wake/${baseHash}.bundle`,
         size: baseBundle.byteLength,
       });
       const persistCapture = async (input: {
@@ -402,9 +399,8 @@ describe("hosted runtime shutdown signal", () => {
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/generated-retention-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -592,9 +588,8 @@ describe("hosted runtime shutdown signal", () => {
             const hash = sha256HostedBundleHex(bundle);
             artifactBytesByHash.set(hash, bundle);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash,
-                key: "users/bundles/member-synthetic/image-shutdown-handoff-first.bundle.json",
                 size: bundle.byteLength,
               }),
             };
@@ -745,9 +740,8 @@ describe("hosted runtime shutdown signal", () => {
               const hash = sha256HostedBundleHex(bundle);
               artifactBytesByHash.set(hash, bundle);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash,
-                  key: "users/bundles/member-synthetic/image-shutdown-handoff-second.bundle.json",
                   size: bundle.byteLength,
                 }),
               };
@@ -837,9 +831,8 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-pending-runtime-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -969,9 +962,8 @@ describe("hosted runtime shutdown signal", () => {
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-stale-runtime-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -1158,9 +1150,8 @@ describe("hosted runtime shutdown signal", () => {
               );
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-after-idle-window-trigger.bundle.json",
                 size: 512,
               }),
             };
@@ -1300,9 +1291,8 @@ describe("hosted runtime shutdown signal", () => {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             checkpointSnapshotCreated = true;
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-during-post-checkpoint-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -1432,9 +1422,8 @@ describe("hosted runtime shutdown signal", () => {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             checkpointSnapshotCreated = true;
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-after-no-work-conversation.bundle.json",
                 size: 512,
               }),
             };
@@ -1546,9 +1535,8 @@ describe("hosted runtime shutdown signal", () => {
           async createCheckpointSnapshot(snapshotInput) {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-after-system-import.bundle.json",
                 size: 512,
               }),
             };
@@ -1720,9 +1708,8 @@ describe("hosted runtime shutdown signal", () => {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             checkpointSnapshotCreated = true;
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-after-consumed-replay.bundle.json",
                 size: 512,
               }),
             };
@@ -1820,10 +1807,8 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key:
-                  "users/bundles/member-synthetic/shutdown-after-consumed-replay-replacement.bundle.json",
                 size: 512,
               }),
             };
@@ -1937,9 +1922,8 @@ describe("hosted runtime shutdown signal", () => {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             checkpointSnapshotCreated = true;
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-after-post-checkpoint-import.bundle.json",
                 size: 512,
               }),
             };
@@ -2096,9 +2080,8 @@ describe("hosted runtime shutdown signal", () => {
           async createCheckpointSnapshot(snapshotInput) {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-after-pre-checkpoint-import.bundle.json",
                 size: 512,
               }),
             };
@@ -2274,9 +2257,8 @@ describe("hosted runtime shutdown signal", () => {
           async createCheckpointSnapshot(snapshotInput) {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-during-pre-checkpoint-pass.bundle.json",
                 size: 512,
               }),
             };
@@ -2397,9 +2379,8 @@ describe("hosted runtime shutdown signal", () => {
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-due-assistant-handoff.bundle.json",
                 size: 512,
               }),
             };
@@ -2481,9 +2462,8 @@ describe("hosted runtime shutdown signal", () => {
               laneSeq: "1",
             }));
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-during-due-assistant-import.bundle.json",
                 size: 512,
               }),
             };
@@ -2577,9 +2557,8 @@ describe("hosted runtime shutdown signal", () => {
             assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
             snapshotStarted.resolve();
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-pending-import-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -2745,9 +2724,8 @@ describe("hosted runtime shutdown signal", () => {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
             snapshotStarted.resolve();
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-idle-window-pending-enrichment.bundle.json",
                 size: 512,
               }),
             };
@@ -2905,9 +2883,8 @@ describe("hosted runtime shutdown signal", () => {
               );
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointSnapshotCalls}`.repeat(64).slice(0, 64),
-                key: `users/bundles/member-synthetic/shutdown-checkpoint-accepted-wake-${checkpointSnapshotCalls}.bundle.json`,
                 size: 512,
               }),
             };
@@ -3028,11 +3005,8 @@ describe("hosted runtime shutdown signal", () => {
               );
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `d${checkpointSnapshotCalls}`.repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + `shutdown-durable-effect-handoff-${checkpointSnapshotCalls}.bundle.json`,
                 size: 512,
               }),
             };
@@ -3196,9 +3170,8 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-retention-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -3268,9 +3241,8 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-retention-beats-assistant.bundle.json",
                 size: 512,
               }),
             };
@@ -3350,9 +3322,8 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-after-projected-retention.bundle.json",
                 size: 512,
               }),
             };
@@ -3448,9 +3419,8 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/shutdown-signal-mid.bundle.json",
                 size: 512,
               }),
             };

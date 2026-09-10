@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createImageFailureCodexAppServerCommand,
   createMailboxItem,
@@ -193,9 +193,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-preempt.bundle.json",
                 size: 640,
               }),
             };
@@ -439,9 +438,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-batch-limit.bundle.json",
                 size: 640,
               }),
             };
@@ -640,9 +638,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "8".repeat(64),
-                  key: `users/bundles/member-synthetic/preference-pages-${preferenceItemCount}.bundle.json`,
                   size: 640,
                 }),
               };
@@ -785,9 +782,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-prefix-repair-order.bundle.json",
                 size: 640,
               }),
             };
@@ -986,9 +982,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/bootstrap-boundary-tail.bundle.json",
                 size: 640,
               }),
             };
@@ -1114,9 +1109,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/unindexed-reminder.bundle.json",
                 size: 640,
               }),
             };
@@ -1298,11 +1292,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 assert.equal(imageGenerationCompleted, false);
               }
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: (shutdownDuringDelivery ? "9" : "8").repeat(64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `foreground-delivery-image-${scenario}-${snapshotOrdinal}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1829,9 +1820,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "5".repeat(64),
-                key: "users/bundles/member-synthetic/image-completion-preemption.bundle.json",
                 size: 512,
               }),
             };
@@ -2023,9 +2013,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "4".repeat(64),
-                  key: "users/bundles/member-synthetic/image-evidence-retry.bundle.json",
                   size: 512,
                 }),
               };
@@ -2610,9 +2599,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "8".repeat(64),
-                  key: "users/bundles/member-synthetic/image-edit-failure-route.bundle.json",
                   size: 512,
                 }),
               };
@@ -2979,9 +2967,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-context-replay.bundle.json",
                 size: 640,
               }),
             };
@@ -3329,9 +3316,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-after-stalled-offer.bundle.json",
                 size: 640,
               }),
             };
@@ -3421,9 +3407,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-projection-retry.bundle.json",
                 size: 640,
               }),
             };
@@ -3615,9 +3600,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-device-pressure.bundle.json",
                 size: 640,
               }),
             };
@@ -3895,9 +3879,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-hidden-command.bundle.json",
                 size: 640,
               }),
             };
@@ -4000,10 +3983,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key:
-                  "users/bundles/member-synthetic/runtime-vault-share-hidden-command-continuation.bundle.json",
                 size: 640,
               }),
             };
@@ -4114,9 +4095,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-classifier-fallback.bundle.json",
                 size: 640,
               }),
             };
@@ -4318,9 +4298,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-checkpoint-classifier-shutdown.bundle.json",
                 size: 640,
               }),
             };
@@ -4461,9 +4440,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "0".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-checkpoint-fallback-shutdown.bundle.json",
                 size: 640,
               }),
             };
@@ -4613,9 +4591,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-device-shutdown.bundle.json",
                 size: 640,
               }),
             };

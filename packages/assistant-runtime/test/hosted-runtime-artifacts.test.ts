@@ -2,7 +2,7 @@ import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -33,11 +33,10 @@ import {
   hostedCanonicalWriteReceiptLogStatusFields,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import { restoreHostedWorkspaceRuntimeJobWorkspace } from "../src/hosted-runtime/workspace-restore.ts";
-import { createWorkspaceState } from "./hosted-runtime-workspace-entrypoint.harness.ts";
+import { createPlatform, createSnapshotFixtureRef, createWorkspaceState } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import {
   createHostedArtifactMaterializer,
-  createHostedArtifactResolver,
   createHostedArtifactUploadSink,
 } from "../src/hosted-runtime/artifacts.ts";
 import {
@@ -55,51 +54,6 @@ import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
   readHostedMediaReferenceCatalogue,
 } from "../src/hosted-runtime/media-references.ts";
-
-test("hosted artifact resolver caches repeated reads by artifact hash", async () => {
-  const bytes = new Uint8Array([1, 2, 3]);
-  const { artifactStore, getCalls } = createHostedRuntimeArtifactStoreStub({
-    sha_cached: bytes,
-  });
-  const resolveArtifact = createHostedArtifactResolver({ artifactStore });
-
-  const first = await resolveArtifact({
-    ref: {
-      byteSize: bytes.byteLength,
-      sha256: "sha_cached",
-    },
-  });
-  const second = await resolveArtifact({
-    ref: {
-      byteSize: bytes.byteLength,
-      sha256: "sha_cached",
-    },
-  });
-
-  assert.equal(first, bytes);
-  assert.equal(second, bytes);
-  assert.deepEqual(getCalls, ["sha_cached"]);
-});
-
-test("hosted artifact resolver fails closed when the artifact store misses a requested hash", async () => {
-  const { artifactStore } = createHostedRuntimeArtifactStoreStub();
-  const resolveArtifact = createHostedArtifactResolver({ artifactStore });
-
-  await assert.rejects(
-    resolveArtifact({
-      ref: {
-        byteSize: 1,
-        sha256: "sha_missing",
-      },
-    }),
-    (error: unknown) => (
-      error instanceof Error
-      && error.message === "Hosted artifact fetch failed with HTTP 404."
-      && (error as { status?: unknown }).status === 404
-      && (error as { statusCode?: unknown }).statusCode === 404
-    ),
-  );
-});
 
 test("hosted artifact upload sink skips known and already uploaded hashes", async () => {
   const { artifactStore, putCalls } = createHostedRuntimeArtifactStoreStub();
@@ -153,99 +107,36 @@ test("hosted artifact upload sink clones bytes before sending them to the store"
   assert.deepEqual(Array.from(storedBytesByHash.get("sha_clone") ?? []), [9, 8, 7]);
 });
 
-test("hosted artifact materializer records only paths that restore", async () => {
-  const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-artifacts-source-"));
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-artifacts-vault-"));
-  const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-artifacts-home-"));
-  const artifactBytesByHash = new Map<string, Uint8Array>();
-
+test("v2 materialization derives bounded local file availability without a cache index", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-local-artifact-proof-"));
+  const vaultRoot = path.join(root, "vault");
+  const operatorHomeRoot = path.join(root, "home");
+  const materializedArtifactPaths = new Set<string>();
   try {
-    const sourceFiles = [
-      {
-        bytes: Buffer.from("scan artifact\n", "utf8"),
-        path: "raw/inbox/example/scan.txt",
-      },
-      {
-        bytes: Buffer.from("derived summary\n", "utf8"),
-        path: "derived/inbox/example/attachment/summary.txt",
-      },
-    ];
-    for (const file of sourceFiles) {
-      const sourcePath = path.join(sourceVaultRoot, file.path);
-      await mkdir(path.dirname(sourcePath), { recursive: true });
-      await writeFile(sourcePath, file.bytes);
-    }
-    const bundle = await snapshotHostedBundleRoots({
-      externalizeFile: async (file) => {
-        const sha256 = sha256HostedBundleHex(file.bytes);
-        artifactBytesByHash.set(sha256, file.bytes);
-        return {
-          byteSize: file.bytes.byteLength,
-          sha256,
-        };
-      },
-      kind: "vault",
-      roots: [{
-        root: sourceVaultRoot,
-        rootKey: "vault",
-      }],
-    });
-    assert.ok(bundle);
-    const { artifactStore, getCalls } = createHostedRuntimeArtifactStoreStub(
-      Object.fromEntries(artifactBytesByHash),
-    );
-    const materializedArtifactPaths = new Set<string>();
-    const materialize = createHostedArtifactMaterializer({
-      artifactResolver: createHostedArtifactResolver({ artifactStore }),
-      bundles: [async () => bundle],
-      materializedArtifactPaths,
-      operatorHomeRoot,
-      vaultRoot,
-    });
-
-    const missing = await materialize(["raw/inbox/example/missing.txt"]);
-    assert.deepEqual([...missing.materializedArtifactPaths], []);
-    assert.deepEqual([...missing.missingArtifactPaths], ["vault:raw/inbox/example/missing.txt"]);
-    assert.deepEqual([...materializedArtifactPaths], []);
-
-    const overBudget = await materialize(
-      ["derived/inbox/example/attachment/summary.txt"],
-      { maxFileBytes: 4 },
-    );
-    assert.deepEqual([...overBudget.materializedArtifactPaths], []);
-    assert.deepEqual(
-      [...overBudget.missingArtifactPaths],
-      ["vault:derived/inbox/example/attachment/summary.txt"],
-    );
-    assert.deepEqual(getCalls, []);
-
-    const restored = await materialize([
-      "derived/inbox/example/attachment/summary.txt",
-      "raw/inbox/example/scan.txt",
-    ]);
-    assert.deepEqual(
-      [...restored.materializedArtifactPaths].sort(),
-      [
-        "vault:derived/inbox/example/attachment/summary.txt",
-        "vault:raw/inbox/example/scan.txt",
-      ],
-    );
-    assert.deepEqual([...restored.missingArtifactPaths], []);
-    assert.deepEqual(
-      [...materializedArtifactPaths].sort(),
-      [
-        "vault:derived/inbox/example/attachment/summary.txt",
-        "vault:raw/inbox/example/scan.txt",
-      ],
-    );
-    await expect(readFile(path.join(vaultRoot, "raw", "inbox", "example", "scan.txt"), "utf8"))
-      .resolves.toBe("scan artifact\n");
-    await expect(readFile(path.join(vaultRoot, "derived", "inbox", "example", "attachment", "summary.txt"), "utf8"))
-      .resolves.toBe("derived summary\n");
+    await mkdir(vaultRoot);
+    await mkdir(operatorHomeRoot);
+    await mkdir(path.join(vaultRoot, "directory"));
+    await writeFile(path.join(vaultRoot, "existing.txt"), "existing canonical bytes");
+    await writeFile(path.join(operatorHomeRoot, "rollout.jsonl"), "{}\n");
+    await writeFile(path.join(root, "outside.txt"), "outside");
+    await symlink(root, path.join(vaultRoot, "linked"));
+    await symlink(path.join(root, "outside.txt"), path.join(vaultRoot, "linked-file"));
+    const materialize = createHostedArtifactMaterializer({ materializedArtifactPaths, operatorHomeRoot, vaultRoot });
+    const available = await materialize(["existing.txt", "operator-home:rollout.jsonl"]);
+    assert.deepEqual([...available.materializedArtifactPaths].sort(), ["operator-home:rollout.jsonl", "vault:existing.txt"]);
+    assert.equal(available.missingArtifactPaths.size, 0);
+    assert.equal(materializedArtifactPaths.size, 0);
+    const rejected = ["missing.txt", "directory", "../outside.txt", "linked/outside.txt", "linked-file"];
+    const missing = await materialize(rejected);
+    assert.equal(missing.materializedArtifactPaths.size, 0);
+    assert.deepEqual([...missing.missingArtifactPaths], rejected.map((p) => `vault:${p}`));
+    materializedArtifactPaths.add("vault:existing.txt");
+    const oversized = await materialize(["existing.txt"], { maxFileBytes: 4 });
+    assert.deepEqual([...oversized.missingArtifactPaths], ["vault:existing.txt"]);
+    await rm(path.join(vaultRoot, "existing.txt"));
+    assert.deepEqual([...(await materialize(["existing.txt"])).missingArtifactPaths], ["vault:existing.txt"]);
   } finally {
-    await rm(sourceVaultRoot, { force: true, recursive: true });
-    await rm(vaultRoot, { force: true, recursive: true });
-    await rm(operatorHomeRoot, { force: true, recursive: true });
+    await rm(root, { force: true, recursive: true });
   }
 });
 
@@ -442,8 +333,6 @@ test.each([false, true])("hosted artifact materializer restores retained inbox m
     const { artifactStore } = createHostedRuntimeArtifactStoreStub();
     const materializedArtifactPaths = new Set<string>();
     const materialize = createHostedArtifactMaterializer({
-      artifactResolver: createHostedArtifactResolver({ artifactStore }),
-      bundles: [],
       materializedArtifactPaths,
       mediaStore,
       operatorHomeRoot,
@@ -456,6 +345,9 @@ test.each([false, true])("hosted artifact materializer restores retained inbox m
       `vault:${imagePath}`,
       `vault:${videoPath}`,
     ].sort());
+    const deniedLocalMedia = await materialize([imagePath], { maxFileBytes: 1 });
+    assert.deepEqual([...deniedLocalMedia.missingArtifactPaths], [`vault:${imagePath}`]);
+    assert.equal(deniedLocalMedia.materializedArtifactPaths.size, 0);
     assert.deepEqual([...materializedArtifactPaths].sort(), [
       `vault:${imagePath}`,
       `vault:${videoPath}`,
@@ -588,8 +480,7 @@ test("ordinary canonical captures have no transient media deadline", async () =>
     await rm(path.join(vaultRoot, entry.relativePath));
     const { artifactStore } = createHostedRuntimeArtifactStoreStub();
     const materialize = createHostedArtifactMaterializer({
-      artifactResolver: createHostedArtifactResolver({ artifactStore }),
-      bundles: [], materializedArtifactPaths: new Set(), mediaStore,
+      materializedArtifactPaths: new Set(), mediaStore,
       operatorHomeRoot: vaultRoot, vaultRoot,
     });
     assert.equal((await materialize([entry.relativePath])).missingArtifactPaths.size, 0);
@@ -657,9 +548,9 @@ test("failed capture replacement preserves saved media until committed snapshot 
     assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries, catalogue.entries);
     assert.ok(store.storedBytesByMediaId.has(original.mediaId));
     const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-      vaultRoot: restoredRoot, platform: { artifactStore, logPort: null, mediaStore: store.mediaStore },
+      vaultRoot: restoredRoot, platform: { ...createPlatform({ artifactBytesByHash: new Map([[snapshotHash, snapshot]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore: store.mediaStore },
       workspace: createWorkspaceState({
-        snapshotRef: { hash: snapshotHash, key: "synthetic/rollback-base.bundle", size: snapshot.byteLength, updatedAt: now },
+        snapshotRef: createSnapshotFixtureRef({ hash: snapshotHash, size: snapshot.byteLength }),
       }),
     });
     assert.deepEqual(store.getCalls, []);
@@ -722,7 +613,6 @@ test("acknowledged capture receipts recover media references without a newer sna
     await assert.rejects(readFile(path.join(restoredRoot, relativePath)), { code: "ENOENT" });
     const { artifactStore } = createHostedRuntimeArtifactStoreStub();
     const materialize = createHostedArtifactMaterializer({
-      artifactResolver: createHostedArtifactResolver({ artifactStore }), bundles: [],
       materializedArtifactPaths: new Set(), mediaStore, operatorHomeRoot: path.join(root, "home"), vaultRoot: restoredRoot,
     });
     assert.equal((await materialize([relativePath])).missingArtifactPaths.size, 0);
@@ -808,10 +698,10 @@ test.each([
     await rm(vaultRoot, { recursive: true, force: true });
     const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
       vaultRoot: restoredRoot,
-      platform: { artifactStore, logPort: null, mediaStore: scenario.external ? mediaStore : null },
+      platform: { ...createPlatform({ artifactBytesByHash: new Map([[snapshotHash, snapshot]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore: scenario.external ? mediaStore : null },
       workspace: createWorkspaceState({
         redactedStatus: status,
-        snapshotRef: { hash: snapshotHash, key: "synthetic/media-base.bundle", size: snapshot.byteLength, updatedAt: now },
+        snapshotRef: createSnapshotFixtureRef({ hash: snapshotHash, size: snapshot.byteLength }),
       }),
     });
     assert.equal(restored.canonicalWriteReceiptRecoveryFailed, false);
@@ -946,9 +836,9 @@ test.each([
     assert.deepEqual(store.getCalls, []);
     await rm(vaultRoot, { recursive: true, force: true });
     const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-      vaultRoot: restoredRoot, platform: { artifactStore, logPort: null, mediaStore },
+      vaultRoot: restoredRoot, platform: { ...createPlatform({ artifactBytesByHash: new Map([[snapshotHash, snapshot]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore },
       workspace: createWorkspaceState({ redactedStatus: status,
-        snapshotRef: { hash: snapshotHash, key: "synthetic/reference-base.bundle", size: snapshot.byteLength, updatedAt: now },
+        snapshotRef: createSnapshotFixtureRef({ hash: snapshotHash, size: snapshot.byteLength }),
       }),
     });
     assert.equal(restored.canonicalWriteReceiptRecoveryFailed, false);

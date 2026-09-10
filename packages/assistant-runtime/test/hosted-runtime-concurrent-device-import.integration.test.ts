@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createDeviceSyncResolvedConfig,
   createMailboxItem,
@@ -247,8 +247,8 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
         async createCheckpointSnapshot() {
           if (completesBeforeReply || persistent) await releaseSnapshot.promise;
           events.push("snapshot.completed");
-          return { snapshotRef: createBundleRef({
-            hash: "d".repeat(64), key: "users/bundles/member-synthetic/concurrent-import.bundle.json", size: 512,
+          return { snapshotRef: createSnapshotFixtureRef({
+            hash: "d".repeat(64), size: 512,
           }) };
         },
         async importItem(item) {
@@ -496,7 +496,7 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
       vaultRoot, signal: controller.signal,
       async createCheckpointSnapshot() {
         const snapshot = await createVaultSnapshotBundle({
-          key: `users/bundles/member-synthetic/preload-retry-${++snapshots}.bundle.json`, vaultRoot,
+          vaultRoot,
         });
         artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
         return { snapshotRef: snapshot.snapshotRef };
