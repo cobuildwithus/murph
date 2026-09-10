@@ -13,7 +13,9 @@
       "journal",
       "labs"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      3167
+    ],
     "tryIt": {
       "label": "Open Journal",
       "href": "/journal"
