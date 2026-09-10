@@ -52,7 +52,9 @@ first protected full deployment. That deployment alone requires
 `CF_BOOTSTRAP_SMALL_RUNNER=true`: migration `v9` creates the SQLite namespace
 using a full Worker deploy with selection off and every existing application
 pinned to its live image, resources and capacity. Native before/after receipts
-must remain unchanged. This is the bounded namespace-bootstrap exception to
+must remain unchanged. Existing native image tags are preserved exactly in this
+namespace-only step; newly admitted release images still require immutable
+digests. This is the bounded namespace-bootstrap exception to
 the ordinary version-only release flow; no application image rollout belongs
 in that bootstrap. Missing live authority, a pending candidate or an active
 native rollout stops provisioning. Clear the bootstrap control after success.
