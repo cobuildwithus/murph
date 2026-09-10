@@ -1121,7 +1121,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               memberId,
               phoneNumber: memberPhone,
               prisma: tx,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -1406,7 +1406,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               memberId,
               phoneNumber: memberPhone,
               prisma: tx,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -1656,7 +1656,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                 memberId: requireString(memberId),
                 phoneNumber: memberPhone,
                 prisma: tx,
-                privyUserId: null,
+
                 signupPhoneCodeSendAttemptId: null,
                 signupPhoneCodeSendAttemptStartedAt: null,
                 signupPhoneCodeSentAt: null,

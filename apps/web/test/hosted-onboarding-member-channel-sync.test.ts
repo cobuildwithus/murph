@@ -73,22 +73,6 @@ describe("hosted onboarding member channel sync", () => {
     });
   });
 
-  it("treats a verified Privy email as authoritative without consulting canonical email authorization", async () => {
-    await expect(
-      resolveHostedMemberEmailLinked({
-        linkedAccounts: [
-          {
-            address: "user@example.com",
-            latest_verified_at: 1743064200,
-            type: "email",
-          },
-        ],
-        memberId: "member_123",
-      }),
-    ).resolves.toBe(true);
-
-    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
-  });
 
   it("falls back to the canonical hosted member email authorization slice when the session has no verified email", async () => {
     const tx = {
@@ -106,7 +90,7 @@ describe("hosted onboarding member channel sync", () => {
 
     await expect(
       resolveHostedMemberEmailLinked({
-        linkedAccounts: [],
+
         memberId: "member_123",
         prisma: tx as never,
       }),
@@ -121,7 +105,7 @@ describe("hosted onboarding member channel sync", () => {
   it("returns false when neither the session nor the canonical email authorization slice has a verified email", async () => {
     await expect(
       resolveHostedMemberEmailLinked({
-        linkedAccounts: [],
+
         memberId: "member_123",
       }),
     ).resolves.toBe(false);
@@ -191,7 +175,7 @@ describe("hosted onboarding member channel sync", () => {
 
     await expect(
       enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
-        linkedAccounts: [],
+
         memberId: "member_123",
         occurredAt: "2026-04-15T00:00:00.000Z",
         prisma: tx as never,
@@ -240,13 +224,7 @@ describe("hosted onboarding member channel sync", () => {
 
     await expect(
       enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
-        linkedAccounts: [
-          {
-            address: "user@example.test",
-            latest_verified_at: 1743064200,
-            type: "email",
-          },
-        ],
+
         memberId: "member_123",
         occurredAt: "2026-04-15T00:00:00.000Z",
         prisma: tx as never,
@@ -289,13 +267,7 @@ describe("hosted onboarding member channel sync", () => {
 
     await expect(
       enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
-        linkedAccounts: [
-          {
-            address: "user@example.test",
-            latest_verified_at: 1743064200,
-            type: "email",
-          },
-        ],
+
         memberId: "member_123",
         occurredAt: "2026-04-15T00:00:00.000Z",
         prisma: tx as never,
@@ -403,11 +375,8 @@ function makeMemberSnapshot(): HostedMemberSnapshot {
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
-      privyUserId: null,
-      walletAddress: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
     },
     routing: {
       linqChatId: null,

@@ -87,7 +87,7 @@ describe("hosted action approval decision route", () => {
     mocks.buildHostedActionApprovalBinding.mockReturnValue("f".repeat(64));
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_action_decision" },
-      privyUserId: "privy_action_decision",
+
       sessionId: "session_action_decision",
     });
     mocks.requireHostedActionApprovalId.mockReturnValue(APPROVAL_ID);

@@ -113,8 +113,7 @@ import {
   startBrowserVaultWarmLoad,
 } from "@/src/lib/browser-vault/warm-store";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
-import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
-import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
+import { logoutHostedAppSession, verifyHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
 import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
@@ -3790,7 +3789,7 @@ test("malformed completion JSON after replacement headers clears the cached and 
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
       /unexpected response/u,
     );
   });
@@ -3834,7 +3833,7 @@ test("a completion body-read failure after replacement headers clears the cached
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
       /response body unavailable/u,
     );
   });
@@ -3873,7 +3872,7 @@ test("a nonreplacement completion failure preserves the cached and live member A
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
       /Something went wrong/u,
     );
   });

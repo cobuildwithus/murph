@@ -1,3 +1,4 @@
+import { buildHostedLocalWebAuthEnvironment, removeHostedLocalWebAuthorityEnvironment } from "../authority-env.ts";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, existsSync, readdirSync, readFileSync } from "node:fs";
@@ -135,6 +136,8 @@ export interface HostedLocalDevStack {
    * `runtimeEnv` and only injected into the web child process env.
    */
   hostedAppSessionHmacKey: string;
+  hostedBetterAuthSecret: string;
+  hostedAuthStorageKey: string;
   oidcIdentity: HostedExecutionOidcIdentity;
   oidcToken: string;
   processes: {
@@ -425,7 +428,10 @@ export async function startHostedLocalDevStack(input: {
     const hostedAppSessionHmacKey =
       rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY?.trim()
       || HOSTED_LOCAL_APP_SESSION_HMAC_KEY;
-    delete rawVercelEnv.HOSTED_APP_SESSION_HMAC_KEY;
+    const webAuthEnvironment = buildHostedLocalWebAuthEnvironment({
+      ...rawVercelEnv, ...input.webProcessEnvOverrides,
+    });
+    removeHostedLocalWebAuthorityEnvironment(rawVercelEnv);
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
     const shouldPreserveTestNodeEnvForLocalTestMode =
       usesWranglerLocalDevTestRoutes(rawVercelEnv)
@@ -670,8 +676,6 @@ export async function startHostedLocalDevStack(input: {
       "Enable Vercel OIDC for the linked project and make sure the Vercel CLI is logged in.",
     );
 
-    warnForMissingEnv("NEXT_PUBLIC_PRIVY_APP_ID", runtimeEnv.NEXT_PUBLIC_PRIVY_APP_ID);
-    warnForMissingEnv("PRIVY_VERIFICATION_KEY", runtimeEnv.PRIVY_VERIFICATION_KEY);
     const stripeListenerWillCaptureSecret = !config.skipStripeListen && !config.skipWeb;
     writeHostedLocalStripeCheckoutDiagnostics({
       env: runtimeEnv,
@@ -968,6 +972,7 @@ export async function startHostedLocalDevStack(input: {
     const webProcessSourceEnv: NodeJS.ProcessEnv = {
       ...runtimeEnv,
       ...(input.webProcessEnvOverrides ?? {}),
+      ...webAuthEnvironment,
       HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKey,
       // Keep disabled mode fail-closed even when dev-local subsequently
       // loads apps/web/.env.local and .env into the child process.
@@ -1218,6 +1223,8 @@ export async function startHostedLocalDevStack(input: {
         workerPersistDir,
       },
       hostedAppSessionHmacKey,
+      hostedBetterAuthSecret: webAuthEnvironment.HOSTED_BETTER_AUTH_SECRET,
+      hostedAuthStorageKey: webAuthEnvironment.HOSTED_AUTH_STORAGE_KEY,
       kill,
       oidcIdentity,
       oidcToken,

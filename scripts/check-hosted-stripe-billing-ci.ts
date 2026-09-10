@@ -102,11 +102,6 @@ export function inspectHostedStripeBillingWorkflow(
     "Live steps must use only the dedicated sandbox secret.",
   );
   requireText(
-    "missing-privy-client-config",
-    "vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID",
-    "The browser lane must render with the existing public Privy client configuration.",
-  );
-  requireText(
     "missing-live-command",
     "pnpm hosted-local e2e stripe-billing-browser-matrix",
     "Workflow and harness scenario must stay aligned.",

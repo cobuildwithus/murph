@@ -974,9 +974,14 @@ async function createClinicalFixture(): Promise<ClinicalFixture> {
     });
 
     boundary.authSession = {
+      primaryAuthenticatedAt: null,
+      // Authentication is a boundary port in this deletion/clinical-record race.
+      authProof: { credentialDigest: Buffer.alloc(32), expiresAt: new Date(now.getTime() + 60 * 60_000),
+        row: { model: "session", id: sessionId, memberId, payloadEncrypted: "synthetic", lookupKey: null,
+          secondaryLookupKey: null, expiresAt: new Date(now.getTime() + 60 * 60_000), createdAt: now, updatedAt: now } },
       expiresAt: new Date(now.getTime() + 60 * 60_000),
       member,
-      privyUserId: `did:privy:clinical-records-proof-${fixtureId}`,
+
       sessionId,
     };
     boundary.token = {

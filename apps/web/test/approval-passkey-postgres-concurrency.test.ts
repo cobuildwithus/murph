@@ -1,18 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { privateKeyToAccount } from "viem/accounts";
+import { issueHostedAppSession } from "./support/hosted-auth-session";
+import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
+import { lockHostedMemberRow } from "../src/lib/hosted-onboarding/shared";
 
 vi.mock("server-only", () => ({}));
-const provider = vi.hoisted(() => ({ read: vi.fn() }));
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({ readHostedPrivyUserById: provider.read }));
-vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({ getHostedOnboardingEnvironment: () => ({ publicBaseUrl: "https://www.withmurph.ai", allowedMutationOrigins: [] }) }));
-vi.mock("@/src/lib/hosted-web/public-url", () => ({ resolveHostedPublicOrigin: () => "https://www.withmurph.ai" }));
 
 import { POST as authenticationOptionsRoute } from "../app/api/settings/approval-passkeys/authenticate/route";
 import { getPrisma } from "@/src/lib/prisma";
-import { issueHostedAppSession, requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import { createApprovalPasskeyRegistrationOptions, registerApprovalPasskey } from "@/src/lib/sensitive-actions/passkey-enrollment";
-import { readApprovalPasskeyState, prepareApprovalPasskeyWrite } from "@/src/lib/sensitive-actions/passkey-store";
+import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { createInitialApprovalPasskeyRegistrationOptions, registerApprovalPasskey } from "@/src/lib/sensitive-actions/passkey-enrollment";
+import { readApprovalPasskeyState, prepareApprovalPasskeyWrite, commitApprovalPasskeyWriteTx } from "@/src/lib/sensitive-actions/passkey-store";
 import {
   buildSettingsSensitiveActionBinding, createSensitiveActionChallenge,
   consumeSensitiveActionChallenge, verifySensitiveActionChallenge,
@@ -30,18 +28,13 @@ if (enabled) {
     throw new Error("Approval concurrency proof requires an isolated local Murph test database.");
   }
 }
-const account = privateKeyToAccount("0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-const privyUserId = "did:privy:synthetic-approval";
 
 describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
   beforeEach(() => {
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
-    provider.read.mockReset();
-    provider.read.mockResolvedValue({
-      id: privyUserId,
-      linked_accounts: [{ address: account.address, chain_type: "ethereum", connector_type: "embedded", type: "wallet", wallet_client_type: "privy", wallet_index: 0 }],
-      mfa_methods: [{ type: "passkey" }],
-    });
+    vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
+    vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 10).toString("base64url"));
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.withmurph.ai");
   });
   afterAll(async () => { if (enabled) await getPrisma().$disconnect(); });
 
@@ -55,7 +48,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     const prisma = getPrisma();
     const memberId = `member_approval_test_${randomUUID()}`;
     await prisma.hostedMember.create({ data: { id: memberId } });
-    const issued = await issueHostedAppSession({ memberId, privyUserId });
+    const issued = await issueHostedAppSession({ memberId, primaryAuthenticatedAt: new Date() });
     const request = new Request("https://www.withmurph.ai/api/settings/approval-passkeys/register", {
       headers: { cookie: issued.cookie.split(";")[0] ?? "", origin: "https://www.withmurph.ai" },
     });
@@ -66,13 +59,12 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
       return { bindingHash, kind, ...material };
     }
     async function enrollment() {
-      const material = await challenge();
-      const key = authenticator(material.message);
-      const authorization = { token: material.token, signature: await account.signMessage({ message: material.message }) };
-      const options = await createApprovalPasskeyRegistrationOptions({ authorization, prisma, session });
+      const material = await createInitialApprovalPasskeyRegistrationOptions({ prisma, session });
+      const key = authenticator();
       return {
         key,
-        input: { authorization, prisma, request, response: key.registration(true, options.challenge), session },
+        input: { authorization: undefined, initialToken: material.token, prisma, request,
+          response: key.registration(true, material.options.challenge), session },
       };
     }
     return { challenge, enrollment, memberId, prisma, request, session };
@@ -83,7 +75,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     await registerApprovalPasskey(initial.input);
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
     const challenge = await f.challenge("vault.export");
-    const other = await issueHostedAppSession({ memberId: f.memberId, privyUserId });
+    const other = await issueHostedAppSession({ memberId: f.memberId, primaryAuthenticatedAt: new Date() });
     const headers = { cookie: f.request.headers.get("cookie") ?? "", origin: "https://www.withmurph.ai" };
     async function options(customHeaders: Record<string, string>) {
       return authenticationOptionsRoute(new Request("https://www.withmurph.ai/api/settings/approval-passkeys/authenticate", {
@@ -95,7 +87,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     const body: { method: string; options: { challenge: string; userVerification: string } } = await valid.json();
     expect(body).toMatchObject({ method: "passkey", options: { userVerification: "required" } });
     await expect(verifySensitiveActionChallenge({
-      ...f, ...challenge, privyUserId,
+      ...f, ...challenge,
       authorization: { method: "passkey", token: challenge.token, assertion: initial.key.assertion({ challenge: body.options.challenge }) },
     })).resolves.toMatchObject({ passkeys: [{ counter: 1 }] });
     expect((await options({ ...headers, cookie: other.cookie.split(";")[0] ?? "" })).status).toBe(410);
@@ -107,7 +99,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
   it("keeps enrollment closed before compatible readers deploy", () => withMember(async (f) => {
     const enrollment = await f.enrollment();
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
-    await expect(createApprovalPasskeyRegistrationOptions(enrollment.input)).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
+    await expect(createInitialApprovalPasskeyRegistrationOptions({ prisma: f.prisma, session: f.session })).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
     await expect(registerApprovalPasskey(enrollment.input)).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
     expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
   }));
@@ -121,15 +113,13 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     const winner = attempts.find(({ key }) => key.credential.id === state.credentials[0]?.id);
     expect(winner).toBeDefined();
     if (!winner) throw new Error("Missing committed enrollment.");
-    await expect(registerApprovalPasskey(winner.input)).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
+    await expect(registerApprovalPasskey(winner.input)).rejects.toMatchObject({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED" });
     const challenge = await f.challenge("vault.export");
-    provider.read.mockClear();
     await expect(verifySensitiveActionChallenge({
-      ...f, ...challenge, privyUserId,
-      authorization: { token: challenge.token, signature: await account.signMessage({ message: challenge.message }) },
-    })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_SETUP_REQUIRED" });
-    expect(provider.read).not.toHaveBeenCalled();
-    expect(await f.prisma.hostedWebSession.count({ where: { memberId: f.memberId } })).toBe(1);
+      ...f, ...challenge,
+      authorization: { token: challenge.token, signature: `0x${"a".repeat(130)}` },
+    })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED" });
+    expect(await f.prisma.hostedAuthRecord.count({ where: { model: "session", memberId: f.memberId } })).toBe(1);
   }));
 
   it("consumes a counterless assertion once under concurrent commits", () => withMember(async (f) => {
@@ -137,11 +127,11 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     await registerApprovalPasskey(initial.input);
     const challenge = await f.challenge("vault.export");
     const proof = await verifySensitiveActionChallenge({
-      ...f, ...challenge, privyUserId,
+      ...f, ...challenge,
       authorization: { method: "passkey", token: challenge.token, assertion: initial.key.assertion({ counter: 0, customMessage: challenge.message }) },
     });
     const outcomes = await Promise.allSettled([1, 2].map(() => consumeSensitiveActionChallenge({
-      challenge: proof, prisma: f.prisma, session: { request: f.request, sessionId: f.session.sessionId },
+      challenge: proof, prisma: f.prisma, session: { request: f.request, sessionId: f.session.sessionId, authProof: f.session.authProof },
     })));
     expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     expect(await f.prisma.hostedSensitiveActionChallenge.count({ where: { memberId: f.memberId } })).toBe(0);
@@ -152,19 +142,19 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     await registerApprovalPasskey(initial.input);
     const challenge = await f.challenge("vault.export");
     const proof = await verifySensitiveActionChallenge({
-      ...f, ...challenge, privyUserId,
+      ...f, ...challenge,
       authorization: { method: "passkey", token: challenge.token, assertion: initial.key.assertion({ customMessage: challenge.message }) },
     });
     const before = await readApprovalPasskeyState(f);
     await f.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId: f.memberId } });
-    await expect(consumeSensitiveActionChallenge({ challenge: proof, prisma: f.prisma, session: { request: f.request, sessionId: f.session.sessionId } })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
+    await expect(consumeSensitiveActionChallenge({ challenge: proof, prisma: f.prisma, session: { request: f.request, sessionId: f.session.sessionId, authProof: f.session.authProof } })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
     expect(await readApprovalPasskeyState(f)).toEqual(before);
   }));
 
   it.each(["revoked", "expired", "suspended", "deleted"])("rejects enrollment after the member/session becomes %s", (change) => withMember(async (f) => {
     const enrollment = await f.enrollment();
-    if (change === "revoked") await f.prisma.hostedWebSession.update({ where: { id: f.session.sessionId }, data: { revokedAt: new Date() } });
-    if (change === "expired") await f.prisma.hostedWebSession.update({ where: { id: f.session.sessionId }, data: { expiresAt: new Date(0) } });
+    if (change === "revoked") await f.prisma.hostedAuthRecord.delete({ where: { model_id: { model: "session", id: f.session.sessionId } } });
+    if (change === "expired") await hostedAuthAdapter(f.prisma)({}).update({ model: "session", where: [{ field: "id", value: f.session.sessionId }], update: { expiresAt: new Date(0) } });
     if (change === "suspended") await f.prisma.hostedMember.update({ where: { id: f.memberId }, data: { suspendedAt: new Date() } });
     if (change === "deleted") await f.prisma.hostedMember.delete({ where: { id: f.memberId } });
     await expect(registerApprovalPasskey(enrollment.input)).rejects.toThrow();
@@ -173,17 +163,23 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
 
   it("fences stale prepared state and cascades credential removal with deletion", () => withMember(async (f) => {
     const enrollment = await f.enrollment();
+    await registerApprovalPasskey(enrollment.input);
     const before = await readApprovalPasskeyState(f);
-    const stale = await prepareApprovalPasskeyWrite({ state: before, credentials: [authenticator().credential], prisma: f.prisma });
+    const replacement = authenticator();
+    const stale = await prepareApprovalPasskeyWrite({ state: before, credentials: [replacement.credential], prisma: f.prisma });
     const challenge = await f.challenge("vault.export");
     const proof = await verifySensitiveActionChallenge({
-      ...f, ...challenge, privyUserId,
-      authorization: { token: challenge.token, signature: await account.signMessage({ message: challenge.message }) },
+      ...f, ...challenge,
+      authorization: { method: "passkey", token: challenge.token,
+        assertion: enrollment.key.assertion({ customMessage: challenge.message }) },
     });
-    await registerApprovalPasskey(enrollment.input);
-    await expect(consumeSensitiveActionChallenge({ challenge: { ...proof, credentialWrite: stale }, prisma: f.prisma, session: { request: f.request, sessionId: f.session.sessionId } }))
+    await f.prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, f.memberId);
+      await commitApprovalPasskeyWriteTx({ prepared: stale, prisma: tx });
+    });
+    await expect(consumeSensitiveActionChallenge({ challenge: { ...proof, credentialWrite: stale }, prisma: f.prisma, session: { request: f.request, sessionId: f.session.sessionId, authProof: f.session.authProof } }))
       .rejects.toMatchObject({ code: "SENSITIVE_ACTION_CREDENTIALS_CHANGED" });
-    expect((await readApprovalPasskeyState(f)).credentials).toEqual([enrollment.key.credential]);
+    expect((await readApprovalPasskeyState(f)).credentials).toEqual([replacement.credential]);
     await f.prisma.hostedMember.delete({ where: { id: f.memberId } });
     expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
   }));

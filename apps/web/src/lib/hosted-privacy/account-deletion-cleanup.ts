@@ -13,11 +13,6 @@ import {
   type HostedRunnerUserDataDeletionBestEffortResult,
 } from "../hosted-execution/user-data-delete";
 import { describeHostedExecutionSafeLogErrorCode } from "../hosted-execution/logging";
-import {
-  createHostedPrivyUserLookupKey,
-  createHostedPrivyUserLookupKeyReadCandidates,
-} from "../hosted-onboarding/contact-privacy";
-import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import {
   terminateHostedUserRuntimeWorkflowBestEffort,
@@ -35,13 +30,11 @@ const CLEANUP_RETRY_BASE_MS = 5 * 60_000;
 const CLEANUP_RETRY_MAX_MS = 24 * 60 * 60_000;
 const CLEANUP_IDENTIFIER_LIMIT = 1_024;
 const CLEANUP_TARGET_TIMEOUT_ERROR_CODE = "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT";
-const CLEANUP_PRIVY_REBOUND_ERROR_CODE = "ACCOUNT_DELETION_PRIVY_IDENTITY_REBOUND";
 
 export const HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS = 5_000;
 export const HOSTED_ACCOUNT_DELETION_RETRY_ATTEMPT_TIMEOUT_MS = 15_000;
 
 interface CleanupPayload {
-  privyUserId: string | null;
   runtimeMemberIds: string[];
   schema: typeof CLEANUP_SCHEMA;
   stripeCustomerIds: string[];
@@ -65,8 +58,6 @@ export interface PreparedHostedAccountDeletionCleanup {
   kmsKeyName: string;
   nextAttemptAt: Date;
   payloadCiphertext: string;
-  privyCompletedAt: Date | null;
-  privyUserLookupKey: string | null;
   runtimeLogsCompletedAt: Date | null;
   runtimeMemberIds: readonly string[];
   stripeCustomerIds: readonly string[];
@@ -105,7 +96,6 @@ export interface HostedAccountDeletionCleanupBatchResult {
 
 export async function prepareHostedAccountDeletionCleanup(input: {
   now: Date;
-  privyUserId: string | null;
   runtimeMemberIds: readonly string[];
   stripeCustomerIds: readonly string[];
   stripeSubscriptionIds?: readonly string[];
@@ -121,11 +111,8 @@ export async function prepareHostedAccountDeletionCleanup(input: {
     input.stripeSubscriptionIds ?? [],
     "Stripe subscription",
   );
-  const privyUserId = optionalIdentifier(input.privyUserId, "Privy user");
-  const privyUserLookupKey = createHostedPrivyUserLookupKey(privyUserId);
   const cryptoConfig = getHostedWebCryptoConfig();
   const payloadPlaintext = new TextEncoder().encode(JSON.stringify({
-    privyUserId,
     runtimeMemberIds,
     schema: CLEANUP_SCHEMA,
     stripeCustomerIds,
@@ -151,8 +138,6 @@ export async function prepareHostedAccountDeletionCleanup(input: {
     kmsKeyName: normalizeGcpKmsCryptoKeyName(encrypted.keyName),
     nextAttemptAt: input.now,
     payloadCiphertext: encrypted.ciphertext,
-    privyCompletedAt: privyUserId === null ? input.now : null,
-    privyUserLookupKey,
     runtimeLogsCompletedAt: null,
     runtimeMemberIds,
     stripeCustomerIds,
@@ -175,8 +160,6 @@ export async function persistHostedAccountDeletionCleanupTx(input: {
       kmsKeyName: input.cleanup.kmsKeyName,
       nextAttemptAt: input.cleanup.nextAttemptAt,
       payloadCiphertext: input.cleanup.payloadCiphertext,
-      privyCompletedAt: input.cleanup.privyCompletedAt,
-      privyUserLookupKey: input.cleanup.privyUserLookupKey,
       runtimeLogsCompletedAt: input.cleanup.runtimeLogsCompletedAt,
       stripeCompletedAt: input.cleanup.stripeCompletedAt,
       temporalCompletedAt: input.cleanup.temporalCompletedAt,
@@ -257,7 +240,6 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
       runtimeLogs,
       temporal,
       stripeCustomer,
-      privyUser,
     ] = await Promise.all([
       cleanup.cloudflareCompletedAt
         ? completedCloudflareResult()
@@ -277,21 +259,11 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
       cleanup.stripeCompletedAt
         ? completedOrSkippedVendorResult(payload.stripeCustomerIds.length > 0)
         : deleteStripeCustomers(payload.stripeCustomerIds, deadline),
-      cleanup.privyCompletedAt
-        ? completedOrSkippedVendorResult(payload.privyUserId !== null)
-        : deletePrivyUser({
-            deadline,
-            prisma: input.prisma,
-            privyUserId: payload.privyUserId,
-            privyUserLookupKey: cleanup.privyUserLookupKey,
-          }),
     ]);
     const cloudflareCompletedAt = cleanup.cloudflareCompletedAt
       ?? (cloudflare.deleted ? now : null);
     const stripeCompletedAt = cleanup.stripeCompletedAt
       ?? (isTerminalVendorDeletion(stripeCustomer) ? now : null);
-    const privyCompletedAt = cleanup.privyCompletedAt
-      ?? (isTerminalVendorDeletion(privyUser) ? now : null);
     const runtimeLogsCompletedAt = cleanup.runtimeLogsCompletedAt
       ?? (runtimeLogs.completed ? now : null);
     const temporalNextRuntimeIndex = Math.max(
@@ -306,8 +278,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
       !cloudflareCompletedAt
       || !runtimeLogsCompletedAt
       || !temporalCompletedAt
-      || !stripeCompletedAt
-      || !privyCompletedAt;
+      || !stripeCompletedAt;
 
     if (cleanupPending) {
       await input.prisma.hostedAccountDeletionCleanup.updateMany({
@@ -317,7 +288,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
           lastAttemptedAt: now,
           lastErrorCode: pendingErrorCode({
             cloudflare,
-            privyUser,
+
             runtimeLogs,
             stripeCustomer,
             temporal,
@@ -327,7 +298,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
           nextAttemptAt: temporalMadeProgress
             ? now
             : nextAttemptAt(now, cleanup.attemptCount),
-          privyCompletedAt,
+
           runtimeLogsCompletedAt,
           stripeCompletedAt,
           temporalCompletedAt,
@@ -343,7 +314,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
           cloudflareCompletedAt,
           lastAttemptedAt: now,
           lastErrorCode: null,
-          privyCompletedAt,
+
           runtimeLogsCompletedAt,
           stripeCompletedAt,
           temporalCompletedAt,
@@ -374,7 +345,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
     return {
       cleanupPending,
       cloudflare,
-      vendorAccounts: { privyUser, stripeCustomer },
+      vendorAccounts: { privyUser: retiredIdentityResult(), stripeCustomer },
     };
   } catch (error) {
     await input.prisma.hostedAccountDeletionCleanup.updateMany({
@@ -458,7 +429,7 @@ export function pendingHostedAccountDeletionCleanupResult(
       runnerStateDeleted: null,
     },
     vendorAccounts: {
-      privyUser: { errorCode, status: "failed" },
+      privyUser: retiredIdentityResult(),
       stripeCustomer: { errorCode, status: "failed" },
     },
   };
@@ -503,7 +474,6 @@ function parseCleanupPayload(value: unknown): CleanupPayload {
   }
 
   return {
-    privyUserId: optionalIdentifier(value.privyUserId, "Privy user"),
     runtimeMemberIds,
     schema: CLEANUP_SCHEMA,
     stripeCustomerIds: uniqueIdentifiers(value.stripeCustomerIds, "Stripe customer"),
@@ -581,65 +551,6 @@ async function deleteStripeCustomers(
     }
   }
   return { errorCode: null, status: "completed" };
-}
-
-async function deletePrivyUser(input: {
-  deadline: CleanupDeadline;
-  prisma: PrismaClient;
-  privyUserId: string | null;
-  privyUserLookupKey: string | null;
-}): Promise<HostedAccountVendorDeletionResult> {
-  const privyUserId = input.privyUserId;
-  if (!privyUserId) {
-    return { errorCode: null, status: "skipped_no_record" };
-  }
-  const lookupKeys = createHostedPrivyUserLookupKeyReadCandidates(privyUserId);
-  if (
-    !input.privyUserLookupKey
-    || !lookupKeys.includes(input.privyUserLookupKey)
-  ) {
-    return {
-      errorCode: "ACCOUNT_DELETION_PRIVY_LOOKUP_MISMATCH",
-      status: "failed",
-    };
-  }
-  if (cleanupDeadlineExpired(input.deadline)) {
-    return timedOutVendorResult();
-  }
-  const reboundIdentity = await input.prisma.hostedMemberIdentity.findFirst({
-    select: { memberId: true },
-    where: {
-      privyUserLookupKey: {
-        in: lookupKeys,
-      },
-    },
-  });
-  if (reboundIdentity) {
-    return {
-      errorCode: CLEANUP_PRIVY_REBOUND_ERROR_CODE,
-      status: "failed",
-    };
-  }
-  if (cleanupDeadlineExpired(input.deadline)) {
-    return timedOutVendorResult();
-  }
-  try {
-    const deleted = await deleteHostedPrivyUser(privyUserId, {
-      maxRetries: 0,
-      signal: input.deadline.signal,
-      timeout: remainingCleanupDeadlineMs(input.deadline),
-    });
-    return deleted
-      ? { errorCode: null, status: "completed" }
-      : { errorCode: null, status: "skipped_not_configured" };
-  } catch (error) {
-    if (cleanupDeadlineExpired(input.deadline)) {
-      return timedOutVendorResult();
-    }
-    return isExplicitResourceMissingError(error)
-      ? { errorCode: null, status: "completed" }
-      : { errorCode: safeErrorCode(error), status: "failed" };
-  }
 }
 
 interface CleanupDeadline {
@@ -775,9 +686,7 @@ function pendingResult(
       ? completedCloudflareResult()
       : pendingHostedAccountDeletionCleanupResult(errorCode).cloudflare,
     vendorAccounts: {
-      privyUser: cleanup.privyCompletedAt
-        ? { errorCode: null, status: "completed" }
-        : { errorCode, status: "failed" },
+      privyUser: retiredIdentityResult(),
       stripeCustomer: cleanup.stripeCompletedAt
         ? { errorCode: null, status: "completed" }
         : { errorCode, status: "failed" },
@@ -785,12 +694,17 @@ function pendingResult(
   };
 }
 
+function retiredIdentityResult(): HostedAccountVendorDeletionResult {
+  // Older open clients read this response key after deletion commits.
+  return { errorCode: null, status: "skipped_no_record" };
+}
+
 function completedResult(): HostedAccountDeletionCleanupRunResult {
   return {
     cleanupPending: false,
     cloudflare: completedCloudflareResult(),
     vendorAccounts: {
-      privyUser: { errorCode: null, status: "completed" },
+      privyUser: retiredIdentityResult(),
       stripeCustomer: { errorCode: null, status: "completed" },
     },
   };
@@ -849,7 +763,6 @@ function isTerminalVendorDeletion(
 
 function pendingErrorCode(input: {
   cloudflare: HostedRunnerUserDataDeletionBestEffortResult;
-  privyUser: HostedAccountVendorDeletionResult;
   runtimeLogs: HostedRuntimeLogDeletionResult;
   stripeCustomer: HostedAccountVendorDeletionResult;
   temporal: HostedTemporalWorkflowTerminationResult;
@@ -868,9 +781,8 @@ function pendingErrorCode(input: {
     return input.temporal.errorCode
       ?? "HOSTED_TEMPORAL_TERMINATION_INCOMPLETE";
   }
-  const vendor = [input.stripeCustomer, input.privyUser]
-    .find((result) => !isTerminalVendorDeletion(result));
-  if (!vendor) {
+  const vendor = input.stripeCustomer;
+  if (isTerminalVendorDeletion(vendor)) {
     return null;
   }
   return vendor.errorCode
@@ -907,13 +819,6 @@ function uniqueIdentifiers(values: readonly unknown[], label: string): string[] 
   }))];
 }
 
-function optionalIdentifier(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  return uniqueIdentifiers([value], label)[0] ?? null;
-}
-
 function safeErrorCode(error: unknown): string {
   return describeHostedExecutionSafeLogErrorCode(error);
 }
@@ -925,17 +830,6 @@ function isStripeResourceMissingError(error: unknown): boolean {
   return error.code === "resource_missing"
     && typeof error.type === "string"
     && error.type.startsWith("Stripe");
-}
-
-function isExplicitResourceMissingError(error: unknown): boolean {
-  if (!isRecord(error)) {
-    return false;
-  }
-  const status = error.status ?? error.statusCode;
-  return status === 404
-    || error.code === "NOT_FOUND"
-    || error.code === "not_found"
-    || error.code === "resource_missing";
 }
 
 function mergeNullableBooleans(

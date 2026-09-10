@@ -26,7 +26,6 @@ const CHECKOUT_FIXTURE_PATH = fileURLToPath(new URL(
 export interface HostedStripeBillingCatalog {
   accountId: string;
   portalConfigurationId: string;
-  privyAppId: string;
   priceIds: {
     edge: string;
     familyEdge: string;
@@ -99,7 +98,6 @@ export class HostedStripeBillingSandbox {
   readonly stripe: Stripe;
   readonly accountId: string;
   readonly portalConfigurationId: string;
-  readonly privyAppId: string;
   readonly priceIds: HostedStripeBillingCatalog["priceIds"];
 
   private readonly secretKey: string;
@@ -115,7 +113,6 @@ export class HostedStripeBillingSandbox {
     this.runId = input.runId;
     this.accountId = input.accountId;
     this.portalConfigurationId = input.portalConfigurationId;
-    this.privyAppId = input.privyAppId;
     this.priceIds = { ...input.priceIds };
     this.secretKey = input.secretKey;
     this.stripe = new Stripe(input.secretKey, {
@@ -131,7 +128,6 @@ export class HostedStripeBillingSandbox {
     return {
       additionalEnv: {
         NODE_ENV: process.env.NODE_ENV,
-        NEXT_PUBLIC_PRIVY_APP_ID: this.privyAppId,
         HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY:
           this.portalConfigurationId,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY:
@@ -153,7 +149,6 @@ export class HostedStripeBillingSandbox {
       },
       webProcessEnvOverrides: {
         NODE_ENV: process.env.NODE_ENV,
-        NEXT_PUBLIC_PRIVY_APP_ID: this.privyAppId,
         STRIPE_SECRET_KEY: this.secretKey,
       },
     };

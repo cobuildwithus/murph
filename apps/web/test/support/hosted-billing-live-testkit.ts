@@ -80,7 +80,6 @@ export interface HostedBillingMemberSeedForTest {
   memberId: string;
   /** Seeds the crypto-root marker used to detect an earlier activation. */
   previouslyActivated: boolean;
-  privyUserId?: string | null;
   verifiedEmail?: string | null;
   verifiedPhoneNumber?: string;
 }
@@ -250,15 +249,10 @@ interface HostedMemberIdentityStoreModule {
     phoneNumber: string | null;
     phoneNumberVerifiedAt: Date | null;
     prisma: HostedBillingTestTransaction;
-    privyUserId: string | null;
     signupPhoneCodeSendAttemptId: string | null;
     signupPhoneCodeSendAttemptStartedAt: Date | null;
     signupPhoneCodeSentAt: Date | null;
     signupPhoneNumber: string | null;
-    walletAddress: string | null;
-    walletChainType: string | null;
-    walletCreatedAt: Date | null;
-    walletProvider: string | null;
   }): Promise<unknown>;
 }
 
@@ -332,7 +326,7 @@ interface HostedBillingTestModules {
   buildHostedMemberPhoneIdentityFields(phoneNumber: string): Pick<
     Parameters<HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"]>[0],
     "maskedPhoneNumberHint" | "phoneLookupKey" | "phoneNumber"
-    | "phoneNumberVerifiedAt" | "privyUserId"
+    | "phoneNumberVerifiedAt"
   >;
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
   createPrismaClient: HostedPrismaModule["createPrismaClient"];
@@ -369,12 +363,6 @@ export async function seedHostedBillingMemberForTest(
         where: { id: input.memberId },
       });
       if (!existing) {
-        const privyUserId = input.privyUserId?.trim() || null;
-        if (!privyUserId) {
-          throw new TypeError(
-            "A new hosted billing member seed requires a Privy user id.",
-          );
-        }
         await modules.createHostedMember({
           billingStatus: input.billingStatus === "active" ? "active" : "not_started",
           memberId: input.memberId,
@@ -387,20 +375,18 @@ export async function seedHostedBillingMemberForTest(
           phoneNumber: null,
           phoneNumberVerifiedAt: null,
           prisma: tx,
-          privyUserId,
+
           signupPhoneCodeSendAttemptId: null,
           signupPhoneCodeSendAttemptStartedAt: null,
           signupPhoneCodeSentAt: null,
           signupPhoneNumber: null,
-          walletAddress: null,
-          walletChainType: null,
-          walletCreatedAt: null,
-          walletProvider: null,
+
+
           ...(input.verifiedPhoneNumber
             ? {
                 ...modules.buildHostedMemberPhoneIdentityFields(input.verifiedPhoneNumber),
                 phoneNumberVerifiedAt: new Date(),
-                privyUserId,
+
               }
             : {}),
         });

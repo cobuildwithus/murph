@@ -94,14 +94,12 @@ type BillingCheckoutRouteModule = typeof import("../app/api/hosted-onboarding/bi
 type AbortSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/abort/route");
 type ConfirmSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
 type HostedOnboardingHttpModule = typeof import("../src/lib/hosted-onboarding/http");
-type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
 type SendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
 
 let billingCheckoutRoute: BillingCheckoutRouteModule;
 let abortSendCodeRoute: AbortSendCodeRouteModule;
 let confirmSendCodeRoute: ConfirmSendCodeRouteModule;
 let hostedOnboardingHttp: HostedOnboardingHttpModule;
-let privyCompleteRoute: PrivyCompleteRouteModule;
 let sendCodeRoute: SendCodeRouteModule;
 
 const SAME_ORIGIN_HEADERS = {
@@ -119,7 +117,6 @@ describe("hosted onboarding routes", () => {
     billingCheckoutRoute = await import("../app/api/hosted-onboarding/billing/checkout/route");
     confirmSendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
     hostedOnboardingHttp = await import("../src/lib/hosted-onboarding/http");
-    privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/route");
     sendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
   });
 
@@ -231,348 +228,6 @@ describe("hosted onboarding routes", () => {
     setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
   });
 
-  it("marks cookie-backed Privy verification responses as no-store", async () => {
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          inviteCode: "invite-code",
-        }),
-        headers: {
-          cookie: "privy-id-token=cookie-token",
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(response.headers.get("Set-Cookie")).toBe(
-      "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-    );
-    expect(mocks.getHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authMethod: "phone",
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
-      inviteCode: "invite-code",
-      now: expect.any(Date),
-    });
-    expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
-      memberId: "member_123",
-      privyUserId: "did:privy:user_123",
-    });
-    expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
-      prisma: { prisma: true },
-      authenticatedMember: createHostedMember(),
-      inviteCode: "invite-code",
-    });
-    await expect(response.json()).resolves.toEqual({
-      inviteCode: "invite-code",
-      joinUrl: "/join/invite-code",
-      launchConsentGranted: false,
-      launchConsentStatus: {
-        launchGranted: false,
-      },
-      messagingSetupRequired: false,
-      ok: true,
-      stage: "checkout",
-      status: createInviteStatus("checkout"),
-    });
-  });
-
-  it("accepts a valid Privy cookie-backed session even when the request body is empty", async () => {
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        headers: {
-          cookie: "privy-id-token=cookie-token",
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authMethod: "phone",
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
-      inviteCode: null,
-      now: expect.any(Date),
-    });
-  });
-
-  it("ignores any body identity token and keeps the Privy cookie authoritative", async () => {
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          identityToken: "body-token",
-          inviteCode: "invite-code",
-        }),
-        headers: {
-          cookie: "privy-id-token=cookie-token",
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
-      authMethod: "phone",
-      identity: {
-        phone: {
-          number: "+15551234567",
-          verifiedAt: 1742990400,
-        },
-        userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      },
-      inviteCode: "invite-code",
-      now: expect.any(Date),
-    });
-  });
-
-  it("ignores legacy sign-in intent values on the completion route", async () => {
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          intent: "signin",
-          inviteCode: "invite-code",
-        }),
-        headers: {
-          cookie: "privy-id-token=cookie-token",
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      inviteCode: "invite-code",
-    }));
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.not.objectContaining({
-      intent: expect.any(String),
-    }));
-  });
-
-  it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
-    mocks.requirePrivyCompletionSession.mockRejectedValue(
-      hostedOnboardingError({
-        code: "AUTH_REQUIRED",
-        httpStatus: 401,
-        message: "Verify your phone to continue.",
-      }),
-    );
-
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          inviteCode: "invite-code",
-        }),
-        headers: {
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(401);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "AUTH_REQUIRED",
-        message: "Verify your phone to continue.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("checks the hosted Privy cookie-backed session before parsing malformed request JSON", async () => {
-    mocks.requirePrivyCompletionSession.mockRejectedValue(
-      hostedOnboardingError({
-        code: "AUTH_REQUIRED",
-        httpStatus: 401,
-        message: "Verify your phone to continue.",
-      }),
-    );
-
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: "{",
-        headers: {
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(401);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requirePrivyCompletionSession).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "AUTH_REQUIRED",
-        message: "Verify your phone to continue.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("does not accept a body identity token when the hosted Privy identity cookie is missing", async () => {
-    mocks.requirePrivyCompletionSession.mockRejectedValue(
-      hostedOnboardingError({
-        code: "AUTH_REQUIRED",
-        httpStatus: 401,
-        message: "Verify your phone to continue.",
-      }),
-    );
-
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          identityToken: "body-token",
-          inviteCode: "invite-code",
-        }),
-        headers: {
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(401);
-    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "AUTH_REQUIRED",
-        message: "Verify your phone to continue.",
-        retryable: false,
-      },
-    });
-  });
-
-  it("logs a sanitized error message for warning-level hosted Privy completion failures in production", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.requirePrivyCompletionSession.mockRejectedValue(
-      new TypeError(
-        "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading /Users/test/app and notifying user@example.com with Bearer abc.def.ghi",
-      ),
-    );
-
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          inviteCode: "invite-code",
-        }),
-        headers: {
-          cookie: "privy-id-token=cookie-token",
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "INVALID_REQUEST",
-        message: "Invalid request.",
-      },
-    });
-    expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
-      errorMessage:
-        "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading <redacted-path> and notifying <redacted-email> with Bearer <redacted-secret>",
-      errorResponseCode: "INVALID_REQUEST",
-      errorType: "TypeError",
-      internalMessage: "Hosted onboarding route failed unexpectedly.",
-      requestMethod: "POST",
-    });
-  });
-
-  it("serializes retryable server-side Privy lag errors during completion", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.requirePrivyCompletionSession.mockRejectedValue(
-      hostedOnboardingError({
-        code: "PRIVY_PHONE_NOT_READY",
-        httpStatus: 409,
-        message: "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
-        retryable: true,
-      }),
-    );
-
-    const response = await privyCompleteRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
-        body: JSON.stringify({
-          inviteCode: "invite-code",
-        }),
-        headers: {
-          origin: SAME_ORIGIN_HEADERS.origin,
-          "user-agent": "test-agent",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(409);
-    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "PRIVY_PHONE_NOT_READY",
-        message: "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
-        retryable: true,
-      },
-    });
-    expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
-      errorCode: "PRIVY_PHONE_NOT_READY",
-      errorMessage: "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
-      errorResponseCode: "PRIVY_PHONE_NOT_READY",
-      errorResponseRetryable: true,
-      errorResponseStatus: 409,
-      errorType: "HostedOnboardingError",
-      internalMessage: "Hosted onboarding route failed unexpectedly.",
-      requestMethod: "POST",
-    });
-  });
 
   it("keeps no-store headers when hosted onboarding errors are serialized", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -928,38 +583,6 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("forwards invite and session state through the hosted billing checkout route", async () => {
-    const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
-      body: JSON.stringify({
-        inviteCode: "invite-code",
-      }),
-      headers: SAME_ORIGIN_HEADERS,
-      method: "POST",
-    });
-
-    const response = await billingCheckoutRoute.POST(request);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
-    expect(mocks.requirePrivyMemberAuth).not.toHaveBeenCalled();
-    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
-    expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
-      inviteCode: "invite-code",
-      member: {
-        id: "member_123",
-        suspendedAt: null,
-      },
-    });
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: { prisma: true },
-    });
-    await expect(response.json()).resolves.toEqual({
-      alreadyActive: false,
-      url: "https://billing.example.test/session_123",
-    });
-  });
 
   it("ignores a retained legacy trial offer on ordinary paid checkout", async () => {
     mocks.requireHostedInviteCodeFromRequest.mockResolvedValueOnce({
@@ -998,7 +621,7 @@ describe("hosted onboarding routes", () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
       body: JSON.stringify({
         inviteCode: "invite-code",
-        walletAddress: "0x00000000000000000000000000000000000000aa",
+
       }),
       headers: SAME_ORIGIN_HEADERS,
       method: "POST",

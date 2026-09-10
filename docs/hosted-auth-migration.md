@@ -24,10 +24,26 @@ Four Murph PRs are integration boundaries. iOS and Android changes are reviewed 
 Current implementation PRs: [approval migration #3127](https://github.com/cobuildwithus/murph/pull/3127),
 [backend compatibility #3128](https://github.com/cobuildwithus/murph/pull/3128), and
 [Web adoption and recovery #3132](https://github.com/cobuildwithus/murph/pull/3132).
-These links identify review candidates, not deployed versions. Native and final
-retirement candidates will be pinned here before rollout qualification is complete.
+Native adoption is [iOS #150](https://github.com/cobuildwithus/murph-ios/pull/150)
+and [Android #39](https://github.com/cobuildwithus/murph-android/pull/39).
+Android #39 is stacked on [review tooling #38](https://github.com/cobuildwithus/murph-android/pull/38),
+which only corrects the required reviewer model target. Merge that prerequisite
+before its product PR. iOS #150 has an independent PASS at
+`c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e`; Android #39 has green CI at
+`1740066c8a5e31c09de9b8d1e350bc39acdf604e` and its external review remains pending.
+Web #3132 has an additional session-cache correction at
+`82d5147a74b274e222ca1cf5f9c32a11c741aa9a`; its current-head CI is green and its second external review is pending. Successful login invalidates the previous decrypted
+vault at response headers, and an unreadable successful response reloads the
+document. Both phone and Telegram regressions were reproduced before the fix.
+These links identify candidates, not deployed versions. Final retirement remains
+under implementation and must not be deployed until every retirement gate passes.
 
 ## Backend configuration and deployment
+
+The following flags and import commands apply to the additive transition
+releases. The retirement release removes the native bridge, importer and legacy
+configuration after their obligations converge; do not run transition commands
+against the contracted deployment.
 
 PR 2 is an additive compatibility release. Apply both additive schema migrations
 before its Web build reaches requests; old builds tolerate the new tables. Keep
@@ -264,6 +280,50 @@ Retirement requires all of the following:
 Disable drained legacy admission; finish authorized vendor obligations while credentials/receipts remain; deploy code independent of old schema; drain incompatible workers; apply reviewed drops; then revoke residual vendor configuration. Retained Murph members are never deleted just to retire their provider accounts.
 
 Remove live Privy SDKs, verifiers, hooks, wallet code, native dependencies, CSP/configuration, obsolete sessions/bindings, import/runtime migration branches, harnesses, canaries and current documentation. Keep canonical contacts and unrelated key consumers. In particular, the session-named HMAC key also authenticates billing quotes, referrals, device callbacks and recovery witnesses; it is not exclusively a Privy/session dependency.
+
+## Retirement execution
+
+PR 4 removes the old verifiers, exchange/import routes, provider contact writers,
+wallet approvals, SDK UI, native admission fallback and provider configuration.
+It retains the first-party credential format, secure storage contract, canonical
+member IDs and session signing/storage keys. Updated mobile installations read
+the same durable credential after the SDK is removed. Installed upgrades and
+skipped-version recovery still require device qualification before distribution.
+
+Do not merge or deploy PR 4 merely because code review and CI pass. First complete
+the inventory above, including protected accounts, dormant clients and vendor
+exports/deletions. Confirm no valid legacy browser session remains, no retained
+provider-bound identity lacks its first-party user, and no pending deletion
+receipt still targets the provider. For receipts, the relevant pending condition
+is a non-null provider lookup key with no provider completion timestamp; a new
+receipt with neither field is not an outstanding provider obligation. This SQL
+check supplements the hosted encrypted-record/provider inventory; it cannot
+prove passkey availability, payload integrity or native adoption.
+
+Deploy the code that does not reference the old schema, drain incompatible Web
+functions and cleanup workers, then run the existing postdeploy contract lane.
+`20260910070000_retire_legacy_auth` refuses to drop the old table/columns while
+those database obligations remain. The existing runner's current-deployment
+check and short transaction timeouts still apply. The new reader works both
+before and after contraction. After contraction, use a compatible forward fix;
+older schema-dependent builds are below the rollback floor.
+
+Cleanup payloads keep their existing v1 schema. The previous parser accepts an
+omitted optional provider identifier, so both versions can read newly written
+receipts during drain. Stripe, Cloudflare, runtime-log and Temporal cleanup keep
+their current leases, cursors and retry owner. The deletion response retains
+`vendorAccounts.privyUser` as a fixed `skipped_no_record` result for already-open
+browser tabs that read that key after deletion commits. This compatibility field
+is valid only after actual provider obligations are resolved; it never turns
+missing provider configuration into a successful deletion. Historical migrations,
+changelogs and secret-deny rules remain as evidence and privacy protection.
+
+The App Review helper prepares product access for an existing first-party
+account. The reviewer must first use ordinary authentication; it neither creates
+provider test users nor issues fixed codes. Qualify a usable reviewer code-delivery
+process before store submission. Finally revoke the obsolete provider secrets,
+custom auth-domain configuration and service account access through the approved
+hosted path after the last reader and obligation are gone.
 
 ## Completion evidence
 

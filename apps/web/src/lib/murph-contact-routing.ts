@@ -1,14 +1,7 @@
 import { HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS } from "@murphai/hosted-execution/hosted-email";
 
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
-import {
-  extractHostedPrivyPhoneAccount,
-  extractHostedPrivyTelegramAccount,
-  extractHostedPrivyVerifiedEmailAccount,
-  resolveHostedPrivyLinkedAccounts,
-  type HostedPrivyLinkedAccountContainer,
-  type PrivyLinkedAccountLike,
-} from "@/src/lib/hosted-onboarding/privy-shared";
+
 
 export const MURPH_CONTACT_EMAIL = HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS;
 export const DEFAULT_MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
@@ -138,24 +131,6 @@ function orderMurphContactKinds(
   ];
 }
 
-export function resolveMurphContactChannels(input: {
-  accountContainer?: HostedPrivyLinkedAccountContainer | null;
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
-}): MurphContactChannels {
-  const linkedAccounts = input.linkedAccounts
-    ? [...input.linkedAccounts]
-    : resolveHostedPrivyLinkedAccounts(input.accountContainer ?? { linkedAccounts: [] });
-  const telegram = extractHostedPrivyTelegramAccount({
-    linkedAccounts,
-    telegram: input.accountContainer?.telegram,
-  });
-
-  return {
-    email: extractHostedPrivyVerifiedEmailAccount(linkedAccounts) !== null,
-    telegram: telegram !== null,
-    text: extractHostedPrivyPhoneAccount(linkedAccounts) !== null,
-  };
-}
 
 export function buildMurphSmsHref(input: {
   body?: string | null;

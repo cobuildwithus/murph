@@ -157,13 +157,6 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes(source)).toContain("missing-pinned-codex-path");
   });
 
-  it("rejects removing the public Privy client configuration", async () => {
-    const source = (await readWorkflow()).replaceAll(
-      "vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID",
-      "vars.REMOVED_PRIVY_APP_ID",
-    );
-    expect(issueCodes(source)).toContain("missing-privy-client-config");
-  });
 
   it("rejects broad Playwright artifacts and missing cleanup", async () => {
     const source = (await readWorkflow())

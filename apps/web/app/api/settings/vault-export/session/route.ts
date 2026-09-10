@@ -70,7 +70,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   // Verify the MFA-bound signature but do NOT consume the challenge yet:
   // the challenge stays valid through the workspace re-read and the replica
-  // fetch, so a stale workspace or a Privy delay never burns the user's
+  // fetch, so a stale workspace or an approval delay never burns the user's
   // one-time signature.
   const challenge = await verifySensitiveActionChallenge({
     authorization: body.authorization,
@@ -82,7 +82,7 @@ export const POST = withJsonError(async (request: Request) => {
     kind: "vault.export",
     memberId: auth.member.id,
     prisma,
-    privyUserId: auth.privyUserId,
+
   });
 
   // Consent may change while the member completes the slow sensitive-action
@@ -99,7 +99,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  // Re-read the workspace AFTER the slow Privy/signature path. Export the
+  // Re-read the workspace AFTER the approval verification. Export the
   // newest retained replica even when newer source changes are still being
   // processed. Active members also request a refresh; withdrawn members never
   // restart processing.

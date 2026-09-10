@@ -162,7 +162,7 @@ describe("device sync companion address-book route", () => {
     await expect(responsePromise).resolves.toMatchObject({ status: 200 });
   });
 
-  it("reports a stalled member lookup before the route deadline", async () => {
+  it("reports a stalled session verification before the route deadline", async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     let resolveAuth!: (value: { member: typeof MEMBER }) => void;
@@ -171,7 +171,7 @@ describe("device sync companion address-book route", () => {
     });
     mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(
       (_request, _prisma, options) => options.runStage(
-        "member_lookup",
+        "identity_token_verification",
         () => pendingAuth,
       ),
     );
@@ -186,7 +186,7 @@ describe("device sync companion address-book route", () => {
       "Hosted companion address-book GET stage slow.",
       {
         elapsedMs: SLOW_GET_STAGE_MS,
-        stage: "member_lookup",
+        stage: "identity_token_verification",
       },
     );
 

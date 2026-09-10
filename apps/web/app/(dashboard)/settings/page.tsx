@@ -6,7 +6,6 @@ import {
   HOSTED_ASSISTANT_TERRA_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 
-import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { HostedLoginMethodSettings } from "@/src/components/settings/hosted-login-method-settings";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
@@ -164,7 +163,6 @@ export default async function SettingsPage({
     ? await readSettingsPageData({
         memberId: authenticatedMember.id,
         prisma,
-        privyUserId: session?.privyUserId,
         usageReturnPurchaseId:
           request.usageTopUpPurchaseReturn?.purchaseId ?? null,
       })
@@ -294,7 +292,6 @@ function renderAuthenticatedSettingsPage(input: {
   });
   const {
     murphPhoneNumber,
-    privyAppId,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
@@ -518,11 +515,7 @@ function renderAuthenticatedSettingsPage(input: {
     </div>
   );
 
-  return privyAppId ? (
-    <HostedPrivyBoundary legacyApprovalRequired={!secureApprovalStatus.method}>
-      {settingsContent}
-    </HostedPrivyBoundary>
-  ) : settingsContent;
+  return settingsContent;
 }
 
 type NormalizedSettingsPageData = ReturnType<typeof normalizeSettingsPageData>;
@@ -604,7 +597,6 @@ function resolveSettingsAccountPresentation(input: {
 
   return {
     murphPhoneNumber,
-    privyAppId: process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
@@ -979,15 +971,13 @@ function normalizeSettingsPageData(
 async function readSettingsPageData(input: {
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
-  privyUserId: string | null | undefined;
   usageReturnPurchaseId: string | null;
 }) {
   const { memberId, prisma } = input;
-  // Approval status adds one bounded member lookup before the legacy provider
-  // read. The larger Settings projections below remain sequential.
+  // Approval status adds one bounded member lookup. The larger Settings
+  // projections below remain sequential.
   const secureApprovalStatusPromise = readHostedSecureApprovalStatus({
     memberId, prisma,
-    privyUserId: input.privyUserId,
   });
 
   // The database-backed reads run sequentially on purpose: several of them

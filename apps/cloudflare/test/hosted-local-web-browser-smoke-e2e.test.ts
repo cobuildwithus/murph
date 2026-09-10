@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const runId = Date.now();
 const userId = `member_local_web_browser_${runId}`;
-const privyUserId = `did:privy:member_local_web_browser_${runId}`;
+
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
@@ -61,7 +61,7 @@ describe("hosted local authenticated web browser smoke e2e", () => {
       });
       const session = await activeScenario.issueHostedAppSession({
         memberId: userId,
-        privyUserId,
+
       });
       const sessionCookie =
         `${session.cookieName}=${encodeURIComponent(session.cookieValue)}`;

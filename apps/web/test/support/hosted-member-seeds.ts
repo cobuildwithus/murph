@@ -51,7 +51,7 @@ const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   import.meta.url,
 ).href;
 const hostedAppSessionModuleSpecifier = new URL(
-  "../../src/lib/hosted-onboarding/app-session.ts",
+  "./hosted-auth-session.ts",
   import.meta.url,
 ).href;
 const hostedIMessageMiniAppServiceModuleSpecifier = new URL(
@@ -79,9 +79,7 @@ interface HostedActiveMemberSeedInput {
 interface HostedActiveLinqMemberSeedInput extends HostedActiveMemberSeedInput {
   homePhone: string;
   memberPhone: string;
-  privyUserId?: string | null;
   recentInboundAt?: Date | string | null;
-  walletAddress?: string | null;
 }
 
 interface HostedFamilySponsoredLinqMemberSeedInput {
@@ -186,7 +184,6 @@ export interface HostedJunctionDeviceSyncReplayDrainStatus {
 export interface HostedAppSessionForTestInput {
   environment?: NodeJS.ProcessEnv;
   memberId: string;
-  privyUserId: string;
   secureCookieMode: boolean;
 }
 
@@ -303,15 +300,10 @@ interface HostedMemberIdentityStoreModule {
     phoneNumber: string;
     phoneNumberVerifiedAt: Date;
     prisma: unknown;
-    privyUserId: string | null;
     signupPhoneCodeSendAttemptId: string | null;
     signupPhoneCodeSendAttemptStartedAt: Date | null;
     signupPhoneCodeSentAt: Date | null;
     signupPhoneNumber: string;
-    walletAddress: string | null;
-    walletChainType: string | null;
-    walletCreatedAt: Date | null;
-    walletProvider: string | null;
   }): Promise<unknown>;
 }
 
@@ -494,8 +486,7 @@ interface HostedAppSessionModule {
   issueHostedAppSession(input: {
     memberId: string;
     now?: Date;
-    privyUserId: string;
-  }): Promise<{ cookie: string; sessionId: string }>;
+    }): Promise<{ cookie: string; sessionId: string }>;
 }
 
 interface HostedIMessageMiniAppServiceModule {
@@ -595,15 +586,10 @@ export async function seedHostedActiveLinqMember(
           phoneNumber: input.memberPhone,
           phoneNumberVerifiedAt: new Date(),
           prisma: tx,
-          privyUserId: input.privyUserId ?? null,
           signupPhoneCodeSendAttemptId: null,
           signupPhoneCodeSendAttemptStartedAt: null,
           signupPhoneCodeSentAt: null,
           signupPhoneNumber: input.memberPhone,
-          walletAddress: input.walletAddress ?? null,
-          walletChainType: input.walletAddress ? "ethereum" : null,
-          walletCreatedAt: input.walletAddress ? new Date() : null,
-          walletProvider: input.walletAddress ? "privy" : null,
         });
         // A member's assigned home phone must exist in the hosted_linq_line
         // inventory; route binding rejects lines the DB does not know.
@@ -1105,23 +1091,20 @@ export async function readHostedJunctionDeviceSyncReplayDrainStatus(
 
 /**
  * Issues a real hosted app session for a seeded member by running the
- * production `issueHostedAppSession` in-process against the harness database.
- * The caller must supply the same `HOSTED_APP_SESSION_HMAC_KEY` the hosted web
- * process runs with (the full-stack harness exposes it) so the minted cookie
- * verifies against the session row over HTTP.
+ * first-party session issuer and reader in-process against the harness database.
+ * Supply the same Better Auth signing and storage keys as the hosted web process.
  */
 export async function issueHostedAppSessionForTest(
   input: HostedAppSessionForTestInput,
 ): Promise<HostedAppSessionForTest> {
-  if (!input.memberId.trim() || !input.privyUserId.trim()) {
-    throw new Error("Hosted app session issuance requires member id and privy user id.");
+  if (!input.memberId.trim()) {
+    throw new Error("Hosted app session issuance requires a seeded member id.");
   }
 
   return await withHostedMemberSeedEnvironment(input.environment, async () => {
     const appSessionModule = await import(hostedAppSessionModuleSpecifier) as HostedAppSessionModule;
     const issued = await appSessionModule.issueHostedAppSession({
       memberId: input.memberId,
-      privyUserId: input.privyUserId,
     });
     const [cookiePair] = issued.cookie.split(";");
     const separatorIndex = cookiePair?.indexOf("=") ?? -1;

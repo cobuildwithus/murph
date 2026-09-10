@@ -398,3 +398,88 @@ and retirement remain outstanding.
 The Web adoption candidate is PR #3132, stacked on #3128. Its release note uses
 the existing archive renderer; all ten fragment/page cases and Web typecheck
 pass. Public preview and final review are being prepared on the stable candidate.
+
+
+### Retirement candidate execution boundary
+
+PR 3 is reviewed and CI-green at `530f28bacea7d49e66870fd6711896cddd622177`.
+iOS #150 passed its second review at `c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e`
+after a reproduced secure-storage failure was corrected at the existing retryable
+auth-error boundary. Hosted checks and mergeability pass. Android #39 is in its
+first fixed-runner review, based on the independently reviewed tooling-only #38.
+Both native candidates preserve installed-session ownership and retain the SDK
+only for transition. Store publication and real-provider qualification remain
+separate rollout gates.
+
+The retirement branch starts from that stable PR 3 head. It is a gated removal
+candidate, not a deployable next step before cohort evidence exists. Remove
+legacy browser/native admission, provider-backed approval and contact routes,
+SDK-only UI/studies, runtime import/identity branches, provider dependencies and
+configuration. Keep Better Auth, canonical product/contact owners and the
+existing approval aggregate. Never remove the shared HMAC key used by non-auth
+capabilities. Native final candidates remove their restoration adapters only
+after every supported cohort has first-party credentials or a qualified recovery
+path.
+
+Provider obligations and encrypted cleanup receipts must reach terminal outcomes
+before the last reader is removed. Preserve unrelated cleanup leases, cursors,
+attempts and vendor outcomes. Prepare schema contraction outside automatic
+migration deployment, with short lock timeouts and explicit prior-drain gates;
+deploy code that does not select old columns before dropping them. Previously
+protected accounts must have replacement protection or an independently
+authorized terminal disposition before provider binding removal can permit
+initial setup. The final candidate must prove cold/warm first-party login,
+renewal, logout, credential changes, approval, deletion and admission without
+Privy configuration, plus dependency/bundle/catalog and deployment inventories.
+
+Retirement implementation is underway, with legacy session/approval and runtime
+import paths removed first. The initial first-party browser proof passes 43
+cases across login, contact codes, credential changes, session renewal, Telegram
+client and signed-token verification. The initial typecheck correctly exposes
+remaining legacy callers/tests (66 errors at that checkpoint); this candidate
+is not yet fully compiled or reviewed. Subsequent provider identity and schema
+removal is still in progress. No destructive SQL, production or vendor operation
+has run.
+
+Cleanup compatibility inspection found one concrete old-browser consumer:
+`HostedDataPrivacySettings` reads `vendorAccounts.privyUser.status` after a
+successful deletion. Removing that response field can turn a committed deletion
+into a client exception in a still-open PR 3 tab. Keep the existing wire field
+as a fixed terminal no-record value after the provider-retirement prerequisite
+has proved no outstanding targets; remove its runtime integration and state.
+This is response-shape compatibility, not a provider reader or missing-config
+success path. New UI should use the canonical cleanup-pending outcome.
+The existing encrypted cleanup payload schema is v1, and its parser treats a
+missing optional provider identifier as null; prove that omission against the
+base parser before changing its writer. Preserve the other vendors' retries
+and cursor semantics.
+
+
+Retirement implementation checkpoint: provider SDK packages and
+provider UI/server modules are removed; shared billing/contact and cleanup
+owners now use canonical first-party facts. The previous v1 cleanup parser was
+executed against an omitted provider field and returned its supported null
+value. The existing postdeploy contract lane now has guarded retirement SQL;
+no SQL has been applied locally or in production. All 43 focused first-party
+client/token checks pass after package removal. Broader test migration,
+configuration/docs, local database proof, final native SDK-removal counterparts,
+ReviewGPT and exact-head CI remain unfinished. Android adoption review continues
+in its original owned runner; the PR body/head/base are unchanged during review.
+
+### Retirement regression and owner update
+
+- The actual contract SQL passed all three refusal checks against an owned local PostgreSQL database (live legacy browser session, unconverged identity, unfinished provider cleanup), then applied and reapplied successfully. After contraction, 75 auth/Telegram/approval/transport cases passed against the database without the retired columns/table.
+- Forty retained member-lock and Clinical Records/account-deletion PostgreSQL cases passed. The companion enrollment suite now passes all three scenarios with the strict local KMS project fixture and actual no-recipient email policy; only the delivery boundary is mocked. No production database or provider operation was performed.
+- The broader affected-file run found obsolete SDK mocks and expectations. Canonical phone proof now preserves the expired Family invite replay without unnecessary provider work. Settings, account deletion and the scalar privacy schema contract pass 192 cases after removing dead provider scaffolding. Native routes and admission pass 129 cases, including consent, suspension and activation recovery. Counts overlap earlier runs.
+- Active native admission now returns through the existing access/wake owner without preparing acquisition data or an unused invite; untouched new members still use canonical Starter enrollment. Removed the empty native member-lookup timing wrapper: authenticated session and canonical member verification share their actual stage.
+- First-party phone/Telegram response-header cache invalidation is included here and was also committed to adoption PR #3132 at `82d5147a74b274e222ca1cf5f9c32a11c741aa9a`. Its second sensitive full-snapshot ReviewGPT audit and current-head CI are running.
+- Web typecheck passed after the runtime changes. Architecture, security, deletion/export, setup and rollout owners are updated to reflect first-party-only operation and the distinction between prepared code and qualified production retirement. SDK-only modal CSS and the unused logo are removed; the deletion wire compatibility result remains fixed for existing tabs.
+
+- Documentation drift and gardening checks pass. All changed Web files pass lint with no errors; the remaining unused declarations from removed SDK tests and design sections are deleted. Account-data, member-store/service and stale Telegram return checks pass 213 cases.
+
+Retirement candidate verification update:
+- The expanded PostgreSQL run covered 236 affected cases with one outdated diagnostic-stage assertion. That assertion passed in the focused rerun. The final 46-case canonical-auth run passes after retaining real delivery configuration in its transport mock; the six Ops account-preparation cases also pass. These runs overlap the earlier counts.
+- All 200 local-harness environment tests and its typecheck pass. The Web typecheck and repository verification-tool suites pass. The complexity guard passes across 148 changed source files without increased hotspot debt.
+- The composed hosted-local browser command stopped during runner bundle preparation: its static boot closure measured 2056177 bytes against a 2046662-byte budget. It did not reach browser startup, so authenticated full-stack rendering is still a proof gap. Do not weaken the runner budget to complete this authentication change.
+- PR 3 head 82d5147a74b274e222ca1cf5f9c32a11c741aa9a now has green CI; second external review remains pending. Android review round 1 reported an interrupted-first-write recovery defect; it is accepted for correction in the existing secure-store owner before that release is ready.
+- The standalone Web startup smoke passes with Privy environment variables absent and the prepared local-environment entrypoint. This proves Web startup independently of the runner bundle gap.

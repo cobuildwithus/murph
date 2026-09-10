@@ -8,7 +8,7 @@ import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
-  createHostedPrivyUserLookupKey,
+
   createHostedStripeBillingEventLookupKey,
   createHostedStripeBillingEventLookupKeyReadCandidates,
   createHostedStripeCheckoutSessionLookupKey,
@@ -17,7 +17,7 @@ import {
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionScheduleLookupKey,
   createHostedTelegramUsernameLookupKeyReadCandidates,
-  createHostedWalletAddressLookupKey,
+
   hostedPhoneLookupKeyMatchesValue,
   parseHostedBlindIndex,
   readHostedContactPrivacyCurrentVersion,
@@ -44,7 +44,6 @@ describe("hosted member lookup keys", () => {
   });
 
   it("creates blind lookup keys that do not expose raw identifiers", () => {
-    const privy = createHostedPrivyUserLookupKey("did:privy:abc123");
     const assistantInput = createHostedAssistantInputLookupKey(
       "ain_0123456789abcdef0123456789abcdef",
     );
@@ -60,7 +59,6 @@ describe("hosted member lookup keys", () => {
     const checkout = createHostedStripeCheckoutSessionLookupKey("cs_123");
     const event = createHostedStripeBillingEventLookupKey("evt_123");
 
-    expect(privy).toMatch(/^hbidx:privy-user:v1:/u);
     expect(assistantInput).toMatch(/^hbidx:assistant-input:v1:/u);
     expect(linq).toMatch(/^hbidx:linq-chat:v1:/u);
     expect(groupDisclosurePermission).toMatch(
@@ -73,7 +71,6 @@ describe("hosted member lookup keys", () => {
     expect(checkout).toMatch(/^hbidx:stripe-checkout-session:v1:/u);
     expect(event).toMatch(/^hbidx:stripe-billing-event:v1:/u);
 
-    expect(privy).not.toContain("did:privy:abc123");
     expect(assistantInput).not.toContain(
       "ain_0123456789abcdef0123456789abcdef",
     );
@@ -89,15 +86,8 @@ describe("hosted member lookup keys", () => {
     expect(event).not.toContain("evt_123");
   });
 
-  it("normalizes wallet addresses before hashing", () => {
-    expect(createHostedWalletAddressLookupKey(" 0xABc ")).toBe(
-      createHostedWalletAddressLookupKey("0xabc"),
-    );
-  });
 
   it("returns null for empty values", () => {
-    expect(createHostedPrivyUserLookupKey("   ")).toBeNull();
-    expect(createHostedWalletAddressLookupKey(null)).toBeNull();
     expect(createHostedLinqChatLookupKey(undefined)).toBeNull();
   });
 

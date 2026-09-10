@@ -22,7 +22,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 vi.mock("server-only", () => ({}));
 
 const boundaries = vi.hoisted(() => ({
-  sendSignupWelcomeEmail: vi.fn(),
+  sendWelcomeEmail: vi.fn(),
   signalMailboxAppend: vi.fn(async () => ({
     signalAccepted: true as const,
     workflowId: "hosted-user-runtime:test",
@@ -36,9 +36,9 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async (importOriginal) 
   signalHostedMailboxAppendRuntime: boundaries.signalMailboxAppend,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", () => ({
-  sendHostedSignupWelcomeEmailForMemberBestEffort:
-    boundaries.sendSignupWelcomeEmail,
+vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/resend-plain-text-email")>()),
+  sendHostedResendPlainTextEmail: boundaries.sendWelcomeEmail,
 }));
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -99,7 +99,7 @@ describe.skipIf(!runPostgresProof)(
       let memberCreated = false;
       let lineCreated = false;
 
-      boundaries.sendSignupWelcomeEmail.mockClear();
+      boundaries.sendWelcomeEmail.mockClear();
       boundaries.signalMailboxAppend.mockClear();
       setHostedSecureBoxStringTestCodecForTests({
         decrypt: ({ value }) => value,
@@ -146,7 +146,7 @@ describe.skipIf(!runPostgresProof)(
                 memberId,
                 phoneNumber: memberPhone,
                 prisma: tx,
-                privyUserId: null,
+
                 signupPhoneCodeSendAttemptId: null,
                 signupPhoneCodeSendAttemptStartedAt: null,
                 signupPhoneCodeSentAt: null,
@@ -254,7 +254,7 @@ describe.skipIf(!runPostgresProof)(
           },
         })).resolves.toBe(1);
         expect(boundaries.signalMailboxAppend).toHaveBeenCalledOnce();
-        expect(boundaries.sendSignupWelcomeEmail).not.toHaveBeenCalled();
+        expect(boundaries.sendWelcomeEmail).not.toHaveBeenCalled();
 
         await expect(ensureHostedStarterUsageEnrollment({
           inviteCode,
@@ -270,7 +270,7 @@ describe.skipIf(!runPostgresProof)(
           where: { beneficiaryMemberId: memberId },
         })).resolves.toBe(1);
         expect(boundaries.signalMailboxAppend).toHaveBeenCalledTimes(2);
-        expect(boundaries.sendSignupWelcomeEmail).not.toHaveBeenCalled();
+        expect(boundaries.sendWelcomeEmail).not.toHaveBeenCalled();
 
         if (!scenario.expectedRoute) {
           if (scenario.lineState === "missing") {
@@ -478,11 +478,11 @@ function configureLocalCryptoForTest(): () => void {
       JSON.stringify(automationKey.publicKey),
     HOSTED_CRYPTO_ENV: "test",
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+      "projects/test-project/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
     HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
     HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+      "projects/test-project/locations/global/keyRings/test/cryptoKeys/web-wrap",
     HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
       JSON.stringify(authorityKey.privateKey),
     HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY:

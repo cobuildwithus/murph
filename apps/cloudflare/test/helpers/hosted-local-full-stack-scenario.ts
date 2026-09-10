@@ -112,9 +112,7 @@ interface HostedActiveMemberSeedArgs {
 interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
   homePhone: string;
   memberPhone: string;
-  privyUserId?: string | null;
   recentInboundAt?: Date | string | null;
-  walletAddress?: string | null;
 }
 
 type HostedJunctionDeviceSyncReplaySeedArgs =
@@ -195,7 +193,6 @@ export interface HostedLocalFullStackScenario {
    */
   issueHostedAppSession(input: {
     memberId: string;
-    privyUserId: string;
   }): Promise<HostedAppSessionForTest>;
   issueHostedIMessageMiniAppCredential(input: {
     memberId: string;
@@ -552,12 +549,13 @@ async function startHostedLocalFullStackScenarioAttempt(
         await issueHostedAppSessionForTest({
           environment: buildScenarioSeedEnvironment({
             HOSTED_APP_SESSION_HMAC_KEY: scenarioHarness.hostedAppSessionHmacKey,
+            HOSTED_BETTER_AUTH_SECRET: scenarioHarness.hostedBetterAuthSecret,
+            HOSTED_AUTH_STORAGE_KEY: scenarioHarness.hostedAuthStorageKey,
             NODE_ENV: await shouldUseHostedWebProductionStart({
               env: scenarioRuntimeEnv,
             }) ? "production" : "test",
           }),
           memberId: sessionInput.memberId,
-          privyUserId: sessionInput.privyUserId,
           secureCookieMode: scenarioHarness.webUsesProductionArtifact,
         }),
       issueHostedIMessageMiniAppCredential: async (credentialInput) =>
@@ -578,13 +576,11 @@ async function startHostedLocalFullStackScenarioAttempt(
           homePhone: seedInput.homePhone,
           memberId: seedInput.memberId,
           memberPhone: seedInput.memberPhone,
-          privyUserId: seedInput.privyUserId,
           recentInboundAt: seedInput.recentInboundAt === undefined
             ? new Date().toISOString()
             : seedInput.recentInboundAt,
           stripeCustomerId: seedInput.stripeCustomerId,
           stripeSubscriptionId: seedInput.stripeSubscriptionId,
-          walletAddress: seedInput.walletAddress,
         });
       },
       seedActiveHostedMember: async (seedInput) => {

@@ -4,7 +4,7 @@ const NATIVE_TOKEN_PREFIX = "murph_auth_v1.";
 const SESSION_TOKEN = /^[A-Za-z0-9]{32}$/u;
 const LEGACY_IDENTITY_TOKEN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 
-type Credential = { kind: "better-auth" | "legacy"; token: string } | { kind: "anonymous" };
+type Credential = { kind: "better-auth"; token: string } | { kind: "anonymous" };
 
 export function hostedAuthCookieName(secure: boolean): string {
   return secure ? "__Host-murph-auth-session" : "murph-auth-session";
@@ -22,14 +22,12 @@ export function classifyHostedBrowserCredential(input: {
   // A presented replacement credential selects only its verifier. Invalid,
   // expired or revoked replacement state must never fall back to an old cookie.
   if (replacement !== null) return { kind: "better-auth", token: replacement };
-  const legacy = readCookie(cookies, input.production ? "__Host-murph-session" : "murph-session");
-  return legacy === null ? { kind: "anonymous" } : { kind: "legacy", token: legacy };
+  return { kind: "anonymous" };
 }
 
 export function classifyHostedNativeCredential(input: {
   authorization: string | null;
   cookie: string | null;
-  legacyAllowed: boolean;
 }): Exclude<Credential, { kind: "anonymous" }> {
   if (input.cookie !== null) throw invalidCredential();
   const match = /^Bearer ([^\s]+)$/iu.exec(input.authorization ?? "");
@@ -41,12 +39,7 @@ export function classifyHostedNativeCredential(input: {
     return { kind: "better-auth", token: sessionToken };
   }
   if (token.startsWith("murph_auth") || !LEGACY_IDENTITY_TOKEN.test(token)) throw invalidCredential();
-  if (!input.legacyAllowed) {
-    throw hostedOnboardingError({ code: "AUTH_CLIENT_UPGRADE_REQUIRED", httpStatus: 426, message: "Update Murph to continue signing in." });
-  }
-  // Structural classification is not authentication. The legacy owner must
-  // verify signature, expiry, exact principal and the member's admission fence.
-  return { kind: "legacy", token };
+  throw hostedOnboardingError({ code: "AUTH_CLIENT_UPGRADE_REQUIRED", httpStatus: 426, message: "Update Murph to continue signing in." });
 }
 
 export function serializeHostedNativeSessionToken(token: string): string {

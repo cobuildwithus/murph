@@ -11,7 +11,7 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import {
   armHostedGroupStartHandoff,
@@ -95,7 +95,7 @@ export function HostedGroupStartClient({
     };
   }, [activeAccess, authenticated]);
 
-  async function handleCompleted(payload: HostedPrivyCompletionPayload) {
+  async function handleCompleted(payload: HostedAuthenticationCompletionPayload) {
     const recoveryToken = recoveryTokenRef.current;
     if (recoveryToken) {
       setRecoveryStatus("linking");

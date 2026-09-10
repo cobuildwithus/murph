@@ -51,24 +51,12 @@ const COMPANION_ADMISSION_PUBLIC_RECOVERY_CODES = new Set([
   "HOSTED_ACCESS_REQUIRED",
   "HOSTED_CONSENT_REQUIRED",
   "HOSTED_MEMBER_SUSPENDED",
-  "PRIVY_IDENTITY_CONFLICT",
-  "PRIVY_USER_MISMATCH",
+  "AUTH_CLIENT_UPGRADE_REQUIRED",
 ]);
 
 function normalizeCompanionAdmissionError(error: unknown): unknown {
   if (!isHostedOnboardingError(error)) {
     return error;
-  }
-
-  if (
-    error.code === "PRIVY_ACCOUNT_REQUIRED"
-    || error.code === "PRIVY_AUTH_FAILED"
-  ) {
-    return hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      httpStatus: 401,
-      message: "Sign in to continue.",
-    });
   }
 
   if (COMPANION_ADMISSION_ACCESS_RECOVERY_CODES.has(error.code)) {

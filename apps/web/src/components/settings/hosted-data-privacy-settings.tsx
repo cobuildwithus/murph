@@ -58,7 +58,6 @@ interface HostedAccountDeleteResponse {
     };
     deletedAt: string;
     vendorAccounts: {
-      privyUser: HostedAccountVendorDeletionSummary;
       stripeCustomer: HostedAccountVendorDeletionSummary;
       stripeSubscription: HostedAccountVendorDeletionSummary;
     };
@@ -665,7 +664,6 @@ export function hasIncompleteHostedAccountDeletionCleanup(
   }
 
   const vendorStatuses = [
-    result.vendorAccounts.privyUser.status,
     result.vendorAccounts.stripeCustomer.status,
     result.vendorAccounts.stripeSubscription.status,
   ];

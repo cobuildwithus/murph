@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import {
   assertHostedAppSessionCurrentTx,
@@ -56,7 +56,6 @@ async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
     kind: "approval.passkey.enroll",
     memberId: input.session.member.id,
     prisma: input.prisma,
-    privyUserId: input.session.privyUserId,
   });
   return {
     proof,
@@ -77,29 +76,19 @@ async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
 }
 
 // Initial setup is available only to a fresh first-party principal with no
-// legacy binding and no established approval credential. It cannot replace a
-// factor, authorize another sensitive action, or use a silently exchanged session.
+// established approval credential. It cannot replace a factor, authorize another
+// sensitive action, or use a silently exchanged session.
 function requireInitialEnrollmentSession(session: HostedAppSession): void {
   const authenticatedAt = session.primaryAuthenticatedAt?.getTime();
   const age = typeof authenticatedAt === "number" ? Date.now() - authenticatedAt : Number.NaN;
-  if (!session.authProof || session.privyUserId || !Number.isFinite(age) || age < 0 || age > 5 * 60 * 1000) {
+  if (!session.authProof || !Number.isFinite(age) || age < 0 || age > 5 * 60 * 1000) {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", httpStatus: 403, message: "Sign in again to set up your first passkey." });
-  }
-}
-
-async function assertInitialEnrollmentIdentity(prisma: PrismaClient | Prisma.TransactionClient, memberId: string) {
-  const identity = await prisma.hostedMemberIdentity.findUnique({
-    where: { memberId }, select: { privyUserIdEncrypted: true },
-  });
-  if (!identity || identity.privyUserIdEncrypted !== null) {
-    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Use your existing secure approval to add a passkey." });
   }
 }
 
 async function readInitialEnrollmentState(input: Pick<EnrollmentInput, "prisma" | "session">) {
   requireApprovalPasskeyEnrollmentEnabled();
   requireInitialEnrollmentSession(input.session);
-  await assertInitialEnrollmentIdentity(input.prisma, input.session.member.id);
   const state = await readApprovalPasskeyState({ memberId: input.session.member.id, prisma: input.prisma });
   if (state.encrypted !== null || state.credentials.length > 0) {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Use your existing passkey to approve this change." });
@@ -185,7 +174,6 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
     });
     if (input.initialToken !== undefined) {
       requireInitialEnrollmentSession(input.session);
-      await assertInitialEnrollmentIdentity(prisma, input.session.member.id);
     }
     await consumeSensitiveActionChallengeTx({
       challenge: { ...verified.proof, credentialWrite: prepared },

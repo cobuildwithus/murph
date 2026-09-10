@@ -3,7 +3,7 @@
 import { useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { AuthContext } from "./auth-dialog-provider";
 import { AuthDialog, preloadHostedAuthPanelIsland } from "./auth-dialog";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
@@ -26,7 +26,7 @@ function UnauthenticatedHomepageAuthRuntimeProvider({ authenticatedDestination, 
   // Intent warms code only. OTP delivery and provider windows still require
   // an explicit action in the opened dialog.
   const openAuthDialog = useCallback(() => { preloadHostedAuthPanelIsland(); setOpen(true); }, []);
-  const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
+  const handleAuthCompleted = useCallback((payload: HostedAuthenticationCompletionPayload) => {
     navigateHostedAuthRedirect(isHostedOnboardingAccessibleStage(payload.stage)
       ? authenticatedDestination ?? HOSTED_APP_HOME_PATH : payload.joinUrl);
   }, [authenticatedDestination]);

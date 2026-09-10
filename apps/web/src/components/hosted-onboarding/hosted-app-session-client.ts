@@ -9,26 +9,36 @@ import {
 import { requestHostedOnboardingJson } from "./client-api";
 import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 
-export async function logoutHostedAppSession(input: {
-  logoutPrivy?: () => Promise<void> | void;
-} = {}): Promise<void> {
-  return endHostedAppSession({
+/** A 2xx verification response may already have replaced the browser cookie. */
+export async function verifyHostedAppSession(input: {
+  url: "/api/auth/otp/verify" | "/api/auth/telegram/verify";
+  payload: Record<string, unknown>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const result = await requestHostedOnboardingJson<{ ok?: unknown; memberId?: unknown }>({
     ...input,
+    onSuccessfulResponseHeaders: publishBrowserVaultSessionInvalidation,
+    onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
+  });
+  if (result.ok !== true || typeof result.memberId !== "string" || !result.memberId) {
+    reloadCurrentHostedAuthDocument();
+    throw new Error("Sign-in could not be confirmed. Reload to check your session.");
+  }
+}
+
+export async function logoutHostedAppSession(): Promise<void> {
+  return endHostedAppSession({
     url: "/api/hosted-onboarding/session/logout",
   });
 }
 
-export async function declineHostedLaunchConsent(input: {
-  logoutPrivy?: () => Promise<void> | void;
-} = {}): Promise<void> {
+export async function declineHostedLaunchConsent(): Promise<void> {
   return endHostedAppSession({
-    ...input,
     url: "/api/legal/consent/decline",
   });
 }
 
 async function endHostedAppSession(input: {
-  logoutPrivy?: () => Promise<void> | void;
   url: string;
 }): Promise<void> {
   publishBrowserVaultSessionEnding();
@@ -53,14 +63,4 @@ async function endHostedAppSession(input: {
     throw error;
   }
 
-  if (!input.logoutPrivy) {
-    return;
-  }
-
-  try {
-    await input.logoutPrivy();
-  } catch {
-    // Server-side Murph app-session logout is authoritative. Privy logout is
-    // best-effort cleanup for client SDK state after the app session is gone.
-  }
 }

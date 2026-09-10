@@ -11,7 +11,7 @@ import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 
 type LandingAuthContext = "nav" | "hero" | "footer";
@@ -102,7 +102,7 @@ export function LandingAuthDialog({
 }
 
 function handleLandingAuthCompleted(
-  payload: HostedPrivyCompletionPayload,
+  payload: HostedAuthenticationCompletionPayload,
 ) {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     navigateHostedAuthRedirect(payload.joinUrl);

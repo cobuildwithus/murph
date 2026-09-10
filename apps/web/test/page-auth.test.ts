@@ -51,7 +51,7 @@ describe("hosted page auth", () => {
     const session = {
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member,
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     };
     mocks.getHostedAppSession.mockResolvedValue(session);
@@ -147,7 +147,7 @@ describe("hosted sidebar auth", () => {
     mocks.getHostedAppSession.mockResolvedValue({
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member: createHostedMember(),
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     });
     const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
@@ -164,7 +164,7 @@ describe("hosted sidebar auth", () => {
       member: createHostedMember({
         billingStatus: HostedBillingStatus.not_started,
       }),
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     });
     const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
@@ -260,7 +260,7 @@ describe("hosted dashboard page auth", () => {
     const session = {
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member,
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     };
     mocks.getHostedAppSession.mockResolvedValue(session);
@@ -283,7 +283,7 @@ describe("hosted dashboard page auth", () => {
     const session = {
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member,
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     };
     mocks.getHostedAppSession.mockResolvedValue(session);
@@ -361,7 +361,7 @@ describe("hosted dashboard page auth", () => {
       member: createHostedMember({
         billingStatus,
       }),
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     });
     const { getHostedDashboardPageAuthSnapshot } =
@@ -400,7 +400,7 @@ describe("hosted dashboard page auth", () => {
       member: createHostedMember({
         billingStatus: HostedBillingStatus.incomplete,
       }),
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     });
     const { getHostedDashboardPageAuthSnapshot } =
@@ -420,7 +420,7 @@ describe("hosted dashboard page auth", () => {
     const session = {
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member,
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     };
     mocks.getHostedAppSession.mockResolvedValue(session);
@@ -443,7 +443,7 @@ describe("hosted dashboard page auth", () => {
     const session = {
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member,
-      privyUserId: "did:privy:user_123",
+
       sessionId: "hws_123",
     };
     mocks.getHostedAppSession.mockResolvedValue(session);

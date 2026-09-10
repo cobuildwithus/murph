@@ -24,12 +24,16 @@ describe("resolveVercelOidcToken", () => {
     await expect(resolveVercelOidcToken({
       DATABASE_URL: "postgresql://database.example.test/murph",
       HOSTED_APP_SESSION_HMAC_KEY: Buffer.alloc(32, 9).toString("base64url"),
+      HOSTED_BETTER_AUTH_SECRET: "synthetic-auth",
+      HOSTED_AUTH_STORAGE_KEY: "synthetic-storage",
       PATH: "/usr/bin",
     })).resolves.toBe("oidc-token");
 
     expect(mocks.captureCommandOutput).toHaveBeenCalledOnce();
     const childEnv = mocks.captureCommandOutput.mock.calls[0]?.[2].env;
     expect(childEnv?.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(childEnv?.HOSTED_BETTER_AUTH_SECRET).toBeUndefined();
+    expect(childEnv?.HOSTED_AUTH_STORAGE_KEY).toBeUndefined();
     expect(childEnv?.DATABASE_URL).toBe("postgresql://database.example.test/murph");
   });
 });

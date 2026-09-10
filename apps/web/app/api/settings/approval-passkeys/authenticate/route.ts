@@ -31,13 +31,10 @@ export const POST = withJsonError(async (request: Request) => {
       : null;
   if (bindingHash !== challenge.bindingHash) throw unavailable();
   const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma });
-  if (state.credentials.length === 0) {
-    if (!session.privyUserId) throw hostedOnboardingError({
-      code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403,
-      message: "Set up a passkey in account settings before approving this action.",
-    });
-    return jsonOk({ method: "wallet", privyUserId: session.privyUserId });
-  }
+  if (state.credentials.length === 0) throw hostedOnboardingError({
+    code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403,
+    message: "Set up a passkey in account settings before approving this action.",
+  });
   return jsonOk({
     method: "passkey",
     options: await approvalPasskeyAuthenticationOptions({

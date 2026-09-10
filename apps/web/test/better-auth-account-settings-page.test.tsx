@@ -5,7 +5,7 @@ import type { HostedLoginMethodSettings } from "@/src/components/settings/hosted
 import type { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), snapshot: vi.fn(), approval: vi.fn(),
-  connections: vi.fn(), passkeys: vi.fn(), provider: vi.fn(), prisma: {},
+  connections: vi.fn(), passkeys: vi.fn(), prisma: {},
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({ getHostedPageAuthSnapshot: mocks.auth }));
@@ -13,7 +13,6 @@ vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => mocks.prisma }));
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({ readHostedAccountSettingsPageSnapshot: mocks.snapshot }));
 vi.mock("@/src/lib/sensitive-actions/secure-approval-status", () => ({ readHostedSecureApprovalStatus: mocks.approval }));
 vi.mock("@/src/lib/sensitive-actions/passkey-rollout", () => ({ isApprovalPasskeyEnrollmentEnabled: () => true }));
-vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({ HostedPrivyProvider: ({ children }: { children: ReactNode }) => { mocks.provider(); return children; } }));
 vi.mock("@/src/components/ui/auth-button", () => ({ AuthButton: ({ children }: { children: ReactNode }) => createElement("button", null, children) }));
 vi.mock("@/src/components/settings/hosted-login-method-settings", () => ({ HostedLoginMethodSettings: (props: ComponentProps<typeof HostedLoginMethodSettings>) => {
   mocks.connections(props); return createElement("p", null, "Connected accounts");
@@ -29,25 +28,25 @@ const account = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.auth.mockResolvedValue({ authenticated: true, authenticatedMember: { id: "synthetic-member", billingStatus: "not_started" }, session: { privyUserId: null } });
+  mocks.auth.mockResolvedValue({ authenticated: true, authenticatedMember: { id: "synthetic-member", billingStatus: "not_started" }, session: { } });
   mocks.snapshot.mockResolvedValue({ account, billingRef: null, routing: null });
   mocks.approval.mockResolvedValue({ method: "initial", status: "not_configured" });
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 
-test.each(["initial", "passkey"] as const)("%s protection does not mount legacy SDK state", async (method) => {
-  vi.stubEnv("NEXT_PUBLIC_PRIVY_APP_ID", "synthetic-app");
+test.each(["initial", "passkey"] as const)("%s protection renders the passkey controls", async (method) => {
   mocks.approval.mockResolvedValue({ method, status: method === "initial" ? "not_configured" : "configured" });
   renderToStaticMarkup(await AccountSettingsPage({ searchParams: Promise.resolve({}) }));
-  expect(mocks.provider).not.toHaveBeenCalled();
   expect(mocks.passkeys).toHaveBeenCalledOnce();
 });
 
-test("an unmigrated factor retains its temporary SDK provider", async () => {
-  vi.stubEnv("NEXT_PUBLIC_PRIVY_APP_ID", "synthetic-app");
-  mocks.approval.mockResolvedValue({ status: "configured" });
-  renderToStaticMarkup(await AccountSettingsPage({ searchParams: Promise.resolve({}) }));
-  expect(mocks.provider).toHaveBeenCalledOnce();
+test("unavailable approval state keeps account controls accessible and disables approval", async () => {
+  mocks.approval.mockResolvedValue({ status: "unavailable", reason: "Secure approval is unavailable." });
+  const markup = renderToStaticMarkup(await AccountSettingsPage({ searchParams: Promise.resolve({}) }));
+  expect(markup).toContain("Connected accounts");
+  expect(mocks.passkeys).toHaveBeenCalledWith(expect.objectContaining({
+    secureApprovalStatus: { status: "unavailable", reason: "Secure approval is unavailable." },
+  }));
 });
 
 test("unfinished signup can reach canonical account connections and initial passkey setup", async () => {

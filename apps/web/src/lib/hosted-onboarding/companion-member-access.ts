@@ -1,233 +1,45 @@
-import { openAuthRecord } from "../better-auth/record-crypto";
-import { classifyHostedNativeCredential } from "../better-auth/transport";
+import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
 import { readHostedNativeMemberAuth } from "../better-auth/native-auth";
-import { readHostedAuthenticationCompletion } from "./authentication-completion";
-import {
-  HostedBillingStatus,
-  type PrismaClient,
-} from "@prisma/client";
-
 import { getPrisma } from "../prisma";
 import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
-import { completeHostedPrivyVerification } from "./authentication-service";
-import {
-  ensureHostedStarterUsageEnrollment,
-  retryPendingHostedStarterUsageActivationRuntimeWake,
-} from "./starter-usage-enrollment-service";
-import { assertHostedMemberNotSuspended } from "./entitlement";
+import { readHostedAuthenticationCompletion } from "./authentication-completion";
+import { updateHostedMemberPendingActivationTimeZoneIfActivationPending } from "./hosted-member-store";
+import { ensureHostedStarterUsageEnrollment, retryPendingHostedStarterUsageActivationRuntimeWake } from "./starter-usage-enrollment-service";
 import { hostedOnboardingError } from "./errors";
-import {
-  assertActiveHostedMemberAccessAllowed,
-  readActiveHostedMemberAccess,
-} from "./member-access";
-import { lookupHostedMemberForPrivyPrincipal } from "./member-identity-service";
-import {
-  remapHostedPrivyCompletionLagError,
-  type HostedPrivyIdentity,
-} from "./privy";
-import {
-  buildHostedSignupNotificationContext,
-  type HostedSignupNotificationContextV1,
-} from "./signup-notification-context";
-import {
-  readHostedMemberMessagingSetupState,
-  updateHostedMemberPendingActivationTimeZoneIfActivationPending,
-} from "./hosted-member-store";
-import {
-  isHostedMemberMessagingSetupRequired,
-} from "./messaging-state";
-import {
-  isHostedSignupNotificationEmailConfigured,
-} from "./signup-notification-email-config";
-import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
+import { assertActiveHostedMemberAccessAllowed, readActiveHostedMemberAccess } from "./member-access";
 
-/**
- * Native companion admission reuses the hosted Web lifecycle rather than
- * creating a second signup or entitlement owner. The first authenticated
- * request may create the canonical member and invite, but consent is checked
- * before Starter enrollment or Junction authority is issued.
- */
+// Authentication owns signup; companion admission reuses canonical consent,
+// billing and activation without a second native identity owner.
 export async function requireHostedCompanionMemberIdFromRequest(input: {
   prisma?: PrismaClient;
   request: Request;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
-  const credential = classifyHostedNativeCredential({
-    authorization: input.request.headers.get("authorization"), cookie: input.request.headers.get("cookie"),
-    legacyAllowed: process.env.HOSTED_PRIVY_NATIVE_ENABLED !== "false",
-  });
-  if (credential.kind === "better-auth") {
-    const auth = await readHostedNativeMemberAuth(input.request, prisma);
-    await assertHostedHistoricalLaunchConsentGranted({ memberId: auth.member.id, prisma });
-    if (input.timeZone) await updateHostedMemberPendingActivationTimeZoneIfActivationPending({ memberId: auth.member.id, pendingActivationTimeZone: input.timeZone, prisma });
+  const auth = await readHostedNativeMemberAuth(input.request, prisma);
+  await assertHostedHistoricalLaunchConsentGranted({ memberId: auth.member.id, prisma });
+  if (input.timeZone) await updateHostedMemberPendingActivationTimeZoneIfActivationPending({ memberId: auth.member.id, pendingActivationTimeZone: input.timeZone, prisma });
+  // Existing active members do not need acquisition data or a new invite.
+  if (await readActiveHostedMemberAccess({ memberId: auth.member.id, prisma })) {
+    await requireHostedCompanionActivationRuntimeWake({ memberId: auth.member.id, prisma });
+    return auth.member.id;
+  }
+
+  // Only untouched acquisition state may enter Starter enrollment. Lapsed and
+  // incomplete billing retain their existing recovery owner.
+  if (auth.member.billingStatus === HostedBillingStatus.not_started) {
     const completion = await readHostedAuthenticationCompletion({ member: auth.member, prisma });
-    return finishHostedCompanionAdmission({ completion, prisma, now: new Date() });
-  }
-  if (process.env.HOSTED_BETTER_AUTH_ENABLED === "true") {
-    return requireLegacyCompanionAccess(input.request, prisma);
-  }
-  const session = await resolveHostedPrivySessionFromBearerToken(input.request);
-
-  if (!session) {
-    throw hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      message: "Sign in to continue.",
-      httpStatus: 401,
-    });
-  }
-
-  const now = new Date();
-  const signupNotificationContext = isHostedSignupNotificationEmailConfigured()
-    ? buildHostedSignupNotificationContext({
-        headers: input.request.headers,
-        occurredAt: now,
-        surface: "mobile_app",
-        timeZone: input.timeZone,
-      })
-    : undefined;
-  return ensureHostedCompanionMemberId({
-    identity: session.identity,
-    now,
-    prisma,
-    ...(signupNotificationContext ? { signupNotificationContext } : {}),
-    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
-  });
-}
-
-export async function ensureHostedCompanionMemberId(input: {
-  identity: HostedPrivyIdentity;
-  now?: Date;
-  prisma?: PrismaClient;
-  signupNotificationContext?: HostedSignupNotificationContextV1;
-  timeZone?: string | null;
-}): Promise<string> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-  const existingMember = await lookupHostedMemberForPrivyPrincipal({
-    identity: input.identity,
-    prisma,
-  });
-
-  if (existingMember) {
-    assertHostedMemberNotSuspended(existingMember);
-    const handedOff = await prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: existingMember.id } } });
-    if (handedOff) {
-      // Pausing issuance cannot reopen an old member's credential writers.
-      if ((await openAuthRecord(handedOff, prisma)).credentialsChangedAt !== null) {
-        throw hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." });
-      }
-      return requireLegacyCompanionMemberAccess(existingMember.id, prisma);
-    }
-
-    if (await readActiveHostedMemberAccess({
-      memberId: existingMember.id,
-      prisma,
-    })) {
-      await assertHostedHistoricalLaunchConsentGranted({
-        memberId: existingMember.id,
-        prisma,
-      });
-      const messagingState = await readHostedMemberMessagingSetupState({
-        memberId: existingMember.id,
-        prisma,
-      });
-      if (
-        isHostedMemberMessagingSetupRequired({
-          identity: messagingState?.identity ?? null,
-          routing: messagingState?.routing ?? null,
-        })
-        && (input.identity.phone || input.identity.telegram)
-      ) {
-        // Existing active members normally stay on the read-only fast path.
-        // A member whose live Privy identity now includes phone or Telegram is
-        // the narrow exception: repeating canonical completion synchronizes
-        // the newly linked account before readiness is projected again.
-        const completion = await completeHostedPrivyVerification({
-          identity: input.identity,
-          now,
-          prisma,
-          ...(input.timeZone ? { timeZone: input.timeZone } : {}),
-        }).catch((error: unknown) => {
-          throw remapHostedPrivyCompletionLagError(error);
-        });
-        if (completion.messagingSetupRequired) {
-          throw hostedOnboardingError({
-            code: "PRIVY_ACCOUNT_NOT_READY",
-            httpStatus: 409,
-            message:
-              "Your verified messaging account has not reached Murph yet. Wait a moment and try again.",
-            retryable: true,
-          });
-        }
-      }
-      await requireHostedCompanionActivationRuntimeWake({
-        memberId: existingMember.id,
-        prisma,
-      });
-      return existingMember.id;
-    }
-  }
-
-  const completion = await completeHostedPrivyVerification({
-    identity: input.identity,
-    now,
-    prisma,
-    ...(input.signupNotificationContext
-      ? { signupNotificationContext: input.signupNotificationContext }
-      : {}),
-    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
-  }).catch((error: unknown) => {
-    throw remapHostedPrivyCompletionLagError(error);
-  });
-
-  return finishHostedCompanionAdmission({ completion, now, prisma });
-}
-
-async function finishHostedCompanionAdmission(input: {
-  completion: Awaited<ReturnType<typeof readHostedAuthenticationCompletion>>;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<string> {
-  const { completion, now, prisma } = input;
-  await assertHostedHistoricalLaunchConsentGranted({
-    memberId: completion.memberId,
-    prisma,
-  });
-
-  if (await readActiveHostedMemberAccess({
-    memberId: completion.memberId,
-    prisma,
-  })) {
-    await requireHostedCompanionActivationRuntimeWake({
-      memberId: completion.memberId,
-      prisma,
-    });
-    return completion.memberId;
-  }
-
-  // Only the untouched hosted acquisition state may enter Starter enrollment
-  // here. Incomplete and lapsed billing retain their existing Web
-  // recovery owners instead of being reinterpreted as a native signup.
-  if (completion.member.billingStatus === HostedBillingStatus.not_started) {
     await ensureHostedStarterUsageEnrollment({
       inviteCode: completion.inviteCode,
-      member: {
-        id: completion.member.id,
-        suspendedAt: completion.member.suspendedAt,
-      },
-      now,
+      member: { id: auth.member.id, suspendedAt: auth.member.suspendedAt },
+      now: new Date(),
       prisma,
       source: "companion_onboarding",
     });
   }
 
-  await assertActiveHostedMemberAccessAllowed({
-    memberId: completion.memberId,
-    prisma,
-  });
-
-  return completion.memberId;
+  await assertActiveHostedMemberAccessAllowed({ memberId: auth.member.id, prisma });
+  return auth.member.id;
 }
 
 async function requireHostedCompanionActivationRuntimeWake(input: {
@@ -244,16 +56,4 @@ async function requireHostedCompanionActivationRuntimeWake(input: {
       retryable: true,
     });
   }
-}
-
-async function requireLegacyCompanionAccess(request: Request, prisma: PrismaClient): Promise<string> {
-  const auth = await readHostedNativeMemberAuth(request, prisma);
-  return requireLegacyCompanionMemberAccess(auth.member.id, prisma);
-}
-
-async function requireLegacyCompanionMemberAccess(memberId: string, prisma: PrismaClient): Promise<string> {
-  await assertActiveHostedMemberAccessAllowed({ memberId, prisma });
-  await assertHostedHistoricalLaunchConsentGranted({ memberId, prisma });
-  await requireHostedCompanionActivationRuntimeWake({ memberId, prisma });
-  return memberId;
 }

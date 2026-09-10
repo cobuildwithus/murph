@@ -48,6 +48,8 @@ export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
   /** The app-session HMAC key the web process runs with. */
   hostedAppSessionHmacKey: string;
+  hostedBetterAuthSecret: string;
+  hostedAuthStorageKey: string;
   interventionCount: number;
   oidcToken: string;
   persistDir: string;
@@ -288,6 +290,8 @@ export async function startHostedLocalDevHarness(input: {
         workerPersistDir: persistDir,
       },
       hostedAppSessionHmacKey: stack.hostedAppSessionHmacKey,
+      hostedBetterAuthSecret: stack.hostedBetterAuthSecret,
+      hostedAuthStorageKey: stack.hostedAuthStorageKey,
       oidcToken: stack.oidcToken,
       get interventionCount(): number {
         return interventionCount;

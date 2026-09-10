@@ -214,9 +214,8 @@ function createHostedOnboardingEnvironment(
     linqMaxActiveMembersPerConversationPhone: null,
     linqWebhookSecret: null,
     linqWebhookTimestampToleranceMs: 300_000,
-    privyAppId: null,
-    privyAppSecret: null,
-    privyVerificationKey: null,
+
+
     publicBaseUrl: null,
     stripeFamilyPriceIdsByPlan: {
       edge: null,
