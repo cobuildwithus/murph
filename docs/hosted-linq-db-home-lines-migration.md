@@ -105,11 +105,14 @@ Current application code no longer parses
 Weighted planning and the separate proactive new-conversation quota retain their
 existing owners and behavior.
 
-The nullable physical `hosted_linq_line.active_member_limit` column remains
-until a separate postdeploy contract cleanup. Keeping it makes the code release
-compatible with older Web builds and operator scripts, including Prisma
-whole-row upserts that still select the field implicitly. The removal condition
-is all of the following:
+The postdeploy contract migration
+`20260910180000_drop_linq_active_member_limit` drops the retired nullable
+`hosted_linq_line.active_member_limit` column. Keep this migration out of `main`
+until every gate below is satisfied: merging it admits automatic execution by
+`hosted-web-contract-migrations.yml` after the replacement deployment. The
+preceding code release retains the column for older Web builds and operator
+scripts, including Prisma whole-row upserts that select the field implicitly.
+The pre-merge gates are all of the following:
 
 1. The replacement Web build and Prisma client are deployed, and the production
    alias is proven before and after the configured prior-function drain.
@@ -120,6 +123,13 @@ is all of the following:
 4. Rollback admission excludes every Web build or CLI artifact that still
    references the column. The postdeploy contract lane may then apply the
    physical drop without changing weighted planning or proactive quotas.
+
+The automatic contract lane proves deployment provenance and HTTP drain; it
+does not attest operator CLI completion, prevent an old checkout from being
+run, or settle a deployment-pinned Workflow. Establish those separate gates
+before admitting this migration to `main`; a draft PR is not deployment proof.
+After the lane applies it, verify the column is absent and ordinary configured
+sync, provider inventory, and weighted/sticky routing succeed.
 
 Before the physical drop, the code release can be reverted while retaining the
 column. After the drop, recovery is a forward deployment of the replacement or
