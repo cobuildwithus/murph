@@ -517,6 +517,9 @@ jobs:
       - name: Verify pinned Codex upstream egress source
         run: pnpm --dir apps/cloudflare verify:codex-upstream-source
 
+      - name: Prepare runtime-state timing exports
+        run: pnpm --filter @murphai/runtime-state build
+
       - name: Run Cloudflare verification
         run: pnpm --dir apps/cloudflare verify
 

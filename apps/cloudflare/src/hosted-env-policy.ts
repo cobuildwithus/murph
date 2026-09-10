@@ -82,8 +82,6 @@ export const HOSTED_RUNNER_DEPRECATED_CODEX_APP_SERVER_PROXY_ENV_KEYS = [
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
 ] as const;
 
-const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [] as const;
-
 const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS,
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
@@ -178,22 +176,19 @@ export function isHostedRunnerSecretKeyAllowed(
   key: string,
   source: StringEnvSource = process.env,
 ): boolean {
-  if (DISALLOWED_RUNNER_SECRET_KEYS.has(key)) {
-    return false;
-  }
+  return readHostedRunnerAllowedSecretKeys(source).has(key);
+}
 
-  if (DISALLOWED_RUNNER_SECRET_PREFIXES.some((prefix) => key.startsWith(prefix))) {
-    return false;
-  }
-
-  const allowedKeys = new Set([
-    ...DEFAULT_ALLOWED_RUNNER_SECRET_KEYS,
-    ...parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
-  ]);
-
+export function readHostedRunnerAllowedSecretKeys(
+  source: StringEnvSource = process.env,
+): ReadonlySet<string> {
   // Hosted runner secrets are execution-only. Product facts and
   // process-control variables must stay out of this payload.
-  return allowedKeys.has(key);
+  return new Set(
+    parseHostedEnvCsvList(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS)
+      .filter((key) => !DISALLOWED_RUNNER_SECRET_KEYS.has(key)
+        && !DISALLOWED_RUNNER_SECRET_PREFIXES.some((prefix) => key.startsWith(prefix))),
+  );
 }
 
 export function isHostedRunnerProcessControlEnvKey(key: string): boolean {

@@ -1072,6 +1072,7 @@ function asRootPrisma<T extends object>(tx: T): T & {
   ).$executeRaw ?? vi.fn().mockResolvedValue(0);
   const innerTx = {
     $executeRaw: executeRaw,
+    hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(null) },
     hostedAccountDeletionCleanup: {
       findFirst: vi.fn().mockResolvedValue(null),
     },

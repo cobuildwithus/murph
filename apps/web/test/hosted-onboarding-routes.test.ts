@@ -275,6 +275,7 @@ describe("hosted onboarding routes", () => {
       privyUserId: "did:privy:user_123",
     });
     expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      prisma: { prisma: true },
       authenticatedMember: createHostedMember(),
       inviteCode: "invite-code",
     });

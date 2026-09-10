@@ -67,6 +67,7 @@ export const POST = withJsonError(async (
         prisma,
         privyUserId: session.privyUserId,
         sessionId: session.sessionId,
+        authProof: session.authProof,
       })
     : await prisma.$transaction((tx) =>
         decideHostedActionApprovalTx({
@@ -114,9 +115,10 @@ async function approveHostedAction(input: {
   memberId: string;
   now: Date;
   prisma: ReturnType<typeof getPrisma>;
-  privyUserId: string;
+  privyUserId: string | null;
   request: Request;
   sessionId: string;
+  authProof?: import("@/src/lib/better-auth/session").HostedAuthSessionProof;
 }) {
   const challenge = await verifySensitiveActionChallenge({
     authorization: input.authorization,
@@ -141,6 +143,7 @@ async function approveHostedAction(input: {
       prisma: tx,
       request: input.request,
       sessionId: input.sessionId,
+      authProof: input.authProof,
     });
     return decideHostedActionApprovalTx({
       approval: input.approval,

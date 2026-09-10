@@ -194,7 +194,7 @@ export const POST = withJsonError(async (request: Request) => {
   // Consume the challenge atomically only once the encrypted replica is in
   // hand. A failure here aborts the response without releasing the session.
   await consumeSensitiveActionChallenge({
-    challenge, prisma, session: { request, sessionId: auth.sessionId },
+    challenge, prisma, session: { request, sessionId: auth.sessionId, authProof: auth.authProof },
   });
 
   return jsonOk({

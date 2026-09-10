@@ -5,7 +5,7 @@ import { HOSTED_ACCOUNT_DATA_DELETION_SCHEMA } from "@/src/lib/hosted-privacy/ac
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  buildHostedAppSessionClearCookie: vi.fn(),
+  buildHostedAppSessionClearCookies: vi.fn(),
   deleteHostedAccountData: vi.fn(),
   getPrisma: vi.fn(),
   parseHostedAccountDeletionRequest: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
-  buildHostedAppSessionClearCookie: mocks.buildHostedAppSessionClearCookie,
+  buildHostedAppSessionClearCookies: mocks.buildHostedAppSessionClearCookies,
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 
@@ -67,9 +67,10 @@ describe("settings privacy delete route", () => {
       privyUserId: "privy-user-123",
       sessionId: "session_123",
     });
-    mocks.buildHostedAppSessionClearCookie.mockReturnValue(
+    mocks.buildHostedAppSessionClearCookies.mockReturnValue([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     mocks.deleteHostedAccountData.mockResolvedValue({
       cloudflare: {
         deleted: true,
@@ -116,13 +117,14 @@ describe("settings privacy delete route", () => {
       providerAccessRemovalConfirmationToken: null,
       request: expect.any(Request),
     });
-    expect(mocks.buildHostedAppSessionClearCookie).toHaveBeenCalledTimes(1);
+    expect(mocks.buildHostedAppSessionClearCookies).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedAccountData.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.buildHostedAppSessionClearCookie.mock.invocationCallOrder[0],
+      mocks.buildHostedAppSessionClearCookies.mock.invocationCallOrder[0],
     );
-    expect(response.headers.get("Set-Cookie")).toBe(
+    expect(response.headers.getSetCookie()).toEqual([
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
+      "murph-auth-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    ]);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       result: {

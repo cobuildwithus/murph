@@ -152,10 +152,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       scheduleAfterResponse: (task) => {
         afterResponseTasks.push(task);
       },
-      wakeHandoff: buildWakeHandoff({
-        runtimeShellPrewarmOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-      }),
+      wakeHandoff: buildWakeHandoff(),
     });
     void handoff.then(
       () => {
@@ -213,8 +210,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
-          shellPrewarmExpectedOrchestrationAttemptId:
-            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,

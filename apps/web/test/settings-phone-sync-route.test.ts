@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
   hostedPhoneLookupKeyMatchesValue: vi.fn(),
+  logHostedOnboardingDiagnostic: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirement: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
   prismaClient: {
@@ -25,6 +26,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
+  logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
@@ -233,167 +238,20 @@ describe("settings phone sync route", () => {
     });
   });
 
-  it("reconciles a provider-confirmed phone transfer from an unused signup scaffold", async () => {
-    const transfer = {
-      phoneNumber: "+14155552671",
-      sourceMemberId: "member_unused",
-      sourcePrivyUserId: "did:privy:user_unused",
-    };
-    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(transfer);
-
-    const response = await postSync({
-      kind: "exact",
-      phoneNumber: "+14155552671",
+  it("rejects cross-member phone claims before retirement, billing cleanup or identity writes", async () => {
+    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue({
+      phoneNumber: "+12025550146",
+      sourceMemberId: "member_other",
+      sourcePrivyUserId: "did:privy:other",
     });
-
-    expect(response.status).toBe(200);
+    const response = await postSync({ kind: "exact", phoneNumber: "+14155552671" });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "PHONE_IDENTITY_CONFLICT" } });
+    expect(mocks.prepareHostedPrivyPhoneTransferSourceRetirement).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedPrivyPhoneTransferSourceAccountData).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
-    expect(
-      mocks.prepareHostedPrivyPhoneTransferSourceRetirement,
-    ).toHaveBeenCalledWith({
-      prisma: mocks.prismaClient,
-      sourceMemberId: "member_unused",
-      targetMemberId: "member_123",
-    });
-    expect(
-      mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
-    ).toHaveBeenCalledWith({
-      identity: {
-        phone: {
-          number: "+14155552671",
-        },
-        telegram: null,
-        userId: "did:privy:user_123",
-      },
-      member: {
-        billingStatus: "active",
-        id: "member_123",
-        suspendedAt: null,
-      },
-      now: expect.any(Date),
-      prepared: {
-        rawFingerprint: "prepared-fingerprint",
-        sourceBillingRef: null,
-        sourceIdentity: null,
-        sourceMemberId: "member_unused",
-        targetIdentity: null,
-        targetMemberId: "member_123",
-      },
-      prisma: mocks.prismaClient,
-      targetPhoneNumberBeforeTransfer: null,
-      transfer,
-    });
-    expect(
-      mocks.deleteHostedPrivyPhoneTransferSourceAccountData,
-    ).toHaveBeenCalledWith({
-      prisma: mocks.prismaClient,
-      request: expect.any(Request),
-      retirement: {
-        autoTrialBilling: null,
-        sourceMemberId: "member_unused",
-      },
-      targetMember: {
-        billingStatus: "active",
-        id: "member_123",
-        suspendedAt: null,
-      },
-      targetPhoneNumberBeforeTransfer: null,
-      targetPrivyUserId: "did:privy:user_123",
-      transfer,
-    });
-    await expect(response.json()).resolves.toMatchObject({
-      phoneNumber: "+14155552671",
-      status: "synced",
-    });
-  });
-
-  it("finishes provider-backed retirement preparation before transaction checkout", async () => {
-    const transfer = {
-      phoneNumber: "+14155552671",
-      sourceMemberId: "member_unused",
-      sourcePrivyUserId: "did:privy:user_unused",
-    };
-    let releasePreparation!: () => void;
-    const preparationBlocked = new Promise<void>((resolve) => {
-      releasePreparation = resolve;
-    });
-    const prepared = {
-      rawFingerprint: "delayed-fingerprint",
-      sourceBillingRef: null,
-      sourceIdentity: null,
-      sourceMemberId: "member_unused",
-      targetIdentity: null,
-      targetMemberId: "member_123",
-    };
-    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(transfer);
-    mocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockImplementationOnce(
-      async () => {
-        await preparationBlocked;
-        return prepared;
-      },
-    );
-
-    const responsePromise = postSync({
-      kind: "exact",
-      phoneNumber: "+14155552671",
-    });
-    await vi.waitFor(() => {
-      expect(
-        mocks.prepareHostedPrivyPhoneTransferSourceRetirement,
-      ).toHaveBeenCalledTimes(1);
-    });
     expect(mocks.prismaClient.$transaction).not.toHaveBeenCalled();
-
-    releasePreparation();
-    const response = await responsePromise;
-
-    expect(response.status).toBe(200);
-    expect(mocks.prismaClient.$transaction).toHaveBeenCalledTimes(1);
-    expect(
-      mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx,
-    ).toHaveBeenCalledWith(expect.objectContaining({ prepared }));
-  });
-
-  it("delegates auto-trial authority to the canonical source-deletion boundary", async () => {
-    const transfer = {
-      phoneNumber: "+14155552671",
-      sourceMemberId: "member_unused",
-      sourcePrivyUserId: "did:privy:user_unused",
-    };
-    mocks.readHostedPrivyPhoneTransferProof.mockResolvedValue(transfer);
-    mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-      autoTrialBilling: {
-        stripeCustomerId: "cus_unused",
-        stripeSubscriptionId: "sub_unused",
-      },
-      sourceMemberId: "member_unused",
-    });
-
-    const response = await postSync({
-      kind: "exact",
-      phoneNumber: "+14155552671",
-    });
-
-    expect(response.status).toBe(200);
-    expect(mocks.deleteHostedPrivyPhoneTransferSourceAccountData).toHaveBeenCalledWith({
-      prisma: mocks.prismaClient,
-      request: expect.any(Request),
-      retirement: {
-        autoTrialBilling: {
-          stripeCustomerId: "cus_unused",
-          stripeSubscriptionId: "sub_unused",
-        },
-        sourceMemberId: "member_unused",
-      },
-      targetMember: {
-        billingStatus: "active",
-        id: "member_123",
-        suspendedAt: null,
-      },
-      targetPhoneNumberBeforeTransfer: null,
-      targetPrivyUserId: "did:privy:user_123",
-      transfer,
-    });
   });
 
   it("repairs an incomplete canonical projection even when the phone text already matches", async () => {
@@ -461,6 +319,14 @@ describe("settings phone sync route", () => {
     });
 
     expect(response.status).toBe(409);
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.phone-sync.provider-state",
+      expect.objectContaining({
+        expectationKind: "exact", expectedPhonePresent: true,
+        providerPhonePresent: true, providerPhoneMatchesExpectation: false,
+        providerPhoneState: "verified",
+      }),
+    );
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -469,6 +335,50 @@ describe("settings phone sync route", () => {
         retryable: true,
       },
     });
+  });
+
+  it.each([
+    { accounts: [], state: "absent_account" },
+    { accounts: [{ type: "phone", number: "+14155552671" }], state: "unusable_account" },
+    { accounts: [{ type: "phone", number: "invalid-private-value", verified_at: 1_700_000_000 }], state: "unusable_account" },
+  ])("records $state before rejecting an exact phone, without private values", async ({ accounts, state }) => {
+    const { buildHostedPrivySessionState } = await vi.importActual<typeof import("../src/lib/hosted-onboarding/privy-user")>(
+      "../src/lib/hosted-onboarding/privy-user",
+    );
+    mocks.buildHostedPrivySessionState.mockImplementationOnce(buildHostedPrivySessionState);
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        { type: "email", address: "private@example.test", verified_at: 1_700_000_000 },
+        ...accounts,
+      ],
+    });
+    const response = await postSync({ kind: "exact", phoneNumber: "+14155550000" });
+
+    expect(response.status).toBe(409);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledExactlyOnceWith(
+      "hosted-onboarding.phone-sync.provider-state", {
+        memberRef: expect.stringMatching(/^[a-f0-9]{16}$/u),
+        expectationKind: "exact", expectedPhonePresent: true,
+        providerPhonePresent: false, providerPhoneAccountPresent: accounts.length > 0,
+        providerPhoneMatchesExpectation: false, providerPhoneState: state,
+      },
+    );
+    const logged = JSON.stringify(mocks.logHostedOnboardingDiagnostic.mock.calls);
+    for (const privateValue of ["member_123", "did:privy:user_123", "+14155550000", "+14155552671", "invalid-private-value", "private@example.test"]) {
+      expect(logged).not.toContain(privateValue);
+    }
+  });
+
+  it.each([
+    { phoneNumber: "+14155552671", status: 200 },
+    { phoneNumber: "+14155550000", status: 409 },
+  ])("preserves status $status when diagnostics throw", async ({ phoneNumber, status }) => {
+    mocks.logHostedOnboardingDiagnostic.mockImplementationOnce(() => { throw new Error("logger unavailable"); });
+    const response = await postSync({ kind: "exact", phoneNumber });
+    expect(response.status).toBe(status);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
   });
 
   it("waits through an absent intermediate state in an existing-phone transfer", async () => {

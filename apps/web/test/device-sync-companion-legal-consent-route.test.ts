@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   readHostedConsentStatus: vi.fn(),
   readHostedOnboardingJsonObject: vi.fn(),
   recordHostedLaunchRequiredConsent: vi.fn(),
-  requirePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/http", async (importOriginal) => ({
@@ -20,8 +20,8 @@ vi.mock("@/src/lib/hosted-onboarding/http", async (importOriginal) => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuthFromBearerToken:
-    mocks.requirePrivyMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken:
+    mocks.requireHostedMemberAuthFromBearerToken,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -62,7 +62,7 @@ describe("device sync companion legal consent route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: MEMBER,
     });
     mocks.readHostedConsentStatus.mockResolvedValue(STATUS);
@@ -79,7 +79,7 @@ describe("device sync companion legal consent route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual(STATUS);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
     );
@@ -130,7 +130,7 @@ describe("device sync companion legal consent route", () => {
       "https://app.example.test/api/device-sync/companion/legal-consent",
       { method: "POST" },
     );
-    mocks.requirePrivyMemberAuthFromBearerToken.mockRejectedValue(
+    mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,

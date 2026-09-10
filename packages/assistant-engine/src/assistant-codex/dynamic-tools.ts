@@ -1,3 +1,4 @@
+import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   completeDynamicToolFailureDiagnostics,
   toolFailureDiagnostic,
@@ -2048,8 +2049,8 @@ export function readMurphDynamicToolRequest(
       }
     }
     case MURPH_COMPUTER_OPEN_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
+      const parsed = parseDynamicToolArguments({
+        value: request.arguments,
         schema: computerOpenArgumentsSchema,
         schemaName: 'murph.computer_open.input',
         schemaRootKeys: COMPUTER_OPEN_ARGUMENT_ROOT_KEYS,
@@ -2060,8 +2061,8 @@ export function readMurphDynamicToolRequest(
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
     case MURPH_COMPUTER_ACT_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
+      const parsed = parseDynamicToolArguments({
+        value: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
         schemaRootKeys: ['runId', 'code', 'timeoutMs'],
@@ -2072,8 +2073,8 @@ export function readMurphDynamicToolRequest(
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
     case MURPH_COMPUTER_OS_CONTROL_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
+      const parsed = parseDynamicToolArguments({
+        value: request.arguments,
         schema: computerOsControlArgumentsSchema,
         schemaName: 'murph.computer_os_control.input',
         toolName: 'murph.computer_os_control',
@@ -2083,8 +2084,8 @@ export function readMurphDynamicToolRequest(
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
     case MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
+      const parsed = parseDynamicToolArguments({
+        value: request.arguments,
         schema: computerPauseForUserArgumentsSchema,
         schemaName: 'murph.computer_pause_for_user.input',
         schemaPaths: computerPauseForUserValidationPaths,
@@ -2096,8 +2097,8 @@ export function readMurphDynamicToolRequest(
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
     case MURPH_COMPUTER_FINISH_RUN_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
+      const parsed = parseDynamicToolArguments({
+        value: request.arguments,
         schema: computerFinishRunArgumentsSchema,
         schemaName: 'murph.computer_finish_run.input',
         toolName: 'murph.computer_finish_run',
@@ -7191,23 +7192,18 @@ function parseSendProgressUpdateArguments(
 ):
   | { ok: true; text: string }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = sendProgressUpdateArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.send_progress_update.input',
-        schemaRootKeys: readZodObjectRootKeys(sendProgressUpdateArgumentsSchema),
-        toolName: 'murph.send_progress_update',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: sendProgressUpdateArgumentsSchema,
+    value,
+    toolName: 'murph.send_progress_update',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return {
     ok: true,
-    text: parsed.data.text,
+    text: parsed.args.text,
   }
 }
 
@@ -7216,20 +7212,15 @@ function parseGenerateImageArguments(
 ):
   | { ok: true; args: GenerateImageToolArgs; messageRef?: string }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = generateImageArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.generate_image.input',
-        schemaRootKeys: readZodObjectRootKeys(generateImageArgumentsSchema),
-        toolName: 'murph.generate_image',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: generateImageArgumentsSchema,
+    value,
+    toolName: 'murph.generate_image',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
-  const { message_ref: messageRef, ...args } = parsed.data
+  const { message_ref: messageRef, ...args } = parsed.args
   return {
     args,
     ...(messageRef ? { messageRef } : {}),
@@ -7245,21 +7236,16 @@ function parseSubmitProductFeedbackArguments(
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = submitProductFeedbackArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.submit_product_feedback.input',
-        schemaRootKeys: readZodObjectRootKeys(submitProductFeedbackArgumentsSchema),
-        toolName: 'murph.submit_product_feedback',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: submitProductFeedbackArgumentsSchema,
+    value,
+    toolName: 'murph.submit_product_feedback',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
   return {
-    feedback: parsed.data,
+    feedback: parsed.args,
     ok: true,
   }
 }
@@ -7272,21 +7258,17 @@ function parseFamilyPlanArguments(
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = familyPlanArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.family_plan.input',
-        schemaRootKeys: ['action', 'invite'],
-        toolName: 'murph.family_plan',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: familyPlanArgumentsSchema,
+    value,
+    schemaRootKeys: ['action', 'invite'],
+    toolName: 'murph.family_plan',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
-  if (parsed.data.action === 'read_status') {
+  if (parsed.args.action === 'read_status') {
     return {
       ok: true,
       request: {
@@ -7294,12 +7276,12 @@ function parseFamilyPlanArguments(
       },
     }
   }
-  if (parsed.data.action === 'start_checkout') {
+  if (parsed.args.action === 'start_checkout') {
     return {
       ok: true,
       request: {
         action: 'start_checkout',
-        ...(parsed.data.confirmedTrialConversion
+        ...(parsed.args.confirmedTrialConversion
           ? { confirmedTrialConversion: true as const }
           : {}),
       },
@@ -7311,15 +7293,15 @@ function parseFamilyPlanArguments(
     request: {
       action: 'create_invite',
       invite: {
-        ...(parsed.data.invite.planCode
-          ? { planCode: parsed.data.invite.planCode }
+        ...(parsed.args.invite.planCode
+          ? { planCode: parsed.args.invite.planCode }
           : {}),
-        ...(parsed.data.invite.targetEmail
-          ? { targetEmail: parsed.data.invite.targetEmail }
+        ...(parsed.args.invite.targetEmail
+          ? { targetEmail: parsed.args.invite.targetEmail }
           : {}),
-        targetLabel: parsed.data.invite.targetLabel,
-        targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
-        targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
+        targetLabel: parsed.args.invite.targetLabel,
+        targetPhoneNumber: parsed.args.invite.targetPhoneNumber,
+        targetTelegramUsername: parsed.args.invite.targetTelegramUsername,
       },
     },
   }
@@ -7330,27 +7312,23 @@ function parsePlanUsageArguments(
 ):
   | { ok: true; request: HostedPlanUsageToolRequest }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = planUsageArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.plan_usage.input',
-        schemaRootKeys: ['targetPlanCode'],
-        toolName: 'murph.plan_usage',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: planUsageArgumentsSchema,
+    value,
+    schemaRootKeys: ['targetPlanCode'],
+    toolName: 'murph.plan_usage',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
   return {
     ok: true,
     request: {
       includeSubscriptionActionQuote: true,
-      ...(parsed.data.targetPlanCode
+      ...(parsed.args.targetPlanCode
         ? {
             subscriptionActionTargetPlanCode:
-              parsed.data.targetPlanCode,
+              parsed.args.targetPlanCode,
           }
         : {}),
     },
@@ -7362,18 +7340,14 @@ function parseIMessageContactArguments(
 ):
   | { ok: true }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = imessageContactArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.imessage_contact.input',
-        schemaRootKeys: [],
-        toolName: 'murph.imessage_contact',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: imessageContactArgumentsSchema,
+    value,
+    schemaRootKeys: [],
+    toolName: 'murph.imessage_contact',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
   return { ok: true }
 }
@@ -7386,22 +7360,18 @@ function parseSubscriptionArguments(
       request: HostedRuntimeSubscriptionToolRequest
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = hostedRuntimeSubscriptionToolRequestSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.subscription.input',
-        schemaRootKeys: ['action'],
-        toolName: 'murph.subscription',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: hostedRuntimeSubscriptionToolRequestSchema,
+    value,
+    schemaRootKeys: ['action'],
+    toolName: 'murph.subscription',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
   return {
     ok: true,
-    request: parsed.data,
+    request: parsed.args,
   }
 }
 
@@ -7413,30 +7383,25 @@ function parsePersonalizationArguments(
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = hostedRuntimeAssistantPersonalizationModelToolRequestSchema
-    .safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.personalization.input',
-        schemaRootKeys: [
-          'action',
-          'mainPersona',
-          'supportingPersona',
-          'tone',
-          'voice',
-        ],
-        toolName: 'murph.personalization',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
+    value,
+    schemaRootKeys: [
+      'action',
+      'mainPersona',
+      'supportingPersona',
+      'tone',
+      'voice',
+    ],
+    toolName: 'murph.personalization',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return {
     ok: true,
-    request: parsed.data,
+    request: parsed.args,
   }
 }
 
@@ -7448,23 +7413,19 @@ function parseAssistantConfigurationArguments(
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = assistantConfigurationArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.assistant_configuration.input',
-        schemaRootKeys: ['action', 'model', 'provider', 'reasoningEffort'],
-        toolName: 'murph.assistant_configuration',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: assistantConfigurationArgumentsSchema,
+    value,
+    schemaRootKeys: ['action', 'model', 'provider', 'reasoningEffort'],
+    toolName: 'murph.assistant_configuration',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return {
     ok: true,
-    request: parsed.data,
+    request: parsed.args,
   }
 }
 
@@ -7492,91 +7453,87 @@ function parseGroupArguments(
             path: ["action"],
           },
         );
-  const parsed = parser.safeParse(value);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: `${qualifiedToolName}.input`,
-        schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
-        toolName: qualifiedToolName,
-      }),
-    };
+  const parsed = parseDynamicToolArguments({
+    schema: parser,
+    value,
+    schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+    toolName: qualifiedToolName,
+  });
+  if (!parsed.ok) {
+    return parsed;
   }
   if (
-    parsed.data.action === "ask" ||
-    parsed.data.action === "handoff" ||
-    parsed.data.action === "ask_member" ||
-    parsed.data.action === "post_disclosure_request" ||
-    parsed.data.action === "revoke_disclosure_grant" ||
-    parsed.data.action === "arm_usage_referral" ||
-    parsed.data.action === "cancel_usage_referral"
+    parsed.args.action === "ask" ||
+    parsed.args.action === "handoff" ||
+    parsed.args.action === "ask_member" ||
+    parsed.args.action === "post_disclosure_request" ||
+    parsed.args.action === "revoke_disclosure_grant" ||
+    parsed.args.action === "arm_usage_referral" ||
+    parsed.args.action === "cancel_usage_referral"
   ) {
-    return { ok: true, request: parsed.data };
+    return { ok: true, request: parsed.args };
   }
-  const currentSenderRequest = parseCurrentSenderGroupRequest(parsed.data);
+  const currentSenderRequest = parseCurrentSenderGroupRequest(parsed.args);
   if (currentSenderRequest) {
     return { ok: true, request: currentSenderRequest };
   }
-  if (parsed.data.action === "read_shared") {
+  if (parsed.args.action === "read_shared") {
     return {
       ok: true,
       request: {
         action: "read_shared",
-        ...(parsed.data.audience === undefined
+        ...(parsed.args.audience === undefined
           ? {}
-          : { audience: parsed.data.audience }),
-        projectionScopes: parsed.data.projectionScopes,
+          : { audience: parsed.args.audience }),
+        projectionScopes: parsed.args.projectionScopes,
       },
     };
   }
-  if (parsed.data.action === "send_email") {
-    return { ok: true, request: parsed.data };
+  if (parsed.args.action === "send_email") {
+    return { ok: true, request: parsed.args };
   }
-  if (parsed.data.action === "offer_access") {
+  if (parsed.args.action === "offer_access") {
     return {
       ok: true,
       request: {
         action: "offer_access",
-        ...(parsed.data.displayName === undefined
+        ...(parsed.args.displayName === undefined
           ? {}
-          : { displayName: parsed.data.displayName }),
-        ...(parsed.data.message_ref === undefined
+          : { displayName: parsed.args.displayName }),
+        ...(parsed.args.message_ref === undefined
           ? {}
-          : { messageRef: parsed.data.message_ref }),
-        ...(parsed.data.projectionScopes === undefined
+          : { messageRef: parsed.args.message_ref }),
+        ...(parsed.args.projectionScopes === undefined
           ? {}
-          : { projectionScopes: parsed.data.projectionScopes }),
-        ...(parsed.data.standaloneLink === undefined
+          : { projectionScopes: parsed.args.projectionScopes }),
+        ...(parsed.args.standaloneLink === undefined
           ? {}
-          : { standaloneLink: parsed.data.standaloneLink }),
+          : { standaloneLink: parsed.args.standaloneLink }),
       },
     };
   }
-  if (parsed.data.action === "update_display_name") {
+  if (parsed.args.action === "update_display_name") {
     return {
       ok: true,
       request: {
         action: "update_display_name",
         updateDisplayName: {
-          displayName: parsed.data.displayName,
+          displayName: parsed.args.displayName,
         },
       },
     };
   }
-  if (parsed.data.action === "leave_membership") {
+  if (parsed.args.action === "leave_membership") {
     return {
       ok: true,
       request: {
         action: "leave_membership",
-        membershipId: parsed.data.membershipId,
+        membershipId: parsed.args.membershipId,
       },
     };
   }
-  if (parsed.data.action === "share_contact_card") {
-    if (!parsed.data.avatarPrompt) {
+  if (parsed.args.action === "share_contact_card") {
+    if (!parsed.args.avatarPrompt) {
       return { ok: true, request: { action: "share_contact_card" } };
     }
     return {
@@ -7591,7 +7548,7 @@ function parseGroupArguments(
           args: {
             alt: null,
             outputFormat: "jpeg",
-            prompt: parsed.data.avatarPrompt,
+            prompt: parsed.args.avatarPrompt,
             quality: "medium",
             referenceImageRefs: [],
             size: "1024x1024",
@@ -7600,9 +7557,9 @@ function parseGroupArguments(
       },
     };
   }
-  if (parsed.data.action === "set_chat_avatar") {
-    if (parsed.data.avatarSource === "generate") {
-      if (!parsed.data.prompt) {
+  if (parsed.args.action === "set_chat_avatar") {
+    if (parsed.args.avatarSource === "generate") {
+      if (!parsed.args.prompt) {
         return {
           ok: false,
           validationDigest: buildDynamicToolValidationDigest({
@@ -7629,18 +7586,18 @@ function parseGroupArguments(
           avatar: {
             source: "generate",
             args: {
-              alt: parsed.data.alt,
-              outputFormat: parsed.data.outputFormat,
-              prompt: parsed.data.prompt,
-              quality: parsed.data.quality,
-              referenceImageRefs: parsed.data.referenceImageRefs,
-              size: parsed.data.size,
+              alt: parsed.args.alt,
+              outputFormat: parsed.args.outputFormat,
+              prompt: parsed.args.prompt,
+              quality: parsed.args.quality,
+              referenceImageRefs: parsed.args.referenceImageRefs,
+              size: parsed.args.size,
             },
           },
         },
       };
     }
-    if (!parsed.data.imageRef) {
+    if (!parsed.args.imageRef) {
       return {
         ok: false,
         validationDigest: buildDynamicToolValidationDigest({
@@ -7665,86 +7622,86 @@ function parseGroupArguments(
       request: {
         action: "set_chat_avatar",
         avatar: {
-          alt: parsed.data.alt,
-          imageRef: parsed.data.imageRef,
+          alt: parsed.args.alt,
+          imageRef: parsed.args.imageRef,
           source: "image_ref",
         },
       },
     };
   }
-  if (parsed.data.action === "prepare_next_group") {
+  if (parsed.args.action === "prepare_next_group") {
     return {
       ok: true,
       request: {
-        action: parsed.data.action,
-        ...(parsed.data.setup === undefined
+        action: parsed.args.action,
+        ...(parsed.args.setup === undefined
           ? {}
-          : { setup: parsed.data.setup }),
+          : { setup: parsed.args.setup }),
       },
     };
   }
   if (
-    parsed.data.action === "read_next_group" ||
-    parsed.data.action === "cancel_next_group" ||
-    parsed.data.action === "read_chat_name" ||
-    parsed.data.action === "read_usage" ||
-    parsed.data.action === "read_chat_participants"
+    parsed.args.action === "read_next_group" ||
+    parsed.args.action === "cancel_next_group" ||
+    parsed.args.action === "read_chat_name" ||
+    parsed.args.action === "read_usage" ||
+    parsed.args.action === "read_chat_participants"
   ) {
-    return { ok: true, request: { action: parsed.data.action } };
+    return { ok: true, request: { action: parsed.args.action } };
   }
-  if (parsed.data.action === "list_memberships") {
+  if (parsed.args.action === "list_memberships") {
     return {
       ok: true,
       request: {
         action: "list_memberships",
-        ...(parsed.data.cursor === undefined
+        ...(parsed.args.cursor === undefined
           ? {}
-          : { cursor: parsed.data.cursor }),
-        ...(parsed.data.disclosureGrantCursor === undefined
+          : { cursor: parsed.args.cursor }),
+        ...(parsed.args.disclosureGrantCursor === undefined
           ? {}
-          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+          : { disclosureGrantCursor: parsed.args.disclosureGrantCursor }),
       },
     };
   }
-  if (parsed.data.action === "create_signup_referral_link") {
+  if (parsed.args.action === "create_signup_referral_link") {
     return {
       ok: true,
       request: {
         action: "create_signup_referral_link",
-        ...(parsed.data.message_ref !== undefined
-          ? { messageRef: parsed.data.message_ref }
+        ...(parsed.args.message_ref !== undefined
+          ? { messageRef: parsed.args.message_ref }
           : {}),
       },
     };
   }
-  if (parsed.data.action === "read_usage_referral") {
+  if (parsed.args.action === "read_usage_referral") {
     return {
       ok: true,
       request: {
         action: "read_usage_referral",
-        ...(parsed.data.message_ref !== undefined
-          ? { messageRef: parsed.data.message_ref }
+        ...(parsed.args.message_ref !== undefined
+          ? { messageRef: parsed.args.message_ref }
           : {}),
       },
     };
   }
-  if (parsed.data.action === "revoke_own_email_share") {
+  if (parsed.args.action === "revoke_own_email_share") {
     return {
       ok: true,
       request: {
         action: "revoke_own_email_share",
-        messageRef: parsed.data.message_ref,
+        messageRef: parsed.args.message_ref,
       },
     };
   }
-  if (parsed.data.action === "read_current") {
+  if (parsed.args.action === "read_current") {
     return {
       ok: true,
       request: {
         action: "read_current",
-        ...(parsed.data.disclosureGrantCursor === undefined
+        ...(parsed.args.disclosureGrantCursor === undefined
           ? {}
-          : { disclosureGrantCursor: parsed.data.disclosureGrantCursor }),
+          : { disclosureGrantCursor: parsed.args.disclosureGrantCursor }),
       },
     };
   }
@@ -7851,18 +7808,13 @@ function parseFinishWithoutReplyArguments(
 ):
   | { ok: true }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = finishWithoutReplyArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.finish_without_reply.input',
-        schemaRootKeys: readZodObjectRootKeys(finishWithoutReplyArgumentsSchema),
-        toolName: 'murph.finish_without_reply',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: finishWithoutReplyArgumentsSchema,
+    value,
+    toolName: 'murph.finish_without_reply',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return { ok: true }
@@ -7873,24 +7825,19 @@ function parseReactToMessageArguments(
 ):
   | { messageRef: string; ok: true; reaction: AssistantMessageReaction }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = reactToMessageArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.react_to_message.input',
-        schemaRootKeys: readZodObjectRootKeys(reactToMessageArgumentsSchema),
-        toolName: 'murph.react_to_message',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: reactToMessageArgumentsSchema,
+    value,
+    toolName: 'murph.react_to_message',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return {
-    messageRef: parsed.data.message_ref,
+    messageRef: parsed.args.message_ref,
     ok: true,
-    reaction: parsed.data.reaction,
+    reaction: parsed.args.reaction,
   }
 }
 
@@ -7899,22 +7846,17 @@ function parseSelectReplyTargetArguments(
 ):
   | { messageRef: string; ok: true }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = selectReplyTargetArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.select_reply_target.input',
-        schemaRootKeys: readZodObjectRootKeys(selectReplyTargetArgumentsSchema),
-        toolName: 'murph.select_reply_target',
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: selectReplyTargetArgumentsSchema,
+    value,
+    toolName: 'murph.select_reply_target',
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return {
-    messageRef: parsed.data.message_ref,
+    messageRef: parsed.args.message_ref,
     ok: true,
   }
 }
@@ -7996,37 +7938,6 @@ async function authorizeDynamicToolEffectOrigin(input: {
     messageRef: input.messageRef,
   })
   return target?.targetInputId ?? null
-}
-
-function parseComputerArguments<TArgs>(input: {
-  argumentsValue: unknown
-  schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
-  schemaName: string
-  schemaPaths?: readonly string[]
-  schemaRootKeys?: readonly string[]
-  toolName: string
-}):
-  | { ok: true; args: TArgs }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = input.schema.safeParse(input.argumentsValue)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: input.argumentsValue,
-        schemaName: input.schemaName,
-        schemaPaths: input.schemaPaths,
-        schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
-        toolName: input.toolName,
-      }),
-    }
-  }
-
-  return {
-    args: parsed.data,
-    ok: true,
-  }
 }
 
 function parseAttachResponseCardArguments(
@@ -8240,26 +8151,18 @@ function parseAttachTelegramRichContentArguments(
 ):
   | { ok: true; card: AssistantResponseCard }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const schemaName = 'murph.attach_telegram_rich_content.input'
   const toolName = 'murph.attach_telegram_rich_content'
-  const parsed = attachTelegramRichContentArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName,
-        schemaRootKeys: readZodObjectRootKeys(
-          attachTelegramRichContentArgumentsSchema,
-        ),
-        toolName,
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: attachTelegramRichContentArgumentsSchema,
+    value,
+    toolName,
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return {
-    card: parsed.data.card,
+    card: parsed.args.card,
     ok: true,
   }
 }
@@ -8269,26 +8172,20 @@ function parseAttachResponseMediaArguments(
 ):
   | { ok: true; media: AssistantResponseMedia[] }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const schemaName = 'murph.attach_response_media.input'
   const toolName = 'murph.attach_response_media'
-  const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName,
-        schemaPaths: attachResponseMediaValidationPaths,
-        schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
-        toolName,
-      }),
-    }
+  const parsed = parseDynamicToolArguments({
+    schema: attachResponseMediaArgumentsSchema,
+    value,
+    schemaPaths: attachResponseMediaValidationPaths,
+    toolName,
+  })
+  if (!parsed.ok) {
+    return parsed
   }
 
   return {
     ok: true,
-    media: dedupeAssistantResponseMediaList(parsed.data.media),
+    media: dedupeAssistantResponseMediaList(parsed.args.media),
   }
 }
 

@@ -1032,6 +1032,14 @@ operator child uses `murph-operator-diagnostic-read`, always returns a concrete
 diagnostic, and skips the member disclosure reviewer. The existing authenticated,
 encrypted, expiring Ops completion owner receives the result.
 
+Operator tasks keep Sol while selecting the generated hosted OpenAI provider,
+including its environment credential, independently of the member's provider.
+Runtime preparation registers that provider alongside alternate member providers.
+Local subscription and recorder modes retain their configured OpenAI aliases;
+operator turns never substitute the built-in OpenAI login provider for hosted
+credential configuration. This applies to diagnostics and operator messages;
+request authority, diagnostic permissions, and usage funding stay unchanged.
+
 An executing operator diagnostic defers routine idle checkpoints until it settles
 or reaches the admitted request expiry. Its existing controller aborts execution
 at that deadline; the ordinary requeue and Web prepare path settles expired work.

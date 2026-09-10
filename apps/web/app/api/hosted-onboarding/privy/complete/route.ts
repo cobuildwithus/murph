@@ -1,3 +1,4 @@
+import { readHostedAuthenticationResponse } from "@/src/lib/hosted-onboarding/authentication-response";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -15,7 +16,6 @@ import {
   resolveHostedPrivyAuthMethodFromIdentity,
 } from "@/src/lib/hosted-onboarding/privy-auth-method";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   getHostedAppSessionFromRequest,
@@ -28,10 +28,6 @@ import {
 import {
   isHostedSignupNotificationEmailConfigured,
 } from "@/src/lib/hosted-onboarding/signup-notification-email-config";
-import {
-  readHostedConsentStatus,
-  type HostedConsentStatus,
-} from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import {
   remapHostedPrivyCompletionLagError,
@@ -87,13 +83,7 @@ export const POST = withJsonError(async (request: Request) => {
     ) {
       throw privySessionMemberMismatchError();
     }
-    const [status, launchConsent] = await Promise.all([
-      getHostedInviteStatus({
-        authenticatedMember: result.member,
-        inviteCode: result.inviteCode,
-      }),
-      readHostedCompletionLaunchConsent(result.memberId),
-    ]);
+    const completionResponse = await readHostedAuthenticationResponse(result, getPrisma());
     const appSession = await issueHostedAppSession({
       memberId: result.memberId,
       privyUserId: auth.identity.userId,
@@ -104,18 +94,7 @@ export const POST = withJsonError(async (request: Request) => {
       messagingSetupRequired: result.messagingSetupRequired,
     });
 
-    const response = jsonOk({
-      inviteCode: result.inviteCode,
-      joinUrl: `/join/${encodeURIComponent(result.inviteCode)}`,
-      launchConsentGranted: launchConsent.granted,
-      ...(launchConsent.status && !launchConsent.granted
-        ? { launchConsentStatus: launchConsent.status }
-        : {}),
-      messagingSetupRequired: result.messagingSetupRequired,
-      ok: true,
-      stage: result.stage,
-      status,
-    });
+    const response = jsonOk(completionResponse);
     response.headers.append("Set-Cookie", appSession.cookie);
     return response;
   } catch (error) {
@@ -133,27 +112,6 @@ function privySessionMemberMismatchError() {
       "This Privy login does not match your current Murph session. Sign out and sign back in.",
     httpStatus: 409,
   });
-}
-
-async function readHostedCompletionLaunchConsent(memberId: string): Promise<{
-  granted: boolean;
-  status: HostedConsentStatus | null;
-}> {
-  try {
-    const status = await readHostedConsentStatus({
-      memberId,
-      prisma: getPrisma(),
-    });
-    return {
-      granted: status.launchGranted,
-      status,
-    };
-  } catch {
-    return {
-      granted: false,
-      status: null,
-    };
-  }
 }
 
 function resolveHostedPrivyCompletionAuthMethod(input: {

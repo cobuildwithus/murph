@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   readHostedAddressBookStatus: vi.fn(),
   readJsonObject: vi.fn(),
   replaceHostedAddressBookProjection: vi.fn(),
-  requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
-  requirePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireActiveHostedMemberAuthFromBearerToken: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", async (importOriginal) => ({
@@ -31,10 +31,10 @@ vi.mock("@/src/lib/http", async (importOriginal) => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuthFromBearerToken:
-    mocks.requireActivePrivyMemberAuthFromBearerToken,
-  requirePrivyMemberAuthFromBearerToken:
-    mocks.requirePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken:
+    mocks.requireActiveHostedMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken:
+    mocks.requireHostedMemberAuthFromBearerToken,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -83,8 +83,8 @@ describe("device sync companion address-book route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({ member: MEMBER });
-    mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireHostedMemberAuthFromBearerToken.mockResolvedValue({ member: MEMBER });
+    mocks.requireActiveHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: MEMBER,
     });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -116,12 +116,12 @@ describe("device sync companion address-book route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(STATUS);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
       { runStage: expect.any(Function) },
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     expect(mocks.readHostedAddressBookStatus).toHaveBeenCalledWith({
       memberId: MEMBER.id,
@@ -137,7 +137,7 @@ describe("device sync companion address-book route", () => {
     const pendingAuth = new Promise<{ member: typeof MEMBER }>((resolve) => {
       resolveAuth = resolve;
     });
-    mocks.requirePrivyMemberAuthFromBearerToken.mockImplementation(
+    mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(
       (_request, _prisma, options) => options.runStage(
         "identity_token_verification",
         () => pendingAuth,
@@ -169,7 +169,7 @@ describe("device sync companion address-book route", () => {
     const pendingAuth = new Promise<{ member: typeof MEMBER }>((resolve) => {
       resolveAuth = resolve;
     });
-    mocks.requirePrivyMemberAuthFromBearerToken.mockImplementation(
+    mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(
       (_request, _prisma, options) => options.runStage(
         "member_lookup",
         () => pendingAuth,
@@ -246,11 +246,11 @@ describe("device sync companion address-book route", () => {
     const response = await route.PUT(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
     );
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
       memberId: MEMBER.id,
       prisma: mocks.prisma,
@@ -279,11 +279,11 @@ describe("device sync companion address-book route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(STATUS);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       mocks.prisma,
     );
-    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     expect(mocks.readJsonObject).toHaveBeenCalledWith(request, {
       limitBytes: 1024,

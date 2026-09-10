@@ -815,7 +815,8 @@ The gate uses the pinned real Codex binary and a synthetic local Responses
 provider, `buildHostedCodexConfigToml`, the unchanged `murph-member-workspace`
 profile and production shell allowlist, with only the synthetic vault as a
 workspace root. `MURPH_HOSTED_CLI_TIMING_CLI_BIN` optionally selects an absolute
-path to the freshly packaged `@murphai/murph` **`dist/bin.js`**. Without it, the
+path to the freshly packaged `@murphai/murph` **`dist/bin.js`**, or the fully
+assembled runner's **`.bundle/bin.js`**. Without it, the
 test uses the checkout's `packages/cli/dist/bin.js`; this works only when that
 layout is already readable by the profile. The test checks the built entry and
 package name, but does not establish artifact freshness from the path: prepare
@@ -890,9 +891,13 @@ built `wearables latest` invocation reaches the real query owner and must expose
 No query calls are added to non-query commands. A nonempty session, unchanged
 session on continuation, and native `warm-reused` traces are required.
 
-Passing this gate establishes built CLI -> hosted shell -> Codex raw diagnostic
-transport; the engine profile test composes it with the actual extractor -> hosted
-normalization boundary. Separate startup cases distinguish no native event from
+Passing this gate establishes the selected artifact -> hosted shell -> Codex raw
+diagnostic transport; a source or `dist/bin.js` run does **not** establish
+`.bundle/bin.js` parity. In bundled mode, a third, telemetry-disabled child runs
+the installed sibling `dist/bin.js` in the same shell/profile. All three children
+must complete successfully with identical per-stream bytes; only the enabled
+bundled child may contribute the single report. The engine profile test composes
+this with the actual extractor -> hosted normalization boundary. Separate startup cases distinguish no native event from
 an actual native RPC error and retain the latter. Their receiver fixture mirrors
 the one-shot production close contract: catch and finally can both finish cleanup,
 but only the first can return a diagnostic. Empty startup failures remain empty;
@@ -904,6 +909,99 @@ in the repository. Run that explicit gate from the active plan. A current-parser
 roundtrip of field-stripped data is only legacy-shape proof, not mixed-version
 proof. Ordinary runs without the base variable explicitly skip this additional
 history-dependent case.
+
+#### Bundled timing-owner prerequisite and artifact parity
+
+The CLI's literal lazy import of
+`@murphai/runtime-state/node/cli-timing` and query's variable native runtime import
+must reach the same installed timing owner. Inlining that leaf into the CLI while
+query loads the installed package creates separate `AsyncLocalStorage` instances:
+lifecycle scopes can survive while `query-freshness`, `query-manifest` and
+`query-status` disappear. The shared runner esbuild policy keeps **only that exact
+stateful subpath** external; both bundle input guards reject accidental inlining
+of its installed implementation. The leaf resolves its relative timing catalog
+from the same installed package for CLI and native query callers. Other
+runtime-state entrypoints remain bundleable; no process-global registry is added.
+The CLI import remains lazy. Entry, static-closure and total-output guards are
+unchanged and must pass on the actual assembled candidate.
+
+Old missing query phases mean **unknown**, not zero query cost or a query-free
+command. Lifecycle coverage, a successful command and zero dropped-span counters
+do not prove that the old split owner observed query work; this loss occurs before
+span admission. Do not reconstruct absent durations or treat pre-fix absence as a
+performance baseline. The correction restores existing bounded numeric/enum
+spans to the existing report and transport, without changing collectors, fields,
+caps, loss/unknown semantics, native errors, cancellation or CLI results.
+
+The runner bundle test stages a synthetic successful read through a native
+variable import and copies the candidate's built **public timing exports**, not
+an alternative timing implementation. Its esbuild negative control removes only
+the timing external: it must retain lifecycle phases and lose all three query
+phases. The corrected path calls `bundleInstalledVaultCliBinary`, then executes
+`.bundle/bin.js` and both retargeted wrappers. Enabled reports must contain the
+query phases and remain valid under the existing private-safe normalizer; all
+successful output/exit results must match `dist/bin.js`, including telemetry off.
+Relative-import bypass cases exercise both shared forbidden-input guards.
+This isolates module ownership, not the real query implementation or transport;
+the assembled hosted gate above owns that composed proof.
+
+Use the repository's supported Node (at least 24.14.1), pinned pnpm 10.33.0,
+installed candidate dependencies and pinned Codex binary. Build the public timing
+exports before running the synthetic bundle tests; missing exports are a hard
+fixture failure, not a skip or a source-loader fallback. From the repository root:
+
+```sh
+pnpm --filter @murphai/runtime-state build
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage \
+  apps/cloudflare/test/runner-bundle-cli-bundle.test.ts \
+  apps/cloudflare/test/runner-bundle-entrypoint-bundle.test.ts
+pnpm --dir apps/cloudflare typecheck
+pnpm --dir packages/assistant-runtime typecheck
+```
+
+For the actual production artifact proof, use canonical Linux x86_64 assembly
+without skip flags or budget overrides, then copy the **entire installed runner
+tree**, including retained package payloads, into an already permitted temporary
+root. Do not substitute a separately built CLI, incomplete file copy, new source
+loader, symlink back to an unreadable checkout, or broader filesystem grant:
+
+```sh
+set -eu
+pnpm --dir apps/cloudflare runner:bundle
+export MURPH_CLI_TIMING_ARTIFACT_ROOT="$(mktemp -d)"
+cp -R apps/cloudflare/.deploy/runner-bundle "$MURPH_CLI_TIMING_ARTIFACT_ROOT/installed"
+export MURPH_HOSTED_CLI_TIMING_CLI_BIN="$MURPH_CLI_TIMING_ARTIFACT_ROOT/installed/node_modules/@murphai/murph/.bundle/bin.js"
+MURPH_RUN_HOSTED_CLI_TIMING_E2E=1 \
+  pnpm --dir packages/assistant-runtime exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/hosted-runtime-codex-config.test.ts -t 'shared CLI timing'
+```
+
+The assembly output above is the default deploy-directory location; use the
+actual assembly output when an existing deploy-directory override is active.
+Preserve the installed candidate package tree during the copy and remove the
+owned temporary root after validation. The real successful `wearables latest`
+read must expose all three query phases through the existing hosted diagnostic
+pipeline. `goal list` and `family list` must remain query-phase-free; cold and warm
+session evidence, native failures and telemetry-disabled no-op checks remain
+mandatory. Source query-concurrency tests and an unbundled hosted run are useful
+separate evidence, never substitutes for this assembled-artifact gate.
+
+This is a packaging-only correction using an already deployed vocabulary. The
+original consumer-first rollout rule still applies to introduction of shared CLI
+timing, but this correction requires no new consumer schema, database migration
+or coordinated protocol transition. Rebuild the runner with its matching installed
+packages and use the normal parent-owned rollout. Mixed old/new runners remain
+wire-compatible; older runners may still omit query spans. Do not use the new
+CLI bundle with a different or missing installed timing package.
+
+After parent validation and deployment, measure **72 hours of normal traffic**
+using the bounded aggregate inspection above. Record rollout coverage separately
+from duration, missingness and existing drop/loss indicators; compare the latest
+72-hour and preceding 72-hour windows only where coverage supports comparison.
+Do not add identifiers to reports, replay production payloads, generate probe
+traffic, or infer an optimization from newly visible spans. No production
+measurements or rollout results are established by this implementation handoff.
 
 For source-resolution and startup-loading corrections, run the focused guards
 from the repository root before the existing built hosted proof:

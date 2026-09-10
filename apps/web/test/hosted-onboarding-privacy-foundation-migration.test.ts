@@ -65,6 +65,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
   HostedMember: [
+    "authRecords HostedAuthRecord[]",
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
     'assistantProviderPreference String? @map("assistant_provider_preference")',
@@ -1199,6 +1200,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260905010000_linq_terminal_message_retry",
       "20260908190000_feedback_operator_tasks",
       "20260909210000_hosted_approval_credentials",
+      "20260909220000_hosted_auth_records",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
