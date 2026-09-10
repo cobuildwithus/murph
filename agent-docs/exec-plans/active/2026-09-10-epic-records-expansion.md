@@ -49,4 +49,5 @@ For every PR: focused regressions, relevant package/app typecheck, canonical rea
 
 - Repository/documentation audit and independent advisory review completed before implementation.
 - Dedicated implementation checkout created from current origin/main.
-- Implementation and verification pending.
+- PR #3172 implements standard measurements. Importer tests (597), focused clinical persistence tests (23), health-metrics tests (82; focused normalization rerun 58), three package typechecks, Web typecheck and changelog tests (10) pass. Complexity debt decreases by one. Exact-head CI and ReviewGPT follow the final changelog commit.
+- Remaining coverage PRs are pending.
