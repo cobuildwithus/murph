@@ -21,4 +21,7 @@ No new state, dependencies, schemas, provider advertisements, network calls, or 
 
 ## Progress
 
-Implementation complete. The 11-file focused suite passed 333 tests; the final four-file parser rerun passed 156 tests. Engine typecheck and complexity guard passed. Parent reviewed the complete source/test diff and confirmed no remaining removed-symbol callers. The focused live schema-recovery journey, exact-head CI, and ReviewGPT remain pending.
+Implementation complete. The 11-file focused suite passed 333 tests; the final four-file parser rerun passed 156 tests. Engine typecheck and complexity guard passed. Parent reviewed the complete source/test diff and confirmed no remaining removed-symbol callers. The focused live schema-recovery journey passed with gpt-5.6-terra using local subscription auth after pre-action startup/authentication failures on earlier profiles. It produced exactly one rejected call, one corrected retry, one saved support record, and a concise truthful confirmation. Parent UX verdict: Ready. No instructions or tool advertisements changed for either individual or group runtime. Required exact-head CI and final ReviewGPT are recorded on the open PR; merge and deployment are outside this task.
+Status: completed
+Updated: 2026-09-10
+Completed: 2026-09-10
