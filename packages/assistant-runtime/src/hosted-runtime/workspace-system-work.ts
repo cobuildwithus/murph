@@ -14,6 +14,7 @@ import {
 } from "./workspace-runner.ts";
 import {
   readHostedSystemMailboxState,
+  updateHostedSystemMailboxState,
   type HostedSystemMailboxRouteAction,
 } from "./system-mailbox-state.ts";
 
@@ -53,7 +54,7 @@ export function createHostedWorkspaceSystemWork(input: {
       ...(preparation.status === "processed" || preparation.status === "recording"
         ? {
             afterDurableCheckpoint: async (context) => {
-              input.preparation.signal?.throwIfAborted();
+              (context?.signal ?? input.preparation.signal)?.throwIfAborted();
               if (context?.vaultShareProjectionResult?.outcome === "error"
                 && preparation.item.postCheckpointRecord?.kind !== "vault-share.projection") {
                 const wake = await deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
@@ -75,9 +76,8 @@ export function createHostedWorkspaceSystemWork(input: {
                 }),
               });
               return {
-                nextWakeAt: record.deviceSyncWake?.at ?? record.nextWakeAt,
-                nextWakeReason:
-                  record.deviceSyncWake?.reason ?? record.nextWakeReason ?? null,
+                nextWakeAt: record.nextWakeAt,
+                nextWakeReason: record.nextWakeReason ?? null,
                 requiresFollowUpCheckpoint: true,
               };
             },
@@ -150,8 +150,45 @@ export function createHostedWorkspaceSystemWork(input: {
       allowedRouteActions: readonly HostedSystemMailboxRouteAction[] =
         HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
     ) {
+      const workspace = input.runnerInput.workspace;
+      const occurredAt = input.preparation.now?.() ?? new Date().toISOString();
+      const now = Date.parse(occurredAt);
+      if (allowedRouteActions.includes("run-device-sync-wake")
+        && input.preparation.runtime.resolvedConfig.deviceSync !== null
+        && workspace?.nextWakeReason === "device-sync.reconcile"
+        && Date.parse(workspace.nextWakeAt ?? "") <= now) {
+        // Existing workspace alarms enter the same claim/retry path as incoming hints.
+        const itemId = `device-sync.wake:workspace:${workspace.nextWakeAt}`;
+        await updateHostedSystemMailboxState(input.preparation.vaultRoot, (state) => {
+          if (state.pending.some((item) => item.routeAction === "run-device-sync-wake"
+            && item.wake.kind === "device-sync.wake" && !item.wake.connectionId)) {
+            return { result: undefined, write: false };
+          }
+          return { pending: [...state.pending, {
+            attemptCount: 0,
+            itemId,
+            lastAttemptAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            mailboxDedupeKey: itemId,
+            mailboxLaneSeq: null,
+            nextAttemptAt: null,
+            occurredAt,
+            postCheckpointRecord: null,
+            requestId: null,
+            routeAction: "run-device-sync-wake",
+            status: "pending",
+            wake: {
+              eventId: itemId,
+              kind: "device-sync.wake",
+              occurredAt,
+              reason: "reconcile_due",
+              userId: input.runnerInput.expectedUserId,
+            },
+          }] };
+        });
+      }
       const state = await readHostedSystemMailboxState(input.preparation.vaultRoot);
-      const now = Date.parse(input.preparation.now?.() ?? new Date().toISOString());
       for (const item of state.pending) {
         if (item.status === "recording"
           && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now)

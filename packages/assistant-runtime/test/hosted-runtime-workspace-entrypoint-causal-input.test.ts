@@ -2680,7 +2680,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               if (mixedDevicePrefix) {
                 const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
                 assert.deepEqual(pending.map((item) => [item.itemId, item.attemptCount]), [
-                  [deviceItem.id, 0],
+                  [deviceItem.id, 1],
                 ]);
               }
               return {

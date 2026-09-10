@@ -311,3 +311,46 @@ to the same workspace if it upgrades to foreground processing. No second replay
 queue or durable state was added. Parent candidate privacy/conflict checks pass.
 The current-base merge is ready to commit; final ReviewGPT, exact-head CI, and
 plan closure remain outstanding.
+
+
+## Round four remediation
+
+The user resumed the accepted finding and explicitly authorized continued fixes,
+simplification, and ReviewGPT until merge readiness. This remains preparation of
+the open PR; merging and deployment are not authorized. R4 reviewed
+`37f86ad0aaf7f938a6a4fa04395563f0aecc6679` on verified gpt-6-pro. One High
+REVIEW_INDUCED finding was accepted: the new shared publication owner started
+without the restored workspace/status, so its first metadata update could drop a
+short canonical receipt log. The existing owner now starts with the sanitized
+accepted workspace. An entrypoint regression failed before this correction and
+passes through a second crash/restart, with and without an intervening append.
+No extra publication owner or persisted state was added.
+
+Broader CI found 17 failures after the earlier focused candidate checks. The
+remediation preserves mandatory shutdown effects while independent callbacks
+honor interruption; ready durable effects prevent image work from indefinitely
+postponing their checkpoint. Explicit due device timers now enter the existing
+mailbox claim path, including when a different connection has a future retry.
+Completed device alarms are replaced by remaining mailbox work and returned
+provider deadlines. Disproved delivery projections explicitly replace the old
+wake instead of preserving it through every checkpoint. Generated-image retention
+writes explicitly carry the existing due-assistant predecessor through publication.
+Old exclusive-work fixtures now assert independent completion while preserving
+approval delivery order, failed-item retry state, and contiguous handled progress.
+Initialized-timer fixtures restore actual snapshot state so bootstrap authorization
+is exercised by the same path as mailbox hints.
+
+The affected 15-file runtime sweep passed 507 of 508 cases; its sole remaining
+failure expected a scheduled device wake after the independent job had already
+finished. That obsolete expectation was removed; targeted rerun and the added
+future-connection timer case remain required. A current-base integration, final
+complexity/typecheck proof, fresh full sensitive ReviewGPT, and exact-head CI are
+still outstanding. No production latency or rollout has been measured.
+
+Pre-integration verification: the final scheduling/preemption/import group passes
+81 cases; the delegated-owner/timer group passes eight. Runtime typecheck passes.
+Removing redundant null guards already covered by the due-date helper reduces
+root complexity debt from 558 to 557, with maximum 252 unchanged. The runner's
+58 debt is unchanged and the independent owner remains below 20. All temporary
+diagnostic probes are removed. The accepted R4 correction and CI regressions are
+ready for current-base integration and the next full sensitive audit.

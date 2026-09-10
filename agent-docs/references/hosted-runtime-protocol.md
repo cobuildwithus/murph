@@ -819,11 +819,18 @@ dirty work requires execution and blocks idle retirement across it. Coverage
 never grants continuation authority or bypasses invocation filters. Claimed
 attempts publish completion through the workspace instead of projecting another
 immediate wake. Restoring a newly fenced workspace releases stale in-process
-claims through the existing pending state.
+claims through the existing pending state. A due workspace device timer enters
+that same mailbox claim path; a future retry for another connection does not
+suppress it. After completion, remaining mailbox work and returned provider
+deadlines replace the consumed alarm.
 
 Both assistant and model-free wake deadlines remain independently available.
 Workspace metadata publication is serialized against the latest accepted version
-and preserves locally staged canonical receipts. Full snapshots pause and join
+and preserves locally staged canonical receipts. The publication owner starts
+with the accepted restored workspace and its sanitized receipt references before
+any importer can publish metadata. Explicitly disproved wake projections replace
+the stale deadline, while canonical retention writes retain the selected assistant
+predecessor until it is serviced. Full snapshots pause and join
 owned mutations before capturing state; newly arrived conversation input can
 withdraw that wait, leaving the actual child tracked until it exits. Only effects
 covered by a successful snapshot may acknowledge exact device revisions. Already

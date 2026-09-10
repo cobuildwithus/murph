@@ -475,8 +475,9 @@ describe("hosted workspace runtime entrypoint", () => {
       mocks.snapshotHostedPortableWorkspaceDelta.getMockImplementation();
     mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockClear();
     mocks.snapshotHostedPortableWorkspaceDelta.mockClear();
-    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(() => {
-      return { createRequest };
+    mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation((...args) => {
+      assert.ok(restoreBuilder);
+      return { ...restoreBuilder(...args), createRequest, checkpoint: async () => createRequest() };
     });
     mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(() => {
       throw new Error("Foreground test should not snapshot portable workspace deltas.");

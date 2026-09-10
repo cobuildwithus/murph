@@ -224,8 +224,8 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
   ): void;
 }
 
-function createHostedWorkspacePublicationState() {
-  let workspace: HostedWorkspaceState | null = null;
+function createHostedWorkspacePublicationState(initialWorkspace: HostedWorkspaceState | null) {
+  let workspace = initialWorkspace;
   let localRedactedStatus: HostedRuntimeRedactedJson | null = null;
   return {
     latestWorkspace: () => workspace,
@@ -541,7 +541,7 @@ export class HostedWorkspaceRunnerUserMismatchError extends Error {
 export function createHostedWorkspaceCheckpointRequestBuilder(
   metadata: HostedWorkspaceCheckpointMetadata,
 ): HostedWorkspaceCheckpointRequestBuilder {
-  const publication = createHostedWorkspacePublicationState();
+  const publication = createHostedWorkspacePublicationState(null);
   return {
     ...publication,
     createRequest(input) {
@@ -595,10 +595,11 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
 }
 
 export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
+  workspace?: HostedWorkspaceState | null;
   createSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
-  const publication = createHostedWorkspacePublicationState();
+  const publication = createHostedWorkspacePublicationState(input.workspace ?? null);
   // The builder owns every field of checkpoint metadata that
   // buildHostedWorkspaceSnapshotCheckpointRequest falls back to. Mirroring the
   // committed workspace here after a successful checkpoint prevents a later

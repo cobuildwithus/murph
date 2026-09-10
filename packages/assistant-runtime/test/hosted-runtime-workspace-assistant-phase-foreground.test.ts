@@ -1639,7 +1639,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     },
   );
 
-  it("drains approved continuations before respecting the durable mailbox frontier", async () => {
+  it("drains approved continuations while independent device work remains eligible", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     vi.useFakeTimers();
     vi.setSystemTime(new Date(now));
@@ -1783,8 +1783,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         }));
         const postCheckpoint = await result.afterCheckpoint?.();
         expect(postCheckpoint).toEqual(expect.objectContaining({
-          nextWakeAt: index === 0 ? now : codexRetryAt,
-          nextWakeReason: "assistant",
+          nextWakeAt: now,
+          nextWakeReason: index === 0 ? "assistant" : "device-sync.reconcile",
         }));
         workspace = createDueAssistantWorkspace({
           nextWakeAt: postCheckpoint?.nextWakeAt ?? now,
@@ -1833,7 +1833,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
       ]);
       expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
       expect(deviceResult).toEqual(expect.objectContaining({
-        nextWakeAt: codexRetryAt,
+        nextWakeAt: now,
+        nextWakeReason: "device-sync.reconcile",
         progressed: false,
       }));
       await deviceResult.afterCheckpoint?.();

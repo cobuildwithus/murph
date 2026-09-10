@@ -161,16 +161,11 @@ describe("hosted runtime delegated foreground owner", () => {
       });
 
       const finalPending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-      expect(finalPending).toEqual(device ? [device] : []);
+      expect(finalPending).toEqual([]);
       expect(assistantPhaseCalls).toBe(1);
       expect(delegatedConsumptionCount).toBe(1);
-      if (device) {
-        assert.equal(result.status, "scheduled");
-        assert.equal(result.nextWakeAt, TEST_NOW);
-        assert.equal(result.nextWakeReason, "device-sync.reconcile");
-      } else {
-        assert.equal(result.status, "idle");
-      }
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
     } finally {
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });

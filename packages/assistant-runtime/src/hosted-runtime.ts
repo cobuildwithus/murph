@@ -2027,6 +2027,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         activeWorkspace?.systemMailboxProgressGeneration ?? null,
     };
     const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      workspace: activeWorkspace,
       createSnapshot: createAbortGuardedCheckpointSnapshot,
       metadata: checkpointMetadata,
     });
@@ -4760,7 +4761,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         nextWakeReason: null,
       };
       const interruption = createHostedRuntimeCheckpointWakeInterruption({
-        enabled: effects.length > 0, runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+        enabled: effects.length > 0 && options.shutdownSignal?.aborted !== true,
+        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
       });
       const effectSignal = interruption.signal
         ? AbortSignal.any([backgroundWorkSignal, interruption.signal])
@@ -4768,7 +4770,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       try {
         for (const effect of effects) {
           try {
-            effectSignal.throwIfAborted();
             const effectResult =
               effect.vaultShareProjectionFailureWake
               && (
@@ -4941,6 +4942,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     ): void => {
       if (workspace) {
         rebaseCommittedWorkspace(workspace);
+      }
+      // Due device work is represented by mailbox claims. Once effects settle,
+      // the boundary re-derives outstanding work; an old alarm is not another job.
+      if (pendingWake.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+        && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)) {
+        pendingWake = { nextWakeAt: null, nextWakeReason: null };
       }
       const durableWakeFollowsDueAssistant =
         durableWake.nextWakeAt !== null
@@ -5701,7 +5708,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const nowMs = Date.now();
         const wakeResolution = resolvePendingWakeAfterForegroundPass({
           assistantProjectedWakeKey: passProjectedAssistantWakeKey,
-          checkpointPendingBeforePass,
+          checkpointPendingBeforePass: checkpointPendingBeforePass
+            && passResult.assistantPhaseResult?.runtimeProjectionCheckpointRequested !== true,
           passWake,
           presentedProjectedAssistantWakeKey,
           previousPendingWake,
@@ -6803,6 +6811,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           options.shutdownSignal?.aborted !== true
           && imageGenerationController?.hasWork()
           && pendingDurableCheckpointEffects.length === 0
+          && readyDurableCheckpointEffects.length === 0
           && !durableCheckpointFollowUpPending
         ) {
           markIdleCheckpointTimerAfterDirtyWork();
@@ -6923,6 +6932,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       runnerInput: {
                         ...baseRunnerInput,
                         workspace,
+                        checkpointRuntimeRedactedStatus: (checkpoint) => checkpointRuntimeRedactedStatus({
+                          ...checkpoint,
+                          nextWakeAt: workspace?.nextWakeAt ?? null,
+                          nextWakeReason: workspace?.nextWakeReason ?? null,
+                        }),
                       },
                       write,
                     });
@@ -8158,7 +8172,8 @@ function shouldReplaceHostedWorkspaceInvocationWake(
 ): boolean {
   return Boolean(
     result.assistantPhaseResult
-      && result.assistantPhaseResult.progressed === true
+      && (result.assistantPhaseResult.progressed === true
+        || result.assistantPhaseResult.runtimeProjectionCheckpointRequested === true)
       && Object.hasOwn(result.assistantPhaseResult, "nextWakeAt"),
   );
 }
@@ -8180,26 +8195,22 @@ function resolvePendingWakeAfterForegroundPass(input: {
   // before the tool returns). Without this, a stale already-due carry wins
   // the preserve branch and the checkpoint silently disarms fresh due work.
   const carriedWakeIsDue =
-    input.previousPendingWake.nextWakeAt !== null
-    && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
+    hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
   const presentedAssistantYieldedToDueMailbox =
     input.presentedProjectedAssistantWakeKey !== null
     && input.assistantProjectedWakeKey === null
     && input.passWake.nextWakeReason === "mailbox"
-    && input.passWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
   const freshDueMailboxOwnerSupersedesCarriedBackground =
     carriedWakeIsDue
     && !input.previousPendingWakeIsForeground
     && input.passWake.nextWakeReason === "mailbox"
-    && input.passWake.nextWakeAt !== null
     && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
   const freshDueSupersedesCarriedDue =
     freshDueMailboxOwnerSupersedesCarriedBackground
     || (
       carriedWakeIsDue
       && !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
-      && input.passWake.nextWakeAt !== null
       && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs)
     );
   const preservePendingWakeThroughPreCheckpointPass =
@@ -8241,7 +8252,6 @@ function resolvePendingWakeAfterForegroundPass(input: {
     && !presentedAssistantYieldedToDueMailbox
     && input.presentedProjectedAssistantWakeKey !== null
     && input.assistantProjectedWakeKey === null
-    && input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
     && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs)
   ) {
@@ -8254,7 +8264,6 @@ function resolvePendingWakeAfterForegroundPass(input: {
   if (
     input.preserveDueAssistantWakeOnNoProgress
     && input.passWake.nextWakeAt === null
-    && input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
     && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs)
   ) {
