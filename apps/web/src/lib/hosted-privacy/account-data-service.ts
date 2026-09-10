@@ -27,7 +27,6 @@ import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
 } from "../device-sync/provider-label";
-import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import {
   HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
   hostedOnboardingError,
@@ -520,12 +519,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes member-scoped source-provider reminder intervals and opt-outs in the canonical account transaction.",
   },
   {
-    slug: "prisma.device_provider_application",
-    label: "Encrypted member-owned device provider applications",
-    deletion: "live-delete",
-    note: "Deletes each member-owned OAuth client application and encrypted client credentials after linked device connection rows are removed. Browser-vault export omits the client identity, ciphertext, and credentials.",
-  },
-  {
     slug: "prisma.device_sync_companion_capture_receipt",
     label: "Companion capture replay receipts",
     deletion: "live-delete",
@@ -811,8 +804,6 @@ type DeviceConnectionIdentity = {
   keyVersion: string | null;
   metadataJson: Prisma.JsonValue;
   provider: string;
-  providerApplicationId: string | null;
-  providerApplicationRevision: number | null;
   providerAccountBlindIndex: string;
   providerConfigKey: string | null;
   refreshLeaseExpiresAt: Date | null;
@@ -2483,8 +2474,6 @@ function buildDeviceConnectionAuthorityFingerprint(
         connection.externalAccountIdEncrypted,
         connection.credentialKind,
         connection.providerConfigKey,
-        connection.providerApplicationId,
-        connection.providerApplicationRevision,
         connection.accessTokenEncrypted,
         connection.accessTokenExpiresAt instanceof Date
           ? connection.accessTokenExpiresAt.toISOString()
@@ -3731,11 +3720,6 @@ async function deleteHostedAccountPrismaRows(input: {
           DELETE FROM hosted_web_internal_request_nonce AS nonce
           WHERE nonce.user_id IN (SELECT id FROM target_members)
           RETURNING 1
-        ),
-        deleted_device_provider_applications AS (
-          DELETE FROM device_provider_application AS application
-          WHERE application.member_id IN (SELECT id FROM target_members)
-          RETURNING 1
         )
         SELECT
           (SELECT count(*) FROM deleted_mailbox_lane_counters)
@@ -3809,9 +3793,7 @@ async function deleteHostedAccountPrismaRows(input: {
           (SELECT count(*) FROM deleted_device_browser_nonces)
             AS "prisma.device_browser_assertion_nonce",
           (SELECT count(*) FROM deleted_web_internal_nonces)
-            AS "prisma.hosted_web_internal_request_nonce",
-          (SELECT count(*) FROM deleted_device_provider_applications)
-            AS "prisma.device_provider_application"
+            AS "prisma.hosted_web_internal_request_nonce"
       `,
     ),
   );
@@ -3883,8 +3865,6 @@ async function listDeviceConnectionIdentities(input: {
       keyVersion: true,
       metadataJson: true,
       provider: true,
-      providerApplicationId: true,
-      providerApplicationRevision: true,
       providerAccountBlindIndex: true,
       providerConfigKey: true,
       refreshLeaseExpiresAt: true,
@@ -4039,7 +4019,7 @@ async function revokeDeviceProvidersBestEffort(input: {
   let registry: ReturnType<typeof createHostedDeviceSyncRegistry> | null = null;
   for (const connection of input.connections) {
     // This canonical raw field is the sole cleanup authority. Do not hydrate an
-    // account or resolve a provider application after confirmed release.
+    // account after confirmed release.
     if (connection.credentialKind === "none") {
       results.push({
         connectionId: connection.id,
@@ -4089,22 +4069,13 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
-        connectionId: connection.id,
-        memberId: input.memberId,
-        prisma: controlPlane.store.prisma,
-        provider: connection.provider,
-        resolveSharedRegistry: () =>
-          (registry ??= createHostedDeviceSyncRegistry(process.env)),
-      });
-      const revokeAccess = cleanup.revokeAccessOverride === undefined
-        ? cleanup.registry?.get(connection.provider)?.connectionHandler?.revokeAccess
-        : cleanup.revokeAccessOverride ?? undefined;
+      registry ??= createHostedDeviceSyncRegistry(process.env);
+      const revokeAccess = registry.get(connection.provider)?.connectionHandler?.revokeAccess;
 
       if (!revokeAccess) {
         results.push({
           connectionId: connection.id,
-          errorCode: cleanup.warning?.code ?? "PROVIDER_REVOKE_NOT_CONFIGURED",
+          errorCode: "PROVIDER_REVOKE_NOT_CONFIGURED",
           providerLabel: resolveDeviceConnectionProviderLabel(connection),
           status: "failed",
           warningCode: null,

@@ -3523,8 +3523,7 @@ function createHostedRuntimeDeviceSecretRecord(input: {
     nextReconcileAt: null,
     provider: "junction",
     providerAccountBlindIndex: `blind-${input.connectionId}`,
-    providerApplicationId: null,
-    providerApplicationRevision: null,
+
     providerConfigKey: null,
     refreshLeaseExpiresAt: null,
     refreshLeaseOwner: null,

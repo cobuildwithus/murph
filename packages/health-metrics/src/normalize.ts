@@ -20,6 +20,52 @@ const HOUR_INTENT_DURATION_ALIASES = new Set([
   "total_sleep_hours",
 ].map(normalizeMetricKey));
 
+const MMOL_TO_MG_DL_BY_METRIC = new Map<string, number>([
+  ["glucose", 18.0182],
+  ["ldl-c", 38.67],
+  ["hdl-c", 38.67],
+  ["triglycerides", 88.57],
+  ["calcium", 4],
+  ["serum-calcium", 4],
+  ["total-calcium", 4],
+  ["cholesterol", 38.67],
+  ["cholesterol-total", 38.67],
+  ["total-cholesterol", 38.67],
+  ["serum-uric-acid", 16.812],
+  ["urate", 16.812],
+  ["uric-acid", 16.812],
+]);
+
+type MetricValueNormalizer = (value: number, unit: string | null, label: string) => MetricValueNormalization;
+
+// Exact units come from the catalog; only conversion and source-unit exceptions need routing here.
+const METRIC_VALUE_NORMALIZERS = new Map<string, MetricValueNormalizer>([
+  ["albumin", normalizeAlbumin],
+  ["body-weight", normalizeWeight],
+  ["lean-body-mass", normalizeWeight],
+  ["waist-circumference", normalizeLengthCentimeters],
+  ["bone-mass-percentage", normalizePercent],
+  ["body-fat-percentage", normalizePercent],
+  ["body-water-percentage", normalizePercent],
+  ["muscle-mass-percentage", normalizePercent],
+  ["lymphocyte-percentage", normalizePercent],
+  ["red-cell-distribution-width", normalizePercent],
+  ["creatinine", normalizeCreatinine],
+  ["blood-urea-nitrogen", normalizeBloodUreaNitrogen],
+  ["bilirubin", normalizeBilirubin],
+  ["bilirubin-total", normalizeBilirubin],
+  ["total-bilirubin", normalizeBilirubin],
+  ["apob", normalizeApoB],
+  ["white-blood-cell-count", normalizeCellCount],
+  ["deep-sleep-minutes", normalizeDurationMinutes],
+  ["rem-sleep-minutes", normalizeDurationMinutes],
+  ["sleep-duration-variability-minutes", normalizeDurationMinutes],
+  ["sleep-midpoint-variability-minutes", normalizeDurationMinutes],
+  ["total-sleep-minutes", normalizeDurationMinutes],
+  ["sleep-score", normalizeHundredPointScore],
+  ["readiness-score", normalizeHundredPointScore],
+]);
+
 interface MetricValueNormalizationInput {
   metricKey: string;
   unit: string | null;
@@ -49,84 +95,14 @@ function normalizeMetricValueForScope(
     return { canonicalUnit: null, canonicalValue: null, unit, warnings: [] };
   }
 
-  switch (definition.key) {
-    case "albumin":
-      return normalizeAlbumin(input.value, unit);
-    case "body-weight":
-    case "lean-body-mass":
-      return normalizeWeight(input.value, unit);
-    case "waist-circumference":
-      return normalizeLengthCentimeters(input.value, unit, definition.displayName);
-    case "bone-mass-percentage":
-    case "body-fat-percentage":
-    case "body-water-percentage":
-    case "hba1c":
-    case "lymphocyte-percentage":
-    case "muscle-mass-percentage":
-    case "red-cell-distribution-width":
-      return normalizePercent(input.value, unit, definition.displayName);
-    case "creatinine":
-      return normalizeCreatinine(input.value, unit);
-    case "blood-urea-nitrogen":
-      return normalizeBloodUreaNitrogen(input.value, unit);
-    case "egfr":
-      return normalizeExactUnit(input.value, unit, "mL/min/1.73m^2", definition.displayName);
-    case "glucose":
-      return normalizeMassConcentration(input.value, unit, "mg/dL", 18.0182, definition.displayName);
-    case "ldl-c":
-    case "hdl-c":
-      return normalizeMassConcentration(input.value, unit, "mg/dL", 38.67, definition.displayName);
-    case "triglycerides":
-      return normalizeMassConcentration(input.value, unit, "mg/dL", 88.57, definition.displayName);
-    case "calcium":
-    case "serum-calcium":
-    case "total-calcium":
-      return normalizeMassConcentration(input.value, unit, "mg/dL", 4, definition.displayName);
-    case "cholesterol":
-    case "cholesterol-total":
-    case "total-cholesterol":
-      return normalizeMassConcentration(input.value, unit, "mg/dL", 38.67, definition.displayName);
-    case "serum-uric-acid":
-    case "urate":
-    case "uric-acid":
-      return normalizeMassConcentration(input.value, unit, "mg/dL", 16.812, definition.displayName);
-    case "bilirubin":
-    case "bilirubin-total":
-    case "total-bilirubin":
-      return normalizeMicromolarMassConcentration(input.value, unit, 17.1, definition.displayName);
-    case "apob":
-      return normalizeApoB(input.value, unit);
-    case "hs-crp":
-      return normalizeExactUnit(input.value, unit, "mg/L", definition.displayName);
-    case "ferritin":
-      return normalizeExactUnit(input.value, unit, "ng/mL", definition.displayName);
-    case "mean-corpuscular-hemoglobin":
-      return normalizeExactUnit(input.value, unit, "pg", definition.displayName);
-    case "mean-corpuscular-hemoglobin-concentration":
-      return normalizeExactUnit(input.value, unit, "g/dL", definition.displayName);
-    case "mean-corpuscular-volume":
-      return normalizeExactUnit(input.value, unit, "fL", definition.displayName);
-    case "thyroid-stimulating-hormone":
-      return normalizeExactUnit(input.value, unit, "mIU/L", definition.displayName);
-    case "white-blood-cell-count":
-      return normalizeCellCount(input.value, unit, definition.displayName);
-    case "alkaline-phosphatase":
-    case "alt":
-    case "ast":
-    case "ggt":
-      return normalizeExactUnit(input.value, unit, "U/L", definition.displayName);
-    case "deep-sleep-minutes":
-    case "rem-sleep-minutes":
-    case "sleep-duration-variability-minutes":
-    case "sleep-midpoint-variability-minutes":
-    case "total-sleep-minutes":
-      return normalizeDurationMinutes(input.value, unit, definition.displayName);
-    case "sleep-score":
-    case "readiness-score":
-      return normalizeHundredPointScore(input.value, unit, definition.displayName);
-    default:
-      return normalizeDeclaredMetricUnit(input.value, unit, definition);
+  const mmolToMgDl = MMOL_TO_MG_DL_BY_METRIC.get(definition.key);
+  if (mmolToMgDl !== undefined) {
+    return normalizeMassConcentration(input.value, unit, "mg/dL", mmolToMgDl, definition.displayName);
   }
+  const normalize = METRIC_VALUE_NORMALIZERS.get(definition.key);
+  return normalize
+    ? normalize(input.value, unit, definition.displayName)
+    : normalizeDeclaredMetricUnit(input.value, unit, definition);
 }
 
 function normalizeDeclaredMetricUnit(
@@ -473,10 +449,9 @@ function normalizeMassConcentration(
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, canonicalUnit)] };
 }
 
-function normalizeMicromolarMassConcentration(
+function normalizeBilirubin(
   value: number,
   unit: string | null,
-  micromolesPerMgDl: number,
   label: string,
 ): MetricValueNormalization {
   if (!unit || unitsEquivalent(unit, "mg/dL")) {
@@ -485,7 +460,7 @@ function normalizeMicromolarMassConcentration(
   if (unitsEquivalent(unit, "umol/L")) {
     return {
       canonicalUnit: "mg/dL",
-      canonicalValue: Number((value / micromolesPerMgDl).toFixed(4)),
+      canonicalValue: Number((value / 17.1).toFixed(4)),
       unit,
       warnings: [],
     };

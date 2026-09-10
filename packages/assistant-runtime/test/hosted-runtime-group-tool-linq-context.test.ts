@@ -7,7 +7,7 @@ import type {
 
 import {
   createHostedGroupToolWithCurrentTurnContext,
-} from "../src/hosted-runtime/workspace-assistant-phase.ts";
+} from "../src/hosted-runtime/group-tool-context.ts";
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
 import type { HostedAssistantEmailDeliveryContext } from "../src/hosted-runtime/email-delivery-context.ts";
 

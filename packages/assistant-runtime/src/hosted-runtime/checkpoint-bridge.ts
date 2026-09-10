@@ -1,7 +1,4 @@
 import type {
-  HostedExecutionSnapshotRef,
-} from "@murphai/hosted-execution/contracts";
-import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -43,39 +40,6 @@ export class HostedRuntimeBridgeCheckpointLeaseError extends Error {
   }
 }
 
-export interface HostedRuntimeBridgeCheckpointInput {
-  checkpointWorkspace(
-    request: HostedWorkspaceCheckpointRequest,
-  ): Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse;
-  readCurrentLease():
-    | HostedRuntimeBridgeCheckpointLease
-    | null
-    | Promise<HostedRuntimeBridgeCheckpointLease | null>;
-  request: HostedWorkspaceCheckpointRequest;
-  snapshotWorkspace(
-    context: HostedRuntimeBridgeCheckpointContext,
-  ): Promise<Uint8Array | ArrayBuffer> | Uint8Array | ArrayBuffer;
-  userId: string;
-  writeBundle(
-    context: HostedRuntimeBridgeBundleWriteContext,
-  ): Promise<HostedExecutionSnapshotRef> | HostedExecutionSnapshotRef;
-}
-
-export interface HostedRuntimeBridgeSnapshotInput {
-  readCurrentLease():
-    | HostedRuntimeBridgeCheckpointLease
-    | null
-    | Promise<HostedRuntimeBridgeCheckpointLease | null>;
-  request: HostedWorkspaceCheckpointRequest;
-  snapshotWorkspace(
-    context: HostedRuntimeBridgeCheckpointContext,
-  ): Promise<Uint8Array | ArrayBuffer> | Uint8Array | ArrayBuffer;
-  userId: string;
-  writeBundle(
-    context: HostedRuntimeBridgeBundleWriteContext,
-  ): Promise<HostedExecutionSnapshotRef> | HostedExecutionSnapshotRef;
-}
-
 export interface HostedRuntimeBridgeWebCheckpointInput {
   checkpointWorkspace(
     request: HostedWorkspaceCheckpointRequest,
@@ -86,66 +50,6 @@ export interface HostedRuntimeBridgeWebCheckpointInput {
     | Promise<HostedRuntimeBridgeCheckpointLease | null>;
   request: HostedWorkspaceCheckpointRequest;
   userId: string;
-}
-
-export interface HostedRuntimeBridgeCheckpointContext {
-  lease: HostedRuntimeBridgeCheckpointLease;
-  request: HostedWorkspaceCheckpointRequest;
-  userId: string;
-}
-
-export interface HostedRuntimeBridgeBundleWriteContext
-  extends HostedRuntimeBridgeCheckpointContext {
-  bundle: Uint8Array;
-}
-
-export async function checkpointHostedRuntimeBridgeWorkspace(
-  input: HostedRuntimeBridgeCheckpointInput,
-): Promise<HostedWorkspaceCheckpointResponse> {
-  const snapshotRef = await snapshotHostedRuntimeBridgeWorkspaceBundle(input);
-
-  return await checkpointHostedRuntimeBridgeWebWorkspace({
-    checkpointWorkspace: input.checkpointWorkspace,
-    readCurrentLease: input.readCurrentLease,
-    request: {
-      ...input.request,
-      snapshotRef,
-    },
-    userId: input.userId,
-  });
-}
-
-export async function snapshotHostedRuntimeBridgeWorkspaceBundle(
-  input: HostedRuntimeBridgeSnapshotInput,
-): Promise<HostedExecutionSnapshotRef> {
-  const initialLease = requireCheckpointLeaseMatchesRequest({
-    lease: await input.readCurrentLease(),
-    request: input.request,
-    stage: "before_snapshot",
-    userId: input.userId,
-  });
-
-  const snapshotBundle = asUint8Array(await input.snapshotWorkspace({
-    lease: initialLease,
-    request: input.request,
-    userId: input.userId,
-  }));
-
-  const bundleWriteLease = requireCheckpointLeaseMatchesRequest({
-    lease: await input.readCurrentLease(),
-    request: input.request,
-    stage: "before_bundle_write",
-    userId: input.userId,
-  });
-
-  const snapshotRef = await input.writeBundle({
-    bundle: snapshotBundle,
-    lease: bundleWriteLease,
-    request: input.request,
-    userId: input.userId,
-  });
-
-  return snapshotRef;
 }
 
 export async function checkpointHostedRuntimeBridgeWebWorkspace(
@@ -212,8 +116,4 @@ function requireCheckpointLeaseMatchesRequest(input: {
   }
 
   return input.lease;
-}
-
-function asUint8Array(value: Uint8Array | ArrayBuffer): Uint8Array {
-  return value instanceof Uint8Array ? value : new Uint8Array(value);
 }

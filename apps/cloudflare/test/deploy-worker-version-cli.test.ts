@@ -19,9 +19,13 @@ vi.mock("../scripts/deploy-artifacts.js", async () => ({
 const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
 vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
+  prepareSmallRunnerNamespaceBootstrap: vi.fn(),
   stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
-vi.mock("../scripts/stage-runner-release.ts", () => ({ stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease }));
+vi.mock("../scripts/stage-runner-release.ts", () => ({
+  stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease,
+  prepareSmallRunnerNamespaceBootstrap: releaseMocks.prepareSmallRunnerNamespaceBootstrap,
+}));
 vi.mock("../scripts/runner-release-provider.ts", () => ({ createRunnerReleaseProvider: () => releaseMocks }));
 vi.mock("../scripts/smoke-hosted-deploy.shared.ts", () => ({ runSmokeHostedDeploy: releaseMocks.runSmokeHostedDeploy }));
 const receiptMocks = vi.hoisted(() => ({
@@ -52,6 +56,41 @@ vi.mock("../scripts/container-release-receipt.js", () => ({
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
 
 describe("runDeployWorkerVersionCli", () => {
+  it("publishes the retained namespace bootstrap before staging and stops if its receipts change", async () => {
+    const trace: string[] = [];
+    releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockResolvedValue("/tmp/bootstrap.jsonc");
+    wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async args => {
+      trace.push(args[0]);
+      expect(args).toContain("--containers-rollout=none");
+      return { stdout: "deploy", stderr: "" };
+    });
+    receiptMocks.buildContainerReleaseEntries.mockImplementation(() => {
+      trace.push("check retained apps");
+      throw new Error("retained native application changed");
+    });
+    await expect(syntheticDeployment()).rejects.toThrow("retained native application changed");
+    expect(trace).toEqual(["deploy", "check retained apps"]);
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+  });
+
+  it("activates compatibility before the small rollout and never enables routing after failed convergence", async () => {
+    const trace: string[] = [];
+    const small = { name: "hosted-worker-smallrunnercontainer", className: "SmallRunnerContainer",
+      applicationId: null, namespaceId: "small-namespace", specification: {} };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving",
+      workerOnly: false, applications: [small], retirements: [],
+    }));
+    wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activate"); });
+    releaseMocks.admitApplication.mockImplementation(async () => { trace.push("small rollout"); return "created"; });
+    releaseMocks.assertApplicationReady.mockRejectedValue(new Error("small image not distributed"));
+    await expect(syntheticDeployment()).rejects.toThrow("small image not distributed");
+    expect(trace).toEqual(["activate", "small rollout"]);
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(releaseMocks.admitApplication).toHaveBeenCalledWith({ ...small, rolloutStepPercentage: 100 });
+    expect(releaseMocks.runSmokeHostedDeploy).not.toHaveBeenCalled();
+  });
   it("retires drained capacity, proves quota, activates compatibility, then rolls the serving image", async () => {
     const trace: string[] = [];
     const deployment = { active: { id: "synthetic-permanent" }, candidate: { id: "synthetic-permanent" }, previous: null };
@@ -92,6 +131,8 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
   beforeEach(() => {
+    releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockReset();
+    releaseMocks.prepareSmallRunnerNamespaceBootstrap.mockResolvedValue(null);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`,
@@ -193,7 +234,7 @@ describe("runDeployWorkerVersionCli", () => {
   it("uploads container metadata before admission without switching traffic", async () => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
-      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "DeploySmokeRunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
     }));
     let containerEnabled = false;
     wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async () => {
@@ -226,7 +267,7 @@ describe("runDeployWorkerVersionCli", () => {
   it.each(["quota rejection", "pending distribution"])("keeps serving traffic unchanged during native %s", async (failure) => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
-      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "DeploySmokeRunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
     }));
     let reject!: (error: Error) => void;
     const operation = failure === "quota rejection" ? releaseMocks.admitApplication : releaseMocks.assertApplicationReady;

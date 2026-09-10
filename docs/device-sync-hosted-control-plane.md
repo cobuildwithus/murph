@@ -687,3 +687,21 @@ Hosted execution continues to use signed internal web callbacks and hosted agent
 The browser owns presentation and explicit Google authorization only. Its persisted Google source `firstSeenAt` is also the authorization epoch used by both exact Google and Fitbit proof jobs. That existing epoch participates in their current job identity; stale queued, leased, retry, timeseries, or workout lineages cannot certify a later authorization. The wake-local hosted device-sync pass drains scheduled and webhook work, publishes source state, and then asks Web to attempt cutover. Web re-enters the existing connection mutation lock, rejects pending dirty state, evaluates importer-owned canonical evidence, and calls targeted provider revoke outside the transaction. A crash is recovered by probing that exact Fitbit provider source; only provider-confirmed inactivity is finalized locally. No migration table, queue, or second state owner exists.
 
 Deploy importer, Device Sync, and hosted-runtime consumers before the Web bundle so every cutover caller understands source-scoped evidence, per-resource fences, retry identity, and Google Health admission. Then deploy Web and smoke one explicit Google authorization. Temporary version skew leaves legacy Fitbit active rather than cutting over without complete evidence.
+
+
+## Retired member-owned provider applications
+
+Hosted Strava uses the ordinary configured-provider registry. The dormant
+member-owned application store, OAuth/connection bindings, and runtime snapshot
+credential overlays are retired. Ordinary Strava OAuth, refresh, polling, and
+revocation remain owned by the shared device-sync implementation.
+
+Before deploying this retirement, confirm that no application rows or non-null
+application binding columns remain. The provisioning writer had no production
+caller. Deploy the Web readers/writers first, retain the normal function drain
+and production-alias check, then run the postdeploy contract migration
+`20260910160000_drop_member_provider_applications_after_drain`. It refuses to
+drop unexpected retained authority. After cleanup, the first Web deployment
+without the retired schema is the rollback floor. Runtime snapshots no longer
+carry optional application overrides; ordinary configured providers work with
+old and new readers throughout the supported empty-application rollout.

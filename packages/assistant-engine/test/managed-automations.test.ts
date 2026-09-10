@@ -1307,7 +1307,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord).toMatchObject({
       assistantTargetOverride: {
         model: 'gpt-5.6-luna',
-        reasoningEffort: 'medium',
+        reasoningEffort: 'high',
       },
       schedule: { kind: 'cron', expression: '0 13 * * *' },
       slug: 'personal-patterns-update',
@@ -1345,6 +1345,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord?.instructions).toContain('Never imply cause')
     expect(patternsUpdateRecord?.instructions).toContain(
       'end with https://www.withmurph.ai/patterns on its own line',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'check that any Patterns link is exactly https://www.withmurph.ai/patterns, including www, on its own line',
     )
     expect(patternsUpdateRecord?.instructions).not.toMatch(
       /State each grade|Always state the grade|available on `\/patterns`|briefly explain that other factors/u,

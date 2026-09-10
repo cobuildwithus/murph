@@ -86,7 +86,7 @@ repo/
 - `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
 - `packages/assistantd` owns the loopback-only local assistant daemon and authenticated control plane for steady-state assistant, automation, outbox, and status operations bound to one vault.
 - `packages/assistant-runtime` owns the headless hosted runtime surface that runs bounded hosted inbox/bootstrap/assistant/outbox/device-sync workspace invocations behind an injected hosted platform context.
-- `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, projection/snapshot helpers, opaque ids, and event-log utilities.
+- `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, and opaque ids.
 - `packages/cloudflare-hosted-control` owns private Cloudflare processing/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
 - `packages/hosted-local-harness` owns the local hosted-development and hosted E2E harness, including profile selection, redacted state files, runner-bundle prep, diagnostics, and cleanup.
 - `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.

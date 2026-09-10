@@ -270,3 +270,32 @@ test("timing that fits exactly at the complete UTF-8 request limit is retained",
   assert.equal(Buffer.byteLength(sent), limit);
   assert.deepEqual(inspect(sent, padded), timing);
 });
+
+test("failure detail survives usage fitting; trimming drops whole calls without mutating queued accounting", async () => {
+  const timing = await mixedRootTiming();
+  for (const command of timing.commands) {
+    command.outcome = "error";
+    command.calls = 10;
+    command.failures = [
+      { code: "invalid_payload", stage: "validation", count: 6 },
+      { code: "conflict", stage: "persistence", count: 2 },
+    ];
+    command.droppedFailures = 2;
+  }
+  const original = structuredClone(timing);
+  const legacy = paddedLegacy(8_000);
+  const body = withTiming(legacy, timing);
+  const sent = await send(body);
+  const received = inspect(sent, legacy);
+  assert.ok(received.commands.length > 0 && received.commands.length < timing.commands.length);
+  assert.deepEqual(received.commands, original.commands.slice(0, received.commands.length));
+  assert.equal(received.droppedCalls, (original.commands.length - received.commands.length) * 10);
+  assert.deepEqual(body, withTiming(legacy, original));
+  const small = { ...emptyCliTiming(), commands: [original.commands[0]!] };
+  const malformed = { ...small, commands: [{ ...small.commands[0], failures: "PRIVATE_SENTINEL" }] };
+  const cleanLegacy = legacyRequest();
+  const normalized = inspect(await send(withTiming(cleanLegacy, malformed)), cleanLegacy);
+  assert.equal(normalized.commands[0]!.calls, 10);
+  assert.equal(normalized.commands[0]!.failures, undefined);
+  assert.equal(normalized.commands[0]!.droppedFailures, undefined);
+});

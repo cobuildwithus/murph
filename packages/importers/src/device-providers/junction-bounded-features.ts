@@ -31,6 +31,27 @@ const WORKOUT_FIELDS = new Set([
   "sourceProviderSlug", "sourceType", "sourceInstanceId",
 ]);
 
+const WORKOUT_METRIC_BOUNDS = [
+  ["distanceMeters", 0, Number.POSITIVE_INFINITY],
+  ["averageHeartRate", 20, 300],
+  ["maxHeartRate", 20, 300],
+  ["firstHalfAverageHeartRate", 20, 300],
+  ["secondHalfAverageHeartRate", 20, 300],
+  ["averageCadence", 0, 400],
+  ["maxCadence", 0, 400],
+  ["averagePower", 0, 5_000],
+  ["maxPower", 0, 5_000],
+  ["averageSpeed", 0, 150],
+  ["maxSpeed", 0, 150],
+] as const;
+
+const WORKOUT_METRIC_PAIRS = [
+  ["averageHeartRate", "maxHeartRate"],
+  ["averageCadence", "maxCadence"],
+  ["averagePower", "maxPower"],
+  ["averageSpeed", "maxSpeed"],
+] as const;
+
 const WORKOUT_SPLIT_FIELDS = new Set([
   "index", "distanceMeters", "durationSeconds", "endedAt",
   "averageHeartRate", "averageCadence", "cadenceUnit", "averagePower",
@@ -790,19 +811,10 @@ function assertFeature(
   const start = firstTimestamp(feature, ecg ? ["sessionStart"] : ["startAt"]);
   const end = firstTimestamp(feature, ecg ? ["sessionEnd"] : ["endAt"]);
   const count = finiteNumber(feature[ecg ? "voltageSampleCount" : "sampleCount"]);
-  const numericFields = ecg
+  const requiredNumericFields = ecg
     ? ["durationSeconds", "voltageMin", "voltageMax", "voltageMean", "voltageRms", "leadCount"]
-    : [
-        "durationSeconds", "distanceMeters", "averageHeartRate", "maxHeartRate",
-        "firstHalfAverageHeartRate", "secondHalfAverageHeartRate",
-        "averageCadence", "maxCadence", "averagePower", "maxPower",
-        "averageSpeed", "maxSpeed",
-      ];
-  const invalidNumber = numericFields.some((key) => {
-    const value = feature[key];
-    return (ecg || key === "durationSeconds" || value !== undefined)
-      && finiteNumber(value) === undefined;
-  });
+    : ["durationSeconds"];
+  const invalidNumber = requiredNumericFields.some((key) => finiteNumber(feature[key]) === undefined);
   const boundedShape = Object.entries(feature).every(
     ([key, value]) => key === "splits"
       ? !ecg && Array.isArray(value)
@@ -811,21 +823,9 @@ function assertFeature(
   const policy = resolveJunctionTimeseriesResourcePolicy(resource);
   const countLimit = ecg ? policy?.maxSamplesPerWindow : policy?.maxSamplesPerRecord;
   const duration = finiteNumber(feature.durationSeconds);
-  const distance = finiteNumber(feature.distanceMeters);
-  const averageHeartRate = finiteNumber(feature.averageHeartRate);
-  const maxHeartRate = finiteNumber(feature.maxHeartRate);
-  const firstHalfAverageHeartRate = finiteNumber(feature.firstHalfAverageHeartRate);
-  const secondHalfAverageHeartRate = finiteNumber(feature.secondHalfAverageHeartRate);
-  const averageCadence = finiteNumber(feature.averageCadence);
-  const maxCadence = finiteNumber(feature.maxCadence);
-  const averagePower = finiteNumber(feature.averagePower);
-  const maxPower = finiteNumber(feature.maxPower);
-  const averageSpeed = finiteNumber(feature.averageSpeed);
-  const maxSpeed = finiteNumber(feature.maxSpeed);
   const voltageMin = finiteNumber(feature.voltageMin);
   const voltageMax = finiteNumber(feature.voltageMax);
   const voltageMean = finiteNumber(feature.voltageMean);
-  const voltageRms = finiteNumber(feature.voltageRms);
   const leadCount = finiteNumber(feature.leadCount);
   if (
     feature.schema !== schema
@@ -844,35 +844,41 @@ function assertFeature(
     || invalidNumber
     || duration === undefined
     || duration < 0
-    || (!ecg && distance !== undefined && distance < 0)
-    || (!ecg && averageHeartRate !== undefined && (averageHeartRate < 20 || averageHeartRate > 300))
-    || (!ecg && maxHeartRate !== undefined && (maxHeartRate < 20 || maxHeartRate > 300))
-    || (!ecg && averageHeartRate !== undefined && maxHeartRate !== undefined && averageHeartRate > maxHeartRate)
-    || (!ecg && firstHalfAverageHeartRate !== undefined && (firstHalfAverageHeartRate < 20 || firstHalfAverageHeartRate > 300))
-    || (!ecg && secondHalfAverageHeartRate !== undefined && (secondHalfAverageHeartRate < 20 || secondHalfAverageHeartRate > 300))
-    || (!ecg && averageCadence !== undefined && (averageCadence < 0 || averageCadence > 400))
-    || (!ecg && maxCadence !== undefined && (maxCadence < 0 || maxCadence > 400))
-    || (!ecg && averageCadence !== undefined && maxCadence !== undefined && averageCadence > maxCadence)
-    || (!ecg && averagePower !== undefined && (averagePower < 0 || averagePower > 5_000))
-    || (!ecg && maxPower !== undefined && (maxPower < 0 || maxPower > 5_000))
-    || (!ecg && averagePower !== undefined && maxPower !== undefined && averagePower > maxPower)
-    || (!ecg && averageSpeed !== undefined && (averageSpeed < 0 || averageSpeed > 150))
-    || (!ecg && maxSpeed !== undefined && (maxSpeed < 0 || maxSpeed > 150))
-    || (!ecg && averageSpeed !== undefined && maxSpeed !== undefined && averageSpeed > maxSpeed)
-    || (!ecg && feature.workoutDayKey !== undefined && strictDayKey(firstString(feature, ["workoutDayKey"])) !== feature.workoutDayKey)
-    || (!ecg && !firstTimestamp(feature, ["version"]))
-    || (ecg && (voltageMin === undefined || voltageMax === undefined || voltageMean === undefined || voltageRms === undefined))
-    || (ecg && voltageMin !== undefined && voltageMax !== undefined && voltageMin > voltageMax)
-    || (ecg && voltageMean !== undefined && voltageMin !== undefined && voltageMean < voltageMin)
-    || (ecg && voltageMean !== undefined && voltageMax !== undefined && voltageMean > voltageMax)
-    || (ecg && voltageRms !== undefined && voltageRms < 0)
-    || (ecg && (leadCount === undefined || !Number.isSafeInteger(leadCount) || leadCount < 1))
-    || (ecg && !firstString(feature, ["voltageUnit"]))
+    || (!ecg && (
+      WORKOUT_METRIC_BOUNDS.some(([key, minimum, maximum]) =>
+        optionalNumberOutsideRange(feature[key], minimum, maximum)
+      )
+      || WORKOUT_METRIC_PAIRS.some(([average, maximum]) =>
+        numbersOutOfOrder(finiteNumber(feature[average]), finiteNumber(feature[maximum]))
+      )
+      || (feature.workoutDayKey !== undefined && strictDayKey(firstString(feature, ["workoutDayKey"])) !== feature.workoutDayKey)
+      || !firstTimestamp(feature, ["version"])
+    ))
+    || (ecg && (
+      numbersOutOfOrder(voltageMin, voltageMax)
+      || numbersOutOfOrder(voltageMin, voltageMean)
+      || numbersOutOfOrder(voltageMean, voltageMax)
+      || optionalNumberOutsideRange(feature.voltageRms, 0, Number.POSITIVE_INFINITY)
+      || leadCount === undefined
+      || !Number.isSafeInteger(leadCount)
+      || leadCount < 1
+      || !firstString(feature, ["voltageUnit"])
+    ))
   ) invalid(`${resource} feature was invalid`);
   if (!ecg) {
     assertWorkoutSplits(feature.splits);
   }
   consistentId(feature, ecg ? ECG_IDS : WORKOUT_IDS, "feature");
+}
+
+function optionalNumberOutsideRange(value: unknown, minimum: number, maximum: number): boolean {
+  if (value === undefined) return false;
+  const number = finiteNumber(value);
+  return number === undefined || number < minimum || number > maximum;
+}
+
+function numbersOutOfOrder(lower: number | undefined, upper: number | undefined): boolean {
+  return lower !== undefined && upper !== undefined && lower > upper;
 }
 
 function assertWorkoutSplits(value: unknown): void {
