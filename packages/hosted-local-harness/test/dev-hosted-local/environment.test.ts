@@ -1709,6 +1709,7 @@ describe("buildWranglerLocalDevConfig", () => {
       "NextRunnerContainer",
       "DeploySmokeRunnerContainer",
       "StandbyRunnerContainer",
+      "SmallRunnerContainer",
     ]);
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
@@ -1804,6 +1805,8 @@ describe("buildWranglerLocalDevConfig", () => {
       },
       max_instances: 0,
     });
+    expect(containers[4]).toMatchObject({ class_name: "SmallRunnerContainer", max_instances: 1,
+      image_vars: { HOSTED_RUNNER_CONTAINER_CLASS: "SmallRunnerContainer" } });
   });
 
   it("uses an isolated worker name for worktree-scoped dev runs", () => {
