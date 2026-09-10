@@ -119,14 +119,17 @@ const EXPECTED_SUBAGENT_USAGE_HINT = [
 // failures are hard failures. The optional path selects a freshly packaged CLI
 // in an ALREADY permitted location, never a source loader or an extra grant.
 testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions and environment on cold and warm turns", {
-  timeout: 240_000,
+  timeout: 300_000,
 }, async () => {
   const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
   const cliBin = process.env.MURPH_HOSTED_CLI_TIMING_CLI_BIN ??
     path.join(repositoryRoot, "packages/cli/dist/bin.js");
   assert.ok(path.isAbsolute(cliBin), "MURPH_HOSTED_CLI_TIMING_CLI_BIN must be absolute.");
-  assert.equal(path.basename(cliBin), "bin.js", "Use the actual packaged dist/bin.js entry.");
-  assert.equal(path.basename(path.dirname(cliBin)), "dist");
+  assert.equal(path.basename(cliBin), "bin.js", "Use the actual packaged CLI entry.");
+  const entryDirectory = path.basename(path.dirname(cliBin));
+  assert.ok(entryDirectory === "dist" || entryDirectory === ".bundle",
+    "Use dist/bin.js or the assembled runner's .bundle/bin.js.");
+  const bundled = entryDirectory === ".bundle";
   assert.equal((await stat(cliBin)).isFile(), true, "Prepare the built CLI artifact before enabling this gate.");
   const cliPackage = parseJsonObject(await readFile(path.resolve(cliBin, "../../package.json"), "utf8"));
   assert.equal(cliPackage?.name, "@murphai/murph", "The entry must belong to the real CLI package.");
@@ -181,12 +184,12 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
     ]) {
       command = buildCliTimingParityCommand([
         cliBin, ...route.args, "--vault", vaultRoot, "--format", "json",
-      ]);
+      ], bundled);
       const priorSessionId = resumeSessionId;
       const stages: string[] = [];
       const requestStart = requests.length;
       const result = await executeCodexAppServerTurn({
-        abortSignal: AbortSignal.timeout(60_000),
+        abortSignal: AbortSignal.timeout(bundled ? 90_000 : 60_000),
         approvalPolicy: "never", codexCommand, codexHome, env,
         permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
         sandbox: undefined,
@@ -211,7 +214,7 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
       // a CLI launch. Do not assume nested tools emit commandExecution items.
       const output = readCliTimingShellOutput(requests[requestStart + 1]!,
         `call_resp_hosted_codex_config_${requestStart + 1}`);
-      assertCliTimingChildParity(output);
+      assertCliTimingChildParity(output, bundled);
       const diagnostic = result.jsonEvents.find((event) =>
         isJsonObject(event) && event.method === CLI_TIMING_EVENT_METHOD);
       assert.ok(isJsonObject(diagnostic) && isJsonObject(diagnostic.params));
@@ -246,18 +249,20 @@ function quoteCliTimingShellLiteral(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function buildCliTimingParityCommand(argv: readonly string[]): string {
-  // Fixture launcher only: run the ACTUAL built entry twice, under the SAME
+function buildCliTimingParityCommand(argv: readonly string[], bundled = false): string {
+  // Fixture launcher only: run the ACTUAL built entry under the SAME
   // hosted shell/profile. Packaging happens before the gate, not by copying a
   // source checkout into it. No source loader or extra runtime roots.
+  // Bundled mode also runs the installed dist entry with telemetry disabled.
+  // This proves bundled/unbundled parity without adding another timing report.
   // Base64 preserves each output stream's exact bytes, including empty output.
   const fixture = `
     const { spawnSync } = require("node:child_process");
     if (!process.env.MURPH_CLI_TIMING_ENDPOINT) throw Error("Missing diagnostic admission");
     const baselineEnv = { ...process.env };
     delete baselineEnv.MURPH_CLI_TIMING_ENDPOINT;
-    function run(env) {
-      const child = spawnSync(process.execPath, process.argv.slice(1), {
+    function run(env, argv = process.argv.slice(1)) {
+      const child = spawnSync(process.execPath, argv, {
         env, timeout: 25000, maxBuffer: 1024 * 1024,
       });
       return { status: child.status, signal: child.signal,
@@ -265,7 +270,14 @@ function buildCliTimingParityCommand(argv: readonly string[]): string {
         stdout: child.stdout?.toString("base64") ?? null,
         stderr: child.stderr?.toString("base64") ?? null };
     }
-    process.stdout.write(JSON.stringify({ baseline: run(baselineEnv), enabled: run(process.env) }) + "\\n");
+    const proof = { baseline: run(baselineEnv), enabled: run(process.env) };
+    if (${bundled}) {
+      const path = require("node:path");
+      const argv = process.argv.slice(1);
+      argv[0] = path.resolve(argv[0], "../../dist/bin.js");
+      proof.unbundled = run(baselineEnv, argv);
+    }
+    process.stdout.write(JSON.stringify(proof) + "\\n");
   `;
   return "OPENSSL_CONF=/dev/null " + [process.execPath, "-e", fixture, "--", ...argv]
     .map(quoteCliTimingShellLiteral).join(" ");
@@ -292,10 +304,19 @@ function readCliTimingShellOutput(request: string, callId: string): string {
   return result.output as string;
 }
 
-function assertCliTimingChildParity(output: string): void {
+function assertCliTimingChildParity(output: string, bundled = false): void {
   const proof = parseJsonObject(output);
   assert.ok(proof && isJsonObject(proof.baseline) && isJsonObject(proof.enabled), output);
-  for (const child of [proof.baseline, proof.enabled]) {
+  if (bundled) {
+    assert.ok(isJsonObject(proof.unbundled), "Require the assembled bundle's installed dist baseline.");
+    assert.equal(proof.unbundled.stdout, proof.baseline.stdout, "Bundled stdout bytes changed.");
+    assert.equal(proof.unbundled.stderr, proof.baseline.stderr, "Bundled stderr bytes changed.");
+  }
+  const children = bundled
+    ? [proof.baseline, proof.enabled, proof.unbundled]
+    : [proof.baseline, proof.enabled];
+  for (const child of children) {
+    assert.ok(isJsonObject(child));
     assert.equal(child.error, null, "The built child must launch, not just return a shell success.");
     assert.equal(child.signal, null);
     assert.equal(typeof child.stdout, "string");
@@ -313,6 +334,18 @@ function assertCliTimingChildParity(output: string): void {
 }
 
 // These deterministic source tests stay mandatory when the built gate is off.
+test("shared CLI timing bundled parity requires a successful matching installed baseline", () => {
+  const child = { status: 0, signal: null, error: null,
+    stdout: Buffer.from('{"summary":null}\n').toString("base64"), stderr: "" };
+  const proof = { baseline: child, enabled: child, unbundled: child };
+  assert.doesNotThrow(() => assertCliTimingChildParity(JSON.stringify(proof), true));
+  for (const unbundled of [undefined, { ...child, status: 1 },
+    { ...child, signal: "SIGTERM" }, { ...child, error: "synthetic launch failure" },
+    { ...child, stdout: "" }, { ...child, stderr: "c3ludGhldGlj" }]) {
+    assert.throws(() => assertCliTimingChildParity(JSON.stringify({ ...proof, unbundled }), true));
+  }
+});
+
 test("shared CLI timing fixture reads native framing and selects only the current call", () => {
   const output = "synthetic stdout\n";
   const line = CLI_TIMING_SHELL_RESULT_PREFIX + JSON.stringify({ exitCode: 0, output });
