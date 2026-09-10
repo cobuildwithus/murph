@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "generated-image-expiry-cleanup",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Complete cleanup for expired generated images",
+    "summary": "Generated-image captures can finish their scheduled cleanup even when the image itself has already expired.",
+    "details": "Cleanup keeps the existing 14-day retention window and does not restore expired images.",
+    "relevanceTags": ["privacy", "images"],
+    "sourcePullRequests": []
+  }
+}

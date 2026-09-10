@@ -29,6 +29,10 @@ This is a directory, not a second copy of the system contracts. Start with
 owners relevant to the task. A row's date is its recorded verification date,
 not a guarantee that every claim was checked in this cleanup.
 
+Generated-image retirement after hosted media expiry is owned by
+`agent-docs/RELIABILITY.md`; implementation and verification are tracked in
+`agent-docs/exec-plans/active/2026-09-10-generated-image-retention-expiry-fix.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
