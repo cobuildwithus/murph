@@ -240,7 +240,10 @@ no-mutation-before-reply behavior explicit without adding a second evidence or
 session pipeline.
 
 Hosted usage-credit coverage is split across focused hosted-web unit
-and component tests. The allowance suites exercise enforced exhaustion,
+and component tests. `hosted-execution-usage-period-postgres.test.ts` runs with
+`MURPH_TEST_POSTGRES_CONCURRENCY=1` and a local migrated `DATABASE_URL`; it
+proves two-statement period acquisition, creation/reuse, driver field types,
+and committed spending visibility after row-lock contention. The allowance suites exercise enforced exhaustion,
 included-first settlement, carryover balance, and crossing-operation behavior;
 credit-ledger suites exercise beneficiary-lock call ordering, unique
 grants/debits, and projection updates; route and purchase-service suites

@@ -178,6 +178,7 @@ export async function readHostedRuntimeReconciliationFacts(
         : null,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: false,
@@ -200,6 +201,7 @@ export async function readHostedRuntimeReconciliationFacts(
       workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: false,
@@ -239,6 +241,7 @@ export async function readHostedRuntimeReconciliationFacts(
       workspace: null,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: false,
@@ -299,6 +302,7 @@ export async function readHostedRuntimeReconciliationFacts(
       workspace: workspaceWithSystemMailboxFrontier,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: false,
@@ -330,6 +334,7 @@ export async function readHostedRuntimeReconciliationFacts(
         workspace: workspaceWithSystemMailboxFrontier,
       });
       emitHostedRuntimeReconciliationFacts({
+        now,
         facts,
         request: input,
         usageGateRequired: true,
@@ -382,6 +387,7 @@ export async function readHostedRuntimeReconciliationFacts(
         workspace: workspaceWithSystemMailboxFrontier,
       });
       emitHostedRuntimeReconciliationFacts({
+        now,
         facts,
         request: input,
         usageGateRequired: true,
@@ -397,6 +403,7 @@ export async function readHostedRuntimeReconciliationFacts(
       workspace: workspaceWithSystemMailboxFrontier,
     });
     emitHostedRuntimeReconciliationFacts({
+      now,
       facts,
       request: input,
       usageGateRequired: true,
@@ -412,6 +419,7 @@ export async function readHostedRuntimeReconciliationFacts(
     workspace: workspaceWithSystemMailboxFrontier,
   });
   emitHostedRuntimeReconciliationFacts({
+    now,
     facts,
     request: input,
     usageGateRequired: false,
@@ -706,6 +714,7 @@ function parseHostedMailboxReconciliationSeq(
 }
 
 function emitHostedRuntimeReconciliationFacts(event: {
+  now: Date;
   facts: HostedRuntimeReconciliationFacts;
   request: HostedRuntimeReconciliationFactsRequest & {
     decisionSource?: HostedRuntimeReconciliationDecisionSource;
@@ -713,42 +722,46 @@ function emitHostedRuntimeReconciliationFacts(event: {
   usageGateRequired: boolean;
   usageGateStatus: HostedRuntimeReconciliationUsageGateStatus;
 }): void {
+  const { blocked, mailboxLag, workspace } = event.facts;
+  const workspaceWakeDue = [
+    workspace?.nextWakeAt,
+    workspace?.nextDefaultProcessingWakeAt,
+    workspace?.inboxMediaRetentionWakeAt,
+  ].some((at) => isHostedRuntimeWakeDue(at ?? null, event.now));
+
   console.info("Hosted runtime reconciliation facts.", {
-    blockedReason: event.facts.blocked?.reason ?? null,
+    blockedReason: blocked?.reason ?? null,
     component: "hosted.orchestration.reconciliation",
-    conversationLagPresent: hasHostedMailboxLag(event.facts.mailboxLag, "conversation"),
+    conversationLagPresent: hasHostedMailboxLag(mailboxLag, "conversation"),
     decisionSource: event.request.decisionSource ?? "workflow",
-    mailboxLagLaneCount: event.facts.mailboxLag.length,
-    retryAtPresent: event.facts.blocked?.retryAt !== null
-      && event.facts.blocked?.retryAt !== undefined,
+    mailboxLagLaneCount: mailboxLag.length,
+    retryAtPresent: typeof blocked?.retryAt === "string",
     schema: HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA,
-    status: event.facts.blocked
+    status: blocked
       ? "blocked"
-      : hasHostedMailboxLag(event.facts.mailboxLag)
+      : hasHostedMailboxLag(mailboxLag)
+        || workspaceWakeDue
         ? "work_pending"
         : "idle",
     usageGateRequired: event.usageGateRequired,
     usageGateStatus: event.usageGateStatus,
     userIdPresent: event.request.userId.length > 0,
     workspaceInboxMediaRetentionWakeAtPresent:
-      event.facts.workspace?.inboxMediaRetentionWakeAt !== null
-        && event.facts.workspace?.inboxMediaRetentionWakeAt !== undefined,
+      typeof workspace?.inboxMediaRetentionWakeAt === "string",
     workspaceNextWakeAtPresent:
-      event.facts.workspace?.nextWakeAt !== null
-        && event.facts.workspace?.nextWakeAt !== undefined,
+      typeof workspace?.nextWakeAt === "string",
     workspaceNextWakeReason: describeHostedRuntimeWakeReasonForLog(
-      event.facts.workspace?.nextWakeReason ?? null,
+      workspace?.nextWakeReason ?? null,
     ),
     workspaceNextDefaultProcessingWakeAtPresent:
-      event.facts.workspace?.nextDefaultProcessingWakeAt !== null
-        && event.facts.workspace?.nextDefaultProcessingWakeAt !== undefined,
+      typeof workspace?.nextDefaultProcessingWakeAt === "string",
     workspaceNextDefaultProcessingWakeReason:
       describeHostedRuntimeWakeReasonForLog(
-        event.facts.workspace?.nextDefaultProcessingWakeReason ?? null,
+        workspace?.nextDefaultProcessingWakeReason ?? null,
       ),
     workspaceSystemMailboxProgressGenerationPresent:
-      event.facts.workspace?.systemMailboxProgressGeneration !== undefined,
-    workspacePresent: event.facts.workspace !== null,
+      workspace?.systemMailboxProgressGeneration !== undefined,
+    workspacePresent: workspace !== null,
   });
 }
 

@@ -87,6 +87,11 @@ canonical owner of hosted product facts.
 
 ## Reconciliation-facts failure observability
 
+The success record's diagnostic `status` is `blocked` when access is blocked,
+`work_pending` when mailbox lag or any projected workspace wake is due, and
+`idle` otherwise. Wake comparisons use the same request clock as reconciliation.
+This metadata-only summary does not drive scheduling or usage admission.
+
 The Web-owned reconciliation-facts route emits one additional failure-only
 Vercel record with the fixed message
 `Hosted runtime reconciliation facts failed.` and schema
@@ -1570,6 +1575,12 @@ exercise the same signed assertion contract.
   worker-owned runtime state.
 
 ## Prisma
+
+The usage allowance owner creates a missing period idempotently, then reads its
+fields with `SELECT … FOR UPDATE` in the same transaction. Period acquisition
+uses two database statements, including when the period already exists. The
+beneficiary-before-period lock order and all billing/settlement decisions remain
+owned by the existing allowance transaction.
 
 Generate the client and apply migrations with Prisma:
 
