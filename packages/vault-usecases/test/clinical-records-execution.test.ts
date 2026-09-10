@@ -22,6 +22,7 @@ import {
   type ClinicalFhirSnapshotImportInput,
   writeClinicalFhirRetrievalCheckpoint,
 } from "@murphai/vault-usecases/clinical-records";
+import { rebuildQueryProjection, summarizeWearableBodyStateRuntime, summarizeWearableRecoveryRuntime } from "@murphai/query";
 import { afterEach, describe, expect, it } from "vitest";
 
 const FHIR_BASE_URL = "https://ehr.example.test/fhir";
@@ -216,6 +217,42 @@ describe("importClinicalFhirSnapshot", () => {
         occurredAt: "2010-04-02T12:00:00.000Z",
         measurements: [{ metric: item.metric, unit: item.unit, value: item.value }],
         externalRef: { version: "2026-07-10T12:00:00.000Z" },
+      });
+    }
+  });
+
+  it.each([
+    { code: "[degF]", value: 98.6, unit: "degF" },
+    { code: "Cel", value: 37, unit: "Cel" },
+  ])("keeps $code clinical temperature source units while projecting Celsius summaries", async ({ code, value, unit }) => {
+    const resource = {
+      ...heartRateObservation("historical-temperature", value),
+      effectiveDateTime: "2010-04-02T12:00:00.000Z",
+      code: { coding: [{ system: "http://loinc.org", code: "8310-5" }] },
+      valueQuantity: { value, system: "http://unitsofmeasure.org", code },
+    };
+    const input = await createSnapshotInput({
+      pages: [{ resourceType: "Observation", content: fhirBundle([resource]) }],
+      resourceTypes: ["Observation"],
+    });
+    expect((await importClinicalFhirSnapshot(input)).canonical.createdCount).toBe(1);
+    for (const retrievalJobId of [input.retrievalJobId, "temperature-repeat"]) {
+      expect((await importClinicalFhirSnapshot({ ...input, retrievalJobId })).canonical)
+        .toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
+      await rebuildQueryProjection(input.vaultRoot);
+      for (const readSummary of [summarizeWearableBodyStateRuntime, summarizeWearableRecoveryRuntime]) {
+        expect(await readSummary(input.vaultRoot)).toMatchObject([
+          { date: "2010-04-02", temperature: { selection: { value: 37, unit: "celsius" } } },
+        ]);
+      }
+      expect(await findEventByExternalRef({
+        vaultRoot: input.vaultRoot,
+        system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+        resourceType: "observation", resourceId: resource.id,
+      })).toMatchObject({
+        measurements: [{ metric: "temperature", value, unit }],
+        externalRef: { version: resource.meta.lastUpdated },
+        occurredAt: resource.effectiveDateTime,
       });
     }
   });
