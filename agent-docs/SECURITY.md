@@ -704,6 +704,17 @@ Last verified: 2026-08-31
   response contains booleans and counts only, and no production log or CI
   artifact may contain either phone number, credentials, message text, chat or
   message ids, or provider responses.
+- The companion Linq canary outcome GET reuses that same bearer and fixed
+  server-configured identity, authenticates before inspecting input, and accepts
+  no query or body selectors. It requires active member access and current health
+  consent. It reads only an already-published Browser Vault core replica through
+  the existing authenticated control/session and decryption owners; it never
+  refreshes a replica or wakes the runtime. Readiness requires no uncheckpointed
+  conversation input, a replica matching the current canonical source checkpoint,
+  and unchanged identity/checkpoint across the read. Only readiness, total goal
+  count, fixed synthetic goal count, and distinct canonical goal ID count leave
+  the boundary, with `Cache-Control: no-store`. Titles, member IDs, source refs, decrypted data,
+  and ephemeral key material remain request-local and are never logged or returned.
 - Privy completion with an ambient Murph app session is same-member reauthentication, not account switching. The fresh Privy user id and resolved member id must both match that app session before web issues a replacement session; a member who intends to switch accounts must end the current app session first.
 - Provider-observed Linq email identity retains its encrypted normalized source
   separately from verified-email authorization. Every canonical verified-email

@@ -154,6 +154,10 @@ jobs:
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: node --test scripts/native-android-hosted-e2e.test.mjs
 
+      - name: Test private wearable canary control contract
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
+        run: node --test scripts/junction-wearable-canary.test.mjs
+
       - name: Test Temporal compatibility control contract
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: node --test scripts/hosted-orchestration-compatibility.test.mjs

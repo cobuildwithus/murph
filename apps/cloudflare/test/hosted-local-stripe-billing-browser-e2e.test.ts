@@ -5,6 +5,7 @@ import {
   HostedBillingBrowserDriver,
   HostedStripeBillingSandbox,
   issueHostedWebInviteForTest,
+  readHostedBillingUsageGateForTest,
   readHostedFamilyProjectionForTest,
   seedHostedBillingMemberForTest,
   seedHostedLaunchConsentForTest,
@@ -113,9 +114,9 @@ describe("hosted-local Stripe billing browser matrix", () => {
     await provePaidPulseUpgradesToEdgeThroughPortal();
   }, 300_000);
 
-  it("schedules an Edge to Pulse downgrade at renewal", async () => {
+  it("schedules Edge to Pulse and applies the paid renewal to usable Pulse access", async () => {
     await proveEdgeSchedulesPulseAtRenewal();
-  }, 300_000);
+  }, 600_000);
 
   it("starts Family through Checkout and activates an invited member", async () => {
     const family = await proveIndividualStartsFamilyThroughCheckout();
@@ -214,6 +215,7 @@ async function proveEdgeSchedulesPulseAtRenewal(): Promise<void> {
     memberId: member.memberId,
     plan: "edge",
     scenario: "edge-to-pulse-schedule",
+    useTestClock: true,
   });
   await bindDirectFixture(member.memberId, fixture, "paid", "launch_edge_monthly");
   const actor = await createActor(member.session);
@@ -258,9 +260,83 @@ async function proveEdgeSchedulesPulseAtRenewal(): Promise<void> {
     });
     await requireDriver().assertSettingsText(actor, /Pulse starts/iu);
     await requireDriver().assertSettingsText(actor, /Edge stays active until then/iu);
+    await provePaidPulseRenewalAfterScheduledDowngrade({
+      fixture,
+      memberId: member.memberId,
+      previousTruth: subscriptionTruth,
+    });
   } finally {
     await closeActor(actor);
   }
+}
+
+async function provePaidPulseRenewalAfterScheduledDowngrade(input: {
+  fixture: HostedStripeSubscriptionFixture;
+  memberId: string;
+  previousTruth: HostedStripeSubscriptionTruth;
+}): Promise<void> {
+  const renewalAt = input.previousTruth.currentPeriodEnd;
+  if (!renewalAt || !input.previousTruth.latestInvoiceId) {
+    throw new Error("Stripe renewal proof requires the paid original invoice and billing period.");
+  }
+  const testClockId = requireNonEmpty(input.fixture.testClockId, "owned Stripe Test Clock");
+  const edgeUsage = await readHostedBillingUsageGateForTest({
+    at: new Date(),
+    environment: requireScenario().runtimeEnv,
+    memberId: input.memberId,
+  });
+  expect(edgeUsage.allowed).toBe(true);
+  expect(edgeUsage.billingPlanCode).toBe("launch_edge_monthly");
+
+  assertHostedStripeListenerAlive();
+  await requireSandbox().advanceTestClock({ frozenTime: renewalAt, testClockId });
+  // Stripe first creates the renewal invoice in draft, then finalizes and pays
+  // it after the documented one-hour collection window on the same test clock.
+  const stripeNow = await requireSandbox().advanceTestClock({
+    frozenTime: new Date(renewalAt.getTime() + 3_600_000),
+    testClockId,
+  });
+  const renewed = await requireSandbox().waitForSubscriptionTruth({
+    label: "new paid Pulse renewal invoice after the scheduled downgrade",
+    ready: (truth) =>
+      truth.status === "active"
+      && truth.latestInvoicePaid
+      && truth.latestInvoiceId !== input.previousTruth.latestInvoiceId
+      && truth.latestInvoiceBillingReason === "subscription_cycle"
+      && truth.currentPeriodStart?.getTime() === renewalAt.getTime()
+      && truth.priceIds.includes(requireSandbox().priceIds.pulse)
+      && !truth.priceIds.includes(requireSandbox().priceIds.edge),
+    subscriptionId: input.fixture.subscriptionId,
+  });
+  const projection = await waitForHostedBillingProjectionForTest({
+    environment: requireScenario().runtimeEnv,
+    label: "renewed paid Pulse entitlement with the scheduled switch cleared",
+    memberId: input.memberId,
+    ready: (candidate) =>
+      candidate.billingStatus === "active"
+      && candidate.currentBillingPhase === "paid"
+      && candidate.currentBillingPlanCode === "launch_monthly"
+      && candidate.stripeSubscriptionId === input.fixture.subscriptionId
+      && candidate.currentPeriodStart?.getTime() === renewalAt.getTime()
+      && candidate.currentPeriodEnd?.getTime() === renewed.currentPeriodEnd?.getTime()
+      && candidate.scheduledBillingPlanCode === null
+      && candidate.scheduledBillingEffectiveAt === null,
+  });
+  const pulseUsage = await readHostedBillingUsageGateForTest({
+    at: stripeNow,
+    environment: requireScenario().runtimeEnv,
+    memberId: input.memberId,
+  });
+  expect(pulseUsage.allowed).toBe(true);
+  expect(pulseUsage.allowanceSource).toBe("direct_paid_member_plan");
+  expect(pulseUsage.billingPlanCode).toBe("launch_monthly");
+  expect(pulseUsage.periodStart).toEqual(projection.currentPeriodStart);
+  expect(pulseUsage.periodEnd).toEqual(projection.currentPeriodEnd);
+  expect(pulseUsage.limitUsdMicros).toBeGreaterThan(0n);
+  expect(pulseUsage.limitUsdMicros).toBeLessThan(edgeUsage.limitUsdMicros);
+  expect(pulseUsage.remainingUsdMicros).toBe(pulseUsage.limitUsdMicros);
+  expect(pulseUsage.spentUsdMicros).toBe(0n);
+  assertHostedStripeListenerAlive();
 }
 
 async function proveIndividualStartsFamilyThroughCheckout(): Promise<{
