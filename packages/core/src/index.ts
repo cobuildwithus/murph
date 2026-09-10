@@ -140,8 +140,6 @@ export {
   deleteProvider,
   deleteRecipe,
   ensureJournalDay,
-  listInboxDocumentDefaultPromotionCorrelations,
-  listLiveExactDocumentImportEvidence,
   importAssessmentResponse,
   importDeviceBatch,
   importDocument,
@@ -354,14 +352,16 @@ export {
   buildSymptomEventDraft,
 } from "./domains/events.ts";
 export {
+  listInboxDocumentDefaultPromotionCorrelations,
+  listLiveExactDocumentImportEvidence,
   WORKOUT_SOURCE_IMPORT_STATUS_VALUES,
-} from "./mutations.ts";
+} from "./domains/documents/source-evidence.ts";
 export type {
   InboxDocumentDefaultPromotionCorrelation,
   LiveExactDocumentImportEvidence,
   LiveExactDocumentImportEvidenceGroup,
   WorkoutSourceImportStatus,
-} from "./mutations.ts";
+} from "./domains/documents/source-evidence.ts";
 export type {
   AddActivitySessionInput,
   AddActivitySessionResult,
