@@ -1,3 +1,4 @@
+import { resolveHostedOperatorModelProvider } from "./codex-runtime-env.ts";
 import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import {
   executeConsentedReadOnlyAssistantAsk,
@@ -436,7 +437,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
       answer = await input.executeOperatorDiagnostic({
         ...executionInput,
         model: HOSTED_ASSISTANT_SOL_MODEL,
-        modelProvider: "openai",
+        modelProvider: resolveHostedOperatorModelProvider(input.modelProvider),
         beforeProviderEntry: undefined,
         feedbackDiagnostic: prepared.feedbackDiagnostic,
       });
