@@ -1,4 +1,9 @@
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
+import {
+  ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+  readTrustedHostedImageCompletion,
+  renderAssistantHostedImageCompletionSystemText,
+} from '../src/assistant/hosted-image-completion.js'
 import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
 import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
@@ -8781,15 +8786,31 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           throw new Error('Expected the generation turn to return a session.')
         }
 
-        const completionTurnContext = buildTrustedHostedImageCompletionTurnContext([{
-          inputId: completionInputId,
-          trustedHostedImageCompletion: {
-            media: [media],
+        const completionIdentity = `image-completion:${'7'.repeat(64)}`
+        const trustedHostedImageCompletion = readTrustedHostedImageCompletion({
+          sourceRef: {
+            dedupeKey: completionIdentity,
+            eventId: completionIdentity,
+            itemId: completionIdentity,
+            kind: 'hosted-mailbox',
+            lane: 'system',
+            laneSeq: completionIdentity,
+            payloadSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+            payloadSource: 'inline',
+            source: 'hosted-mailbox',
+            wakeSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+          },
+          text: renderAssistantHostedImageCompletionSystemText({
             originAssistantInputId: originInputId,
             originAssistantInputIdExact: true,
-            savedImageRef: media.ref,
-            status: 'ready',
-          },
+            result: { media, runtimeIssue: null, savedImageRef: media.ref },
+          }),
+          transcriptText: null,
+        })
+        expect(trustedHostedImageCompletion?.status).toBe('ready')
+        const completionTurnContext = buildTrustedHostedImageCompletionTurnContext([{
+          inputId: completionInputId,
+          trustedHostedImageCompletion,
         }])
         if (!completionTurnContext) {
           throw new Error('Expected trusted image completion turn context.')

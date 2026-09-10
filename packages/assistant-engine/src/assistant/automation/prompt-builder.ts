@@ -1,6 +1,6 @@
 import type {
-  AssistantVaultImageResponseMedia,
-} from '@murphai/operator-config/assistant-cli-contracts'
+  AssistantTrustedHostedImageCompletion,
+} from '../hosted-image-completion.js'
 import { normalizeIanaTimeZone } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
@@ -59,24 +59,6 @@ export interface AssistantAutoReplyPromptProjection {
   reasonCode: string | null
   status: AssistantInputProjectionStatus
 }
-
-export type AssistantTrustedHostedImageCompletion =
-  | {
-      diagnostic: string | null
-      status: 'failed'
-    }
-  | {
-      status: 'invalid'
-    }
-  | {
-      media: readonly [
-        AssistantVaultImageResponseMedia,
-      ]
-      originAssistantInputId: string | null
-      originAssistantInputIdExact: boolean
-      savedImageRef: string
-      status: 'ready'
-    }
 
 export interface AssistantAutoReplyPromptInput {
   actorIsSelf: boolean
