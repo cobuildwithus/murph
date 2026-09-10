@@ -41,7 +41,6 @@ import {
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
-  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
 import type {
@@ -293,7 +292,6 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   assistantAutomationScheduleChanged?: (() => boolean) | null;
   backgroundMaintenanceSignal?: AbortSignal | null;
   clearAssistantAutomationScheduleChanged?: (() => void) | null;
-  deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestAssistantInputBatch?: (() => HostedWorkspaceRunnerAssistantInputBatch | null) | null;
@@ -302,7 +300,6 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   platform: HostedRuntimePlatform;
   persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null;
   onProviderRequestStarted?: (() => void) | null;
-  kickSystemWork?: (() => void) | null;
   prepareAutoReplyDelivery?: (() => Promise<void>) | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   recordDeferredUsage?: ((
@@ -325,16 +322,10 @@ interface HostedDeferredAssistantUsageRecord {
   record: AssistantUsageRecord;
 }
 
-export interface HostedWorkspaceRunnerHandledDeviceSyncWake {
-  nextWakeAt: string;
-  nextWakeReason: string | null;
-}
-
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   afterCheckpointKeepsForegroundImportLoop?: true;
   browserVaultReplicaRefreshRequested?: true;
-  deviceSyncMaintenanceRan?: true;
   // Failed foreground reply count for this pass. Present only when the pass
   // ran the foreground assistant reply phase; selected-prefix repair uses it
   // to distinguish clean completion from retryable reply work.
@@ -353,7 +344,6 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
-  stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   systemMailboxProgressed?: true;
 }
 
@@ -1258,7 +1248,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     now: input.now,
     platform: input.platform,
     persistGeneratedImageCapture,
-    kickSystemWork: input.kickSystemWork,
     prepareAutoReplyDelivery: async () => {
       await stopForegroundMailboxImportLoop();
       if (!foregroundConversationWorkObserved && !input.signal?.aborted) {

@@ -31,10 +31,6 @@ import {
   VaultError,
 } from "@murphai/core";
 import {
-  HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT,
-  HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT,
-} from "@murphai/device-syncd/hosted-runtime";
-import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   type HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
@@ -125,14 +121,12 @@ import {
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantWorkspaceRuntimeJobInput,
-  HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedWorkspaceArtifactMaterializer,
 } from "./hosted-runtime/models.ts";
 import {
   HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
   prefetchHostedMailboxPrefix,
   type HostedMailboxItemImportOutcome,
-  type HostedMailboxImportLoopResult,
   type HostedMailboxPrefixPrefetch,
   type HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
@@ -181,7 +175,6 @@ import {
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
   type HostedWorkspaceRunnerDeferredUsageCapture,
-  type HostedWorkspaceRunnerHandledDeviceSyncWake,
   type HostedWorkspaceRunnerAssistantInputBatch,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
@@ -4248,32 +4241,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         "Hosted runtime invocation assistant provider is not supported.",
       );
     }
-    let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
-    let suppressDirtyPendingFetchUntilCheckpoint = false;
-    let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
-    const stageDeviceSyncDirtyAcks = (
-      records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null | undefined,
-    ): void => {
-      if (!records || records.length === 0) {
-        return;
-      }
-      stagedDeviceSyncDirtyAcks = mergeHostedDeviceSyncStagedDirtyAckRecords([
-        ...stagedDeviceSyncDirtyAcks,
-        ...records,
-      ]);
-      if (
-        stagedDeviceSyncDirtyAcks.length >= HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT
-        || countHostedDeviceSyncStagedDirtyAckPayloadIds(stagedDeviceSyncDirtyAcks)
-          >= HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT
-      ) {
-        suppressDirtyPendingFetchUntilCheckpoint = true;
-      }
-    };
-    const clearStagedDeviceSyncDirtyAcks = (): void => {
-      stagedDeviceSyncDirtyAcks = [];
-      suppressDirtyPendingFetchUntilCheckpoint = false;
-      deviceSyncWorkspaceWakeHandledUntilCheckpoint = null;
-    };
     let browserVaultReplicaRefreshRequested = false;
     const recordBrowserVaultReplicaRefreshIntent = (
       passResult: HostedWorkspaceRunnerResult,
@@ -4431,7 +4398,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 imageGenerationLauncher:
                   imageGenerationController?.launcher ?? null,
                 deviceSyncMessagingReturnTarget,
-                deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                 request: input.request,
                 restored,
                 runtime: phaseRuntime,
@@ -4511,8 +4477,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     currentAssistantInputId = null;
                   };
                 },
-                stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                 signal: passSignal,
               });
             } finally {
@@ -4553,13 +4517,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           requestId,
           stage: "foreground.pass",
           status: "done",
-        });
-        stageDeviceSyncDirtyAcks(passResult.assistantPhaseResult?.stagedDirtyAcks);
-        deviceSyncWorkspaceWakeHandledUntilCheckpoint =
-          resolveHandledDeviceSyncWorkspaceWake({
-            current: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
-            result: passResult,
-            workspace: passInput.workspace,
         });
         recordBrowserVaultReplicaRefreshIntent(passResult);
         if (
@@ -7246,7 +7203,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             workspace: checkpoint.workspace,
           });
         }
-        clearStagedDeviceSyncDirtyAcks();
         // checkpointMetadata is mirrored from the committed workspace inside
         // createHostedWorkspaceSnapshotCheckpointRequestBuilder.recordCheckpoint;
         // re-mutating it here would be a duplicate state owner and is the seam
@@ -8142,31 +8098,6 @@ function readHostedWorkspaceInvocationRedactedNumber(
   return typeof field === "number" ? field : 0;
 }
 
-function resolveHandledDeviceSyncWorkspaceWake(input: {
-  current: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
-  result: HostedWorkspaceRunnerResult;
-  workspace: HostedWorkspaceState | null;
-}): HostedWorkspaceRunnerHandledDeviceSyncWake | null {
-  if (input.result.assistantPhaseResult?.deviceSyncMaintenanceRan !== true) {
-    return input.current;
-  }
-
-  const nextWakeAt = input.workspace?.nextWakeAt ?? null;
-  if (!nextWakeAt) {
-    return input.current;
-  }
-
-  const nextWakeReason = input.workspace?.nextWakeReason ?? null;
-  if (nextWakeReason !== HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON) {
-    return input.current;
-  }
-
-  return {
-    nextWakeAt,
-    nextWakeReason,
-  };
-}
-
 function shouldReplaceHostedWorkspaceInvocationWake(
   result: HostedWorkspaceRunnerResult,
 ): boolean {
@@ -8286,61 +8217,6 @@ function resolvePendingWakeAfterForegroundPass(input: {
     ]),
     preservedDueAssistantWakeOnNoProgress: false,
   };
-}
-
-function mergeHostedDeviceSyncStagedDirtyAckRecords(
-  records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[],
-): HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] {
-  const byConnection = new Map<string, {
-    completedImports: Map<
-      string,
-      NonNullable<HostedDeviceSyncDirtyProcessedPostCheckpointRecord["completedImports"]>[number]
-    >;
-    connectionId: string;
-    processedDirtyPayloadIds: Set<string>;
-    processedRevision: bigint;
-  }>();
-
-  for (const record of records) {
-    const previous = byConnection.get(record.connectionId);
-    const processedRevision = BigInt(record.processedRevision);
-    const entry = previous ?? {
-      completedImports: new Map(),
-      connectionId: record.connectionId,
-      processedDirtyPayloadIds: new Set<string>(),
-      processedRevision,
-    };
-    if (processedRevision > entry.processedRevision) {
-      entry.processedRevision = processedRevision;
-    }
-    for (const payloadId of record.processedDirtyPayloadIds ?? []) {
-      entry.processedDirtyPayloadIds.add(payloadId);
-    }
-    for (const completedImport of record.completedImports ?? []) {
-      entry.completedImports.set(completedImport.dirtyPayloadId, completedImport);
-    }
-    byConnection.set(record.connectionId, entry);
-  }
-
-  return [...byConnection.values()].map((entry) => ({
-    ...(entry.completedImports.size > 0
-      ? { completedImports: [...entry.completedImports.values()] }
-      : {}),
-    connectionId: entry.connectionId,
-    ...(entry.processedDirtyPayloadIds.size > 0
-      ? { processedDirtyPayloadIds: [...entry.processedDirtyPayloadIds] }
-      : {}),
-    processedRevision: entry.processedRevision.toString(),
-  }));
-}
-
-function countHostedDeviceSyncStagedDirtyAckPayloadIds(
-  records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[],
-): number {
-  return records.reduce(
-    (count, record) => count + (record.processedDirtyPayloadIds?.length ?? 0),
-    0,
-  );
 }
 
 function mergeHostedWorkspaceInvocationStatus(

@@ -816,7 +816,11 @@ the fenced workspace and use existing mailbox claims; the invocation's policy
 still decides which families are allowed. Device and Environment work can start
 without assistant preparation. A conversation can upgrade that invocation while
 the same import continues. The default assistant and ordered controls remain
-single-writer; ordinary replies neither cancel nor join independent imports.
+single-writer; ordinary replies neither cancel nor join independent imports. The
+assistant phase has no inline device executor or turn-local dirty-ack buffer.
+Device hints, restored timers, imports, activity scheduling, and exact
+acknowledgments all use the workspace-owned mailbox path. Common durable effects
+retain their existing delivery and shutdown behavior.
 
 Scheduling preserves per-connection ordering and the imported-watermark-bounded
 continuation projection used by handling. Invalid continuation authority cannot

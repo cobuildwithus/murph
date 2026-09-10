@@ -451,3 +451,45 @@ cases. Runtime typecheck and complexity guard pass; root debt is 548 versus main
 549, maximum 252 unchanged. ReviewGPT round six keeps its original capture owner
 and submitted head while this bounded CI correction is pushed; the next exact
 candidate review and CI remain required.
+
+
+### Round-six Complexity Collapse
+
+ReviewGPT verified R5 retry retention and found no remaining Critical or High bug
+on its reviewed head. It accepted a bounded Complexity Collapse: the production
+caller always provided workspace system-work ownership, disabling the old inline
+assistant-phase device executor. Parent repository call-site inspection confirms
+one production caller through hosted-runtime.ts. The captured gpt-6-pro response
+matches the submitted turn and SHA-256
+c111593b2edd81f400704fa2940b40135134b0f86ba93b4676519d528de3f13c.
+
+Delete the unreachable executor and its dedicated scheduling, failure reporting,
+activity-automation, staged dirty-ack, and handled-wake helpers. Remove the
+turn-owned buffer and suppression/handled flags from root, phase, and runner
+interfaces, plus dependent null-only result composition. The workspace owner,
+mailbox claims/retries, existing device handler, canonical writes, and accepted
+snapshot recording remain the only execution path. No replacement mechanism is
+introduced. Common durable effects and mandatory shutdown behavior remain.
+
+Twenty direct-phase tests whose trigger was the unreachable inline executor or its
+removed handled-wake flag are deleted. Generic cleanup/outbox/assistant-priority
+coverage remains; another continuation test now observes the local schedule
+instead of mocking inline execution and explicitly verifies independent routes
+are excluded from phase preparation. Two future-retry cases retain their behavior
+without the obsolete flag. Real-entrypoint crash, timeout, exact acknowledgment,
+reply priority, and closed-loop timer proofs are retained unchanged.
+
+The two adjusted phase files pass 134 cases. Runtime typecheck and the complexity
+guard pass: root debt 547 versus main's 549; assistant-phase debt 365 versus 404
+and maximum 152 versus 176. The 25-file phase/runner/entrypoint/concurrent-import run passed 23 files;
+remaining failures were ten tests invoking the retired executor and two generic
+effect assertions expecting its obsolete array wrapper. The generic receipt and
+vault-share tests retain all execution, metadata, and context assertions and now
+expect the single callable effect. The final three-file rerun passes 157 cases,
+including those two and existing device-handler activity scheduling/failure
+proof. Every entrypoint, runner, and concurrent-import test passed unchanged in
+the broad local run. Runtime typecheck passes again. Existing mailbox and real
+entrypoint cases preserve post-snapshot exact acknowledgments and failure retry
+diagnostics; no generic shutdown or delivery behavior is removed. The cleanup
+deletes over 800 net production lines and adds no state, dependency, or service.
+Parent diff and privacy review pass; proceed to the next full sensitive review.
