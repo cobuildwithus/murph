@@ -2225,31 +2225,6 @@ type PreparedEventImportDecision =
 
 const EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE = "event_import_retraction_marker";
 
-async function isUnchangedEventImportSourceRevision(
-  decision: Extract<PreparedEventImportDecision, { action: "upsert" }>,
-  latest: EventRecord,
-  canPromoteImportHold: ImportEventDecisionBatchInput["canPromoteImportHold"],
-): Promise<boolean> {
-  const contentKey = decision.allowsKindReplacement
-    ? eventImportSourceSemanticContentKey
-    : eventImportVersionedReplayContentKey;
-  if (contentKey(latest) === contentKey(decision.entry.record)) return true;
-  if (decision.allowsKindReplacement
-    && isDeletedEventSpineRecord(latest)
-    && latest.kind === "note"
-    && latest.noteType === EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE
-    && await canPromoteImportHold?.({ marker: latest, incoming: decision.entry.record })) {
-    return false;
-  }
-  const externalRef = decision.entry.record.externalRef!;
-  throw new VaultError(
-    "EVENT_SOURCE_REVISION_CONFLICT",
-    `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-      `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
-      `"${externalRef.version}"; nothing was imported.`,
-  );
-}
-
 interface EventImportReconciliation {
   appendEntries: PreparedJsonlEntry<EventRecord>[];
   forceAppendIds: ReadonlySet<string>;
@@ -5379,7 +5354,6 @@ async function reconcileEventImportDecisionsByExternalRef(
   vaultRoot: string,
   decisions: readonly PreparedEventImportDecision[],
   signal?: AbortSignal | null,
-  canPromoteImportHold?: ImportEventDecisionBatchInput["canPromoteImportHold"],
 ): Promise<EventImportReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
 
@@ -5528,10 +5502,23 @@ async function reconcileEventImportDecisionsByExternalRef(
         skippedExistingCount += 1;
         continue;
       }
-      if (sourceVersionComparison === 0
-        && await isUnchangedEventImportSourceRevision(decision, latest, canPromoteImportHold)) {
-        skippedExistingCount += 1;
-        continue;
+      if (sourceVersionComparison === 0) {
+        const existingContentKey = decision.allowsKindReplacement
+          ? eventImportSourceSemanticContentKey(latest)
+          : eventImportVersionedReplayContentKey(latest);
+        const incomingContentKey = decision.allowsKindReplacement
+          ? eventImportSourceSemanticContentKey(entry.record)
+          : eventImportVersionedReplayContentKey(entry.record);
+        if (existingContentKey === incomingContentKey) {
+          skippedExistingCount += 1;
+          continue;
+        }
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
+            `"${externalRef.version}"; nothing was imported.`,
+        );
       }
     } else {
       // Preserve the legacy public-import contract for unversioned or
@@ -8852,7 +8839,6 @@ export interface ImportEventPayloadBatchInput {
   vaultRoot: string;
   payloads: readonly LooseRecord[];
   decisions?: never;
-  canPromoteImportHold?: never;
   rejectIfSourceRawRefAlreadyImported?: string;
   apply?: boolean;
   signal?: AbortSignal | null;
@@ -8865,12 +8851,6 @@ export interface ImportEventDecisionBatchInput {
   rejectIfSourceRawRefAlreadyImported?: never;
   apply?: boolean;
   signal?: AbortSignal | null;
-  // Trusted importer-only evidence check, evaluated against the current marker
-  // under the canonical write lock. Never exposed through wire decisions.
-  canPromoteImportHold?: (input: {
-    marker: Readonly<EventRecord>;
-    incoming: Readonly<EventRecord>;
-  }) => Promise<boolean>;
 }
 
 export type ImportEventBatchInput = ImportEventPayloadBatchInput | ImportEventDecisionBatchInput;
@@ -9097,7 +9077,6 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     vaultRoot,
     decisions,
     signal,
-    input.canPromoteImportHold,
   );
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {
     dedupeWithinPlan: true,
