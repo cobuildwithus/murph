@@ -2955,9 +2955,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     const prisma = withPrismaTransaction({
       hostedAccountGroupBillingRef: {
         findFirst: vi.fn().mockResolvedValue(null),
-        findUnique: vi.fn().mockResolvedValue({
-          billedSeatCount: 2,
-        }),
+        findUnique: vi.fn().mockResolvedValue({}),
       },
       hostedAccountGroupInvite: {
         count: vi.fn().mockResolvedValue(0),
@@ -3201,7 +3199,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         deleteMany: hostedAccountGroupDeleteMany,
         findUnique: vi.fn().mockResolvedValue({
           billingRef: {
-            billedSeatCount: null,
             checkoutAttemptId: "hbfca_telegram_draft",
             checkoutCreatedAt: new Date("2026-06-18T12:00:00.000Z"),
             checkoutSeatCount: 2,
