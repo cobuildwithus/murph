@@ -1,6 +1,6 @@
 # Remove deprecated Linq active-member cap application surface
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -48,8 +48,9 @@ No private operational evidence belongs in repository artifacts.
 2. Done: update focused tests and the existing deployment owner documentation.
 3. Done: run focused unit and local PostgreSQL proof, Web typecheck, lint, and
    complexity review; inspect privacy and the complete diff.
-4. Commit and open a draft code-release PR for parent review.
-5. Prepare a separately held physical-drop PR after the code-release candidate.
+4. Done: commit and open draft code-release PR #3182 for parent review.
+5. Hand off the separate physical-drop draft to its own execution plan; it is
+   outside this code-release implementation.
 
 ## Decisions
 
@@ -72,3 +73,10 @@ No private operational evidence belongs in repository artifacts.
 - Complexity: line-store debt 3 to 0; maximum function complexity 23 to 19.
   No changed-file hotspots remain above 20.
 - Expected: identical weighted/sticky/quota behavior with no legacy cap writes.
+
+## Outcome
+
+The application cleanup and focused verification are complete in draft PR
+#3182. Required external review and exact-head CI remain PR completion gates
+owned by the root session. The physical drop is a separate held cleanup.
+Completed: 2026-09-10
