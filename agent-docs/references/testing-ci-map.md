@@ -1,8 +1,38 @@
 # Testing And CI Map
 
-Last verified: 2026-09-05
+Last verified: 2026-09-10
 
 ## Current Repo Checks
+
+Hosted browser authentication has three separate proof boundaries:
+
+- `apps/web/test/hosted-privy-sdk-contract.test.ts` uses the installed Privy SDK
+  and ephemeral ES256 keys to verify identity JWT signatures, claims,
+  expiry, tampering and linked-account validation. It needs no provider secrets.
+- `apps/web/test/hosted-privy-completion-postgres.test.ts` uses actual HTTP,
+  migrated PostgreSQL, encrypted identity/domain roots, CSRF, consent and session
+  owners. Only the external provider HTTP service and local KMS are synthetic.
+  Enable it with `MURPH_TEST_POSTGRES_CONCURRENCY=1` and an isolated loopback
+  `murph_test_*` database; it proves fresh member creation, session replay,
+  conflicting identity rejection, consent persistence and stored-token revocation.
+- `pnpm hosted-local e2e hosted-web-auth-journey` drives Chromium from empty
+  storage through the real Privy email/test-OTP UI, app completion, both consent
+  scopes, a Settings tone change, reload and logout. The captured session is
+  replayed after logout to prove server revocation. It requires the production
+  Next artifact, local HTTPS and real provider configuration. An active local
+  entitlement is seeded for the dedicated provider principal; no session,
+  consent, browser cookie, API response or app auth owner is seeded or mocked.
+
+`.github/workflows/hosted-browser-auth.yml` runs the live journey only on main
+pushes, a six-hour schedule and main-only manual dispatch, under the protected
+`hosted-browser-auth-sandbox` environment. Missing configuration fails the job.
+PRs retain credential-free proof; this external lane is not itself a required
+PR check. The existing seeded `hosted-web-browser-smoke` remains rendering
+coverage and must not be described as login coverage. The auth journey is an
+explicit isolated scenario, excluded from default `all`; provider authority is
+withheld from generic preparation and unrelated scenario/runner processes.
+Setup, exact credential names and proof limits live in
+`agent-docs/operations/verification-and-runtime.md#hosted-browser-authentication-proof`.
 
 Vault-share replacement deadline proof lives in `projection-store.test.ts` and
 `vault-share-deliver-route.test.ts`. With an isolated migrated loopback
