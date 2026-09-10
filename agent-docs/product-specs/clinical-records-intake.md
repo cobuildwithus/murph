@@ -20,6 +20,17 @@ It does not claim nationwide identity matching, discover every organization a
 person has visited, connect email, or retrieve records from a provider that
 does not expose a compatible patient-facing SMART endpoint.
 
+### Standard clinical measurements
+
+The FHIR importer maps standard LOINC height, BMI, head circumference, oxygen
+saturation, weight, temperature, blood pressure and rate measurements into the
+canonical measurement surface. It preserves source values and accepted units
+(including inches, grams and Fahrenheit) and source revision/evidence identity.
+Equivalent oxygen-saturation codings in one observation produce one measurement.
+Incompatible units, ambiguous values and missing comparable revisions retain
+their existing explicit review/retraction behavior. These mappings do not
+change provider acquisition windows; lifetime retrieval is a separate owner change.
+
 ## Member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,
