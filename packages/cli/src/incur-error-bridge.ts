@@ -1,10 +1,12 @@
 import { Errors, middleware } from 'incur'
+import { noteCliTimingFailure } from '@murphai/runtime-state/node/cli-timing'
 import { projectVaultCliError } from './vault-cli-error-projection.js'
 
 export const incurErrorBridge = middleware(async (_context, next) => {
   try {
     await next()
   } catch (error) {
+    noteCliTimingFailure(error)
     if (
       error instanceof Errors.IncurError ||
       error instanceof Errors.ParseError ||

@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { Cli } from 'incur'
+import { Cli, Errors, z } from 'incur'
 import { afterEach, test, vi } from 'vitest'
 
 import { cliTimingCommand, normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
@@ -16,6 +16,7 @@ const initialEndpoint = process.env.MURPH_CLI_TIMING_ENDPOINT
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   vi.doUnmock('../src/vault-cli-command-routing.js')
   vi.doUnmock('@murphai/assistant-engine/codex-lifecycle')
   vi.doUnmock('@murphai/runtime-state/node/cli-timing')
@@ -27,7 +28,7 @@ afterEach(async () => {
 
 // A real loopback receiver, not a production callback/flag. The production CLI
 // sender is exercised by every captured invocation; engine tests cover its peer.
-async function collect<T>(run: () => Promise<T>): Promise<{ result: T; timing: CliTiming }> {
+async function collect<T>(run: () => Promise<T>): Promise<{ result: T; timing: CliTiming; wire: string }> {
   const socket = createSocket('udp4')
   const port = randomInt(49_152, 65_536)
   const previous = process.env.MURPH_CLI_TIMING_ENDPOINT
@@ -40,11 +41,12 @@ async function collect<T>(run: () => Promise<T>): Promise<{ result: T; timing: C
     const message = once(socket, 'message', { signal: AbortSignal.timeout(5_000) })
     const result = await run()
     const [buffer] = await message
-    const envelope = JSON.parse(buffer.toString('utf8'))
+    const wire = buffer.toString('utf8')
+    const envelope = JSON.parse(wire)
     assert.equal(envelope.key, key)
     const timing = normalizeCliTiming(envelope.timing)
     assert.ok(timing)
-    return { result, timing }
+    return { result, timing, wire }
   } finally {
     if (previous === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT
     else process.env.MURPH_CLI_TIMING_ENDPOINT = previous
@@ -210,4 +212,163 @@ test('early parse, validation, handler and broken-pipe results/exits remain unch
   assert.deepEqual((await collect(() => invoke(argv, true))).result, baseline)
   process.env.MURPH_CLI_TIMING_ENDPOINT = 'not-a-transport-PRIVATE_SENTINEL'
   assert.deepEqual(await invoke(argv, true), baseline)
+})
+
+
+// Only the handler is synthetic: entrypoint, shell, Incur middleware/errors,
+// rendering, exit handling, invocation ALS and loopback sender remain real.
+async function syntheticSession(run: () => Promise<unknown>) {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-failure-PRIVATE_SENTINEL-'))
+  roots.push(home)
+  vi.stubEnv('HOME', home)
+  vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
+  vi.doMock('../src/vault-cli-command-routing.js', async (importOriginal) => {
+    const original = await importOriginal<typeof import('../src/vault-cli-command-routing.js')>()
+    return {
+      ...original,
+      registerScopedVaultCliCommand: async (input: Parameters<typeof original.registerScopedVaultCliCommand>[0]) => {
+        if (input.root !== 'experiment') return original.registerScopedVaultCliCommand(input)
+        input.cli.command(Cli.create('experiment').command(Cli.create('session').command('log', {
+          options: z.object({ quantity: z.number().optional() }), run,
+        })))
+      },
+    }
+  })
+  vi.doMock('@murphai/assistant-engine/codex-lifecycle', () => ({ stopWarmCodexAppServer: async () => {} }))
+  // Incur error envelopes and batch results contain wall durations. Freeze those,
+  // not the production monotonic timing clock, for byte-for-byte parity.
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.spyOn(Date, 'now').mockReturnValue(1_788_560_000_000)
+}
+const sessionArgv = ['experiment', 'session', 'log', '--vault', '/tmp/PRIVATE_SENTINEL', '--format', 'json']
+
+test('real entry and loopback retain original session code/stage once before Incur projection', async () => {
+  const original = Object.assign(new Error('PRIVATE_SENTINEL'), {
+    code: 'invalid_payload', name: 'PRIVATE_SENTINEL',
+    context: { stage: 'validation', field: 'PRIVATE_SENTINEL', extra: 'PRIVATE_SENTINEL' },
+    cause: Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'PRIVATE_SENTINEL' }),
+    extra: 'PRIVATE_SENTINEL',
+  })
+  let failing = true
+  await syntheticSession(async () => {
+    if (failing) throw original
+    return { unchanged: 'PRIVATE_SENTINEL' }
+  })
+  const { runMurphCliEntrypoint } = await import('../src/cli-entry.ts')
+  delete process.env.MURPH_CLI_TIMING_ENDPOINT
+  const baseline = await invoke(sessionArgv, false, runMurphCliEntrypoint)
+  const failed = await collect(() => invoke(sessionArgv, false, runMurphCliEntrypoint))
+  assert.deepEqual(failed.result, baseline)
+  assert.deepEqual(failed.result.exits, [1])
+  assert.equal(failed.timing.commands.length, 1)
+  assert.equal(failed.timing.commands[0]!.command, 'experiment session log')
+  assert.equal(failed.timing.commands[0]!.outcome, 'error')
+  assert.equal(failed.timing.commands[0]!.calls, 1)
+  assert.deepEqual(failed.timing.commands[0]!.failures, [{ code: 'invalid_payload', stage: 'validation', count: 1 }])
+  assert.equal(failed.wire.includes('PRIVATE_SENTINEL'), false)
+  failing = false
+  const successBaseline = await invoke(sessionArgv, false, runMurphCliEntrypoint)
+  const succeeded = await collect(() => invoke(sessionArgv, false, runMurphCliEntrypoint))
+  assert.deepEqual(succeeded.result, successBaseline)
+  assert.equal(succeeded.timing.commands[0]!.outcome, 'ok')
+  assert.equal(succeeded.timing.commands[0]!.failures, undefined)
+  assert.equal(succeeded.wire.includes('PRIVATE_SENTINEL'), false)
+  const quietBaseline = await invoke(['--version'], false, runMurphCliEntrypoint)
+  const quiet = await collect(() => invoke(['--version'], false, runMurphCliEntrypoint))
+  assert.deepEqual(quiet.result, quietBaseline)
+  assert.equal(quiet.timing.commands[0]!.failures, undefined)
+})
+
+test('real Incur error types and command parsing retain finite detail without reading private fields', async () => {
+  let failure: unknown
+  let handlers = 0
+  await syntheticSession(async () => { handlers += 1; throw failure })
+  const fixtures = [
+    { error: Object.assign(new Errors.IncurError({ code: 'conflict', message: 'PRIVATE_SENTINEL', exitCode: 7 }), { stage: 'persistence' }),
+      expected: { code: 'conflict', stage: 'persistence', count: 1 }, exit: 7 },
+    { error: new Errors.ValidationError({ message: 'PRIVATE_SENTINEL', fieldErrors: [{
+      path: 'PRIVATE_SENTINEL', expected: 'PRIVATE_SENTINEL', received: 'PRIVATE_SENTINEL', message: 'PRIVATE_SENTINEL',
+    }] }), expected: { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, exit: 1 },
+    { error: new Errors.ParseError({ message: 'PRIVATE_SENTINEL' }),
+      expected: { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, exit: 1 },
+    { error: Object.assign(new Errors.IncurError({ code: 'PRIVATE_SENTINEL', message: 'PRIVATE_SENTINEL',
+      cause: Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'invalid_payload', stage: 'validation' }) }),
+      { name: 'PRIVATE_SENTINEL', stage: 'PRIVATE_SENTINEL', context: { stage: 'PRIVATE_SENTINEL' }, extra: 'PRIVATE_SENTINEL' }),
+      expected: { code: 'unknown', stage: 'unknown', count: 1 }, exit: 1 },
+  ]
+  delete process.env.MURPH_CLI_TIMING_ENDPOINT
+  for (const fixture of fixtures) {
+    failure = fixture.error
+    const baseline = await invoke(sessionArgv)
+    const captured = await collect(() => invoke(sessionArgv))
+    assert.deepEqual(captured.result, baseline)
+    assert.deepEqual(captured.result.exits, [fixture.exit])
+    assert.deepEqual(captured.timing.commands[0]!.failures, [fixture.expected])
+    assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+  }
+  for (const [extra, expected, command] of [
+    [['--quantity', 'PRIVATE_SENTINEL'], { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, 'experiment session log'],
+    [['--PRIVATE_SENTINEL'], { code: 'VALIDATION_ERROR', stage: 'validation', count: 1 }, 'experiment session log'],
+    // Built-in parsing fails before the middleware sees an original error or path.
+    [['--token-limit', 'PRIVATE_SENTINEL'], { code: 'unknown', stage: 'unknown', count: 1 }, 'other'],
+  ] as const) {
+    const before = handlers
+    const argv = [...sessionArgv, ...extra]
+    const baseline = await invoke(argv)
+    const captured = await collect(() => invoke(argv))
+    assert.deepEqual(captured.result, baseline)
+    assert.deepEqual(captured.timing.commands[0]!.failures, [expected])
+    assert.equal(captured.timing.commands[0]!.command, command)
+    assert.equal(handlers, before, 'Real Incur parsing, not the handler, must fail.')
+    assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+  }
+})
+
+test('real batch exit rewrites do not multiply failures; mixed stages, stop and nested rejection keep parity', async () => {
+  let index = 0
+  const failures = [
+    Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'invalid_payload', context: { stage: 'validation' } }),
+    Object.assign(new Errors.IncurError({ code: 'conflict', message: 'PRIVATE_SENTINEL' }), { stage: 'persistence' }),
+    Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'invalid_payload', context: { stage: 'validation' } }),
+    Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'invalid_payload', context: { stage: 'write' } }),
+  ]
+  await syntheticSession(async () => {
+    const error = failures[index++]
+    if (error) throw error
+    return { ok: true }
+  })
+  const argv = ['batch', '--vault', '/tmp/PRIVATE_SENTINEL', '--format', 'json',
+    ...Array.from({ length: 5 }, () => ['--command', '["experiment","session","log"]']).flat()]
+  delete process.env.MURPH_CLI_TIMING_ENDPOINT
+  const baseline = await invoke(argv)
+  index = 0
+  const captured = await collect(() => invoke(argv))
+  assert.deepEqual(captured.result, baseline)
+  assert.equal(captured.timing.batchContainers, 1)
+  assert.equal(captured.timing.commands.reduce((n, entry) => n + entry.calls, 0), 5)
+  const failed = captured.timing.commands.find((entry) => entry.outcome === 'error')!
+  assert.equal(failed.calls, 4)
+  assert.deepEqual(failed.failures, [
+    { code: 'invalid_payload', stage: 'validation', count: 2 },
+    { code: 'conflict', stage: 'persistence', count: 1 },
+    { code: 'invalid_payload', stage: 'write', count: 1 },
+  ])
+  assert.equal(captured.timing.commands.find((entry) => entry.outcome === 'ok')!.failures, undefined)
+  assert.equal(captured.wire.includes('PRIVATE_SENTINEL'), false)
+  index = 0
+  const stoppedBaseline = await invoke([...argv, '--stop-on-error'])
+  index = 0
+  const stopped = await collect(() => invoke([...argv, '--stop-on-error']))
+  assert.deepEqual(stopped.result, stoppedBaseline)
+  assert.equal(JSON.parse(stopped.result.stdout).executed, 1)
+  assert.equal(stopped.timing.commands[0]!.calls, 1)
+  assert.deepEqual(stopped.timing.commands[0]!.failures, [{ code: 'invalid_payload', stage: 'validation', count: 1 }])
+  const nestedArgv = ['batch', '--vault', '/tmp/PRIVATE_SENTINEL', '--format', 'json', '--stop-on-error',
+    '--command', '["batch","--command","[\\"experiment\\",\\"session\\",\\"log\\"]"]']
+  const nestedBaseline = await invoke(nestedArgv)
+  const nested = await collect(() => invoke(nestedArgv))
+  assert.deepEqual(nested.result, nestedBaseline)
+  assert.equal(JSON.parse(nested.result.stdout).failed, 1)
+  assert.equal(nested.timing.batchContainers, 1)
+  assert.deepEqual(nested.timing.commands, [], 'Unsupported nested batch is rejected before opening a child invocation.')
 })

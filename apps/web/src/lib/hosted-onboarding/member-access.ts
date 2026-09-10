@@ -100,7 +100,7 @@ const hostedRuntimeAiPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSe
   },
 });
 
-const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+export const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   ...hostedRuntimeAiPersonAccessSelect,
   threadContainer: {
     select: {
@@ -151,6 +151,10 @@ export type HostedMemberAccessState = HostedMemberPersonAccessState & {
 
 type HostedRuntimeAiPersonAccessState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedRuntimeAiPersonAccessSelect;
+}>;
+
+export type HostedRuntimeAiMemberAccessState = Prisma.HostedMemberGetPayload<{
+  select: typeof hostedRuntimeAiMemberAccessSelect;
 }>;
 
 export type HostedRuntimeAiAccessDecision =
@@ -310,13 +314,14 @@ export async function readActiveHostedMemberAccess(input: {
 
 export async function readActiveHostedMemberAccessState(input: {
   memberId: string;
+  memberState?: (HostedMemberAccessState & { assistantProviderPreference: string | null }) | null;
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<(HostedMemberAccessState & {
   assistantProviderPreference: string | null;
 }) | null> {
   const prisma = input.prisma ?? getPrisma();
-  const member = await prisma.hostedMember.findUnique({
+  const member = input.memberState !== undefined ? input.memberState : await prisma.hostedMember.findUnique({
     select: {
       ...hostedMemberAccessSelect,
       assistantProviderPreference: true,
@@ -454,6 +459,7 @@ export async function readActiveHostedFamilySponsorship(input: {
  */
 export async function readHostedRuntimeAiAccessDecision(input: {
   memberId: string;
+  memberState?: HostedRuntimeAiMemberAccessState;
   /**
    * Per-delivery discriminator so repeated notices to the same member rotate
    * copy variants instead of repeating one sentence verbatim. Omit to keep the
@@ -465,7 +471,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
 }): Promise<HostedRuntimeAiAccessDecision> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const member = await prisma.hostedMember.findUnique({
+  const member = input.memberState !== undefined ? input.memberState : await prisma.hostedMember.findUnique({
     select: hostedRuntimeAiMemberAccessSelect,
     where: {
       id: input.memberId,

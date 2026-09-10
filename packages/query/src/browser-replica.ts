@@ -71,7 +71,6 @@ export type {
   BrowserVaultMetricsQueryClient,
   BrowserVaultMetricsReplica,
   BrowserVaultMetricsIndexReplica,
-  BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultReplica,
   BrowserVaultReplicaPolicy,
@@ -134,9 +133,7 @@ export type {
   BrowserVaultPresentedLabResultRow,
 } from "./browser-replica/lab-results.ts";
 export {
-  selectBrowserVaultHistory,
   selectBrowserVaultJournal,
-  selectBrowserVaultOverview,
   selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/views.ts";

@@ -5325,6 +5325,28 @@ describe("hosted Family plan", () => {
     },
   );
 
+  it.each([
+    { stripeCustomerLookupKey: "customer_history" },
+    { stripeSubscriptionItemLookupKey: "item_history" },
+    { currentBillingPhase: "paid" },
+    { currentPeriodStart: new Date("2026-07-01T00:00:00.000Z") },
+    { currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z") },
+    { lastStripeEventCreatedAt: new Date("2026-07-01T00:00:00.000Z") },
+  ])("preserves draft billing history without an aggregate: %j", async (history) => {
+    const draft = createNeverPaidFamilyDraftRecord();
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce({
+      ...draft,
+      billingRef: { ...draft.billingRef, ...history },
+    });
+
+    await expect(readHostedFamilyDraftRecoveryStateForOwner({
+      ownerMemberId: "member_mom",
+      prisma: tx,
+    })).resolves.toEqual({ state: "recovery_required" });
+    expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("does not advertise abandonment during a direct-paid conversion", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
@@ -10767,7 +10789,9 @@ function createTxMock(input: {
     hostedAccountGroupPlanCapacity: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue(input.billedSeatCount === null
+        ? []
+        : [{ billedQuantity: input.billedSeatCount ?? 4, planCode: "pulse" }]),
     },
   });
 

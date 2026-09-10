@@ -15,7 +15,6 @@ const lazyRootCommands = [
   'batch',
   'blood-test',
   'capture',
-  'chat',
   'commons',
   'condition',
   'device',

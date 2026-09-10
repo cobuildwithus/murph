@@ -1348,7 +1348,7 @@ describe('monorepo release flow coverage audit', () => {
       'review_gpt_reject_repository_policy_overrides "$@"',
     )
     expect(reviewGptPrHeadPreflight).toContain(
-      '--minimum-marked-response-time 270s \\\n    "$@"',
+      '--minimum-marked-response-time 180s \\\n    "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -2092,7 +2092,7 @@ describe('monorepo release flow coverage audit', () => {
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
       expect(defaultResult.stdout).toContain(
-        'Minimum marked response time: 270000ms',
+        'Minimum marked response time: 180000ms',
       )
 
       writeHarnessFile(
@@ -2106,7 +2106,7 @@ describe('monorepo release flow coverage audit', () => {
         'Response capture: enabled (7654321ms timeout)',
       )
       expect(localResult.stdout).toContain(
-        'Minimum marked response time: 270000ms',
+        'Minimum marked response time: 180000ms',
       )
 
       writeHarnessFile(
@@ -2122,7 +2122,7 @@ describe('monorepo release flow coverage audit', () => {
       const callbackResult = runRepositoryDry()
       expect(callbackResult.status, callbackResult.stderr).toBe(0)
       expect(callbackResult.stdout).toContain(
-        'Minimum marked response time: 270000ms',
+        'Minimum marked response time: 180000ms',
       )
 
       const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
@@ -3240,20 +3240,20 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     ).toBe('')
 
     const configuredHarness = loadReviewGptOpenTargetHarness(1, undefined, {
-      minimumMarkedResponseMs: 270_000,
+      minimumMarkedResponseMs: 180_000,
     })
     expect(
       configuredHarness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        269_999,
+        179_999,
       ),
-    ).toContain('below the 270s minimum')
+    ).toContain('below the 3m minimum')
     expect(
       configuredHarness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        270_000,
+        180_000,
       ),
     ).toBe('')
     expect(() =>
@@ -5131,7 +5131,6 @@ exit 1
       bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
-        '@murphai/assistantd',
         '@murphai/clinical-records',
         '@murphai/core',
         '@murphai/device-syncd',

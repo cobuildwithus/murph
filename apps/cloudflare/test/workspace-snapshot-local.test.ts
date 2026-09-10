@@ -38,12 +38,12 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   createEncryptedWorkspaceSnapshotFile,
-  readHostedWorkspaceSnapshotProcessFailureDiagnostics,
   type EncryptedWorkspaceSnapshotFile,
   restoreEncryptedWorkspaceSnapshot,
   restoreEncryptedWorkspaceSnapshotFromEncryptedStream,
   waitForHostedWorkspaceSnapshotProcessPipe,
 } from "../src/workspace-snapshot-local.js";
+import { readHostedWorkspaceSnapshotProcessFailureDiagnostics } from "../src/workspace-snapshot-process-diagnostics.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -79,6 +79,41 @@ describe("workspace snapshot process pipes", () => {
 });
 
 describe("workspace snapshot local restore", () => {
+  it.each([
+    {
+      label: "stale",
+      contents: JSON.stringify({
+        schema: "murph.hosted-workspace-skipped-inline-files.v1",
+        files: [{ path: "missing.md", root: "vault", sha256: "0".repeat(64), size: 1 }],
+      }),
+    },
+    { label: "malformed", contents: "{invalid-json" },
+  ])("ignores $label skipped-inline cache manifests during archive planning", async ({ contents }) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "hosted-workspace-skipped-inline-cache-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const manifestRelativePath = ".runtime/cache/hosted-skipped-inline-files.json";
+    const manifestPath = path.join(vaultRoot, manifestRelativePath);
+
+    try {
+      await mkdir(path.dirname(manifestPath), { recursive: true });
+      await writeFile(manifestPath, contents, "utf8");
+      await writeFile(path.join(vaultRoot, "note.md"), "keep me\n", "utf8");
+
+      const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot, vaultRoot });
+
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === manifestRelativePath
+      )).toBe(false);
+      expect(archivePlan.entries.some((entry) =>
+        entry.root === "vault" && entry.relativePath === "note.md"
+      )).toBe(true);
+      expect(await readFile(manifestPath, "utf8")).toBe(contents);
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("omits explicitly excluded vault paths from encrypted archive planning", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "hosted-workspace-excluded-path-"));
     const durableRoot = path.join(tempRoot, "durable");

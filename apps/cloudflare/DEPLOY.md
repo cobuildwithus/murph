@@ -32,6 +32,47 @@ additional deploy-smoke slot. The unused member application stays at zero.
 The scaffold declares the budget on `RunnerContainer`; staging moves that budget
 to `NextRunnerContainer` when the live release selects that namespace.
 
+### Selected-account size experiment
+
+`SmallRunnerContainer` reserves one additional slot outside the regular fleet
+budget: 1 vCPU, 3,072 MiB memory and 6,000 MB disk. It uses the serving runner
+image, release identity, egress policy and member lifecycle. Include this slot
+in account quota accounting. It never supplies shared standby inventory.
+
+The protected Worker secret `HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256` holds
+the lowercase SHA-256 of the selected member ID. Keep both the ID and digest
+out of source, ordinary variables and deployment summaries. Selection defaults
+off through `HOSTED_EXECUTION_SMALL_RUNNER_ENABLED=false`; enabling requires
+the private secret and secret synchronization. Only fresh allocations consult
+selection. Existing targets remain exact-member owned through normal idle,
+checkpointing and retirement, including after disabling selection.
+
+Merge the public runtime and matching private environment mappings before the
+first protected full deployment. That deployment alone requires
+`CF_BOOTSTRAP_SMALL_RUNNER=true`: migration `v9` creates the SQLite namespace
+using a full Worker deploy with selection off and every existing application
+pinned to its live image, resources and capacity. Native before/after receipts
+must remain unchanged. Existing native image tags are preserved exactly in this
+namespace-only step; newly admitted release images still require immutable
+digests. This is the bounded namespace-bootstrap exception to
+the ordinary version-only release flow; no application image rollout belongs
+in that bootstrap. Missing live authority, a pending candidate or an active
+native rollout stops provisioning. Clear the bootstrap control after success.
+
+Normal full releases keep selection off in the compatibility Worker, distribute
+both serving and small images, prove native convergence and smoke, then promote
+the requested selection. Worker-only releases retain an existing small image
+and cannot introduce its application. A failure leaves selection off; retry the
+same release under the existing pending-image rules. Once small targets exist,
+retain the `SmallRunnerContainer` binding and `runner-small--v-...` reader even
+when selection is disabled. An older Worker cannot recover those targets; this
+release is the rollback floor, and any rollback needs separate approval.
+
+After deployment, verify the protected native resource receipt and selected
+account's next cold allocation after normal idle. Compare existing warm ingress
+latency and matched vault CLI timing aggregates, keeping cold starts and missing
+timing coverage separate. Deployment success alone is not latency evidence.
+
 ### Migration and release order
 
 1. Read one authoritative live Worker version, its release manifest, the existing
@@ -2590,3 +2631,26 @@ namespaces, and removing the flag would change process topology and widen
 Use bounded structured runtime logs, Durable Object status, Container
 application and instance inventory, and the managed deploy smoke for production
 diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.
+
+## Retiring pre-v2 live workspace restore
+
+Deploy the runner removal only after the canonical workspace pointer inventory
+contains no pre-v2 refs and all current snapshot writers produce v2. These gates
+were checked before the removal; repeat them if the deployment baseline changes
+to a legacy writer. No migration, backfill, or object deletion accompanies this
+release. Current and older v2 writers can coexist during a gradual rollout; Web
+and Worker require no ordering change. A null pointer remains bootstrap state.
+
+This cleanup requires a v2-capable reader and v2-only writer at the rollback
+floor; all stricter existing fleet and receipt-format rollback floors still
+apply. This release does not permit a pre-v2 writer rollback or direct restoration of a
+pre-v2 backup pointer. Such a recovery requires a separately reviewed conversion
+path before publishing the pointer. Reverting this code removal alone adds the
+old reader without changing stored data.
+
+Keep legacy ref decoding, Durable Object orphan candidates, legacy object and
+artifact cleanup, canonical write receipt recovery, and the omitted
+`replacedSnapshotRef` fallback for older v2 snapshot-session producers. Canonical
+pointer drain does not prove those independent stores empty. After rollout,
+confirm normal managed-container smoke and supported v2 cold restore/checkpoint
+behavior; an unsupported-ref rejection means the pointer/writer gate failed.

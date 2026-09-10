@@ -77,13 +77,24 @@ The live ownership split is:
   separation lets paused-member retention and an explicitly authorized
   Settings export restore encrypted workspace state without reopening ordinary
   assistant or model work.
-  During active mailbox import, the runner container calls a Worker-owned
-  mailbox-payload decode route over the invocation outbound proxy. That route
-  requires the runtime write fence, decrypts the mailbox payload with the
-  Worker-owned ingress crypto context, and returns only a parsed hosted wake or
-  a semantic blocked result. Legacy active-invocation RPC names remain only for
-  deployed-caller compatibility and must be deleted after 2026-05-25. The
-  container must not receive ingress root keys, callback-signing private
+  During active mailbox import, the container opts into Worker-side inline
+  conversation decryption on its existing mailbox fetch. The Worker validates
+  the current write fence, forwards the signed fetch to Web, and decrypts fresh
+  inline conversation items using one ingress context per batch. It returns an
+  ephemeral parsed `decodedWake` beside the original ciphertext. Only the
+  Cloudflare runtime port accepts that field; canonical Web mailbox parsing
+  discards it. Runtime keeps its existing identity, routing and import checks.
+  Consumed, system and sidecar items retain lazy processing. An unsuccessful
+  optional decode retains the original item so one bad payload cannot fail
+  unrelated lanes; ordinary import still owns that item's decode failure/retry.
+  Old containers omit the opt-in; old Workers return the original ciphertext,
+  and new containers keep the existing decode endpoint for that response and
+  for sidecars. Both directions of Worker/container skew are supported, with no
+  Web deployment dependency or persisted schema change. After convergence,
+  fresh inline messages omit the second request and its write-fence RPC.
+  Retire the opt-in once the supported Worker/runner rollback floor and all warm
+  callers consume decodedWake; the decoder remains for lazy sidecar/system work.
+  The container must not receive ingress root keys, callback-signing private
   material, private JWKs, or a root-fetch capability for mailbox import.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
   rows, stages assistant input, runs assistant/device work, and checkpoints the
@@ -118,6 +129,14 @@ fail. Mailbox access and usage-denial bookkeeping remain
 Web-owned and independent of the invocation's provider. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
+
+For eligible Linq appends, Web starts its existing payloadless direct wake when
+its authorized Temporal signal request begins. Current member/participant access,
+exact mailbox ownership, and cancellation checks precede both requests. The hint
+overlaps acknowledgement, while webhook success still waits for Temporal. A
+failed acknowledgement keeps the provider retry path; durable mailbox input and
+consumption evidence continue to suppress duplicate replies. No payload is pushed
+into the hint and no new queue, cache, or retry owner is introduced.
 
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
@@ -378,9 +397,12 @@ every visible item is a system-lane `device-sync.wake`. This includes dirty,
 connection, disconnect, manual-reconcile, and scheduled-reconcile maintenance;
 none is human conversation work. A full page whose high-water lies beyond its
 visible suffix is incomplete and remains foreground work because later rows are
-not yet classified. A conversation row, another system kind, an empty or
-uninspectable prefix, or a failed classification fetch likewise remains
-foreground. A successful classification prefetch is reused by the foreground
+not yet classified. A completely empty response that proves every fetched lane
+is caught up is consumed without preempting projection or scheduling another
+assistant pass when no local state mutation, ready image completion, or owner
+handoff requires service; otherwise repeated notifications can starve
+checkpoint-backed completion. A conversation row, another system kind, an incomplete or
+uninspectable prefix, or a failed classification fetch remains foreground. A successful classification prefetch is reused by the foreground
 import instead of fetched a second time. An invocation that exhausts its mailbox
 budget returns the existing durable continuation before making another
 projection offer. Once graceful shutdown is observed, the retiring runtime
@@ -755,6 +777,18 @@ preserve a second wire version, retry owner, or projection watermark for rollout
 convenience.
 
 ## Current Protocol
+
+### Mailbox Fetch Member Projection
+
+Web loads one fresh member projection per mailbox fetch and passes it explicitly
+to the existing access, consent and read-first allowance owners. No projection
+survives the request. Empty, consumed-replay and system-only batches still skip
+AI usage evaluation. Conversation batches still read current usage periods;
+denials are confirmed by the mutating allowance owner with a new member read.
+Group owner/participant authority and Family sponsorship keep their canonical
+readers. Read-only group allowance derives owner access from its supplied member
+state rather than reloading the same container. Locking and spend accounting are
+unchanged. The encrypted mailbox response and runtime contract are unchanged.
 
 ### Foreground Priority Rule
 
@@ -2210,8 +2244,10 @@ Runner-to-Worker legacy artifact reads carry one fixed-vocabulary purpose and
 one UUID correlation id per logical fetch; retries retain that same id. Both
 sides log only validated purpose/correlation metadata, timing, status, and
 ordinal fields, never artifact refs or bytes. The allowed purposes distinguish
-workspace restore, canonical-write receipts, legacy snapshot materialization,
-and workspace artifact materialization.
+historical workspace restore/materialization, current canonical-write receipts,
+and workspace artifact materialization. Historical purpose values stay readable
+for older producers and diagnostics; the live runtime no longer reads pre-v2
+workspace snapshots.
 
 Repeated dirty hints while the same connection is already dirty do not append or signal
 another device-sync wake; dirty coalescing remains the work-queue invariant,
@@ -2449,9 +2485,8 @@ writer closed. Only after that release reaches 100% traffic and the exact runner
 fingerprint converges may the producer release let initial `send_vault_file`
 preparation accept this ref.
 
-Cold snapshot construction first removes runtime-owned operator-home symlinks,
-then materializes every deferred skipped-inline file before state-aware
-quiescent cleanup. The generated-delivery pass runs independently before
+Cold snapshot construction first removes runtime-owned operator-home symlinks
+before state-aware quiescent cleanup. The generated-delivery pass runs independently before
 pending-input compaction and broad assistant-residue maintenance, so unrelated
 maintenance failures cannot block a successful terminal-file deletion while
 checkpoint publication continues. It evaluates the complete physical
@@ -3556,16 +3591,17 @@ the warm idle window; actual cleanup failures use the provider-cleanup retry
 delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
 wakes from the post-side-effect state, not from a pre-side-effect base wake.
 
-The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
-legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a
-legacy layered `{base, hot}` ref. Live v2 snapshots are one encrypted zstd-compressed
+Live hosted workspace restore accepts a v2 direct-R2 snapshot ref or null
+bootstrap state. Pre-v2 full/base, working `{base, delta}`, and layered
+`{base, hot}` refs fail before local mutation or artifact reads. Shared legacy
+ref decoders remain for stored-object cleanup and historical metadata
+compatibility. Live v2 snapshots are one encrypted zstd-compressed
 tar object uploaded directly from the container to R2 through a short-lived
 presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
 abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
-gzip v2 refs are intentionally unsupported; legacy restore compatibility stays
-limited to pre-v2 workspace refs. The bridge no longer writes foreground
+gzip v2 refs are intentionally unsupported. The bridge no longer writes foreground
 working commits. Mailbox import, active-turn acceptance, assistant-runtime
 commits, canonical-runtime commits, provider cleanup, system-mailbox receipts,
 and pre-delivery outbox state must not enter workspace snapshot construction;
@@ -3709,12 +3745,19 @@ maintenance. Codex provider continuity is the exact active rollout JSONL
 referenced by live assistant session resume state, not ChatGPT `auth.json` or
 the whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
 by `objectKey`, decrypts the encrypted `tar.zst`, and extracts into a fresh durable
-root. For legacy refs, restore clears local roots and legacy cache markers, then
-applies the base bundle when present and either the working delta or legacy hot
-bundle according to the snapshot ref shape. Legacy working `{base, delta}` and
-layered `{base, hot}` refs remain
-restorable during migration, but new bridge snapshots are idle-shutdown direct
-R2 v2 refs only.
+root. The bridge accepts only a null or v2 current snapshot baseline and produces
+idle-shutdown direct R2 v2 refs. It no longer materializes pre-v2 bundles or
+skipped-inline legacy files before archive construction. Canonical write receipt
+replay and its artifact reads remain required recovery paths. Ordinary restored
+file availability is derived from a regular file within the selected root and
+the caller's size budget; it does not require a materialized-artifact cache entry.
+Media catalogue missing, expiry, and size decisions take precedence over local
+bytes. Per-call materialization results remain transient; the runtime no longer
+reads or writes the obsolete materialized-artifact index. Existing index files
+remain inert. The skipped-inline manifest reader and writer are also removed;
+existing `.runtime/cache/hosted-skipped-inline-files.json` files remain inert
+and excluded from archives by the runtime-cache policy. The materializer no
+longer reads legacy workspace bundles.
 
 Foreground assistant turns do not publish a separate Codex continuity artifact
 or snapshot pointer. Provider-native continuity remains an idle workspace
@@ -4028,6 +4071,16 @@ routing.
   size, and warning threshold)
 
 ### Cloudflare Owns
+
+The optional single-account size experiment allocates opaque
+`runner-small--v-<release>--<random>` targets in `SmallRunnerContainer`.
+Selection is private and consulted only for fresh allocation; the container
+independently validates initial member eligibility. Namespace routing, retained
+sessions, cleanup and deletion use the stored exact target even after selection
+is disabled. Small runners share the serving release and existing binding/fence
+lifecycle, but never enter shared standby inventory. Resource shape, protected
+provisioning and the reader rollback floor are owned by
+[`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#selected-account-size-experiment).
 
 - per-user Durable Object routing
 - lease/fencing generation
