@@ -8741,6 +8741,7 @@ describe("Linq group chat auto-provision", () => {
         userId: containerCreate.data.memberId,
       },
       mailboxItemId: "mailbox_group_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 

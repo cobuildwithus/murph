@@ -165,7 +165,9 @@ const mocks = vi.hoisted(() => {
     shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
     }),
-    signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+    signalHostedMailboxAppendRuntime: vi.fn<
+      typeof import("../src/lib/hosted-orchestration/signal-runtime").signalHostedMailboxAppendRuntime
+    >(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
@@ -7972,8 +7974,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input) => {
       callOrder.push("conversation-signal");
+      input.onSignalStarted?.();
       return {
         signalAccepted: true,
         workflowId: `hosted-user-runtime:${memberId}`,
@@ -8108,6 +8111,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         userId: memberId,
       },
       mailboxItemId: "mailbox_instant_first_turn_outbound",
+      onSignalStarted: expect.any(Function),
     });
 
     typingResult.resolve({ ok: false, status: 503 });
