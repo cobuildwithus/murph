@@ -411,3 +411,9 @@ nonreplacement responses preserve the current cache. No new state or logout
 step was added. All 90 focused login, session and live-vault checks and Web
 typecheck pass. This source change requires ReviewGPT round 2 and current-head
 CI before PR #3132 is ready again.
+
+### Adoption renewal ordering correction
+
+ReviewGPT round 2 at 82d5147a74b274e222ca1cf5f9c32a11c741aa9a returned one accepted High finding: an older renewal response can overwrite a successful replacement cookie. Its captured response, committed-turn identity and requested/response gpt-6-pro metadata agree (response SHA-256 14d775b11bc601cff7e4d1f03a698854e6a66f52e0564ad4eb490d238f0a4c11).
+
+Both OTP and Telegram regression cases failed before the correction. The existing session client now serializes cookie writes through one origin-wide Web Lock; the renewal component participates, and verification/logout have bounded waits. Browsers without that API skip automatic browser renewal and retain the original lifetime. Native renewal and valid server sessions are unchanged. Real Chromium with actual HttpOnly Set-Cookie responses passed same-tab and cross-tab OTP/Telegram ordering. All 97 focused session, login and live-vault cases passed before the two additional fallback/failure cases. Final verification and round 3 remain required.
