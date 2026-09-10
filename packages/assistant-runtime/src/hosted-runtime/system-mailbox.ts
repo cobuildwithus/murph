@@ -527,9 +527,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       prepared.routeAction === "run-device-sync-wake"
       && metrics.backgroundMaintenanceYielded === true
       && metrics.postCheckpointRecord == null
-      && input.shouldYieldBackgroundMaintenance?.() === true
+      && metrics.nextWakeAt !== null
     ) {
       return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        nextAttemptAt: metrics.nextWakeAt,
         prepared,
         vaultRoot: input.vaultRoot,
       });
@@ -750,6 +751,7 @@ function shouldPreemptHostedDeviceSyncSystemMailboxItem(
 }
 
 async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(input: {
+  nextAttemptAt?: string | null;
   prepared: HostedSystemMailboxPendingItem;
   vaultRoot: string;
 }): Promise<Extract<HostedSystemMailboxCheckpointPreparation, { status: "preempted" }>> {
@@ -757,7 +759,7 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
     ...input.prepared,
     lastErrorCode: null,
     lastErrorMessage: null,
-    nextAttemptAt: null,
+    nextAttemptAt: input.nextAttemptAt ?? null,
     status: "pending",
   };
   await retainHostedSystemMailboxItemAfterForegroundPreemption({
@@ -894,7 +896,6 @@ export async function retainHostedSystemMailboxItemAfterForegroundPreemption(inp
   await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
     pending: upsertHostedSystemMailboxPendingItem(state.pending, {
       ...input.item,
-      nextAttemptAt: null,
       status: "pending",
     }),
   }));

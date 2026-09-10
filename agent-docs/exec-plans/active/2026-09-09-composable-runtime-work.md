@@ -395,3 +395,38 @@ The focused foreground suite also passes 29 preemption and six concurrent-import
 cases, including bounded reply dispatch. The corrected candidate is pushed for
 CI while the existing round-five capture remains its original review owner; no
 duplicate review is launched. Its result and this delta need the next round.
+
+
+### Round-five ReviewGPT correction
+
+ReviewGPT completed against 8abec78772ae02a67c7dc7eef76aabaa953ece25 with one
+accepted High REVIEW_INDUCED finding: cancellation during connection preload,
+before service initialization and its durable retry fence, could remove the
+unexecuted hint. Capture matched the submitted turn and gpt-6-pro response;
+SHA-256 011c4d5a1ae4e32ee6ed89bab1e43034b9f1a07864ecb956fc23c7d729cf8bc4.
+The restored-receipt correction was confirmed; no additional serious bug or
+material complexity-collapse finding was reported. The user explicitly requests
+continued fixing and review to merge readiness, authorizing this bounded
+remediation without another resume request from the general review-loop default.
+
+The parent reproduced both workspace-boundary cancellation and the pass's own
+timeout at the real entrypoint. Both removed the hint on the reviewed code.
+Preparation now retains a yielded no-record result when it requests a retry,
+storing that deadline in existing nextAttemptAt. The retention writer preserves
+the deadline instead of clearing it again. No-retry unavailable results remain
+terminal. Consumed-alarm reconciliation moves from the acknowledgment suffix to
+the quiescent snapshot boundary, so pre-service yields without acknowledgment
+effects are covered by the same existing rule. No new state owner is added.
+
+Both real-entrypoint cases preserve the exact dirty hint and retry, leave its
+handled prefix at zero, restore the accepted snapshot, import the expected
+observation, and only then acknowledge the exact payload/revision. The 350-case
+surrounding group passed 349; the sole obsolete assertion expected a second
+snapshot for the removed false-completion effect. Its expected count is reduced
+to one while the test keeps its assistant predecessor and restored retry proof.
+The final two-file focused rerun passes all 14 cases, including both new restore
+regressions, and runtime typecheck passes. Parent review accepts the reduced
+false-completion path and retains the existing authority, acknowledgment, and
+foreground-priority boundaries.
+The complexity guard passes: root debt equals main at 549 and max 252 is unchanged;
+mailbox debt 20 to 19, runner 59 to 58, independent owner max 16.

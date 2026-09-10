@@ -12,6 +12,7 @@ import {
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
+  createVaultSnapshotBundle,
   enqueueEnvironmentInterviewSystemMailboxItemForTest,
   listHostedCanonicalWriteReceiptLogArtifacts,
   mocks,
@@ -33,6 +34,8 @@ import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution
 import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
+import * as maintenanceCancellation from "../src/hosted-runtime/background-maintenance-cancellation.ts";
+import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
 test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgment"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
@@ -374,6 +377,185 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
     controller.abort();
     await runtimeCompletion?.catch(() => undefined);
     if (originalAutomation) mocks.runAssistantAutomationPass.mockImplementation(originalAutomation);
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    await removeTempRoot(vaultRoot);
+  }
+});
+
+
+test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted device work after %s and imports it after restore", async (scenario) => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-preload-retry-"));
+  const controller = new AbortController();
+  let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+  const preloadStarted = createDeferred<void>();
+  const preloadAborted = createDeferred<void>();
+  const events: string[] = [];
+  const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+  const artifactBytesByHash = new Map<string, Uint8Array>();
+  const connectionId = "synthetic-preload-connection";
+  const deviceItem = createMailboxItem({
+    id: "mailbox_item_preload_retry", dedupeKey: "device-sync.wake:preload-retry",
+    kind: "device-sync.wake", lane: "system", laneSeq: "1",
+  });
+  const wake = {
+    connectionId, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
+    hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
+    kind: "device-sync.wake" as const, occurredAt: TEST_NOW, provider: "whoop" as const,
+    reason: "webhook_hint" as const, userId: TEST_USER_ID,
+  };
+  let firstInvocation = true;
+  let snapshots = 0;
+  let acknowledgments = 0;
+  let preloadAbortReason: unknown;
+  const originalCancellation = maintenanceCancellation.createHostedBackgroundMaintenanceCancellation;
+  const cancellationSpy = vi.spyOn(maintenanceCancellation, "createHostedBackgroundMaintenanceCancellation")
+    .mockImplementation((input) => {
+      if (input.timeoutMs !== HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS) return originalCancellation(input);
+      assert.equal(input.shouldYield?.() ?? false, false);
+      return originalCancellation({
+        ...input,
+        timeoutMs: firstInvocation && scenario === "pass timeout" ? 200 : input.timeoutMs,
+      });
+    });
+  const baseDevicePort = createSnapshotDeviceSyncPort({
+    connectionId, nextReconcileAt: "2099-01-01T00:00:00.000Z",
+    async onFetchSnapshot(signal) {
+      if (!firstInvocation) return;
+      assert.ok(signal);
+      preloadStarted.resolve();
+      await new Promise<void>((_, reject) => {
+        const abort = () => {
+          preloadAbortReason = signal.reason;
+          events.push("preload.aborted");
+          preloadAborted.resolve();
+          reject(signal.reason);
+        };
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      });
+    },
+  });
+  const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+    ...baseDevicePort,
+    async applyUpdates(request) {
+      return {
+        appliedAt: request.occurredAt ?? TEST_NOW,
+        updates: request.updates.map((update) => ({
+          connection: null, connectionId: update.connectionId, status: "updated" as const,
+          tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+        })),
+        userId: TEST_USER_ID,
+      };
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false, nextWakeAt: null, userId: TEST_USER_ID,
+        items: acknowledgments ? [] : [{
+          connectionId, dirtyRevision: "7", processedRevision: "0",
+          dirtyResources: [{
+            count: 1, dirtyPayloadId: "synthetic-preload-payload", jobKind: "resource",
+            payload: { resourceType: "sleep", resourceId: "synthetic-preload-sleep" },
+            resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
+            windowEnd: null, windowStart: null,
+          }],
+          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
+          userId: TEST_USER_ID, windowEnd: null, windowStart: null,
+        }],
+      };
+    },
+    async ackDirtyStateProcessed(request) {
+      assert.equal(firstInvocation, false);
+      const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
+      assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-preload-sleep")));
+      assert.ok(checkpointRequests.some((request) => request.reason === "idle_shutdown"));
+      assert.deepEqual(request.processedDirtyPayloadIds, ["synthetic-preload-payload"]);
+      assert.equal(request.processedRevision, "7");
+      acknowledgments += 1;
+      return { ...request, dirtyRevision: "7", nextWakeAt: null, recorded: true, stillDirty: false, userId: TEST_USER_ID };
+    },
+  };
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(TEST_NOW));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+    id: "synthetic-preload-sleep", nap: false,
+    start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
+    updated_at: "2026-04-26T08:00:00.000Z",
+  }), { headers: { "content-type": "application/json" } })));
+  try {
+    let workspace = createWorkspaceState();
+    const run = () => runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+      request: {
+        attemptId: firstInvocation ? "attempt_preload_initial" : "attempt_preload_restore",
+        idleCheckpointDelayMs: 1, workspace, workspaceVersion: workspace.version,
+        ...(firstInvocation ? {} : { processingMode: "system_mailbox" as const }),
+      },
+      resolvedConfig: createDeviceSyncResolvedConfig(),
+    }), {
+      vaultRoot, signal: controller.signal,
+      async createCheckpointSnapshot() {
+        const snapshot = await createVaultSnapshotBundle({
+          key: `users/bundles/member-synthetic/preload-retry-${++snapshots}.bundle.json`, vaultRoot,
+        });
+        artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+        return { snapshotRef: snapshot.snapshotRef };
+      },
+      async importItem(item) {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        await enqueueHostedSystemMailboxItem({ item: createResolvedDeviceSyncSystemMailboxItem(item.item), wake, vaultRoot });
+        return { status: "imported" };
+      },
+      async runAssistantPhase() {
+        assert.equal(firstInvocation, true);
+        await preloadStarted.promise;
+        if (scenario === "pass timeout") await preloadAborted.promise;
+        return { progressed: false };
+      },
+      platform: createPlatform({
+        artifactBytesByHash, deviceSyncPort,
+        mailboxPort: createMailboxPort({ events, items: firstInvocation ? [deviceItem] : [] }),
+        workspacePort: createWorkspacePort({ events, checkpointRequests, workspace }),
+      }),
+    });
+    runtimeCompletion = run();
+    await withRealTimeout(runtimeCompletion, 10_000, () => events.join(","));
+    assert.equal(controller.signal.aborted, false);
+    assert.ok(preloadAbortReason instanceof Error);
+    assert.equal(preloadAbortReason.message, scenario === "workspace boundary"
+      ? "Workspace boundary paused background work."
+      : "Background maintenance exceeded its time budget.");
+    assert.equal(acknowledgments, 0);
+    const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]?.itemId, deviceItem.id);
+    assert.deepEqual(pending[0]?.wake, wake);
+    assert.equal(pending[0]?.status, "pending");
+    assert.equal(pending[0]?.postCheckpointRecord, null);
+    const retryAt = "2026-04-27T00:00:30.000Z";
+    assert.equal(pending[0]?.nextAttemptAt, retryAt);
+    const checkpoint = checkpointRequests.at(-1);
+    assert.ok(checkpoint);
+    assert.equal(checkpoint.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "0");
+    assert.equal(checkpoint.nextWakeAt, retryAt);
+    workspace = createWorkspaceState({
+      snapshotRef: checkpoint.snapshotRef, redactedStatus: checkpoint.redactedStatus,
+      nextWakeAt: checkpoint.nextWakeAt, nextWakeReason: checkpoint.nextWakeReason,
+      systemMailboxProgressGeneration: checkpoint.systemMailboxProgressGeneration,
+      version: String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n),
+    });
+    firstInvocation = false;
+    checkpointRequests.length = 0;
+    vi.setSystemTime(new Date(retryAt));
+    runtimeCompletion = run();
+    await withRealTimeout(runtimeCompletion, 10_000, () => events.join(","));
+    assert.equal(acknowledgments, 1, JSON.stringify({ events, pending: (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({ status: item.status, error: item.lastErrorCode })) }));
+    assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+    assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1");
+  } finally {
+    controller.abort();
+    await runtimeCompletion?.catch(() => undefined);
+    cancellationSpy.mockRestore();
     vi.unstubAllGlobals();
     vi.useRealTimers();
     await removeTempRoot(vaultRoot);

@@ -832,8 +832,11 @@ immediate wake. Restoring a newly fenced workspace releases stale in-process
 claims through the existing pending state. A due mailbox item already owns
 the restored device alarm. When none exists, a due workspace device timer enters
 that same mailbox claim path; a future retry for another connection does not
-suppress it. After completion, remaining mailbox work and returned provider
-deadlines replace the consumed alarm.
+suppress it. A device attempt that yields before service initialization keeps
+its exact hint pending with the requested retry deadline; no-retry unavailable
+results remain terminal. At the quiescent snapshot boundary, remaining mailbox
+work and returned provider deadlines replace the consumed alarm, including
+yields that have no acknowledgment effect.
 
 Both assistant and model-free wake deadlines remain independently available.
 Workspace metadata publication is serialized against the latest accepted version

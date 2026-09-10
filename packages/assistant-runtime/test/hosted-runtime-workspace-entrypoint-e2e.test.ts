@@ -438,7 +438,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       assert.deepEqual(checkpoint.handledConversationMailboxItemIds, [
         "mailbox_item_entrypoint_device_sync_pending_retry",
       ]);
-      assert.deepEqual(checkpointSnapshotFrontierSelections, [true, true]);
+      assert.deepEqual(checkpointSnapshotFrontierSelections, [true]);
 
       vi.useRealTimers();
       vi.useFakeTimers({ toFake: ["Date"] });

@@ -4945,12 +4945,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (workspace) {
         rebaseCommittedWorkspace(workspace);
       }
-      // Due device work is represented by mailbox claims. Once effects settle,
-      // the boundary re-derives outstanding work; an old alarm is not another job.
-      if (pendingWake.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-        && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)) {
-        pendingWake = { nextWakeAt: null, nextWakeReason: null };
-      }
       const durableWakeFollowsDueAssistant =
         durableWake.nextWakeAt !== null
         && pendingWake.nextWakeAt !== null
@@ -7096,8 +7090,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             );
             checkpointWakeInterruption.signal?.throwIfAborted();
             const quiescentMailboxWake = await resolveHostedIdleBoundarySystemMailboxWake({ vaultRoot: restored.vaultRoot });
+            const idleWake = checkpointInput.idleCheckpointWake;
+            // Mailbox state owns due device work, including attempts that yielded
+            // before importing. Do not republish their consumed alarm.
             const quiescentWake = selectEarliestHostedRuntimeWake([
-              { at: checkpointInput.idleCheckpointWake.nextWakeAt, reason: checkpointInput.idleCheckpointWake.nextWakeReason },
+              {
+                at: idleWake.nextWakeReason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+                    && hostedRuntimeWakeIsDue(idleWake.nextWakeAt)
+                  ? null : idleWake.nextWakeAt,
+                reason: idleWake.nextWakeReason,
+              },
               quiescentMailboxWake,
             ]);
             const defaultProcessingWake =
