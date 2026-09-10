@@ -911,31 +911,28 @@ The summary keeps total sleep distinct from session duration and leaves provider
 read-only Labs discovery. It reads `JUNCTION_API_KEY`, targets the fixed
 production US Junction origin, and projects live provider-declared panels,
 biomarkers, catalog prices, ZIP coverage, and patient service centers into the
-strict `@murphai/hosted-execution/labs` contract. The authenticated Labs
-browser API at `POST /api/labs` and the signed hosted-runtime callback at
-`POST /api/internal/hosted-execution/labs/tool` call the same stateless service;
-neither path introduces a database, cache, sync job, search index, search
+strict `@murphai/hosted-execution/labs` contract. The signed hosted-runtime callback at
+`POST /api/internal/hosted-execution/labs/tool` calls the stateless service;
+it introduces no database, cache, sync job, search index, search
 history, or ZIP persistence. Junction's catalog and location read APIs require
 GET query parameters, so the Web owner sends the bounded catalog term or ZIP
 only to the fixed Junction origin and never records or logs the full outbound
-URL. The browser and Cloudflare boundaries remain semantic POST bodies.
+URL. The Cloudflare boundary remains a semantic POST body.
 
 Cloudflare carries only an optional semantic Labs port over the existing signed
 `web-control.worker` boundary. `packages/assistant-runtime` passes that port
 into `packages/assistant-engine`, which registers the read-only `murph.labs`
 dynamic tool only for a verified private direct turn when the capability is
-present. Group and unverified contexts do not receive the tool. The assistant
-and browser receive only bounded normalized facts with provider provenance and
+present. Group and unverified contexts do not receive the tool. The assistant receives only bounded normalized facts with provider provenance and
 check time; the provider credential, authorization header, raw body, and raw
 error remain inside Web.
 
-The authenticated, unlinked `/labs` page is a second consumer, not another
-catalog owner. It supports live search, offering detail, and a ZIP-based
-location list. Ordering, payment, booking, eligibility, requisitions, results,
-custom panels, maps, and navigation exposure remain absent. Provider amounts
-are current catalog prices rather than quotes, and a returned collection site
-is not an appointment or proof that a selected offering can be collected
-there. The behavior and deploy contract live in
+The experimental Labs browser page and browser API are retired. `/labs` redirects
+to Home; private conversational discovery remains available. Ordering, payment,
+booking, eligibility, requisitions, results, custom panels, and maps remain absent.
+Provider amounts are catalog prices rather than quotes; a collection site is not
+an appointment or proof that a selected offering can be collected there.
+The behavior and deploy contract live in
 `agent-docs/product-specs/labs-discovery.md`.
 
 ## Hosted Clinical Records

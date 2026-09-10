@@ -708,7 +708,7 @@ Required for live Labs discovery:
 
 This is the same canonical Junction credential used by hosted device sync.
 Labs discovery keeps the key server-only, targets the code-owned production US
-origin, and serves authenticated `POST /api/labs` plus signed
+origin, and serves signed
 `POST /api/internal/hosted-execution/labs/tool` through one stateless service.
 No catalog, query, or ZIP is persisted.
 
