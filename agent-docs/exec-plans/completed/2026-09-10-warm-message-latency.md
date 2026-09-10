@@ -1,6 +1,6 @@
 # Simplify the warm conversation critical path
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -55,5 +55,10 @@ Updated: 2026-09-10
 - Product UX: Patch / Ready for candidate review. Ordinary eligible Linq messages start the existing hint sooner. Inactive, wrong-owner, participant-denied, and cancelled access paths never start it. Signal failure still fails webhook acknowledgement and retains provider retry. Other channels and missing-checkpoint fallback retain their prior ordering.
 - Existing mailbox import and Worker decode/fetch tests pass (69 and 12 cases). Focused Web signal, handoff, mailbox-wake, and webhook idempotency tests cover delivery and authority boundaries.
 - Focused Web proof: 91 cases pass across signal, direct wake, mailbox wake, and webhook idempotency suites. One stale mock argument assertion was corrected and its 19-case suite rerun green. Web typecheck passes. Complexity passes with no hotspots; handoff maximum drops from 12 to 11.
-- Content-only changelog rendering passes (10 cases) after generating the ignored fragment module. PR #3155 is draft; final CI and external review remain pending.
+- Content-only changelog rendering passes (10 cases) after generating the ignored fragment module. Final lifetime simplification passes its 19-case Web suite and prepared Web typecheck; complexity remains green.
+- PR #3155 is Ready. Final ReviewGPT round 1 passes at 40a27ee6e9fb15de7474e79d94b7a0d5a8fa67d5, with no qualifying bugs or material Complexity Collapse. The reviewer independently exercised 17 isolated ordering checks; those do not replace repository tests.
+- Review evidence: full-snapshot attachment preflight passed; reviewer verified the nine changed-file hashes and base/head ordering. Managed Eragon selected 6Pro, and persisted response-model evidence reports gpt-6-pro. Response SHA and preceding committed-turn identity match the captured response. The wait log spans at least 480 seconds, above the 270-second minimum. The substantive boundary audit is accepted despite the prose model self-report being unknown.
+- Parent final review: required ownership, current access, cancellation, acknowledgement failure, unchanged consumers, privacy, and complexity are preserved. No further source edits are needed.
+- Current-base merge-tree is clean. CI remains pending at plan closure; final exact-head check status belongs to PR #3155. No deployment or production speedup has been claimed.
 - Existing production timing is diagnostic evidence only; no post-change production speedup is claimed without a live measurement.
+Completed: 2026-09-10
