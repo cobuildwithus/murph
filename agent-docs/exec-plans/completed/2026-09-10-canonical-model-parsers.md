@@ -1,6 +1,6 @@
 # Use canonical parsers for goal targets and assessment writes
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -30,7 +30,7 @@ Contracts remain the shape owner; core remains the canonical writer. Health metr
 2. Update projection versions and durable owner notes; decide changelog scope.
 3. Run focused source tests, relevant typechecks, complexity and privacy review.
 4. Commit, open draft PR, mark ready after candidate review, and start required ReviewGPT concurrently with CI.
-5. Resolve gates, close this plan, and report the PR.
+5. Complete local remediation and archive the implementation plan; finish exact-head CI on PR #3138 before final handoff.
 
 ## Verification
 
@@ -41,5 +41,11 @@ Contracts remain the shape owner; core remains the canonical writer. Health metr
 - Complexity guard passed: four changed source files, zero functions above 20; goal parser maximum falls from 20 to 11.
 - Changelog: `2026-09-10 / goal-progress-saved-rules`, linked to PR #3138. All 10 changelog archive tests passed.
 - Continuation confirmed the worktree and pushed PR head match the implementation handoff. Parent candidate review found no additional required source edits.
-- Exact-head CI and ReviewGPT are pending Ready admission. Initial CI failures explicitly rejected draft proof; they did not run the runtime suites.
+- Final ReviewGPT round 1 passed at `3d35cbef75c840a3f24883d74f82c0118f4fa3c5`: zero findings. Vonneumann lane; exact committed-turn signature and response hash match the captured `gpt-6-pro` model. Response wait was at least 425 seconds. The reviewer checked the full snapshot and all 11 changed blobs. No review tooling retries; the owned target closed normally. Local tests and CI, not the source-only review, provide automated execution evidence.
+- Web typecheck and all 10 changelog archive tests passed.
+- Initial Ready CI passed 29 checks. Platform coverage exposed five stale version assertions: four pinned browser generation 15 and one pinned SQLite version 26. They now enforce the original compatibility floor while the owning contracts test pins the current browser generation. Production source is unchanged after ReviewGPT.
+- Remediation verification: 33 query browser compatibility tests, 10 hosted-execution tests, and the focused v24 SQLite rebuild test passed. Query and hosted-execution typechecks passed after their final test edits. The other 102 tests in the broad query file were deliberately excluded from that focused command; broader coverage belongs to CI.
+- Parent final review: five test-only corrections retain the existing behavioral assertions and production contracts. No new source, dependencies, persisted state, or generated artifacts. These isolated proof changes and this plan closure are exempt from another substantive ReviewGPT round.
+- Final exact-head CI is pending the remediation push and Ready admission. The completion owner remains responsible for observing it on PR #3138. This archived record does not claim a future CI or deployment result.
 
+Completed: 2026-09-10
