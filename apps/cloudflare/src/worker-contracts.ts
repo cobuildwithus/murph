@@ -1,10 +1,6 @@
 import type {
   HostedWorkspaceInvocationResult,
-  HostedRuntimeShellPrewarmOrchestrationDiagnostics,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import type { R2BucketLike } from "./bundle-store.ts";
 import type { HostedBrowserVaultReplicaOrphanCandidate } from "./browser-vault-store.ts";
 import type {
@@ -149,11 +145,6 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
-  prewarmRuntimeShellForUser?(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void>;
   reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
   publishHostedPrivateMedia?(
     input: HostedPrivateMediaPublishInput,

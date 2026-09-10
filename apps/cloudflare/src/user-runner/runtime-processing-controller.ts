@@ -20,7 +20,6 @@ import {
   RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   type HostedExecutionContainerNamespaceLike,
   type RunnerContainerColdStartTiming,
-  type RunnerContainerShellPrewarmObservation,
   type RunnerContainerStartupFailureStage,
 } from "../runner-container.js";
 import {
@@ -139,7 +138,6 @@ type FreshRuntimeStartPreparation =
       preparedAtEpochMs: number;
       runtimePreparationWaitAfterContainerReadyMs: number;
       startupOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
-      shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
     }
   | {
       kind: "retry";
@@ -195,29 +193,6 @@ function withRuntimeProcessingOrchestration(
       ...(input.orchestration ?? {}),
       ...orchestration,
     },
-  };
-}
-
-function toShellPrewarmOrchestrationDiagnostics(
-  observation: RunnerContainerShellPrewarmObservation | undefined,
-): RuntimeProcessingOrchestrationDiagnostics | null {
-  if (!observation) {
-    return null;
-  }
-  return {
-    ...(observation.orchestration ?? {}),
-    shellPrewarmFirstHintAtEpochMs: observation.firstHintAtEpochMs,
-    shellPrewarmHintCount: observation.hintCount,
-    ...(observation.finishedAtEpochMs === undefined ? {} : {
-      shellPrewarmFinishedAtEpochMs: observation.finishedAtEpochMs,
-    }),
-    ...(observation.operationElapsedMs === undefined ? {} : {
-      shellPrewarmOperationElapsedMs: observation.operationElapsedMs,
-    }),
-    ...(observation.outcome === undefined ? {} : {
-      shellPrewarmOutcome: observation.outcome,
-    }),
-    shellPrewarmSource: observation.source,
   };
 }
 
@@ -1432,7 +1407,6 @@ export class RuntimeProcessingController {
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
       ...preparation.startupOrchestration,
-      ...preparation.shellPrewarmOrchestration,
     });
     const preparationOrchestration =
       preparation.prepared.input.orchestration ?? {};
@@ -1621,9 +1595,6 @@ export class RuntimeProcessingController {
       startupOrchestration: toContainerColdStartOrchestrationDiagnostics(
         startupConfirmed.coldStartTiming,
       ),
-      shellPrewarmOrchestration: toShellPrewarmOrchestrationDiagnostics(
-        startupConfirmed.shellPrewarmObservation,
-      ),
     };
   }
 
@@ -1659,7 +1630,6 @@ export class RuntimeProcessingController {
     | {
         coldStartTiming?: RunnerContainerColdStartTiming;
         confirmed: true;
-        shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
       }
     | {
         confirmed: false;
@@ -1767,9 +1737,6 @@ export class RuntimeProcessingController {
           coldStartTiming: readinessResult.coldStartTiming,
         }),
         confirmed: true,
-        ...(readinessResult.shellPrewarmObservation === undefined ? {} : {
-          shellPrewarmObservation: readinessResult.shellPrewarmObservation,
-        }),
       };
     } catch (error) {
       if (

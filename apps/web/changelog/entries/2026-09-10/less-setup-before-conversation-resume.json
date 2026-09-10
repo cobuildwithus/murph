@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "less-setup-before-conversation-resume",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less setup before a conversation resumes",
+    "summary": "Murph skips an unused setup check before resuming conversations.",
+    "details": "Ready containers still help your conversation get started, with the same checks for access and privacy.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}
