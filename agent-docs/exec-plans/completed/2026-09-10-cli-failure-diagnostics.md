@@ -1,6 +1,6 @@
 # Finite CLI failure diagnostics
 
-Status: active (parent qualification passed; complexity correction and final PR gates pending)
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -74,3 +74,4 @@ incremental correction. Required exact-head CI and final external review remain
 pending. Keep this plan active through the final PR completion gate; the parent
 closes it through the documented `scripts/finish-task` lifecycle. No merge or
 deployment is part of this task.
+Completed: 2026-09-10
