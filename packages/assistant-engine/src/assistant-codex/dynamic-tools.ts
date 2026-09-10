@@ -3751,7 +3751,6 @@ async function dispatchMurphDynamicToolRequest(
           runId,
         }),
         sanitizer: 'act',
-        unknownOutcomeOnTransportError: true,
       })
     }
     case 'computer-os-control': {
@@ -3765,7 +3764,6 @@ async function dispatchMurphDynamicToolRequest(
           runId,
         }),
         sanitizer: 'os-control',
-        unknownOutcomeOnTransportError: true,
       })
     }
     case 'computer-pause-for-user': {
@@ -3779,10 +3777,6 @@ async function dispatchMurphDynamicToolRequest(
           ),
         } satisfies HostedComputerPauseForUserRequest,
         fetchImpl: input.fetchImpl,
-        finishPath: buildHostedComputerRunOperationPath({
-          operation: 'finish',
-          runId,
-        }),
         path: buildHostedComputerRunOperationPath({
           operation: 'pause-for-user',
           runId,
@@ -3803,7 +3797,6 @@ async function dispatchMurphDynamicToolRequest(
           runId,
         }),
         sanitizer: 'finish',
-        unknownOutcomeOnTransportError: true,
       })
     }
   }
@@ -6622,17 +6615,10 @@ async function executeHostedComputerPauseForUserTool(input: {
   abortSignal: AbortSignal | null
   body: HostedComputerPauseForUserRequest
   fetchImpl: typeof fetch
-  finishPath: string
   path: string
 }): Promise<MurphDynamicToolExecutionResult> {
-  const apiResult = await callHostedComputerApi({
-    ...input,
-    unknownOutcomeOnTransportError: true,
-  })
+  const apiResult = await callHostedComputerApi(input)
   if (!apiResult.ok) {
-    if (apiResult.unknownOutcome) {
-      return { ...toolTextResult(false, apiResult.errorText), ...toolFailureMetadata(apiResult) }
-    }
     return { ...toolTextResult(false, apiResult.errorText), ...toolFailureMetadata(apiResult) }
   }
 
@@ -6655,7 +6641,6 @@ async function executeHostedComputerOpenTool(input: {
     fetchImpl: input.fetchImpl,
     path: HOSTED_COMPUTER_RUNS_PATH,
     sanitizer: 'open',
-    unknownOutcomeOnTransportError: true,
   })
 }
 
@@ -6681,7 +6666,6 @@ async function executeHostedComputerApiTool(input: {
   fetchImpl: typeof fetch
   path: string
   sanitizer: HostedComputerToolPayloadSanitizer
-  unknownOutcomeOnTransportError: boolean
 }): Promise<MurphDynamicToolExecutionResult> {
   const apiResult = await callHostedComputerApi(input)
   return apiResult.ok
@@ -6697,10 +6681,9 @@ async function callHostedComputerApi(input: {
   body: unknown
   fetchImpl: typeof fetch
   path: string
-  unknownOutcomeOnTransportError?: boolean
 }): Promise<
   | { ok: true; payload: unknown }
-  | { ok: false; errorText: string; unknownOutcome: boolean; failureDiagnostic: ToolFailureDiagnostic }
+  | { ok: false; errorText: string; failureDiagnostic: ToolFailureDiagnostic }
 > {
   const payload = JSON.stringify(input.body ?? {})
 
@@ -6718,15 +6701,11 @@ async function callHostedComputerApi(input: {
     )
 
     if (!response.ok) {
-      const error = await readHostedComputerApiError({
-        response,
-        unknownOutcomeOnFailure: input.unknownOutcomeOnTransportError ?? false,
-      })
+      const errorText = await readHostedComputerApiErrorText(response)
       return {
         failureDiagnostic: toolFailureDiagnostic('reported_failure', { status: response.status }),
-        errorText: error.text,
+        errorText,
         ok: false,
-        unknownOutcome: error.unknownOutcome,
       }
     }
 
@@ -6737,20 +6716,13 @@ async function callHostedComputerApi(input: {
   } catch (error) {
     return {
       failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
-      errorText: input.unknownOutcomeOnTransportError
-        ? HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT
-        : 'computer API is unavailable',
+      errorText: HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
       ok: false,
-      unknownOutcome: input.unknownOutcomeOnTransportError === true,
     }
   }
 }
 
-async function readHostedComputerApiError(input: {
-  response: Response
-  unknownOutcomeOnFailure: boolean
-}): Promise<{ text: string; unknownOutcome: boolean }> {
-  const { response } = input
+async function readHostedComputerApiErrorText(response: Response): Promise<string> {
   const fallback = `computer API failed with status ${response.status}`
   try {
     const payload = await response.json()
@@ -6762,33 +6734,23 @@ async function readHostedComputerApiError(input: {
     if (isUnknownComputerOutcomeError({
       code,
       status: response.status,
-      unknownOutcomeOnFailure: input.unknownOutcomeOnFailure,
     })) {
-      return {
-        text: appendHostedComputerApiErrorDetail(
-          HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
-          { code, details, message },
-        ),
-        unknownOutcome: true,
-      }
+      return appendHostedComputerApiErrorDetail(
+        HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
+        { code, details, message },
+      )
     }
     if (code && message) {
-      return {
-        text: appendHostedComputerApiErrorDetail(
-          `${fallback}: ${code}: ${message}`,
-          { code: null, details, message: null },
-        ),
-        unknownOutcome: false,
-      }
+      return appendHostedComputerApiErrorDetail(
+        `${fallback}: ${code}: ${message}`,
+        { code: null, details, message: null },
+      )
     }
     if (code) {
-      return {
-        text: appendHostedComputerApiErrorDetail(
-          `${fallback}: ${code}`,
-          { code: null, details, message: null },
-        ),
-        unknownOutcome: false,
-      }
+      return appendHostedComputerApiErrorDetail(
+        `${fallback}: ${code}`,
+        { code: null, details, message: null },
+      )
     }
   } catch {
     // Ignore non-JSON error bodies; hosted web route helpers keep safe details in JSON.
@@ -6797,12 +6759,11 @@ async function readHostedComputerApiError(input: {
   if (isUnknownComputerOutcomeError({
     code: null,
     status: response.status,
-    unknownOutcomeOnFailure: input.unknownOutcomeOnFailure,
   })) {
-    return { text: HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT, unknownOutcome: true }
+    return HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT
   }
 
-  return { text: fallback, unknownOutcome: false }
+  return fallback
 }
 
 function appendHostedComputerApiErrorDetail(
@@ -6887,12 +6848,7 @@ function readHostedComputerApiErrorDetailLine(
 function isUnknownComputerOutcomeError(input: {
   code: string | null
   status: number
-  unknownOutcomeOnFailure: boolean
 }): boolean {
-  if (!input.unknownOutcomeOnFailure) {
-    return false
-  }
-
   if (!input.code) {
     return input.status >= 500
   }
