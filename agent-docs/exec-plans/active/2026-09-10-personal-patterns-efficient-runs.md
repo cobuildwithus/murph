@@ -52,10 +52,17 @@ Deployment and measured production savings are outside this PR's local proof.
   occurrence uses Luna high/Flex; manual runs and Standard failure retries remain.
 - Assistant Engine typecheck passed. Complexity guard passed with no added debt;
   the new eligibility helper stays below 20 and existing hotspots are unchanged.
-- Changelog rendering: 10 tests passed; Web typecheck is pending.
-- The live Luna high digest is pending; the default local subscription returned
-  unauthorized before any provider action, so the bounded alternate-home retry is
-  in progress. No production credential or member data is used.
+- Changelog rendering: 10 tests passed, including the PR source reference; Web
+  typecheck passed.
+- The live Luna high first digest passed through local subscription after three
+  homes failed before provider action. It made one report read, zero vocabulary
+  writes, and one versioned ledger write covering all four graded identities. The
+  bounded three-highlight reply was reviewed as Ready. The existing-history case
+  also passed after tightening the final exact-link instruction; its ledger was
+  valid before and after that correction. Both replies are Ready. The 79 affected
+  deterministic cases and Assistant Engine typecheck passed after the prompt fix.
+  No production credential or member data is used.
 - Parent candidate review found no new state owner, notification write in the
-  precondition, foreground call, or migration requirement. Direct proof remains
-  pending the live journey. Exact-head CI and final ReviewGPT follow the draft PR.
+  precondition, foreground call, or migration requirement. Direct proof is Ready.
+  PR #3204 now awaits exact-head CI and final ReviewGPT. The current candidate
+  merges with the current base.
