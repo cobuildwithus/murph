@@ -19,6 +19,7 @@ import type { QueryEntityFamily } from "../query-runtime.js"
 import type {
   CoreWriteServices,
   ImporterServices,
+  IntegratedVaultServiceDependencies,
   ProjectAssessmentInput,
   QueryEntity,
   QueryServices,
@@ -456,7 +457,9 @@ function isJsonObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-function createIntegratedCoreServices(): CoreWriteServices {
+function createIntegratedCoreServices(
+  dependencies: IntegratedVaultServiceDependencies,
+): CoreWriteServices {
   return {
     async init(input: CommandContext & {
       timezone?: string
@@ -743,13 +746,13 @@ function createIntegratedCoreServices(): CoreWriteServices {
       return stopExperimentRecord(input)
     },
     async logExperimentSession(input) {
-      return logExperimentSessionRecord(input)
+      return logExperimentSessionRecord(input, dependencies)
     },
     async logExperimentSessionJson(input: CommandContext & {
       lookup: string
       inputFile: string
     }) {
-      return logExperimentSessionRecordFromInput(input)
+      return logExperimentSessionRecordFromInput(input, dependencies)
     },
     async attachExperimentSession(input) {
       return attachExperimentSessionRecord(input)
@@ -1860,9 +1863,11 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function createIntegratedVaultServiceGroups(): VaultServices {
+function createIntegratedVaultServiceGroups(
+  dependencies: IntegratedVaultServiceDependencies = {},
+): VaultServices {
   return {
-    core: createIntegratedCoreServices(),
+    core: createIntegratedCoreServices(dependencies),
     importers: createIntegratedImporterServices(),
     query: createIntegratedQueryServices(),
   }
@@ -1888,9 +1893,9 @@ function createUnwiredServiceGroup<
 }
 
 export function createIntegratedVaultServices(
-  _dependencies: Record<string, unknown> = {},
+  dependencies: IntegratedVaultServiceDependencies = {},
 ): VaultServices {
-  return createIntegratedVaultServiceGroups()
+  return createIntegratedVaultServiceGroups(dependencies)
 }
 
 export function createUnwiredVaultServices(
