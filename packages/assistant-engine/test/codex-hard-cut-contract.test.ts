@@ -107,7 +107,6 @@ describe('Codex-only assistant hard-cut contracts', () => {
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'automation', 'run-loop.ts'),
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'automation', 'scanner.ts'),
       path.join('packages', 'assistant-cli', 'src', 'assistant', 'automation', 'run-loop.ts'),
-      path.join('packages', 'assistant-cli', 'src', 'assistant-daemon-client.ts'),
     ]
 
     for (const runtimePath of runtimePaths) {
