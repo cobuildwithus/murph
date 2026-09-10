@@ -959,7 +959,7 @@ run_all_package_coverage 1
 
     expect(result.status, result.stderr).toBe(0);
     const pairs = result.stdout.trim().split("\n");
-    expect(pairs).toHaveLength(27);
+    expect(pairs).toHaveLength(26);
     expect(pairs).toContain(
       "packages/hosted-execution|Package coverage for packages/hosted-execution",
     );
