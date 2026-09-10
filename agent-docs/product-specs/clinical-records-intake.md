@@ -31,6 +31,16 @@ Incompatible units, ambiguous values and missing comparable revisions retain
 their existing explicit review/retraction behavior. These mappings do not
 change provider acquisition windows; lifetime retrieval is a separate owner change.
 
+Mapping upgrades may promote an unseen Observation's importer-created unsupported
+code/unit marker at the same provider revision. The clinical adapter verifies
+the retained manifest's source/patient identity, page hash and exact source
+resource against the newly admitted evidence. Core evaluates that proof against
+the latest deleted import marker under its canonical write lock. Genuine
+withdrawals, invalid semantics, newer revisions, changed source content and
+retractions of previously accepted facts retain their existing fences. Missing
+or corrupt evidence fails closed; retained reads are cached within the existing
+page and aggregate snapshot byte bounds. No provider revision is fabricated.
+
 ## Member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,

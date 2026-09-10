@@ -36,6 +36,7 @@ import {
 import * as z from "@murphai/contracts/zod-runtime";
 
 import { loadRuntimeModule } from "./runtime-import.js";
+import { createClinicalImportHoldVerifier } from "./clinical-import-hold-promotion.js";
 
 const CLINICAL_IMPORTER_MODULE_SPECIFIER = "@murphai/importers/clinical-records";
 const JSON_MEDIA_TYPE = "application/fhir+json";
@@ -478,6 +479,12 @@ export async function importClinicalFhirSnapshot(
         supersededCount: 0,
       }
     : await importClinicalEventDecisions({
+        canPromoteImportHold: createClinicalImportHoldVerifier({
+          manifest: prepared.manifest,
+          pages: prepared.pages,
+          signal: input.signal,
+          vaultRoot: input.vaultRoot,
+        }),
         decisions: executableDecisions,
         signal: input.signal,
         vaultRoot: input.vaultRoot,
@@ -575,6 +582,7 @@ function isMissingFileError(error: unknown): boolean {
 }
 
 async function importClinicalEventDecisions(input: {
+  canPromoteImportHold: ReturnType<typeof createClinicalImportHoldVerifier>;
   decisions: EventImportDecision[];
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -582,6 +590,7 @@ async function importClinicalEventDecisions(input: {
   try {
     return await importEventBatch({
       apply: true,
+      canPromoteImportHold: input.canPromoteImportHold,
       decisions: input.decisions,
       signal: input.signal,
       vaultRoot: input.vaultRoot,

@@ -50,4 +50,7 @@ For every PR: focused regressions, relevant package/app typecheck, canonical rea
 - Repository/documentation audit and independent advisory review completed before implementation.
 - Dedicated implementation checkout created from current origin/main.
 - PR #3172 implements standard measurements. Importer tests (597), focused clinical persistence tests (23), health-metrics tests (82; focused normalization rerun 58), three package typechecks, Web typecheck and changelog tests (10) pass. Complexity debt decreases by one. Exact-head CI and ReviewGPT follow the final changelog commit.
-- Remaining coverage PRs are pending.
+- ReviewGPT round 1 found an upgrade conflict in #3172 and a stale embedded provider policy in #3174. Both were reproduced and accepted; the user authorized remediation.
+- #3174 now preserves every directory entry and source-provenance field while updating its complete embedded lifetime policy. All 92 focused Web tests and typecheck pass; round 2 runs concurrently with CI.
+- #3172 adds retained-evidence verification for legacy unsupported measurement markers, evaluated under the existing canonical write lock. Upgrade/replay and rejection regressions accompany the correction.
+- Source-history work is preserved in its own checkout. Authorized document reads, durable large-chart continuation and additional query variants remain pending.

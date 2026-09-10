@@ -10,6 +10,7 @@ import {
 } from "@murphai/clinical-records";
 import {
   findEventByExternalRef,
+  importEventBatch,
   initializeVault,
 } from "@murphai/core";
 import {
@@ -39,6 +40,86 @@ afterEach(async () => {
 });
 
 describe("importClinicalFhirSnapshot", () => {
+  it("promotes a verified legacy unsupported hold and imports an unrelated lab atomically", async () => {
+    const { input, resource } = await seedLegacyMeasurementHold();
+    const next = {
+      ...input,
+      retrievalJobId: "upgrade-retrieval",
+      pages: [{ ...input.pages[0]!, content: fhirBundle([
+        Object.fromEntries(Object.entries(resource).reverse()), upgradeLab(),
+      ]) }],
+    };
+    expect((await importClinicalFhirSnapshot(next)).canonical).toMatchObject({ createdCount: 2 });
+    expect((await importClinicalFhirSnapshot(next)).canonical).toMatchObject({
+      createdCount: 0, skippedExistingCount: 2,
+    });
+    expect(await findEventByExternalRef({
+      vaultRoot: input.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId: resource.id,
+    })).toMatchObject({
+      kind: "measurement",
+      externalRef: { version: resource.meta.lastUpdated },
+      occurredAt: resource.effectiveDateTime,
+    });
+  });
+
+  it.each(["FHIR Observation status entered-in-error", "FHIR modifier semantics are not importable"])(
+    "does not promote an authoritative or unsafe hold: %s",
+    async (reason) => {
+      const { input } = await seedLegacyMeasurementHold({ reason });
+      await expect(importClinicalFhirSnapshot({ ...input, retrievalJobId: "upgrade-retrieval" }))
+        .rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+    },
+  );
+
+  it("rejects changed same-version content without importing the unrelated lab", async () => {
+    const { input, resource } = await seedLegacyMeasurementHold();
+    await expect(importClinicalFhirSnapshot({
+      ...input,
+      retrievalJobId: "upgrade-retrieval",
+      pages: [{ ...input.pages[0]!, content: fhirBundle([
+        { ...resource, valueQuantity: { ...resource.valueQuantity, value: 75 } },
+        upgradeLab(),
+      ]) }],
+    })).rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+    expect(await findEventByExternalRef({
+      vaultRoot: input.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation", resourceId: "upgrade-lab",
+    })).toBeNull();
+  });
+
+  it("keeps a newer unsupported hold fenced while importing unrelated new evidence", async () => {
+    const { input, resource } = await seedLegacyMeasurementHold();
+    expect((await importClinicalFhirSnapshot({
+      ...input,
+      retrievalJobId: "delayed-retrieval",
+      pages: [{ ...input.pages[0]!, content: fhirBundle([
+        { ...resource, meta: { lastUpdated: "2026-07-09T12:00:00.000Z" } },
+        upgradeLab(),
+      ]) }],
+    })).canonical).toMatchObject({ createdCount: 1, skippedExistingCount: 1 });
+  });
+
+  it.each(["missing", "changed"])("requires intact retained evidence (%s)", async (mode) => {
+    const { input, rawPath } = await seedLegacyMeasurementHold();
+    if (mode === "missing") await rm(path.join(input.vaultRoot, rawPath));
+    else await writeFile(path.join(input.vaultRoot, rawPath), fhirBundle([]));
+    await expect(importClinicalFhirSnapshot({ ...input, retrievalJobId: "upgrade-retrieval" }))
+      .rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+  });
+
+  it.each(["patientIdHash", "fhirBaseUrlHash"])("rejects retained evidence from a different %s", async (field) => {
+    const { input } = await seedLegacyMeasurementHold();
+    const manifestPath = path.join(input.vaultRoot, "raw/clinical/fhir", input.connectionId, input.retrievalJobId, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest[field] = "f".repeat(64);
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await expect(importClinicalFhirSnapshot({ ...input, retrievalJobId: "upgrade-retrieval" }))
+      .rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+  });
   it("keeps retrieval checkpoints private, run-bound, and terminally clearable", async () => {
     const input = await createSnapshotInput({
       pages: [],
@@ -783,6 +864,52 @@ describe("importClinicalFhirSnapshot", () => {
     })).toBeNull();
   });
 });
+
+async function seedLegacyMeasurementHold(options: { reason?: string } = {}) {
+  const resource = {
+    ...heartRateObservation("legacy-height"),
+    effectiveDateTime: "2010-04-02T12:00:00.000Z",
+    code: { coding: [{ system: "http://loinc.org", code: "8302-2" }] },
+    valueQuantity: { value: 69, system: "http://unitsofmeasure.org", code: "[in_i]" },
+  };
+  const input = await createSnapshotInput({
+    pages: [{ resourceType: "Observation", content: fhirBundle([resource]) }],
+    resourceTypes: ["Observation"],
+  });
+  // Persist the actual immutable snapshot, then seed the old importer's exact
+  // retraction decision before any newly supported canonical fact is written.
+  let checks = 0;
+  const beforeCanonical = new Error("Seed legacy importer decision");
+  await expect(importClinicalFhirSnapshot({
+    ...input,
+    assertCurrent: async () => { if (++checks === 2) throw beforeCanonical; },
+  })).rejects.toBe(beforeCanonical);
+  const rawPath = `raw/clinical/fhir/${input.connectionId}/${input.retrievalJobId}/observation/whole/Observation/page-0001.json`;
+  await importEventBatch({
+    vaultRoot: input.vaultRoot,
+    apply: true,
+    decisions: [{
+      action: "retract",
+      externalRef: {
+        system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+        resourceType: "observation", resourceId: resource.id,
+        version: resource.meta.lastUpdated,
+      },
+      reason: options.reason ?? "observation code is not importable",
+      evidence: [{ rawRef: rawPath, sourceLabel: `Observation/${resource.id}` }],
+    }],
+  });
+  return { input, resource, rawPath };
+}
+
+function upgradeLab() {
+  return {
+    ...heartRateObservation("upgrade-lab"),
+    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+    code: { coding: [{ system: "http://loinc.org", code: "2345-7", display: "Glucose" }] },
+    valueQuantity: { value: 90, system: "http://unitsofmeasure.org", code: "mg/dL", unit: "mg/dL" },
+  };
+}
 
 async function createSnapshotInput(input: {
   pages: Array<Omit<ClinicalFhirSnapshotImportInput["pages"][number], "queryScopeId" | "sliceId"> & Partial<Pick<ClinicalFhirSnapshotImportInput["pages"][number], "queryScopeId" | "sliceId">>>;
