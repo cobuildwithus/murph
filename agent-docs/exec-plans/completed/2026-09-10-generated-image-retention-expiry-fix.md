@@ -1,6 +1,6 @@
 # Complete generated-image cleanup after hosted expiry
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -78,4 +78,14 @@ Updated: 2026-09-10
   candidate materialization belongs in the existing preparation owner.
 - Parent reviewed the full diff: one production owner changed, no provider
   input, foreground path, scheduler, persisted format or retry-policy additions.
-- Final ReviewGPT, exact-head CI and plan closure remain pending for the PR.
+- PR #3170 final ReviewGPT passed at
+  `4f7288efa46d4a05cd262668d5434e5a3fc4af3e` with zero qualifying findings.
+  The capture verified the actual `gpt-6-pro` response. The reviewer checked
+  ownership, protection, commit rollback, replay, accounting and retry boundaries;
+  it did not independently execute runtime tests.
+- Parent final review accepted the unchanged production patch. Plan closure and
+  this historical evidence are the only final changes; no new review is needed.
+- Required CI was still queued when this plan was archived. Final-head CI and
+  current-base mergeability remain PR completion gates, recorded in the PR body.
+  This PR is for human review and deployment; no merge or deployment occurred.
+Completed: 2026-09-10

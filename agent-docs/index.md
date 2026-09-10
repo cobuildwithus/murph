@@ -31,7 +31,7 @@ not a guarantee that every claim was checked in this cleanup.
 
 Generated-image retirement after hosted media expiry is owned by
 `agent-docs/RELIABILITY.md`; implementation and verification are tracked in
-`agent-docs/exec-plans/active/2026-09-10-generated-image-retention-expiry-fix.md`.
+`agent-docs/exec-plans/completed/2026-09-10-generated-image-retention-expiry-fix.md`.
 
 ## Canonical Docs
 
