@@ -12,6 +12,12 @@ Adding a new wearable provider? Pair the importer work with the transport half d
 - Clinical FHIR planning is available only from `@murphai/importers/clinical-records`; it stays off the broad importer root and hosted cold-start path until a clinical intake owner wires that explicit seam.
 - No OCR, transcription, or structured lab parsing is performed in the baseline.
 
+The sample and workout CSV planners share `src/csv-parsing.ts` for delimited
+rows and flexible timestamp parsing. The sample planner owns file loading,
+vault timezone discovery, and sample inference; the workout planner owns
+provider dialects, unit gates, and source-session identity. The public
+`parseDelimitedRows` export points directly to the parsing owner.
+
 ## Built-in Device Providers
 
 `createImporters()` and `prepareDeviceProviderSnapshotImport()` ship with built-in adapters for `whoop`, `oura`, and `strava`. Garmin data is supported exclusively through the `junction` provider.

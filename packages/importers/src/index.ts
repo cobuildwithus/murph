@@ -5,10 +5,10 @@ export {
   type AssessmentResponseImportInput,
 } from "./assessment/import-assessment-response.ts";
 export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.ts";
+export { parseDelimitedRows } from "./csv-parsing.ts";
 export {
   CsvSampleImportError,
   importCsvSamples,
-  parseDelimitedRows,
   prepareCsvSampleImport,
   profileCsvSampleFile,
 } from "./csv-sample-importer.ts";

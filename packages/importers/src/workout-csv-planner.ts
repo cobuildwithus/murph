@@ -10,7 +10,7 @@ import {
 import {
   normalizeFlexibleTimestamp,
   parseDelimitedRows,
-} from "./csv-sample-import-planner.ts";
+} from "./csv-parsing.ts";
 
 const DEFAULT_DELIMITER = ",";
 const DEFAULT_SOURCE = "strong";
