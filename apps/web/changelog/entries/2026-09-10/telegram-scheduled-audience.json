@@ -8,7 +8,13 @@
     "title": "More reliable scheduled Telegram messages",
     "summary": "Scheduled Telegram messages can proceed when an older saved destination lacks private or group information.",
     "details": "Murph checks the current conversation before preparing the message. Private and group conversations keep their existing access boundaries.",
-    "relevanceTags": ["messaging", "automations", "reliability"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "messaging",
+      "automations",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3210
+    ]
   }
 }

@@ -16309,7 +16309,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
       expect(intents).toHaveLength(1)
       expect(intents[0]).toMatchObject({
         channel: 'telegram', threadIsDirect, externalThreadRouteAuthority: authority,
-        bindingDelivery: { kind: 'thread', target: authority.threadId },
+        explicitTarget: authority.threadId, status: 'pending', operation: null,
       })
       const reply = intents[0]!.message
       process.stdout.write(`[real-codex scheduled Telegram audience] ${JSON.stringify({ threadIsDirect, reply, intents: intents.length })}\n`)

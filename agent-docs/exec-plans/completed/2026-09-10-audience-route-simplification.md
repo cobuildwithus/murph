@@ -1,6 +1,6 @@
 # Simplify notification audience authority
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -50,5 +50,11 @@ Updated: 2026-09-10
 - Focused deterministic proof: 825 engine tests across the affected suites, 52 runtime scheduling tests, 27 Web route-owner/endpoint tests, 5 Worker forwarding cases, and 10 changelog rendering tests pass. Covers exact current targets, missing/stale metadata, private/group scope, no actor/participant guesses, and onboarding using the same audience fact.
 - Engine, runtime, Worker and Web typechecks; scoped Web ESLint; diff whitespace; complexity guard pass. Audience-policy maximum complexity decreases from 19 to 18; no new complexity debt.
 - The existing target-bound directness helper remains small; its inference tree and separate target/actor inference helper are deleted, together with the duplicate effective audience field. Unrelated cron and workspace lifecycle hotspots retain their current owners.
-- The synthetic real-Codex journey runs the canonical scheduled entry through the ordinary notification planner into a queued outbox intent. Live verification is pending; no production send is part of this task.
-- Product UX: deterministic private, group, unknown, changed-target and no-route local paths match the patch plan. Final reply review remains pending the live run.
+- The synthetic real-Codex journey runs the canonical scheduled entry through the ordinary notification planner into a queued outbox intent. Both private and group live journeys pass on gpt-5.6-terra using local subscription auth. Each makes exactly one model request, no tool calls, and one pending outbox intent for the exact authorized target; no production send is part of this task.
+- Product UX: deterministic private, group, unknown, changed-target and no-route local paths match the patch plan. Reply review is Ready: both synthetic reminders are concise, immediately useful, and make no completion or internal-authority claims.
+
+## Handoff
+
+- Implementation and focused proof are complete in PR #3210. Final external review and exact-head CI remain PR completion gates; no merge or deployment is authorized by this task.
+- Deploy Web before the Worker adapter and runtime; missing metadata during skew uses the existing bounded retry and does not weaken audience checks.
+Completed: 2026-09-10
