@@ -730,6 +730,12 @@ gate unset and makes no paid request.
   CLI `.bundle` and runner entrypoint `dist-bundled` roots separately. Each
   surface receives the existing `max(96 KiB, floor(1% of exact base total))`
   relative allowance, so shrinkage in one cannot subsidize growth in the other.
+- The isolated Cloudflare jobs in `host-support.yml` and `release.yml` run
+  `pnpm --filter @murphai/runtime-state build` after dependency installation and
+  before `pnpm --dir apps/cloudflare verify`. Host support keeps pinned Codex
+  upstream-source verification before this build. The bundle fixtures copy the
+  installed public timing exports; typechecking does not emit them. Preparation
+  finishes before verification's parallel test lanes, never from a test body.
 - The private `cobuildwithus/murph-cloud` repository owns the Temporal worker's
   cross-repository hosted-local integration matrix, package verification, and
   protected post-CI Render deploy. Public Murph intentionally contains neither
