@@ -71,17 +71,14 @@ describe("ensureHostedMemberForPhone", () => {
     const currentIdentity = await makeIdentityRecord({
       memberId: "member_123",
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-      privyUserId: "did:privy:user_existing",
-      privyUserLookupKey: "hbidx:privy-user:v1:existing",
+
+
       signupPhoneCodeSendAttemptId: "hbpc_old",
       signupPhoneCodeSendAttemptStartedAt: new Date("2026-03-20T12:05:00.000Z"),
       signupPhoneCodeSentAt: new Date("2026-03-20T12:05:00.000Z"),
       signupPhoneNumber: "+15550001111",
-      walletAddress: "0x1234",
-      walletAddressLookupKey: "hbidx:wallet-address:v1:existing",
-      walletChainType: "ethereum",
-      walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
-      walletProvider: "privy",
+
+
     });
     const identityUpsert = vi.fn().mockResolvedValue(currentIdentity);
     const identityFindFirst = vi.fn().mockImplementation(async ({
@@ -144,8 +141,8 @@ describe("ensureHostedMemberForPhone", () => {
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
+
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -155,8 +152,8 @@ describe("ensureHostedMemberForPhone", () => {
         maskedPhoneNumberHint: "*** 4567",
         phoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
-        privyUserLookupKey: expect.stringMatching(/^hbidx:privy-user:v1:/u),
-        privyUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
+
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -393,7 +390,7 @@ describe("prepareHostedInvitePhoneCode", () => {
     },
   );
 
-  it("returns a stored phone for the Privy client send and records the transient send attempt", async () => {
+  it("returns a stored phone for the phone-code client send and records the transient send attempt", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
         memberId: "member_123",
@@ -553,7 +550,7 @@ describe("prepareHostedInvitePhoneCode", () => {
 });
 
 describe("confirmHostedInvitePhoneCode", () => {
-  it("clears the pending attempt after a successful Privy send confirmation", async () => {
+  it("clears the pending attempt after a successful phone-code send confirmation", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
         memberId: "member_123",
@@ -630,7 +627,7 @@ describe("confirmHostedInvitePhoneCode", () => {
 });
 
 describe("abortHostedInvitePhoneCode", () => {
-  it("clears only the pending attempt after a failed Privy send", async () => {
+  it("clears only the pending attempt after a failed phone-code send", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
         memberId: "member_123",
@@ -921,8 +918,6 @@ async function makeIdentityRecord(input: {
   phoneLookupKey?: string;
   phoneNumber?: string | null;
   phoneNumberVerifiedAt?: Date | null;
-  privyUserId?: string | null;
-  privyUserLookupKey?: string | null;
   signupPhoneCodeSendAttemptId?: string | null;
   signupPhoneCodeSendAttemptStartedAt?: Date | null;
   signupPhoneCodeSentAt?: Date | null;
@@ -943,12 +938,8 @@ async function makeIdentityRecord(input: {
       value: input.phoneNumber ?? null,
     }),
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt ?? null,
-    privyUserIdEncrypted: await encryptHostedWebNullableString({
-      field: "hosted-member-identity.privy-user-id",
-      memberId: input.memberId,
-      value: input.privyUserId ?? null,
-    }),
-    privyUserLookupKey: input.privyUserLookupKey ?? null,
+
+
     signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId ?? null,
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt ?? null,
     signupPhoneCodeSentAt: input.signupPhoneCodeSentAt ?? null,
@@ -957,14 +948,7 @@ async function makeIdentityRecord(input: {
       memberId: input.memberId,
       value: input.signupPhoneNumber ?? null,
     }),
-    walletAddressEncrypted: await encryptHostedWebNullableString({
-      field: "hosted-member-identity.wallet-address",
-      memberId: input.memberId,
-      value: input.walletAddress ?? null,
-    }),
-    walletAddressLookupKey: input.walletAddressLookupKey ?? null,
-    walletChainType: input.walletChainType ?? null,
-    walletCreatedAt: input.walletCreatedAt ?? null,
-    walletProvider: input.walletProvider ?? null,
+
+
   };
 }

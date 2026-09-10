@@ -439,15 +439,13 @@ describe("hosted Linq usage reset e2e", () => {
         memberId: MEMBER_ID,
         phoneNumber: SENDER_PHONE,
         phoneNumberVerifiedAt: new Date("2026-01-01T00:00:00.000Z"),
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
-        walletAddress: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+
+
       },
       matchedBy: "phoneNumber",
     });

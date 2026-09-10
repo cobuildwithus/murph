@@ -1,11 +1,8 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ key: vi.fn(), provider: vi.fn() }));
+const mocks = vi.hoisted(() => ({ key: vi.fn() }));
 vi.mock("jose", async (original) => ({ ...await original<typeof import("jose")>(), createRemoteJWKSet: () => mocks.key }));
-vi.mock("../src/lib/hosted-onboarding/privy", async (original) => ({
-  ...await original<typeof import("../src/lib/hosted-onboarding/privy")>(), readHostedPrivyUserById: mocks.provider,
-}));
 vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
   ...await original<typeof import("../src/lib/hosted-crypto/domain-root-store")>(),
   provisionActiveHostedDomainRootEnvelopeForUserOnly: async () => undefined,
@@ -43,7 +40,7 @@ const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.searchParams.has("host") || url.pathname !== "/murph_dev_better_auth_adoption") throw new Error("Telegram proof requires its isolated local task database.");
+    || url.searchParams.has("host") || !["/murph_dev_better_auth_adoption", "/murph_dev_better_auth_retirement"].includes(url.pathname)) throw new Error("Telegram proof requires its isolated local task database.");
 }
 const baseURL = "http://localhost:3000";
 const clientId = "123456789";
@@ -57,7 +54,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
   const nonces = new Set<string>();
   beforeAll(async () => { keys = await generateKeyPair("ES256"); });
   beforeEach(() => {
-    mocks.key.mockResolvedValue(keys.publicKey); mocks.provider.mockReset();
+    mocks.key.mockResolvedValue(keys.publicKey);
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true"); vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", secret);
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL); vi.stubEnv("HOSTED_AUTH_TELEGRAM_CLIENT_ID", clientId);
@@ -159,7 +156,6 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect((await readHostedMemberRoutingState({ memberId: member.memberId, prisma }))?.telegramUserId).toBeNull();
     expect(await getHostedAppSessionFromRequest(request("/home", {}, other.cookie))).toBeNull();
     expect((await getHostedAppSessionFromRequest(request("/home", {}, member.cookie)))?.member.id).toBe(member.memberId);
-    expect(mocks.provider).not.toHaveBeenCalled();
   });
 
   it("never exchanges Telegram login and credential nonces or browser sessions", async () => {
@@ -219,7 +215,6 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       expect(result.status).toBe(200); expect(await result.json()).toMatchObject({ ok: true, launchConsentGranted: false });
     }
     expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: body.memberId } })).billingStatus).toBe("not_started");
-    expect(mocks.provider).not.toHaveBeenCalled();
   });
 
   it("reuses the same member on repeat login and rejects a consumed nonce", async () => {
@@ -244,18 +239,16 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
 
   it("preserves an existing independently reconciled Telegram member", async () => {
     const prisma = getPrisma(); const memberId = `telegram-existing-${randomUUID()}`; memberIds.add(memberId);
-    const flow = await begin(); const principal = `did:privy:${memberId}`;
+    const flow = await begin();
     await prisma.hostedMember.create({ data: { id: memberId } });
     await prisma.$transaction(async (tx) => {
-      await upsertHostedMemberIdentity({ memberId, prisma: tx, privyUserId: principal, phoneNumber: null, phoneNumberVerifiedAt: null,
+      await upsertHostedMemberIdentity({ memberId, prisma: tx, phoneNumber: null, phoneNumberVerifiedAt: null,
         phoneLookupKey: null, maskedPhoneNumberHint: null, signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null });
       await upsertHostedMemberTelegramRoutingBindingTx({ memberId, telegramUserId: flow.id, prisma: tx });
     });
-    mocks.provider.mockResolvedValue({ id: principal, linked_accounts: [{ type: "telegram", telegram_user_id: flow.id }] });
     const response = await finish(flow); expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ memberId });
-    expect(mocks.provider).toHaveBeenCalledTimes(1);
-    expect((await finish(await begin(flow.id))).status).toBe(200); expect(mocks.provider).toHaveBeenCalledTimes(1);
+    expect((await finish(await begin(flow.id))).status).toBe(200);
   });
 
   it("rolls back referral claim and nonce consumption when session creation fails, then retries the same proof", async () => {

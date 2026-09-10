@@ -36,26 +36,19 @@ export async function verifyHostedAppSession(input: {
   }
 }
 
-export async function logoutHostedAppSession(input: {
-  logoutPrivy?: () => Promise<void> | void;
-} = {}): Promise<void> {
+export async function logoutHostedAppSession(): Promise<void> {
   return endHostedAppSession({
-    ...input,
     url: "/api/hosted-onboarding/session/logout",
   });
 }
 
-export async function declineHostedLaunchConsent(input: {
-  logoutPrivy?: () => Promise<void> | void;
-} = {}): Promise<void> {
+export async function declineHostedLaunchConsent(): Promise<void> {
   return endHostedAppSession({
-    ...input,
     url: "/api/legal/consent/decline",
   });
 }
 
 async function endHostedAppSession(input: {
-  logoutPrivy?: () => Promise<void> | void;
   url: string;
 }): Promise<void> {
   publishBrowserVaultSessionEnding();
@@ -81,14 +74,4 @@ async function endHostedAppSession(input: {
     throw error;
   }
 
-  if (!input.logoutPrivy) {
-    return;
-  }
-
-  try {
-    await input.logoutPrivy();
-  } catch {
-    // Server-side Murph app-session logout is authoritative. Privy logout is
-    // best-effort cleanup for client SDK state after the app session is gone.
-  }
 }

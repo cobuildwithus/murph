@@ -7,7 +7,6 @@ type Principal = HostedOpsAppReviewMemberPrincipal;
 
 interface Options {
   apply: boolean;
-  createPrivyUser: boolean;
   help: boolean;
   principal: Principal | null;
 }
@@ -16,18 +15,15 @@ const usage = `
 Local/test usage from the repository root (the caller must provide an approved non-production DATABASE_URL):
   NODE_OPTIONS=--conditions=react-server \\
     pnpm exec tsx --tsconfig apps/web/tsconfig.json \\
-    apps/web/scripts/prepare-app-review-member.ts --email <reviewer-email> --create-privy-user --apply
+    apps/web/scripts/prepare-app-review-member.ts --email <reviewer-email> --apply
 
 Production:
   Use the authenticated same-origin hosted Ops route. Do not run this script
   against production or put a reviewer principal in workflow-dispatch input.
 
 Options:
-  --email <email>          Resolve the Privy reviewer user by email.
-  --phone <e164>           Resolve the Privy reviewer user by phone.
-  --privy-user-id <id>     Resolve the Privy reviewer user by Privy user id.
-  --create-privy-user      Authenticate the configured Privy test account first.
-                           This is supported for --email and requires --apply.
+  --email <email>          Resolve an existing reviewer account by verified email.
+  --phone <e164>           Resolve an existing reviewer account by verified phone.
   --apply                  Apply writes to the configured local/test environment.
                            Without this, only inspect.
   --help                   Print this message.
@@ -40,13 +36,7 @@ async function main(): Promise<void> {
     return;
   }
   if (!options.principal) {
-    throw new Error("Choose exactly one reviewer principal: --email, --phone, or --privy-user-id.");
-  }
-  if (options.createPrivyUser && options.principal.kind !== "email") {
-    throw new Error("--create-privy-user currently supports --email test accounts only.");
-  }
-  if (options.createPrivyUser && !options.apply) {
-    throw new Error("--create-privy-user changes Privy state and requires --apply.");
+    throw new Error("Choose exactly one reviewer principal: --email or --phone.");
   }
   assertReactServerCondition();
 
@@ -61,7 +51,6 @@ async function main(): Promise<void> {
 
   try {
     printResult(await prepareHostedOpsAppReviewMember({
-      createPrivyUser: options.createPrivyUser,
       mode: readMode(options),
       principal: options.principal,
       prisma,
@@ -74,7 +63,6 @@ async function main(): Promise<void> {
 function parseOptions(argv: string[]): Options {
   const options: Options = {
     apply: false,
-    createPrivyUser: false,
     help: false,
     principal: null,
   };
@@ -84,9 +72,6 @@ function parseOptions(argv: string[]): Options {
     switch (arg) {
       case "--apply":
         options.apply = true;
-        break;
-      case "--create-privy-user":
-        options.createPrivyUser = true;
         break;
       case "--help":
       case "-h":
@@ -104,12 +89,6 @@ function parseOptions(argv: string[]): Options {
           value: normalizeRequiredArgument(arg, argv[++i]),
         });
         break;
-      case "--privy-user-id":
-        options.principal = setPrincipal(options.principal, {
-          kind: "privyUserId",
-          value: normalizeRequiredArgument(arg, argv[++i]),
-        });
-        break;
       default:
         throw new Error(`Unknown option: ${arg ?? ""}`);
     }
@@ -120,7 +99,7 @@ function parseOptions(argv: string[]): Options {
 
 function setPrincipal(existing: Principal | null, next: Principal): Principal {
   if (existing) {
-    throw new Error("Choose only one of --email, --phone, or --privy-user-id.");
+    throw new Error("Choose only one of --email or --phone.");
   }
   return next;
 }

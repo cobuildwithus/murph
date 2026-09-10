@@ -114,9 +114,6 @@ export interface HostedOnboardingEnvironment {
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
-  privyAppId: string | null;
-  privyAppSecret: string | null;
-  privyVerificationKey: string | null;
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeFamilyPriceIdsByPlan: Readonly<
@@ -171,9 +168,6 @@ export function readHostedOnboardingEnvironment(
     ),
     linqWebhookSecret: linq.webhookSecret,
     linqWebhookTimestampToleranceMs: linq.webhookTimestampToleranceMs,
-    privyAppId: readEnv(source, "NEXT_PUBLIC_PRIVY_APP_ID"),
-    privyAppSecret: readEnv(source, "PRIVY_APP_SECRET"),
-    privyVerificationKey: readEnv(source, "PRIVY_VERIFICATION_KEY"),
     publicBaseUrl,
     stripeFamilyPriceIdsByPlan: readHostedStripeFamilyPriceIdsByPlan(source),
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),

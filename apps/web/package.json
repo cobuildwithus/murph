@@ -73,8 +73,6 @@
     "@onkernel/sdk": "^0.76.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
-    "@privy-io/node": "^0.18.0",
-    "@privy-io/react-auth": "^3.40.0",
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.1",
     "@temporalio/client": "~1.16.3",

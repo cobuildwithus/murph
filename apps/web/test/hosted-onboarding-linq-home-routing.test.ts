@@ -2177,15 +2177,13 @@ function buildMember(
       phoneLookupKey: "hbidx:phone:v1:test",
       phoneNumber: "+15551234567",
       phoneNumberVerifiedAt: new Date("2026-04-12T00:00:00.000Z"),
-      privyUserId: null,
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
-      walletAddress: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
     },
     routing: {
       linqChatId: null,

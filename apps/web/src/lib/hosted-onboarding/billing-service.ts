@@ -1,3 +1,4 @@
+import { readHostedMemberEmailAuthorization } from "./hosted-member-store";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -48,10 +49,6 @@ import {
 } from "./logging";
 import { sha256Hex } from "../primitives";
 import {
-  extractHostedPrivyVerifiedEmailAccount,
-  type PrivyLinkedAccountLike,
-} from "./privy-shared";
-import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
@@ -81,7 +78,6 @@ const HOSTED_BILLING_CHECKOUT_REQUEST_OPTIONS = {
 export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
   inviteCode: string;
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   member?: HostedBillingCheckoutAuthenticatedMember;
   now?: Date;
   prisma?: PrismaClient;
@@ -186,8 +182,10 @@ export async function createHostedBillingCheckout(
     });
 
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-    const verifiedEmailAddress =
-      extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
+    const verifiedEmailAddress = (await readHostedMemberEmailAuthorization({
+      memberId: invite.member.id,
+      prisma,
+    }))?.verifiedEmail?.address ?? null;
     const checkout = await createOrReuseHostedBillingCheckoutAttempt({
       billingPlanCode,
       inviteCode: invite.inviteCode,

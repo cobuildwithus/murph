@@ -1552,11 +1552,8 @@ function makeMemberSnapshot(overrides?: {
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
-      privyUserId: null,
-      walletAddress: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
       ...identity,
     },
     routing: overrides?.routing ?? null,

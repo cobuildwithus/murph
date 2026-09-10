@@ -10,7 +10,7 @@ import {
   reloadCurrentHostedAuthDocument,
 } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 const FAMILY_SETUP_AUTH_COPY = {
   description:
@@ -25,7 +25,7 @@ const FAMILY_SETUP_AUTH_COPY = {
 export function FamilySetupAuthRequired() {
   const [open, setOpen] = useState(true);
   const handleAuthCompleted = useCallback(
-    (payload: HostedPrivyCompletionPayload) => {
+    (payload: HostedAuthenticationCompletionPayload) => {
       if (isHostedOnboardingAccessibleStage(payload.stage)) {
         reloadCurrentHostedAuthDocument();
         return;

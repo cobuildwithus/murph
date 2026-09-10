@@ -1,146 +1,68 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-
 const mocks = vi.hoisted(() => ({
-  getPrisma: vi.fn(),
-  lookupHostedMemberIdentityByPrivyUserId: vi.fn(),
-  prisma: {
-    label: "address-book-composed-auth-prisma",
-    hostedAuthRecord: { findUnique: vi.fn() },
-    hostedMemberIdentity: { findUnique: vi.fn() },
-  },
-  projectHostedMemberIdentityState: vi.fn(),
+  prisma: { label: "address-book-composed-auth-prisma" },
+  readHostedAuthSession: vi.fn(),
   readHostedAddressBookStatus: vi.fn(),
-  verifyHostedPrivyIdentityToken: vi.fn(),
 }));
-
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => mocks.prisma }));
+vi.mock("@/src/lib/better-auth/config", () => ({
+  requireHostedBetterAuthConfig: () => ({ baseURL: "https://app.example.test", secret: "synthetic-session-secret" }),
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  verifyHostedPrivyIdentityToken:
-    mocks.verifyHostedPrivyIdentityToken,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  assertHostedPrivyAccountDeletionNotPending: async () => undefined,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  projectHostedMemberIdentityState: mocks.projectHostedMemberIdentityState,
-  lookupHostedMemberIdentityByPrivyUserId:
-    mocks.lookupHostedMemberIdentityByPrivyUserId,
-}));
-
+vi.mock("@/src/lib/better-auth/session", () => ({ readHostedAuthSession: mocks.readHostedAuthSession }));
 vi.mock("@/src/lib/hosted-address-book/projection", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-address-book/projection")>()),
   readHostedAddressBookStatus: mocks.readHostedAddressBookStatus,
 }));
 
-type AddressBookRoute =
-  typeof import("../app/api/device-sync/companion/address-book/route");
-
 const SLOW_GET_STAGE_MS = 5_000;
-const IDENTITY = {
-  phone: null,
-  telegram: null,
-  userId: "did:privy:composed-address-book-auth",
-  wallet: null,
-};
-const MEMBER = { core: { id: "member-composed-address-book-auth", suspendedAt: null }, identity: { privyUserId: IDENTITY.userId } };
-const SESSION = { id: IDENTITY.userId };
-const TOKEN = `header.${Buffer.from(JSON.stringify({ exp: 4_000_000_000 })).toString("base64url")}.signature`;
+const SESSION = { session: {
+  member: { id: "member-composed-address-book-auth", suspendedAt: null },
+  sessionId: "synthetic-session", proof: {},
+} };
+const TOKEN = `murph_auth_v1.${"a".repeat(32)}`;
 const STATUS = {
-  enabled: false,
-  lastReplacedAt: null,
-  revision: 0,
-  schemaVersion: 1 as const,
-  storedContactCount: 0,
-  writeCapability: "disabled" as const,
+  enabled: false, lastReplacedAt: null, revision: 0, schemaVersion: 1 as const,
+  storedContactCount: 0, writeCapability: "disabled" as const,
 };
-
-let route: AddressBookRoute;
+let route: typeof import("../app/api/device-sync/companion/address-book/route");
+const request = () => new Request("https://app.example.test/api/device-sync/companion/address-book", {
+  headers: { authorization: `Bearer ${TOKEN}` },
+});
 
 describe("device sync companion address-book composed auth diagnostics", () => {
-  beforeAll(async () => {
-    route = await import("../app/api/device-sync/companion/address-book/route");
-  });
-
+  beforeAll(async () => { route = await import("../app/api/device-sync/companion/address-book/route"); });
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.prisma.hostedAuthRecord.findUnique.mockResolvedValue(null);
-    mocks.prisma.hostedMemberIdentity.findUnique.mockResolvedValue({ memberId: MEMBER.core.id });
-    mocks.projectHostedMemberIdentityState.mockResolvedValue({ privyUserId: IDENTITY.userId });
-    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue(SESSION);
-    mocks.lookupHostedMemberIdentityByPrivyUserId.mockResolvedValue(MEMBER);
+    vi.resetAllMocks();
+    mocks.readHostedAuthSession.mockResolvedValue(SESSION);
     mocks.readHostedAddressBookStatus.mockResolvedValue(STATUS);
   });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  });
-
-  it("maps pending real identity verification to the identity stage", async () => {
+  it("attributes pending session and canonical-member verification to the authentication stage", async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     let resolveSession!: (value: typeof SESSION) => void;
-    mocks.verifyHostedPrivyIdentityToken.mockReturnValue(
-      new Promise((resolve) => {
-        resolveSession = resolve;
-      }),
-    );
-    const request = new Request(
-      "https://app.example.test/api/device-sync/companion/address-book",
-      { headers: { authorization: `Bearer ${TOKEN}` } },
-    );
-
-    const responsePromise = route.GET(request);
+    mocks.readHostedAuthSession.mockReturnValue(new Promise((resolve) => { resolveSession = resolve; }));
+    const response = route.GET(request());
     await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
-
-    expect(warn).toHaveBeenCalledWith(
-      "Hosted companion address-book GET stage slow.",
-      {
-        elapsedMs: SLOW_GET_STAGE_MS,
-        stage: "identity_token_verification",
-      },
-    );
-    expect(mocks.lookupHostedMemberIdentityByPrivyUserId).not.toHaveBeenCalled();
-
+    expect(warn).toHaveBeenCalledWith("Hosted companion address-book GET stage slow.", {
+      elapsedMs: SLOW_GET_STAGE_MS, stage: "identity_token_verification",
+    });
+    expect(mocks.readHostedAddressBookStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedAuthSession).toHaveBeenCalledWith(expect.objectContaining({
+      credential: "a".repeat(32), transport: "native", prisma: mocks.prisma,
+    }));
     resolveSession(SESSION);
-    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+    await expect(response).resolves.toMatchObject({ status: 200 });
   });
 
-  it("maps pending real member resolution to the member-lookup stage", async () => {
-    vi.useFakeTimers();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    let resolveMember!: (value: typeof MEMBER) => void;
-    mocks.lookupHostedMemberIdentityByPrivyUserId.mockReturnValue(
-      new Promise((resolve) => {
-        resolveMember = resolve;
-      }),
-    );
-    const request = new Request(
-      "https://app.example.test/api/device-sync/companion/address-book",
-      { headers: { authorization: `Bearer ${TOKEN}` } },
-    );
-
-    const responsePromise = route.GET(request);
-    await vi.advanceTimersByTimeAsync(SLOW_GET_STAGE_MS);
-
-    expect(warn).toHaveBeenCalledWith(
-      "Hosted companion address-book GET stage slow.",
-      {
-        elapsedMs: SLOW_GET_STAGE_MS,
-        stage: "member_lookup",
-      },
-    );
+  it("rejects an expired or revoked session before reading private address-book state", async () => {
+    mocks.readHostedAuthSession.mockResolvedValue({ session: null });
+    const response = await route.GET(request());
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "AUTH_REQUIRED" } });
     expect(mocks.readHostedAddressBookStatus).not.toHaveBeenCalled();
-
-    resolveMember(MEMBER);
-    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
   });
 });

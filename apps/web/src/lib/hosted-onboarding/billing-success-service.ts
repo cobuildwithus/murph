@@ -13,7 +13,6 @@ import {
   type HostedMemberCoreState,
 } from "./hosted-member-store";
 import { getHostedInviteStatus, requireHostedInviteForAuthentication } from "./invite-service";
-import { type PrivyLinkedAccountLike } from "./privy-shared";
 import { requireHostedStripeApi } from "./runtime";
 import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
@@ -40,7 +39,6 @@ import {
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   member: HostedMemberCoreState;
   prisma?: PrismaClient;
   sessionId: string;

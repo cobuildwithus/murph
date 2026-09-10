@@ -5,7 +5,7 @@ import { readHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64url");
 
 describe("readHostedOnboardingEnvironment", () => {
-  it("reads hosted onboarding defaults and surfaces Privy config", () => {
+  it("reads hosted onboarding defaults without identity-provider configuration", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_monthly_123",
@@ -15,15 +15,11 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_usage_10_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD: "price_usage_20_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: "price_usage_25_123",
-      NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
-      PRIVY_VERIFICATION_KEY: "privy-verification-key",
       STRIPE_SECRET_KEY: "sk_test_123",
     }));
 
     expect(environment.allowedMutationOrigins).toEqual([]);
     expect(environment.publicBaseUrl).toBe("https://join.example.test");
-    expect(environment.privyAppId).toBe("cm_app_123");
-    expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
     expect(environment.linqFirstContactAdmissionMode).toBe("off");
@@ -111,7 +107,6 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL: "gpt-5.4-mini",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY: "first-contact-openai-key",
       HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES: "+1, +44,+1",
-      NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       TELEGRAM_BOT_USERNAME: "murph_bot",
       TELEGRAM_WEBHOOK_SECRET: "telegram-secret",
     }));
@@ -130,7 +125,6 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.4-mini");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBe("first-contact-openai-key");
     expect(environment.linqInstantStartPhonePrefixes).toEqual(["+44", "+1"]);
-    expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.telegramBotUsername).toBe("murph_bot");
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");
   });

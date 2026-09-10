@@ -6,7 +6,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { runWithHostedDomainRootProviderCallsDisabled } from "../hosted-crypto/domain-root-unwrap-cache";
 import { createHostedBetterAuth } from "./auth";
 import { hostedAuthTransactionAdapter } from "./adapter";
-import type { HostedAuthUserFields } from "./migration-source";
 import { hostedAuthOtpIdentifier, lockHostedAuthOtpTx } from "./otp-store";
 import { makeHostedAuthSessionRoomTx } from "./session-limit";
 
@@ -28,7 +27,6 @@ export async function commitHostedAuthOtp(input: {
   prisma: PrismaClient;
   memberId: string;
   otp: HostedAuthOtp;
-  initialUser?: HostedAuthUserFields;
   commitMember(tx: Prisma.TransactionClient): Promise<void>;
 }): Promise<{ memberId: string; token: string; expiresAt: Date; headers: Headers }> {
   const outcome = await input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
@@ -57,7 +55,6 @@ export async function commitHostedAuthOtp(input: {
         user: {
           create: { before: async () => {
             await commitMember();
-            return input.initialUser ? { data: input.initialUser } : undefined;
           } },
           update: { before: async () => { await commitMember(); } },
         },

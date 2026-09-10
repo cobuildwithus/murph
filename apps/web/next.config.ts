@@ -34,8 +34,7 @@ interface HostedWebWebpackContext {
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
 const MURPH_SAFE_HEADER_SOURCE = "/search/:path*";
-const PRIVY_CUSTOM_DOMAIN_ENV_KEYS = ["PRIVY_CUSTOM_AUTH_DOMAIN"] as const;
-const PRIVY_BASE_DOMAIN_ENV_KEYS = ["PRIVY_BASE_DOMAIN"] as const;
+
 const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
   "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
   "HOSTED_WEB_BASE_URL",
@@ -43,29 +42,14 @@ const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
 const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
 const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY = "DEVICE_SYNC_PUBLIC_BASE_URL";
 const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
-const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
+
 const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
 const WORKFLOW_TARGET_WORLD_ENV_KEY = "WORKFLOW_TARGET_WORLD";
 const HOSTED_WEB_PREPARED_TYPECHECK_ENV_KEY = "MURPH_HOSTED_WEB_PREPARED_TYPECHECK";
 const HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE = "complete";
 const WORKFLOW_NEXT_DEFAULT_LOCAL_DATA_DIR = ".next/workflow-data";
 const WORKFLOW_LOCAL_TARGET_WORLD = "local";
-const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
-  "https://auth.privy.io",
-  "https://verify.walletconnect.com",
-  "https://verify.walletconnect.org",
-] as const;
-const PRIVY_REQUIRED_CONNECT_SOURCES = [
-  "https://auth.privy.io",
-  "wss://relay.walletconnect.com",
-  "wss://relay.walletconnect.org",
-  "wss://www.walletlink.org",
-  "https://*.rpc.privy.systems",
-  "https://explorer-api.walletconnect.com",
-] as const;
-const PRIVY_REQUIRED_SCRIPT_SOURCES = [
-  "https://auth.privy.io",
-] as const;
+
 const TELEGRAM_REQUIRED_SCRIPT_SOURCES = [
   "https://telegram.org",
 ] as const;
@@ -122,80 +106,18 @@ export const HOSTED_WEB_WORKFLOW_OPTIONS = {
   },
 } satisfies Parameters<typeof withWorkflow>[1];
 
-export function resolvePrivyBaseDomainOrigin(value: string | null | undefined): string | null {
-  const parsed = parseConfiguredOrigin(value);
-
-  if (!parsed || isLoopbackHostname(parsed.hostname)) {
-    return null;
-  }
-
-  const normalizedHostname = parsed.hostname.startsWith("privy.")
-    ? parsed.hostname
-    : `privy.${parsed.hostname.replace(/^www\./u, "")}`;
-
-  return buildOrigin(parsed.protocol, normalizedHostname, parsed.port);
-}
-
-export function resolveHostedPrivyOrigin(
-  environment: NodeJS.ProcessEnv = process.env,
-): string | null {
-  const configuredCustomOrigin = resolveConfiguredOrigin(readFirstConfiguredValue(environment, PRIVY_CUSTOM_DOMAIN_ENV_KEYS));
-
-  if (configuredCustomOrigin) {
-    return configuredCustomOrigin;
-  }
-
-  const configuredBaseDomainOrigin = resolvePrivyBaseDomainOrigin(
-    readFirstConfiguredValue(environment, PRIVY_BASE_DOMAIN_ENV_KEYS),
-  );
-
-  if (configuredBaseDomainOrigin) {
-    return configuredBaseDomainOrigin;
-  }
-
-  return resolvePrivyBaseDomainOrigin(readHostedPublicOriginFromEnvironment(environment));
-}
-
-export function resolveHostedPrivyOrigins(
-  environment: NodeJS.ProcessEnv = process.env,
-): string[] {
-  const configuredCustomOrigin = resolveConfiguredOrigin(readFirstConfiguredValue(environment, PRIVY_CUSTOM_DOMAIN_ENV_KEYS));
-
-  if (configuredCustomOrigin) {
-    return [configuredCustomOrigin];
-  }
-
-  const configuredBaseDomainOrigin = resolvePrivyBaseDomainOrigin(
-    readFirstConfiguredValue(environment, PRIVY_BASE_DOMAIN_ENV_KEYS),
-  );
-
-  if (configuredBaseDomainOrigin) {
-    return [configuredBaseDomainOrigin];
-  }
-
-  return resolveHostedPrivyFallbackOrigins(readHostedPublicOriginFromEnvironment(environment));
-}
-
 export function buildHostedWebContentSecurityPolicy(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
   const isDevelopment = environment.NODE_ENV === "development";
   const isProduction = environment.NODE_ENV === "production";
-  const privyOrigins = resolveHostedPrivyOrigins(environment);
-  const privyFrameSources = uniqueSources([
-    ...PRIVY_REQUIRED_CHILD_FRAME_SOURCES,
-    ...privyOrigins,
-  ]);
   const frameSources = uniqueSources([
-    ...privyFrameSources,
     ...TELEGRAM_REQUIRED_FRAME_SOURCES,
     ...TURNSTILE_SOURCES,
     ...KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
   ]);
   const connectSources = uniqueSources([
     "'self'",
-    ...PRIVY_REQUIRED_CONNECT_SOURCES,
-    ...privyOrigins,
     ...KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
     ...STATUS_PAGE_CONNECT_SOURCES,
     ...BRANDFETCH_API_SOURCES,
@@ -204,7 +126,6 @@ export function buildHostedWebContentSecurityPolicy(
   const scriptSources = uniqueSources([
     "'self'",
     "'unsafe-inline'",
-    ...PRIVY_REQUIRED_SCRIPT_SOURCES,
     ...TELEGRAM_REQUIRED_SCRIPT_SOURCES,
     ...TURNSTILE_SOURCES,
     ...(isDevelopment ? ["'unsafe-eval'", "https://ui.sh"] : []),
@@ -223,7 +144,7 @@ export function buildHostedWebContentSecurityPolicy(
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    `child-src ${privyFrameSources.join(" ")}`,
+    "child-src 'none'",
     `frame-src ${frameSources.join(" ")}`,
     `connect-src ${connectSources.join(" ")}`,
     "worker-src 'self'",
@@ -599,48 +520,6 @@ function uniqueSources(sources: readonly (string | null | undefined)[]): string[
   return [...new Set(sources.filter((value): value is string => Boolean(value)))];
 }
 
-function readFirstConfiguredValue(
-  environment: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = environment[key];
-
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function resolveConfiguredOrigin(value: string | null | undefined): string | null {
-  const parsed = parseConfiguredOrigin(value);
-
-  if (!parsed) {
-    return null;
-  }
-
-  return buildOrigin(parsed.protocol, parsed.hostname, parsed.port);
-}
-
-function resolveHostedPrivyFallbackOrigins(value: string | null | undefined): string[] {
-  const parsed = parseConfiguredOrigin(value);
-
-  if (!parsed || isLoopbackHostname(parsed.hostname)) {
-    return [];
-  }
-
-  const hostnames = new Set<string>([normalizePrivyHostnameCandidate(parsed.hostname)]);
-  const strippedHostname = stripHostedPublicSubdomainPrefix(parsed.hostname);
-
-  if (strippedHostname) {
-    hostnames.add(normalizePrivyHostnameCandidate(strippedHostname));
-  }
-
-  return [...hostnames].map((hostname) => buildOrigin(parsed.protocol, hostname, parsed.port));
-}
-
 function parseConfiguredOrigin(value: string | null | undefined): URL | null {
   if (typeof value !== "string") {
     return null;
@@ -659,71 +538,6 @@ function parseConfiguredOrigin(value: string | null | undefined): URL | null {
   }
 }
 
-function stripHostedPublicSubdomainPrefix(hostname: string): string | null {
-  const labels = hostname.toLowerCase().split(".");
-
-  if (labels.length < 3) {
-    return null;
-  }
-
-  const [firstLabel, ...remainingLabels] = labels;
-
-  if (!HOSTED_PUBLIC_SUBDOMAIN_PREFIXES.includes(firstLabel as typeof HOSTED_PUBLIC_SUBDOMAIN_PREFIXES[number])) {
-    return null;
-  }
-
-  return remainingLabels.join(".");
-}
-
-function normalizePrivyHostnameCandidate(hostname: string): string {
-  const normalizedHostname = hostname.toLowerCase();
-
-  if (normalizedHostname.startsWith("privy.")) {
-    return normalizedHostname;
-  }
-
-  return `privy.${normalizedHostname.replace(/^www\./u, "")}`;
-}
-
-function readHostedPublicOriginFromEnvironment(
-  environment: NodeJS.ProcessEnv,
-): string | null {
-  const baseUrl = readHostedPublicBaseUrlFromEnvironment(environment);
-  return baseUrl ? new URL(baseUrl).origin : null;
-}
-
-function readHostedPublicBaseUrlFromEnvironment(
-  environment: NodeJS.ProcessEnv,
-): string | null {
-  const configuredBaseUrl = readFirstNormalizedBaseUrl(environment, HOSTED_PUBLIC_BASE_URL_ENV_KEYS);
-
-  if (configuredBaseUrl) {
-    return configuredBaseUrl;
-  }
-
-  return normalizeConfiguredBaseUrl(environment[HOSTED_PUBLIC_VERCEL_URL_ENV_KEY], {
-    allowHttpLoopback: true,
-  });
-}
-
-function readFirstNormalizedBaseUrl(
-  environment: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = environment[key];
-
-    const normalized = normalizeConfiguredBaseUrl(value, {
-      allowHttpLoopback: true,
-    });
-
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return null;
-}
 
 function normalizeConfiguredBaseUrl(
   value: string | null | undefined,
@@ -767,9 +581,6 @@ function normalizeConfiguredBaseUrl(
   return parsed.toString().replace(/\/$/u, "");
 }
 
-function buildOrigin(protocol: string, hostname: string, port: string): string {
-  return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
-}
 
 function isLoopbackHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";

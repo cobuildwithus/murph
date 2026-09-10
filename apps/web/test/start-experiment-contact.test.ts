@@ -5,31 +5,12 @@ import {
   MURPH_EXPERIMENT_CONTACT_EMAIL,
   MURPH_EXPERIMENT_TELEGRAM_URL,
   resolveExperimentStartContactAction,
-  resolveExperimentStartContactChannels,
 } from "@/src/lib/experiments/start-experiment-contact";
 
 describe("experiment start contact resolver", () => {
   it("offers every connected Murph channel without placing user identifiers in hrefs", () => {
     const action = resolveExperimentStartContactAction({
-      accountContainer: {
-        linkedAccounts: [
-          {
-            latest_verified_at: 1771977600,
-            phone_number: "+14045550123",
-            type: "phone",
-          },
-          {
-            id: "tg_user_123",
-            type: "telegram",
-            username: "member_handle",
-          },
-          {
-            address: "member@example.test",
-            latest_verified_at: 1771977600,
-            type: "email",
-          },
-        ],
-      },
+      initialContactChannels: { email: true, telegram: true, text: true },
       murphEmailAddress: "assistant+private@mail.example.test",
       murphPhoneNumber: "+15550100001",
       protocolTitle: "Finnish Dry Sauna",
@@ -69,15 +50,7 @@ describe("experiment start contact resolver", () => {
 
   it("opens the single connected channel directly", () => {
     const action = resolveExperimentStartContactAction({
-      accountContainer: {
-        linkedAccounts: [
-          {
-            address: "member@example.test",
-            latest_verified_at: 1771977600,
-            type: "email",
-          },
-        ],
-      },
+      initialContactChannels: { email: true, telegram: false, text: false },
       protocolTitle: "Norwegian 4x4",
     });
 
@@ -99,16 +72,9 @@ describe("experiment start contact resolver", () => {
     );
   });
 
-  it("does not enable unverified email as a start channel", () => {
+  it("falls back when the server has not confirmed an email channel", () => {
     const action = resolveExperimentStartContactAction({
-      accountContainer: {
-        linkedAccounts: [
-          {
-            address: "member@example.test",
-            type: "email",
-          },
-        ],
-      },
+      initialContactChannels: { email: false, telegram: false, text: false },
       protocolTitle: "Norwegian 4x4",
     });
 
@@ -140,38 +106,10 @@ describe("experiment start contact resolver", () => {
     expect(action.options.map((option) => option.kind)).toEqual(["telegram", "email"]);
   });
 
-  it("derives minimized channel flags from linked accounts", () => {
-    expect(resolveExperimentStartContactChannels({
-      linkedAccounts: [
-        {
-          latest_verified_at: 1771977600,
-          phone_number: "+14045550123",
-          type: "phone",
-        },
-        {
-          address: "member@example.test",
-          latest_verified_at: 1771977600,
-          type: "email",
-        },
-      ],
-    })).toEqual({
-      email: true,
-      telegram: false,
-      text: true,
-    });
-  });
 
   it("falls back to Telegram for phone-only users when Murph has no routed text number", () => {
     const action = resolveExperimentStartContactAction({
-      accountContainer: {
-        linkedAccounts: [
-          {
-            latest_verified_at: 1771977600,
-            phone_number: "+14045550123",
-            type: "phone",
-          },
-        ],
-      },
+      initialContactChannels: { email: false, telegram: false, text: true },
       protocolTitle: "Red Light Glasses Before Bed",
     });
 
@@ -186,9 +124,7 @@ describe("experiment start contact resolver", () => {
 
   it("normalizes invalid Murph text targets before building sms links", () => {
     const action = resolveExperimentStartContactAction({
-      accountContainer: {
-        linkedAccounts: [],
-      },
+      initialContactChannels: { email: false, telegram: false, text: false },
       murphPhoneNumber: "+15550100001?body=Injected",
       protocolTitle: "Red Light Glasses Before Bed",
     });
@@ -204,9 +140,7 @@ describe("experiment start contact resolver", () => {
 
   it("falls back to Telegram when no connected channel or text number is resolved", () => {
     const action = resolveExperimentStartContactAction({
-      accountContainer: {
-        linkedAccounts: [],
-      },
+      initialContactChannels: { email: false, telegram: false, text: false },
       protocolTitle: "Red Light Glasses Before Bed",
     });
 
@@ -221,9 +155,7 @@ describe("experiment start contact resolver", () => {
 
   it("falls back to Messages when a Murph text number is available", () => {
     const action = resolveExperimentStartContactAction({
-      accountContainer: {
-        linkedAccounts: [],
-      },
+      initialContactChannels: { email: false, telegram: false, text: false },
       murphPhoneNumber: "+15550100001",
       protocolTitle: "Red Light Glasses Before Bed",
     });

@@ -442,14 +442,14 @@ async function createMember(
   session: HostedAppSessionForTest;
 }> {
   const memberId = `member_hsb_${runToken}_${label}`;
-  const privyUserId = `did:privy:hsb_${runToken}_${label}`;
+
   const verifiedEmail = `${label}.${runToken}@example.invalid`;
   await seedHostedBillingMemberForTest({
     billingStatus,
     environment: requireScenario().runtimeEnv,
     memberId,
     previouslyActivated: billingStatus === "canceled",
-    privyUserId,
+
     verifiedEmail,
     verifiedPhoneNumber,
   });
@@ -459,7 +459,7 @@ async function createMember(
   });
   const session = await requireScenario().issueHostedAppSession({
     memberId,
-    privyUserId,
+
   });
   return { memberId, session };
 }

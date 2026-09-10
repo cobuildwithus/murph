@@ -8,7 +8,6 @@ export const GET = withJsonError(async (request: Request) => {
   const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma: getPrisma() });
   return jsonOk({
     configured: state.credentials.length > 0,
-    legacyUserId: state.credentials.length === 0 ? session.privyUserId ?? null : null,
-    initialEnrollmentAllowed: Boolean(session.authProof && !session.privyUserId && state.encrypted === null),
+    initialEnrollmentAllowed: state.encrypted === null,
   });
 });

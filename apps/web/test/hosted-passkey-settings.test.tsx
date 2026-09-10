@@ -1,133 +1,41 @@
-import { createElement } from "react";
-import { act } from "react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-
+import { act, createElement } from "react";
+import { beforeEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
-
-const mocks = vi.hoisted(() => ({
-  ensureConfigured: vi.fn(),
-  loginForSetup: vi.fn(),
-  hookState: {
-    clientAuthenticated: false,
-    configured: false,
-    error: null as string | null,
-    pendingLabel: null as string | null,
-    ready: true,
-    walletAddress: null as string | null,
-  },
-  openAuthDialog: vi.fn(),
+const mocks = vi.hoisted(() => ({ enroll: vi.fn(), state: { pending: false, registered: false, error: null as string | null } }));
+vi.mock("@/src/components/sensitive-actions/use-approval-passkey-enrollment", () => ({
+  useApprovalPasskeyEnrollment: () => ({ ...mocks.state, enroll: mocks.enroll }),
 }));
-
-vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
-  useAuth: () => ({
-    authenticated: true,
-    openAuthDialog: mocks.openAuthDialog,
-  }),
-}));
-
-vi.mock("@/src/components/sensitive-actions/legacy-wallet-approval-context", () => ({
-  useLegacyWalletApproval: () => ({ setup: {
-    ...mocks.hookState,
-    ensureConfigured: mocks.ensureConfigured,
-    loginForSetup: mocks.loginForSetup,
-  } }),
-}));
-
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
+beforeEach(() => { vi.clearAllMocks(); mocks.state.pending = false; mocks.state.registered = false; mocks.state.error = null; });
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.hookState.clientAuthenticated = false;
-  mocks.hookState.configured = false;
-  mocks.hookState.error = null;
-  mocks.hookState.pendingLabel = null;
-  mocks.hookState.ready = true;
-  mocks.hookState.walletAddress = null;
+test("renders an established passkey and recovery without primary reauthentication", async () => {
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
+    authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "configured", method: "passkey" },
+  }));
+  try {
+    expect(rendered.container.textContent).toContain("Enabled");
+    expect([...rendered.container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Save a recovery key", "Use a recovery key"]);
+    expect(mocks.enroll).not.toHaveBeenCalled();
+  } finally { await rendered.cleanup(); }
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
+test("starts the initial passkey owner only when its server gate is open", async () => {
+  const props = { authenticated: true, enrollmentEnabled: false, secureApprovalStatus: { status: "not_configured" as const, method: "initial" as const } };
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, props));
+  try {
+    expect(rendered.button.disabled).toBe(true);
+    await rendered.rerender(createElement(HostedPasskeySettings, { ...props, enrollmentEnabled: true }));
+    await act(async () => { rendered.container.querySelector("button")?.dispatchEvent(new rendered.window.Event("click", { bubbles: true })); });
+    expect(mocks.enroll).toHaveBeenCalledOnce();
+  } finally { await rendered.cleanup(); }
 });
 
-test("shows server-confirmed passkey enabled when the mobile Privy client user is absent", async () => {
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      secureApprovalStatus: { status: "configured" },
-    }),
-    { requireButton: false },
-  );
-
-  expect(rendered.container.textContent).toContain("Enabled");
-  expect(rendered.container.textContent).not.toContain("Not set up");
-  expect(rendered.container.textContent).not.toContain("Set up");
-  expect(rendered.container.textContent).not.toContain("Sign in");
-
-  await rendered.cleanup();
-});
-
-test("restores only the legacy setup client instead of opening primary login", async () => {
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      secureApprovalStatus: { status: "not_configured" },
-    }),
-  );
-
-  expect(rendered.container.textContent).toContain("Not set up");
-  expect(rendered.container.textContent).toContain("Sign in on this device");
-  expect(rendered.button.textContent).toBe("Verify existing sign-in");
-
-  await act(async () => {
-    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.loginForSetup).toHaveBeenCalledOnce();
-  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
-  expect(mocks.ensureConfigured).not.toHaveBeenCalled();
-
-  await rendered.cleanup();
-});
-
-test("starts passkey setup only when Privy has an authenticated client user", async () => {
-  mocks.hookState.clientAuthenticated = true;
-  mocks.ensureConfigured.mockResolvedValue({
-    address: "0x1111111111111111111111111111111111111111",
-    walletIndex: 0,
-  });
-
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      secureApprovalStatus: { status: "not_configured" },
-    }),
-  );
-
-  expect(rendered.button.textContent).toBe("Set up");
-
-  await act(async () => {
-    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.ensureConfigured).toHaveBeenCalledTimes(1);
-  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
-
-  await rendered.cleanup();
-});
-
-test("renders the migrated approval passkey without asking for client reauthentication", async () => {
-  mocks.hookState.ready = false;
-  const rendered = await renderClientComponent(
-    createElement(HostedPasskeySettings, {
-      authenticated: true,
-      enrollmentEnabled: true,
-      secureApprovalStatus: { status: "configured", method: "passkey" },
-    }),
-    { requireButton: false },
-  );
-  expect(rendered.container.textContent).toContain("Enabled");
-  expect([...rendered.container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Save a recovery key", "Use a recovery key"]);
-  expect(mocks.ensureConfigured).not.toHaveBeenCalled();
-  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
-  await rendered.cleanup();
+test("does not offer enrollment when the existing protection cannot be read", async () => {
+  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
+    authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "unavailable" },
+  }), { requireButton: false });
+  try {
+    expect(rendered.container.textContent).toContain("temporarily unavailable");
+    expect(rendered.container.querySelector("button")).toBeNull();
+  } finally { await rendered.cleanup(); }
 });

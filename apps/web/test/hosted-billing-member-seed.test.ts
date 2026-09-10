@@ -7,12 +7,11 @@ const database = vi.hoisted(() => ({
   createMember: vi.fn(async () => undefined),
   disconnect: vi.fn(async () => undefined),
   upsertEmail: vi.fn(async () => undefined),
-  upsertIdentity: vi.fn(async (_input: {
+  upsertIdentity: vi.fn<(input: {
     phoneLookupKey: string | null;
     phoneNumber: string | null;
     phoneNumberVerifiedAt: Date | null;
-    privyUserId: string | null;
-  }) => undefined),
+  }) => Promise<void>>(async () => undefined),
 }));
 
 vi.mock("@/src/lib/prisma", async (importOriginal) => ({
@@ -53,7 +52,7 @@ describe("billing fixture messaging readiness", () => {
         },
         memberId: "member_billing_seed",
         previouslyActivated: false,
-        privyUserId: "did:privy:billing_seed",
+
         verifiedEmail: "billing-seed@example.invalid",
         verifiedPhoneNumber,
       });
@@ -62,7 +61,6 @@ describe("billing fixture messaging readiness", () => {
       const identity = database.upsertIdentity.mock.calls[0]?.[0];
       expect(identity).toBeDefined();
       if (!identity) throw new Error("Missing seeded identity");
-      expect(identity.privyUserId).toBe("did:privy:billing_seed");
       expect(identity.phoneNumber).toBe(verifiedPhoneNumber ?? null);
       expect(identity.phoneNumberVerifiedAt instanceof Date)
         .toBe(verifiedPhoneNumber !== undefined);

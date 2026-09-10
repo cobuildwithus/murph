@@ -31,16 +31,7 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
-import {
-  HostedPhonePrivyHandOffStatus,
-  HostedPhoneLinkAction,
-  HostedPhoneLinkCardPresentation,
-} from "@/src/components/settings/hosted-phone-settings";
-import {
-  HostedIdentitySessionLoading,
-  HostedIdentitySessionMismatch,
-  HostedSettingsIdentityRemovalView,
-} from "@/src/components/settings/hosted-settings-identity-link-dialog";
+
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
@@ -55,20 +46,11 @@ import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
+
 import {
-  HostedAuthPanelAlternateMethods,
-  HostedResumableAuthState,
-} from "@/src/components/hosted-onboarding/hosted-auth-panel";
-import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
-import { EmailIcon } from "@/src/components/homepage/email-icon";
-import {
-  resolveAuthDialogHeaderPresentation,
+
 } from "@/src/components/hosted-onboarding/auth-dialog";
-import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
-import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
-import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
-import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
-import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
+
 import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
@@ -270,34 +252,6 @@ function PlanBulletListStudy({
   );
 }
 
-function DialogPreviewFrame({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
-      <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
-        <DialogPreviewHeader />
-        <div className="mt-5">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function DialogPreviewHeader() {
-  const header = resolveAuthDialogHeaderPresentation({
-    panelView: "auth-active",
-  });
-
-  return (
-    <div className={header.headerClassName}>
-      <h3 className="text-xl font-bold tracking-tight text-foreground">
-        {header.title}
-      </h3>
-      <p className="text-sm text-pretty text-muted-foreground">
-        {header.description}
-      </p>
-    </div>
-  );
-}
 
 function resolveDesignPhoneCountryOption(value: string) {
   const option =
@@ -309,7 +263,6 @@ function resolveDesignPhoneCountryOption(value: string) {
   }
   return option;
 }
-
 
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
@@ -475,14 +428,6 @@ function createDesignLaunchConsentStatus({
 const DESIGN_DASHBOARD_CONSENT_STATUS = createDesignLaunchConsentStatus({
   healthDataGranted: false,
   legalGranted: false,
-});
-const DESIGN_LEGAL_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
-  healthDataGranted: true,
-  legalGranted: false,
-});
-const DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
-  healthDataGranted: false,
-  legalGranted: true,
 });
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
@@ -665,8 +610,7 @@ export function ComponentsContent() {
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
-  const [phoneTransferSupportDialogOpen, setPhoneTransferSupportDialogOpen] =
-    useState(false);
+
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
@@ -777,212 +721,6 @@ export function ComponentsContent() {
             {DESIGN_HOME_HISTORY_CARDS.map((card) => (
               <HomeExperimentCard key={card.id} card={card} variant="history" />
             ))}
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Homepage auth transitions">
-          <div
-            className="flex flex-col gap-6"
-            data-design-homepage-auth-transitions
-            id="homepage-auth-transitions"
-          >
-            <p className="text-sm text-muted-foreground">
-              Secure sign in keeps the ordinary methods visible while the
-              provider initializes. A selected method owns the pending state
-              immediately. If hydration discovers an existing session before
-              submission, method actions pause until its linked account is
-              known, then recovery takes priority. Otherwise account completion
-              stays on that production action through the next view.
-            </p>
-            <div
-              className="grid items-start gap-5 lg:grid-cols-2"
-              data-design-homepage-auth-readiness
-              inert
-            >
-              <DialogPreviewFrame label="Queued action delay">
-                <HostedPrivyReadinessState
-                  onRestart={() => {}}
-                  restartAvailable={false}
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Repeated provider delay">
-                <HostedPrivyReadinessState
-                  onRestart={() => {}}
-                  restartAvailable
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Enabled alternate methods">
-                <div className="grid grid-cols-2 gap-3">
-                  <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                  <HostedInlineAuthButton
-                    icon={<EmailIcon className="size-5" />}
-                    onClick={() => {}}
-                  >
-                    Email
-                  </HostedInlineAuthButton>
-                </div>
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Telegram authorization available">
-                <HostedTelegramAuthButtonPresentation
-                  active
-                  onClick={() => {}}
-                />
-              </DialogPreviewFrame>
-            </div>
-            <div
-              className="grid items-start gap-5 lg:grid-cols-2"
-              id="homepage-auth-hydrated-session-recovery"
-              inert
-            >
-              <DialogPreviewFrame label="Session identity hydration">
-                <HostedPrivyReadinessState
-                  message="Secure sign in is checking your existing session."
-                  onRestart={() => {}}
-                  restartAvailable={false}
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Hydrated email session recovery">
-                <div className="space-y-4">
-                  <HostedResumableAuthState
-                    auth={{ identityLabel: "member@example.com", method: "email" }}
-                    disabled={false}
-                    onContinue={() => {}}
-                    onSignOut={() => {}}
-                    pending={false}
-                  />
-                  <HostedAuthPanelAlternateMethods>
-                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                    <HostedInlineAuthButton
-                      icon={<EmailIcon className="size-5" />}
-                      onClick={() => {}}
-                    >
-                      Email
-                    </HostedInlineAuthButton>
-                  </HostedAuthPanelAlternateMethods>
-                </div>
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Hydrated phone session recovery">
-                <div className="space-y-4">
-                  <HostedAuthenticatedPhoneAuthState
-                    body=""
-                    description=""
-                    disabled={false}
-                    onContinue={() => {}}
-                    onUseDifferentNumber={() => {}}
-                    pendingAction={null}
-                    secondaryActionSize="lg"
-                    title=""
-                    view="manual-resume"
-                  />
-                  <HostedAuthPanelAlternateMethods>
-                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                    <HostedInlineAuthButton
-                      icon={<EmailIcon className="size-5" />}
-                      onClick={() => {}}
-                    >
-                      Email
-                    </HostedInlineAuthButton>
-                  </HostedAuthPanelAlternateMethods>
-                </div>
-              </DialogPreviewFrame>
-            </div>
-            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
-              <DialogPreviewFrame label="Telegram completion">
-                <div className="grid grid-cols-2 gap-3">
-                  <HostedTelegramAuthButtonPresentation
-                    active
-                    completionPending
-                    disabled
-                    onClick={() => {}}
-                  />
-                  <HostedInlineAuthButton
-                    disabled
-                    icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
-                    onClick={() => {}}
-                  >
-                    Email
-                  </HostedInlineAuthButton>
-                </div>
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Phone verification completion">
-                <HostedCodeEntryStep
-                  autoFocus={false}
-                  code="123456"
-                  disableSignup={false}
-                  disabled
-                  onCodeChange={() => {}}
-                  onResendCode={() => {}}
-                  onUseDifferentNumber={() => {}}
-                  onVerifyCode={() => {}}
-                  pendingAction="verify-code"
-                  secondaryActionSize="lg"
-                  size="compact"
-                  verificationPhoneNumberHint="*** 2671"
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Phone resume completion">
-                <HostedAuthenticatedPhoneAuthState
-                  body=""
-                  description=""
-                  disabled
-                  onContinue={() => {}}
-                  onUseDifferentNumber={() => {}}
-                  pendingAction="continue"
-                  secondaryActionSize="lg"
-                  title=""
-                  view="manual-resume"
-                />
-              </DialogPreviewFrame>
-              <DialogPreviewFrame label="Resumable completion">
-                <HostedResumableAuthState
-                  auth={{ identityLabel: null, method: "telegram" }}
-                  disabled
-                  onContinue={() => {}}
-                  onSignOut={() => {}}
-                  pending
-                />
-              </DialogPreviewFrame>
-            </div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Consent appears directly from completion status
-            </p>
-            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
-              <div
-                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="combined"
-              >
-                <HostedLegalConsentCard
-                  initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
-                  mode="compact"
-                  onDecline={() => {}}
-                  source="design-homepage-consent-combined"
-                />
-              </div>
-              <div
-                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="health-data"
-              >
-                <HostedLegalConsentCard
-                  initialStatus={DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS}
-                  mode="compact"
-                  onDecline={() => {}}
-                  source="design-homepage-consent-health-data"
-                />
-              </div>
-              <div
-                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="legal"
-              >
-                <HostedLegalConsentCard
-                  initialStatus={DESIGN_LEGAL_ONLY_CONSENT_STATUS}
-                  mode="compact"
-                  onDecline={() => {}}
-                  source="design-homepage-consent-legal"
-                />
-              </div>
-            </div>
           </div>
         </Section>
 
@@ -1196,7 +934,6 @@ export function ComponentsContent() {
             />
           </div>
         </Section>
-
 
         <Separator />
 
@@ -2073,177 +1810,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section id="phone-account-linking" title="Phone Account Linking">
-          <p className="text-sm leading-6 text-muted-foreground">
-            Settings opens the authenticated identity provider directly, with
-            no second Murph confirmation. After verification or an approved
-            account transfer, Murph saves the exact provider-owned result. If
-            Privy already has a verified phone that Murph has not recorded,
-            Settings repairs that projection directly. A declined transfer
-            closes quietly, and a failed save retries without reopening Privy.
-            Existing phone accounts use the same surface for replacement.
-            Support-required conflicts stop retrying and leave one direct email
-            action without putting account identifiers in the message.
-            Privacy-safe lifecycle diagnostics observe these states without
-            changing any rendered state or action.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2" inert>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Add phone
-              </p>
-              <HostedPhoneLinkAction
-                isChangeFlow={false}
-                isLinking={false}
-                isSyncing={false}
-                onClick={() => {}}
-              />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Replace phone
-              </p>
-              <HostedPhoneLinkAction
-                isChangeFlow
-                isLinking={false}
-                isSyncing={false}
-                onClick={() => {}}
-              />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Provider opening
-              </p>
-              <HostedPhoneLinkAction
-                disabled
-                isChangeFlow={false}
-                isLinking
-                isSyncing={false}
-                onClick={() => {}}
-              />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Session mismatch
-              </p>
-              <HostedIdentitySessionMismatch onSignInAgain={() => {}} />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Provider loading
-              </p>
-              <HostedIdentitySessionLoading />
-            </div>
-            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                Recovery failed
-              </p>
-              <HostedIdentitySessionMismatch
-                errorMessage="Sign out did not finish. Try again."
-                onSignInAgain={() => {}}
-              />
-            </div>
-          </div>
-          <p className="text-sm leading-6 text-muted-foreground">
-            The join card composes that action with its reserved status line
-            and the Telegram alternative. The status line holds its height
-            while empty so the button never moves when a message arrives, so
-            these previews show the real resting spacing between the two
-            contact channels.
-          </p>
-          <div
-            aria-label="Composed contact channel card previews"
-            className="grid max-w-3xl gap-4 sm:grid-cols-2"
-            data-design-component="hosted-contact-channel-choice"
-            inert
-          >
-            {[
-              {
-                disabled: false,
-                errorMessage: null,
-                label: "Resting",
-                showPhoneAction: true,
-                state: "resting",
-                statusMessage: null,
-                statusTone: "neutral" as const,
-              },
-              {
-                disabled: false,
-                errorMessage: null,
-                label: "Saved status",
-                showPhoneAction: true,
-                state: "status",
-                statusMessage: "Phone saved.",
-                statusTone: "success" as const,
-              },
-              {
-                disabled: true,
-                errorMessage:
-                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
-                label: "Support required",
-                showPhoneAction: false,
-                state: "support-required",
-                statusMessage:
-                  "That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely.",
-                statusTone: "destructive" as const,
-              },
-            ].map((preview) => (
-              <div
-                className="space-y-3 rounded-xl border border-border bg-card p-5"
-                data-design-state={preview.state}
-                key={preview.label}
-              >
-                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                  {preview.label}
-                </p>
-                <HostedContactChannelChoice
-                  phone={
-                    <HostedPhoneLinkCardPresentation
-                      disabled={preview.disabled}
-                      errorMessage={preview.errorMessage}
-                      isChangeFlow={false}
-                      isLinking={false}
-                      isSyncing={false}
-                      showPhoneAction={preview.showPhoneAction}
-                      statusMessage={preview.statusMessage}
-                      statusTone={preview.statusTone}
-                      onClick={() => {}}
-                    />
-                  }
-                  telegram={
-                    <HostedTelegramAuthButtonPresentation onClick={() => {}} />
-                  }
-                />
-              </div>
-            ))}
-          </div>
-          <div className="space-y-3">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Settings support-required dialog
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => setPhoneTransferSupportDialogOpen(true)}
-            >
-              Preview terminal dialog
-            </Button>
-            {phoneTransferSupportDialogOpen
-              ? (
-                  <HostedPhonePrivyHandOffStatus
-                    errorMessage="That phone moved from another Murph account that is still active with its own sign-in. Contact support to reconcile it safely."
-                    isLinking={false}
-                    isRetryAllowed={false}
-                    isSyncing={false}
-                    onAborted={() => setPhoneTransferSupportDialogOpen(false)}
-                    onRetry={() => {}}
-                  />
-                )
-              : null}
-          </div>
-        </Section>
-
-        <Separator />
-
         <Section title="Hosted AI usage credits and referrals">
           <p className="text-sm text-muted-foreground">
             Read-only Settings detail keeps current referrals visible and
@@ -2301,61 +1867,6 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section id="linked-account-removal" title="Linked Account Removal">
-          <p className="text-sm leading-6 text-muted-foreground">
-            Settings confirms the exact connection and explains the messaging
-            consequence before disconnecting it. Removal is unavailable until
-            another supported sign-in can keep the account accessible.
-          </p>
-          <div
-            className="grid max-w-4xl gap-4 sm:grid-cols-2"
-            data-design-component="linked-account-removal"
-            inert
-          >
-            <div className="rounded-xl border border-border bg-card p-5">
-              <HostedSettingsIdentityRemovalView
-                displayValue="@preview_member"
-                errorMessage={null}
-                intent="replace"
-                label="Telegram"
-                onCancel={() => {}}
-                onRemove={() => {}}
-                pending={false}
-                providerAccountRemoved={false}
-                removable
-              />
-            </div>
-            <div className="rounded-xl border border-border bg-card p-5">
-              <HostedSettingsIdentityRemovalView
-                displayValue="member@example.test"
-                errorMessage={null}
-                intent="remove"
-                label="Email"
-                onCancel={() => {}}
-                onRemove={() => {}}
-                pending={false}
-                providerAccountRemoved={false}
-                removable={false}
-              />
-            </div>
-            <div className="rounded-xl border border-border bg-card p-5">
-              <HostedSettingsIdentityRemovalView
-                displayValue="Connected"
-                errorMessage="Telegram is disconnected. Finish updating Murph."
-                intent="finish"
-                label="Telegram"
-                onCancel={() => {}}
-                onRemove={() => {}}
-                pending={false}
-                providerAccountRemoved
-                removable
-              />
-            </div>
           </div>
         </Section>
 

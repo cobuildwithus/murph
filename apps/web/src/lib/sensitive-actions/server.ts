@@ -3,14 +3,8 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { isAddressEqual, recoverMessageAddress } from "viem";
 
-import {
-  hasOnlyHostedPrivyPasskeyMfa,
-  selectHostedPrivyEmbeddedEthereumWallet,
-} from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readHostedPrivyUserById } from "@/src/lib/hosted-onboarding/privy";
 import { resolveHostedPublicOrigin } from "@/src/lib/hosted-web/public-url";
 
 import {
@@ -25,7 +19,6 @@ import {
 import {
   commitApprovalPasskeyWriteTx,
   prepareApprovalPasskeyWrite,
-  preserveApprovalPasskeyState,
   readApprovalPasskeyState,
   type PreparedApprovalPasskeyWrite,
 } from "./passkey-store";
@@ -120,7 +113,6 @@ export async function verifySensitiveActionChallenge(input: {
   memberId: string;
   now?: Date;
   prisma: PrismaClient;
-  privyUserId: string | null;
 }): Promise<VerifiedSensitiveActionChallenge> {
   assertBindingHash(input.bindingHash);
   const authorization = parseSensitiveActionAuthorization(input.authorization);
@@ -145,81 +137,27 @@ export async function verifySensitiveActionChallenge(input: {
   }
 
   const state = await readApprovalPasskeyState({ memberId: input.memberId, prisma: input.prisma });
-  if (state.credentials.length > 0) {
-    if (authorization.method !== "passkey") throw sensitiveActionSetupRequired();
-    const credentials = await verifyApprovalPasskeyAssertion({
-      credentials: state.credentials,
-      message: buildSensitiveActionMessage({
-        bindingHash: challenge.bindingHash,
-        expiresAt: challenge.expiresAt,
-        kind: input.kind,
-        origin: requireSensitiveActionOrigin(),
-        token: authorization.token,
-      }),
-      origin: requireSensitiveActionOrigin(),
-      response: authorization.assertion,
-    }).catch(() => { throw sensitiveActionInvalidSignature(); });
-    return {
+  if (state.credentials.length === 0) throw sensitiveActionSetupRequired();
+  const credentials = await verifyApprovalPasskeyAssertion({
+    credentials: state.credentials,
+    message: buildSensitiveActionMessage({
       bindingHash: challenge.bindingHash,
       expiresAt: challenge.expiresAt,
       kind: input.kind,
-      memberId: input.memberId,
-      tokenHash,
-      credentialWrite: await prepareApprovalPasskeyWrite({ credentials, state, prisma: input.prisma }),
-      passkeys: credentials,
-    };
-  }
-  if (authorization.method === "passkey" || !input.privyUserId) throw sensitiveActionSetupRequired();
-
-  let privyUser: unknown;
-  try {
-    privyUser = await readHostedPrivyUserById(input.privyUserId);
-  } catch {
-    throw sensitiveActionProviderUnavailable();
-  }
-
-  if (
-    !privyUser
-    || typeof privyUser !== "object"
-    || Reflect.get(privyUser, "id") !== input.privyUserId
-    || !hasOnlyHostedPrivyPasskeyMfa(privyUser)
-  ) {
-    throw sensitiveActionSetupRequired();
-  }
-
-  const walletSelection = selectHostedPrivyEmbeddedEthereumWallet(privyUser);
-  if (walletSelection.status !== "ready") {
-    throw sensitiveActionSetupRequired();
-  }
-
-  let recoveredAddress: `0x${string}`;
-  try {
-    recoveredAddress = await recoverMessageAddress({
-      message: buildSensitiveActionMessage({
-        bindingHash: challenge.bindingHash,
-        expiresAt: challenge.expiresAt,
-        kind: input.kind,
-        origin: requireSensitiveActionOrigin(),
-        token: authorization.token,
-      }),
-      signature: authorization.signature,
-    });
-  } catch {
-    throw sensitiveActionInvalidSignature();
-  }
-
-  if (!isAddressEqual(recoveredAddress, walletSelection.wallet.address)) {
-    throw sensitiveActionInvalidSignature();
-  }
-
+      origin: requireSensitiveActionOrigin(),
+      token: authorization.token,
+    }),
+    origin: requireSensitiveActionOrigin(),
+    response: authorization.assertion,
+  }).catch(() => { throw sensitiveActionInvalidSignature(); });
   return {
     bindingHash: challenge.bindingHash,
     expiresAt: challenge.expiresAt,
     kind: input.kind,
-    credentialWrite: preserveApprovalPasskeyState(state),
-    passkeys: [],
-    memberId: challenge.memberId,
+    memberId: input.memberId,
     tokenHash,
+    credentialWrite: await prepareApprovalPasskeyWrite({ credentials, state, prisma: input.prisma }),
+    passkeys: credentials,
   };
 }
 
@@ -227,7 +165,7 @@ export async function consumeSensitiveActionChallenge(input: {
   challenge: VerifiedSensitiveActionChallenge;
   now?: Date;
   prisma: PrismaClient;
-  session: { request: Request; sessionId: string; authProof?: import("../better-auth/session").HostedAuthSessionProof };
+  session: { request: Request; sessionId: string; authProof: import("../better-auth/session").HostedAuthSessionProof };
 }): Promise<void> {
   await input.prisma.$transaction(async (prisma) => {
     await lockHostedMemberRow(prisma, input.challenge.memberId);
@@ -305,7 +243,10 @@ export function buildSensitiveActionMessage(input: {
 function requireSensitiveActionOrigin(): string {
   const origin = resolveHostedPublicOrigin();
   if (!origin) {
-    throw sensitiveActionProviderUnavailable();
+    throw hostedOnboardingError({
+      code: "SENSITIVE_ACTION_UNAVAILABLE", httpStatus: 503,
+      message: "Secure approval is temporarily unavailable.", retryable: true,
+    });
   }
   return origin;
 }
@@ -349,14 +290,5 @@ function sensitiveActionUnavailable() {
     code: "SENSITIVE_ACTION_UNAVAILABLE",
     httpStatus: 410,
     message: "This secure approval is expired, already used, or no longer available.",
-  });
-}
-
-function sensitiveActionProviderUnavailable() {
-  return hostedOnboardingError({
-    code: "SENSITIVE_ACTION_PROVIDER_UNAVAILABLE",
-    httpStatus: 503,
-    message: "Secure approval is temporarily unavailable.",
-    retryable: true,
   });
 }

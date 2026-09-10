@@ -129,8 +129,8 @@ const accountDeletionMocks = vi.hoisted(() => ({
       kmsKeyName: "test-key",
       nextAttemptAt: input.now,
       payloadCiphertext: "encrypted",
-      privyCompletedAt: input.now,
-      privyUserLookupKey: null,
+
+
       runtimeMemberIds: [...input.runtimeMemberIds],
       stripeCustomerIds: [...input.stripeCustomerIds],
       stripeCompletedAt: input.now,
@@ -573,7 +573,7 @@ describe.skipIf(!runPostgresProof)(
               memberId: participantMemberId,
               phoneNumber: participantPhone,
               prisma,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -4063,7 +4063,7 @@ describe.skipIf(!runPostgresProof)(
               memberId: fixture.participantMemberId,
               phoneNumber: fixture.participantPhone,
               prisma: fixture.deletionPrisma,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -4889,7 +4889,7 @@ async function createGroupLineRecoveryFixture():
         memberId,
         phoneNumber: participantPhone,
         prisma,
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -5120,7 +5120,7 @@ async function createPhoneBoundMemberIdentityTx(input: {
         memberId,
         phoneNumber: input.phoneNumber,
         prisma: input.tx,
-        privyUserId: null,
+
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
@@ -5438,8 +5438,8 @@ function makePreparedDeletionCleanup(input: {
     kmsKeyName: "test-key",
     nextAttemptAt: input.now,
     payloadCiphertext: "encrypted",
-    privyCompletedAt: input.now,
-    privyUserLookupKey: null,
+
+
     runtimeMemberIds: [...input.runtimeMemberIds],
     stripeCustomerIds: [...input.stripeCustomerIds],
     stripeCompletedAt: input.now,

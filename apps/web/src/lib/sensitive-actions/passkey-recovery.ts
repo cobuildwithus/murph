@@ -38,7 +38,7 @@ export async function rotateApprovalRecoveryKey(input: Input & { authorization: 
   const memberId = session.member.id;
   const proof = await verifySensitiveActionChallenge({
     authorization: input.authorization, bindingHash: buildSettingsSensitiveActionBinding({ kind: ROTATE_KIND, memberId, sessionId: session.sessionId }),
-    kind: ROTATE_KIND, memberId, prisma, privyUserId: session.privyUserId,
+    kind: ROTATE_KIND, memberId, prisma,
   });
   if (proof.passkeys.length === 0) throw unavailable();
   const key = randomBytes(32).toString("base64url");
@@ -107,7 +107,7 @@ export async function recoverApprovalPasskey(input: Input & { key: unknown; toke
     const updated = await adapter.update({ model: "user", where: [{ field: "id", value: memberId }], update: { credentialsChangedAt: now, updatedAt: now } });
     if (!updated) throw unavailable();
     await adapter.deleteMany({ model: "session", where: [{ field: "userId", value: memberId }, { field: "id", operator: "ne", value: session.sessionId }] });
-    await tx.hostedWebSession.updateMany({ where: { memberId, revokedAt: null }, data: { revokedAt: now, updatedAt: now, revokeReason: "approval-recovery" } });
+
   }), { maxWait: 5_000, timeout: 10_000 });
 }
 

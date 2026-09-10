@@ -19,7 +19,7 @@ import { consumeSensitiveActionChallengeTx, verifySensitiveActionChallenge } fro
 import { hostedAuthAdapter, hostedAuthTransactionAdapter } from "./adapter";
 import { hostedBetterAuthOptions } from "./auth";
 import { requireHostedBetterAuthConfig } from "./config";
-import { readHostedAuthSourceSnapshot } from "./migration-source";
+import { readHostedAuthSourceSnapshot } from "./member-snapshot";
 import type { AuthRecord } from "./record";
 import { authLookupKey } from "./record-crypto";
 
@@ -106,7 +106,7 @@ export async function prepareHostedCredentialChange(input: {
   const bindingHash = hostedCredentialChangeBinding({ change, memberId, sessionId: session.sessionId });
   const proof = input.authorization === undefined ? null : await verifySensitiveActionChallenge({
     authorization: input.authorization, bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND,
-    memberId, prisma, privyUserId: session.privyUserId,
+    memberId, prisma,
   });
   const root = await prepareHostedDomainRootForWeb({ domain: "control", prepareMissing: false, prisma, userId: memberId, reason: "hosted-auth.credential-change" });
   const channelCrypto = proof && await readActiveHostedMemberAccess({ memberId, prisma })
@@ -134,15 +134,15 @@ export async function prepareHostedCredentialChange(input: {
     if (!proof) throw invalidChange();
     await consumeSensitiveActionChallengeTx({ challenge: proof, prisma: tx });
     if (change.expectedIdentity) await removeHostedMemberLinkedAccountProjectionTx({
-      expectedIdentity: change.expectedIdentity, memberId, method: change.method, authSource: "better-auth", prisma: tx,
+      expectedIdentity: change.expectedIdentity, memberId, method: change.method, prisma: tx,
     });
     const now = new Date();
     const adapter = hostedAuthTransactionAdapter(prisma, tx, options);
     if (change.method === "email" && change.value) await syncHostedMemberVerifiedEmailAuthorization({
-      authSource: "better-auth", memberId, address: change.value, verifiedAt: now, preparedControlRoot: root, preparedReplyAlias: replyAlias, prisma: tx,
+      memberId, address: change.value, verifiedAt: now, preparedControlRoot: root, preparedReplyAlias: replyAlias, prisma: tx,
     });
     if (change.method === "phone" && change.value) await upsertHostedMemberIdentity({
-      ...identity, ...buildHostedMemberPhoneIdentityFields(change.value), privyUserId: identity.privyUserId,
+      ...identity, ...buildHostedMemberPhoneIdentityFields(change.value),
       phoneNumberVerifiedAt: now, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null, signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
     });
@@ -162,7 +162,7 @@ export async function prepareHostedCredentialChange(input: {
     if (!updated) throw changedIdentity();
     if (revoked) {
       await adapter.deleteMany({ model: "session", where: [{ field: "userId", value: memberId }, { field: "id", operator: "ne", value: session.sessionId }] });
-      await tx.hostedWebSession.updateMany({ where: { memberId, revokedAt: null }, data: { revokedAt: now, updatedAt: now, revokeReason: "credential-change" } });
+
     }
     if (channelCrypto) await revalidatePreparedHostedDomainRootForWebTx({ prepared: channelCrypto, tx });
     return enqueueHostedMemberChannelsUpdatedForActiveMemberTx({ memberId, occurredAt: now.toISOString(), prisma: tx, sourceType: "settings.credential.change" });

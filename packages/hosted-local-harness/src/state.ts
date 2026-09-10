@@ -49,7 +49,6 @@ const hostedLocalEnvPrefixAllowlist = [
   "MURPH_",
   "NEXT_",
   "NODE_ENV",
-  "PRIVY_",
   "TELEGRAM_",
   "VERCEL_",
   "VITEST",

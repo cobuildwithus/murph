@@ -515,7 +515,7 @@ export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
  * remains held until that outer transaction ends. New transaction code must
  * use the prepared-only commit API above.
  *
- * Signup/Privy identity reconciliation uses the separate single-domain legacy
+ * Signup identity creation uses the separate single-domain legacy
  * surface below. Active Family Stripe reconciliation prepares every bounded
  * member candidate before opening its owner transaction.
  */

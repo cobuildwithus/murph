@@ -13,7 +13,7 @@ import {
   GroupJoinSuccess,
   type GroupJoinPermissionDisplay,
 } from "@/src/components/hosted-groups/group-join-client";
-import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import { HostedFirstPartyAuthPanel } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
 import { HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION } from "@/src/lib/hosted-groups/projection-display-copy";
 
 const DESIGN_GROUP_NAME = "Sunday Sleep Crew";
@@ -167,7 +167,7 @@ export function GroupJoinStudy({
         title="Message invite · signed out"
       >
         <GroupJoinPageMock alreadyActiveMember={false}>
-          <HostedAuthPanel
+          <HostedFirstPartyAuthPanel
             inviteCode="hinv_design_group_message"
             methods={["phone"]}
             requireLaunchConsentOnCompletion

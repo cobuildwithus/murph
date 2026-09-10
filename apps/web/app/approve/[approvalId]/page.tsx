@@ -16,7 +16,6 @@ import {
   ACTION_APPROVAL_RECORDED_DESCRIPTION,
   ActionApprovalScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
-import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
@@ -34,7 +33,6 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { cn } from "@/src/lib/utils";
-import { readApprovalPasskeyState } from "@/src/lib/sensitive-actions/passkey-store";
 
 import { APPROVE_OG_ALT } from "./approve-share-card";
 
@@ -99,12 +97,7 @@ export default async function ActionApprovalPage({
   }
 
   if (!isTerminalActionApproval(approval)) {
-    const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma: getPrisma() }).catch(() => null);
-    return (
-      <HostedPrivyBoundary legacyApprovalRequired={Boolean(session.privyUserId) && state?.credentials.length === 0}>
-        <ActionApprovalCard approval={approval} />
-      </HostedPrivyBoundary>
-    );
+    return <ActionApprovalCard approval={approval} />;
   }
 
   return <ActionApprovalTerminalState approval={approval} />;

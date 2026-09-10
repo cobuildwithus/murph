@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { renderClientComponent } from "./render-client-component";
 
@@ -9,12 +9,12 @@ const mocks = vi.hoisted(() => ({
   navigateHostedAuthRedirect: vi.fn(),
   onCompleted: null as
     | null
-    | ((payload: HostedPrivyCompletionPayload) => void),
+    | ((payload: HostedAuthenticationCompletionPayload) => void),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
-    onCompleted: (payload: HostedPrivyCompletionPayload) => void;
+    onCompleted: (payload: HostedAuthenticationCompletionPayload) => void;
   }) {
     mocks.onCompleted = props.onCompleted;
     return createElement("div", null, "Auth dialog");
@@ -47,13 +47,13 @@ async function renderProvider(authenticatedDestination?: string) {
 }
 
 function completionPayload(
-  overrides: Partial<HostedPrivyCompletionPayload>,
-): HostedPrivyCompletionPayload {
+  overrides: Partial<HostedAuthenticationCompletionPayload>,
+): HostedAuthenticationCompletionPayload {
   return {
     joinUrl: "/join?token=join_token",
     stage: "active",
     ...overrides,
-  } as HostedPrivyCompletionPayload;
+  } as HostedAuthenticationCompletionPayload;
 }
 
 test("an accessible member returns to the configured destination after auth", async () => {

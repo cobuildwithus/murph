@@ -162,7 +162,7 @@ beforeEach(() => {
     },
     linkedAccounts: [],
     session: {
-      privyUserId: "test-privy-user",
+
       identity: {
         phone: {
           number: "+15550100271",
@@ -280,7 +280,7 @@ test.each([
         updatedAt: new Date("2026-07-13T08:00:00.000Z"),
       },
       session: {
-        privyUserId: "test-privy-user",
+
         identity: null,
         linkedAccounts: [],
         verifiedPrivyUser: { id: "test-privy-user" },
@@ -317,7 +317,7 @@ test("JoinInvitePage leaves a suspended paused member in the blocked flow", asyn
       updatedAt: new Date("2026-07-20T08:00:00.000Z"),
     },
     session: {
-      privyUserId: "test-privy-user",
+
       identity: null,
       linkedAccounts: [],
       verifiedPrivyUser: { id: "test-privy-user" },
@@ -440,7 +440,7 @@ test.each(["available", "checkout", "syncing"] as const)(
         updatedAt: new Date("2026-07-28T08:00:00.000Z"),
       },
       session: {
-        privyUserId: "test-privy-user",
+
         identity: null,
         linkedAccounts: [],
         verifiedPrivyUser: { id: "test-privy-user" },

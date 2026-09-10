@@ -189,13 +189,13 @@ it.each([false, true])(
     try {
       await scenario.issueHostedAppSession({
         memberId: "member_cookie_mode",
-        privyUserId: "did:privy:cookie_mode",
+
       });
 
       expect(mocks.issueHostedAppSessionForTest).toHaveBeenCalledWith(
         expect.objectContaining({
           memberId: "member_cookie_mode",
-          privyUserId: "did:privy:cookie_mode",
+
           secureCookieMode: webUsesProductionArtifact,
         }),
       );

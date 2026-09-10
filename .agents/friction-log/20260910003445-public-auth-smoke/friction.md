@@ -22,3 +22,6 @@ Run e2e/pr-public-auth-loading-design-proof.spec.ts through apps/web/playwright.
 ## Context
 
 Found while verifying authentication adoption. The identical parent-branch failure establishes that this migration did not introduce it; phone/email authentication and retry proof passes separately.
+
+
+Retirement verification also reproduces the same server-render failure on authenticated Connect. Run `pnpm hosted-local e2e hosted-web-browser-smoke --profile e2e:stub` with an isolated synthetic stack: retirement source `87786eda0b935ac32614fc843665e0aadefa971c` and earlier compatibility source `ca1c6a115aaf050df78a939c77f0590f0737e995` both reach Connect and fail the same two uncaught desktop invalid-element errors. The browser recovers, but this stronger smoke assertion correctly fails. Investigate the affected render paths and preserve that assertion. Focused auth and session-cookie browser proofs pass separately.

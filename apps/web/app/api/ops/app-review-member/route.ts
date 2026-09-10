@@ -27,31 +27,12 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorMessage: "Hosted ops App Review member request body is too large.",
   });
 
-  const createPrivyUser = readCreatePrivyUser(body);
-  const mode = readMode(body);
-  const principal = readPrincipal(body);
-
-  if (createPrivyUser && mode !== "apply") {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_APP_REVIEW_MEMBER_CREATE_PRIVY_USER_REQUIRES_APPLY",
-      httpStatus: 400,
-      message: "Privy test-user creation requires apply mode.",
-      retryable: false,
-    });
+  if (Object.keys(body).some((key) => !["email", "phone", "mode"].includes(key))) {
+    throw hostedOnboardingError({ code: "HOSTED_OPS_APP_REVIEW_MEMBER_REQUEST_INVALID", httpStatus: 400,
+      message: "Choose an existing review account by email or phone." });
   }
-  if (createPrivyUser && principal.kind !== "email") {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_APP_REVIEW_MEMBER_CREATE_PRIVY_USER_EMAIL_REQUIRED",
-      httpStatus: 400,
-      message: "Privy test-user creation requires an email principal.",
-      retryable: false,
-    });
-  }
-
   return jsonOk(await prepareHostedOpsAppReviewMember({
-    createPrivyUser,
-    mode,
-    principal,
+    mode: readMode(body), principal: readPrincipal(body),
   }));
 });
 
@@ -72,28 +53,10 @@ function readMode(body: Record<string, unknown>): HostedOpsAppReviewMemberMode {
   });
 }
 
-function readCreatePrivyUser(body: Record<string, unknown>): boolean {
-  const value = body.createPrivyUser;
-  if (value === undefined || value === null || value === false) {
-    return false;
-  }
-  if (value === true) {
-    return true;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_OPS_APP_REVIEW_MEMBER_CREATE_PRIVY_USER_INVALID",
-    httpStatus: 400,
-    message: "createPrivyUser must be true or false.",
-    retryable: false,
-  });
-}
-
 function readPrincipal(body: Record<string, unknown>): HostedOpsAppReviewMemberPrincipal {
   const email = readOptionalString(body.email);
   const phone = readOptionalString(body.phone);
-  const privyUserId = readOptionalString(body.privyUserId);
-  const present = [email, phone, privyUserId].filter(Boolean);
+  const present = [email, phone].filter(Boolean);
 
   if (present.length !== 1) {
     throw hostedOnboardingError({
@@ -110,7 +73,7 @@ function readPrincipal(body: Record<string, unknown>): HostedOpsAppReviewMemberP
   if (phone) {
     return { kind: "phone", value: phone };
   }
-  return { kind: "privyUserId", value: privyUserId ?? "" };
+  throw new TypeError("A review account principal is required.");
 }
 
 function readOptionalString(value: unknown): string | null {

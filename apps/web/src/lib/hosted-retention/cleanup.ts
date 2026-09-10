@@ -19,7 +19,6 @@ export const HOSTED_RUN_LOG_VERBOSE_RETENTION_MS = 7 * DAY_MS;
 // store so content retirement and the live-item read filter cannot drift.
 export { HOSTED_MAILBOX_RETENTION_MS };
 export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
-export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
@@ -71,7 +70,6 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredOperatorTaskResultsRetired: number;
   expiredSensitiveActionChallengesDeleted: number;
   expiredSignupNotificationContextsRetired: number;
-  staleWebSessionsDeleted: number;
 }
 
 export interface HostedRuntimeSignalRetentionCleanupResult {
@@ -131,10 +129,6 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     now,
     prisma,
   });
-  const staleWebSessionsDeleted = await deleteStaleHostedWebSessions({
-    now,
-    prisma,
-  });
 
   return {
     compactedLinqProviderEventDiagnostics,
@@ -157,7 +151,6 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     expiredOperatorTaskResultsRetired,
     expiredSensitiveActionChallengesDeleted,
     expiredSignupNotificationContextsRetired,
-    staleWebSessionsDeleted,
   };
 }
 
@@ -1010,38 +1003,6 @@ async function runControlArtifactRetentionBatches(
   }
 
   return affected;
-}
-
-async function deleteStaleHostedWebSessions(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const cutoff = new Date(input.now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS);
-  const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_web_session"
-      WHERE "expires_at" < ${cutoff}
-      ORDER BY "expires_at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "hosted_web_session" AS web_session
-    USING doomed
-    WHERE web_session."id" = doomed."id"
-  `);
-  const revoked = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_web_session"
-      WHERE "revoked_at" < ${cutoff}
-      ORDER BY "revoked_at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "hosted_web_session" AS web_session
-    USING doomed
-    WHERE web_session."id" = doomed."id"
-  `);
-  return expired + revoked;
 }
 
 export function normalizeHostedRetentionDate(value: Date | string): Date {

@@ -6,7 +6,7 @@ import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-cons
 import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { requestHostedOnboardingJson } from "./client-api";
 import { declineHostedLaunchConsent, logoutHostedAppSession, verifyHostedAppSession } from "./hosted-app-session-client";
 import { HostedAuthLegalNotice } from "./hosted-auth-shared";
@@ -21,7 +21,7 @@ export interface HostedFirstPartyAuthPanelProps {
   inviteCode?: string | null;
   initialEmailAddress?: string;
   methods: readonly Method[];
-  onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
+  onCompleted?: (payload: HostedAuthenticationCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   onViewChange?: (view: HostedFirstPartyAuthPanelView) => void;
   phoneInputAutoFocus?: boolean;
@@ -41,7 +41,7 @@ export function HostedFirstPartyAuthPanel({
   const [pending, setPending] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [completion, setCompletion] = useState<HostedPrivyCompletionPayload | null>(null);
+  const [completion, setCompletion] = useState<HostedAuthenticationCompletionPayload | null>(null);
   const operation = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const ending = useRef(false);
@@ -58,7 +58,7 @@ export function HostedFirstPartyAuthPanel({
     operation.current = controller;
     setPending(true); setError(null);
     try {
-      const payload = await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
+      const payload = await requestHostedOnboardingJson<HostedAuthenticationCompletionPayload>({
         url: "/api/auth/complete", method: "POST", payload: {}, signal: controller.signal,
       });
       if (controller.signal.aborted) return;

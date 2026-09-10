@@ -516,7 +516,7 @@ The hosted Prisma schema keeps ownership sharp and nested:
   external-cleanup receipt in the same transaction before removing member
   rows. The immediate attempt and hourly external-retention cron share that
   idempotent owner for Cloudflare runner/R2, isolated runtime logs, Temporal
-  workflow termination, Stripe-customer, and Privy cleanup; unconfigured or
+  workflow termination and Stripe-customer cleanup; unconfigured or
   partial targets stay pending, completed targets are skipped, and the receipt
   is removed only after convergence. Temporal completion requires every
   captured runtime workflow to be terminated or confirmed absent. One
@@ -690,8 +690,13 @@ Required:
 - `DATABASE_URL`
 - `HOSTED_DEVICE_ROUTING_INDEX_KEY`
 - `HOSTED_APP_SESSION_HMAC_KEY` as a dedicated canonical 32-byte base64url
-  key. Web uses it only to authenticate first-party app-session bearer and row
-  claims; do not reuse contact, mailbox, provider, or encryption keys.
+  key. It remains in use by billing quotes, referrals, device callbacks and
+  recovery witnesses after legacy browser sessions retire; keep it Web-only.
+- `HOSTED_BETTER_AUTH_SECRET` and `HOSTED_AUTH_STORAGE_KEY`, independent
+  canonical 32-byte base64url keys owned only by Web. The first protects the
+  session protocol; the second protects pre-member auth records.
+- `HOSTED_BETTER_AUTH_ENABLED=true` to issue new login sessions. Pausing
+  issuance preserves existing session reads, renewal and logout.
 
 Required for production migrations:
 
@@ -956,12 +961,6 @@ Hosted onboarding extras:
   retryable while its already-committed billing result remains intact. Both
   website and iMessage Assistant billing use the same Web-owned Stripe
   services, so there is no separate channel-specific configuration.
-- `NEXT_PUBLIC_PRIVY_APP_ID`
-- `NEXT_PUBLIC_PRIVY_CLIENT_ID`
-- `PRIVY_CUSTOM_AUTH_DOMAIN`
-- `PRIVY_BASE_DOMAIN`
-- `PRIVY_APP_SECRET`
-- `PRIVY_VERIFICATION_KEY`
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
@@ -1202,8 +1201,9 @@ Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
 the removed Stripe meter path. The hosted allowance owner reads web-owned spend
 and the local credit projection for admission, projection, and notices.
 
-Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
-when it is missing instead of carrying fallback branches in page code.
+Hosted sign-in uses the first-party email, phone and Telegram routes. Missing
+issuance or delivery configuration returns the existing retryable unavailable
+state; current sessions do not require new-code delivery to remain usable.
 
 ### Local Stripe webhook listener
 
@@ -1408,52 +1408,21 @@ catalog content. Enabling the complete journey also requires the same flag in
 the Cloudflare GitHub Environment so new runner containers receive matching
 assistant guidance; follow the tandem activation order in `apps/cloudflare/DEPLOY.md`.
 
-Provision `HOSTED_APP_SESSION_HMAC_KEY` in every hosted-web environment that
-will serve authenticated traffic before deploying the strict v2 session code.
-This is a deliberate secret-before-code hard cut: the deployment rejects all
-legacy unsigned cookies, so existing users sign in again, and a missing or
-malformed key fails session issuance, resolution, and revocation closed. Keep
-the key out of Cloudflare Worker and runner environments; no Cloudflare deploy
-is required for this cutover.
+Provision the Web-only authentication keys before deploying the additive
+first-party reader. Follow [the authentication rollout owner](../../docs/hosted-auth-migration.md)
+for issuance activation, native continuity, generated-deployment protection,
+protected-account qualification and the final schema contract migration.
+The adoption release preserves existing valid browser sessions and exchanges
+valid, already-bound native authority for the same canonical member. The
+retirement release can deploy only after those compatibility obligations drain;
+it does not itself establish that users have migrated.
 
-Before deploying, enable Vercel Authentication with Standard Protection (or
-`All Except Custom Domains`) for the project. Do not use `All Deployments`,
-which would also protect (and make private) the custom production domain,
-while protecting every generated production URL,
-including URLs for historical deployments that still accept legacy sessions.
-With the secure `HOSTED_WEB_VERCEL_*` operator environment loaded, require this
-check to pass before cutover:
-
-```sh
-pnpm --dir apps/web release:production:verify-deployment-protection
-```
-
-Do not proceed if the check fails. These Vercel management credentials belong
-in the secure operator environment, not in the hosted app merely to satisfy its
-production build. Keep deployment-protection bypass secrets and share links
-out of the cutover verification path.
-
-Freeze production deploys and rollbacks for the cutover. Record the exact
-strict-v2 commit and exact ready deployment URL, deploy it, and prove every
-configured production custom domain points at that deployment with
-`pnpm --dir apps/web release:production:verify-exact-deployment`, `DEPLOYED_SHA`,
-`HOSTED_WEB_VERCEL_DEPLOYMENT_URL`, and the secure `HOSTED_WEB_VERCEL_*`
-operator environment. The verifier enumerates the project domain set, excludes
-branch/custom-environment domains, requires the configured production base host,
-and compares every remaining alias by deployment id without logging domain
-names. Wait the configured
-`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, then
-run the exact-deployment proof again. If it changed, select a strict-v2 commit
-and restart the full drain. A completion response from an old function can set
-a legacy cookie during this window; rejection is intentional, and the user must
-retry sign-in after the drain to receive a v2 cookie. Verify that retry,
-authenticated browser-vault access, expiry, and logout before ending the freeze.
-
-The first strict-v2 production deployment is the app-session rollback floor.
-Do not roll back to an older build: it accepts the database-forgeable legacy
-session protocol. For incidents after the cutover, deploy a forward fix or
-roll forward to this floor or a newer strict-v2 commit. Record the commit, both
-alias proofs, elapsed drain, and post-drain verification as rollout evidence.
+The existing production deployment-protection and exact-deployment verifiers
+remain required before contraction. Drain incompatible functions and workers,
+then use the existing postdeploy contract-migration lane. Pausing issuance must
+preserve first-party session reads, renewal and logout. Once contraction commits,
+older schema-dependent releases are below the rollback floor; repair forward
+with a compatible build. No production activation or rollback is implied by a PR.
 
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
@@ -2282,7 +2251,11 @@ Hosted onboarding surfaces:
 - `POST /api/hosted-onboarding/invites/:inviteCode/send-code`
 - `POST /api/hosted-onboarding/invites/:inviteCode/send-code/confirm`
 - `POST /api/hosted-onboarding/invites/:inviteCode/send-code/abort`
-- `POST /api/hosted-onboarding/privy/complete`
+- `POST /api/auth/otp/send`
+- `POST /api/auth/otp/verify`
+- `POST /api/auth/telegram/verify`
+- `POST /api/auth/complete`
+- `POST /api/auth/session`
 - `POST /api/hosted-onboarding/billing/checkout`
 - `GET /api/hosted-onboarding/billing/success`
 - `POST /api/hosted-onboarding/linq/webhook`
@@ -2298,10 +2271,10 @@ Authenticated Settings usage-credit surfaces:
 The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.
-- Privy verifies login, linking, and security-sensitive identity operations;
-  successful hosted completion issues a strict opaque v2 app session whose
-  database row stores a dedicated-key HMAC over its bearer, session id, member,
-  Privy identity, and expiry. Legacy unsigned cookies are rejected.
+- Better Auth handles primary login and renewable sessions through a closed
+  encrypted adapter. Explicit settings routes combine new-contact proof with
+  an independently approved, member/session/action-bound mutation. Passkeys
+  authorize sensitive actions; primary login alone cannot replace protection.
 - Hosted onboarding grants one non-expiring starter-usage balance without
   creating Stripe state. Paid-plan Checkout uses subscription mode and
   `invoice.paid` is the positive subscription-entitlement source. The separate

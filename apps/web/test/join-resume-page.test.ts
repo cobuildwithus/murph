@@ -67,7 +67,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -93,7 +93,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -123,7 +123,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -144,7 +144,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -165,7 +165,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -190,7 +190,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -212,7 +212,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });
@@ -237,7 +237,7 @@ describe("/join session resume page", () => {
       session: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         member,
-        privyUserId: "did:privy:user_123",
+
         sessionId: "hws_123",
       },
     });

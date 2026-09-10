@@ -1,7 +1,7 @@
 import type { HostedPhoneCountryOption } from "./hosted-phone-auth-types";
 
 // Derived from Twilio's documented supported regions and libphonenumber-js
-// metadata/examples so the hosted auth picker matches the Privy BYO Twilio footprint.
+// metadata/examples so the hosted auth picker matches the supported SMS delivery footprint.
 export const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
   { code: "AF", dialCode: "+93", label: "Afghanistan", placeholder: "070 123 4567" },
   { code: "AL", dialCode: "+355", label: "Albania", placeholder: "067 212 3456" },

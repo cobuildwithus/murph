@@ -113,7 +113,6 @@ import {
   startBrowserVaultWarmLoad,
 } from "@/src/lib/browser-vault/warm-store";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
-import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
 import { logoutHostedAppSession, verifyHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
 import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
@@ -3790,7 +3789,7 @@ test("malformed completion JSON after replacement headers clears the cached and 
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
       /unexpected response/u,
     );
   });
@@ -3834,7 +3833,7 @@ test("a completion body-read failure after replacement headers clears the cached
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
       /response body unavailable/u,
     );
   });
@@ -3873,7 +3872,7 @@ test("a nonreplacement completion failure preserves the cached and live member A
 
   await act(async () => {
     await assert.rejects(
-      requestHostedPrivyCompletionWithRetry({ authMethod: "email" }),
+      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
       /Something went wrong/u,
     );
   });
@@ -4977,124 +4976,3 @@ function createExperimentDemandOutcome(input: {
     },
   };
 }
-
-test("first-party login: malformed completion JSON after replacement headers clears the cached and live member A client", async () => {
-  const ref = createReplicaRef();
-  const fetchMock = vi.fn()
-    .mockResolvedValueOnce(jsonResponse({
-      encryptedReplica: createReplicaEnvelope(),
-      replicaAad: createReplicaAad(),
-      replicaKeyEnvelope: createReplicaKeyEnvelope(),
-      replicaRef: ref,
-      state: "ready",
-    }))
-    .mockResolvedValueOnce(new Response("{", { status: 200 }));
-
-  installBrowserVaultCryptoMocks();
-  vi.stubGlobal("fetch", fetchMock);
-
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
-    { requireButton: false },
-  );
-
-  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
-  assert.ok(getBrowserVaultReadySnapshot());
-
-  await act(async () => {
-    await assert.rejects(
-      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
-      /unexpected response/u,
-    );
-  });
-
-  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
-  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
-  assert.equal(rendered.container.textContent, "empty:none");
-  assert.equal(getBrowserVaultReadySnapshot(), null);
-
-  await rendered.cleanup();
-});
-
-test("first-party login: a completion body-read failure after replacement headers clears the cached and live member A client", async () => {
-  const ref = createReplicaRef();
-  const completionResponse = new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-  });
-  vi.spyOn(completionResponse, "text").mockRejectedValueOnce(
-    new Error("response body unavailable"),
-  );
-  const fetchMock = vi.fn()
-    .mockResolvedValueOnce(jsonResponse({
-      encryptedReplica: createReplicaEnvelope(),
-      replicaAad: createReplicaAad(),
-      replicaKeyEnvelope: createReplicaKeyEnvelope(),
-      replicaRef: ref,
-      state: "ready",
-    }))
-    .mockResolvedValueOnce(completionResponse);
-
-  installBrowserVaultCryptoMocks();
-  vi.stubGlobal("fetch", fetchMock);
-
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
-    { requireButton: false },
-  );
-
-  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
-  assert.ok(getBrowserVaultReadySnapshot());
-
-  await act(async () => {
-    await assert.rejects(
-      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
-      /response body unavailable/u,
-    );
-  });
-
-  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
-  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 1);
-  assert.equal(rendered.container.textContent, "empty:none");
-  assert.equal(getBrowserVaultReadySnapshot(), null);
-
-  await rendered.cleanup();
-});
-
-test("first-party login: a nonreplacement completion failure preserves the cached and live member A client", async () => {
-  const ref = createReplicaRef();
-  const fetchMock = vi.fn()
-    .mockResolvedValueOnce(jsonResponse({
-      encryptedReplica: createReplicaEnvelope(),
-      replicaAad: createReplicaAad(),
-      replicaKeyEnvelope: createReplicaKeyEnvelope(),
-      replicaRef: ref,
-      state: "ready",
-    }))
-    .mockResolvedValueOnce(new Response("{", { status: 503 }));
-
-  installBrowserVaultCryptoMocks();
-  vi.stubGlobal("fetch", fetchMock);
-
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
-    { requireButton: false },
-  );
-
-  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
-  const cachedSnapshot = getBrowserVaultReadySnapshot();
-  assert.ok(cachedSnapshot);
-
-  await act(async () => {
-    await assert.rejects(
-      verifyHostedAppSession({ url: "/api/auth/otp/verify", payload: { kind: "email", value: "member@example.test", code: "123456" } }),
-      /Something went wrong/u,
-    );
-  });
-
-  assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 0);
-  assert.equal(mocks.reloadCurrentHostedAuthDocument.mock.calls.length, 0);
-  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
-  assert.equal(getBrowserVaultReadySnapshot(), cachedSnapshot);
-
-  await rendered.cleanup();
-});

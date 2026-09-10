@@ -5,7 +5,7 @@ import type { HostedContactCodeForm } from "@/src/components/hosted-onboarding/h
 import type { HostedTelegramProofButton } from "@/src/components/hosted-onboarding/hosted-telegram-proof-button";
 import type { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 const mocks = vi.hoisted(() => ({
   invalidated: vi.fn(), reloaded: vi.fn(), request: vi.fn(), completed: vi.fn(), declined: vi.fn(), logout: vi.fn(), navigate: vi.fn(),
@@ -35,7 +35,7 @@ const acceptedConsent: HostedConsentStatus = {
   ok: true, schema: "murph.hosted-consent-status.v1", generatedAt: "2026-09-09T12:00:00Z",
   launchGranted: true, documents: [], scopes: [], launchScopes: [],
 };
-const payload: HostedPrivyCompletionPayload = {
+const payload: HostedAuthenticationCompletionPayload = {
   inviteCode: "synthetic-invite", joinUrl: "/join/synthetic-invite", launchConsentGranted: true,
   messagingSetupRequired: false, stage: "active", status: {
     billing: { defaultPlanCode: null, plans: [] }, capabilities: { billingReady: true, phoneAuthReady: true },
@@ -105,7 +105,7 @@ test.each(["active", "checkout"] as const)("%s completion waits for current laun
 
 test("decline fences a pending acceptance and late account-loading results", async () => {
   let calls = 0;
-  let finish!: (value: HostedPrivyCompletionPayload) => void;
+  let finish!: (value: HostedAuthenticationCompletionPayload) => void;
   mocks.request.mockImplementation(async ({ url }: { url: string }) => {
     if (!url.endsWith("/complete")) return { ok: true, memberId: "synthetic-member" };
     if (++calls === 1) return { ...payload, launchConsentGranted: false };
@@ -141,7 +141,7 @@ test("Telegram signs in through the same consent and product completion owner", 
 });
 
 test("closing during product bootstrap prevents a late completion callback", async () => {
-  let finish!: (value: HostedPrivyCompletionPayload) => void;
+  let finish!: (value: HostedAuthenticationCompletionPayload) => void;
   mocks.request.mockImplementation(async ({ url }: { url: string }) => url.endsWith("/complete")
     ? new Promise((resolve) => { finish = resolve; }) : { ok: true, memberId: "synthetic-member" });
   await render();
