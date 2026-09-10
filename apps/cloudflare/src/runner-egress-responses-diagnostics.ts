@@ -1185,4 +1185,3 @@ function copyDiagnosticBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 function isHostedOpenAiDiagnosticRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
