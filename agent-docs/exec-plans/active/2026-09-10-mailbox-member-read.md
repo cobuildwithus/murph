@@ -36,7 +36,7 @@ reads remain where current authority requires them.
   at the tested fetch boundary; live typing latency requires deployment evidence.
 - 241 focused Web cases passed, including a composed real-route/gate proof of one
   member read and next-request consent/suspension/deletion changes. Existing group
-  and Family allowance cases pass. Full Web typecheck passed before final proof
-  additions; final prepared typecheck and changelog SSR proof are running.
+  and Family allowance cases pass. Full Web typecheck, final prepared typecheck and changelog SSR proof pass;
+  the complete focused run passed 251 cases.
 - Complexity guard passed; all five reported >20 hotspots are unchanged allowance
   pricing/period functions outside this correction. Final review and CI pending.
