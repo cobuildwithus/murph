@@ -92,6 +92,8 @@ The live ownership split is:
   for sidecars. Both directions of Worker/container skew are supported, with no
   Web deployment dependency or persisted schema change. After convergence,
   fresh inline messages omit the second request and its write-fence RPC.
+  Retire the opt-in once the supported Worker/runner rollback floor and all warm
+  callers consume decodedWake; the decoder remains for lazy sidecar/system work.
   The container must not receive ingress root keys, callback-signing private
   material, private JWKs, or a root-fetch capability for mailbox import.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox

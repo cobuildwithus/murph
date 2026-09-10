@@ -89,17 +89,19 @@ describe("Worker mailbox fetch/decode composition", () => {
     // Canonical Web parsing never accepts the ephemeral plaintext field.
     expect(parseHostedMailboxFetchResponse(fetched).items[0]).not.toHaveProperty("decodedWake");
   });
-  it("resolves ingress context once for a batch of inline items", async () => {
+  it.each([2, 100])("resolves ingress context once for %i inline items", async (count) => {
     const mailbox = await mailboxFixture();
-    const next = await mailboxFixture(2);
-    mailbox.items.push(next.items[0]!);
-    mailbox.maxSeqByLane[0]!.maxSeq = "2";
+    for (let index = 2; index <= count; index += 1) {
+      const next = await mailboxFixture(index);
+      mailbox.items.push(next.items[0]!);
+    }
+    mailbox.maxSeqByLane[0]!.maxSeq = String(count);
     mocks.forward.mockResolvedValue(Response.json(mailbox));
     const response = await handle(request());
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toMatchObject({ items: [
-      { decodedWake: wake }, { decodedWake: { ...wake, eventId: "synthetic-event-2" } },
-    ] });
+    expect(await response.json()).toMatchObject({ items: Array.from({ length: count }, (_, index) => ({
+      decodedWake: index === 0 ? wake : { ...wake, eventId: `synthetic-event-${index + 1}` },
+    })) });
     expect(mocks.crypto).toHaveBeenCalledTimes(1);
   });
   it("leaves old containers on the original fetch contract", async () => {

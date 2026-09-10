@@ -43,9 +43,11 @@ message setup with identical accepted assistant input; live latency awaits deplo
 - Runtime bridge tests import the same conversation with and without enrichment;
   enriched imports never call the decoder and preserve staged-input evidence.
 - 67 Cloudflare decode/encryption/bridge cases, 272 routing cases, 80 assistant
-  payload/import cases and 10 changelog SSR cases pass. The final composed check
-  has 14 cases. Cloudflare and assistant-runtime typechecks pass; final stable
-  formatting and cache-control edits are being rechecked before Ready.
+  payload/import cases and 10 changelog SSR cases pass. The composed check
+  also covers the maximum 100-row conversation batch and resolves crypto context
+  once. Cloudflare and assistant-runtime typechecks pass, including final stable
+  formatting and no-store response policy. Maximum-batch proof and its final
+  Cloudflare typecheck are the remaining candidate checks before Ready.
 - Complexity guard passes. The web-control handler drops from 47 to 46 by deriving
   five POST-only classifications from the already-validated route policy. Its
   broader dispatch ownership and two unrelated runtime hotspots remain unchanged.
