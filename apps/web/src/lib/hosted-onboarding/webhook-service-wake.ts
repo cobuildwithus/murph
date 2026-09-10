@@ -90,6 +90,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
+  let directEnsureWake: Promise<void> | null = null;
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   let temporalSignalAcceptedAt: Date | null = null;
   try {
@@ -100,6 +101,22 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         expectedUserId: userId,
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,
+        ...(directEnsureEligible ? {
+          onSignalStarted: () => {
+            directEnsureWake = startHostedDirectRuntimeWakeBestEffort({
+              onTiming: async (timing) => {
+                await recordHostedDirectEnsureWakeTimingBestEffort({
+                  mailboxItemId,
+                  source: "linq",
+                  timing,
+                  userId,
+                });
+              },
+              source: "linq",
+              userId,
+            });
+          },
+        } : {}),
       }),
       signal: input.signal,
     });
@@ -114,37 +131,16 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     });
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
-      directEnsureWakeStarted: false,
+      directEnsureWakeStarted: Boolean(directEnsureWake),
       errorName,
     });
     throw error;
-  }
-
-  // Linq-only latency fast path, after Temporal has accepted the durable wake.
-  // With consumed_at live, a racing ensure is harmless: consumed mailbox items
-  // restage with a null reply target, and a gap invocation that imports only
-  // already-consumed work finds nothing replyable and exits.
-  const directEnsureWake = directEnsureEligible
-    ? startHostedDirectRuntimeWakeBestEffort({
-        onTiming: async (timing) => {
-          await recordHostedDirectEnsureWakeTimingBestEffort({
-            mailboxItemId,
-            source: "linq",
-            timing,
-            userId,
-          });
-        },
-        source: "linq",
-        userId,
-      })
-    : null;
-  if (directEnsureWake) {
-    if (input.scheduleAfterResponse) {
-      // Keep the in-flight request alive past the response without ever
-      // putting its latency on the provider success path.
-      input.scheduleAfterResponse(() => directEnsureWake);
-    } else {
-      void directEnsureWake;
+  } finally {
+    // Keep an authorized hint alive on both acknowledgement and signal failure.
+    // The webhook still reports Temporal failure so the provider can retry.
+    const wake = directEnsureWake;
+    if (wake && input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(() => wake);
     }
   }
 

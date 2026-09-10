@@ -119,6 +119,14 @@ Web-owned and independent of the invocation's provider. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 
+For eligible Linq appends, Web starts its existing payloadless direct wake when
+its authorized Temporal signal request begins. Current member/participant access,
+exact mailbox ownership, and cancellation checks precede both requests. The hint
+overlaps acknowledgement, while webhook success still waits for Temporal. A
+failed acknowledgement keeps the provider retry path; durable mailbox input and
+consumption evidence continue to suppress duplicate replies. No payload is pushed
+into the hint and no new queue, cache, or retry owner is introduced.
+
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
 `assistant.ask.completed` mailbox items. After each append, Web first signals
