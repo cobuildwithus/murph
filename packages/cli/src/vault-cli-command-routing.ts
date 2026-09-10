@@ -342,8 +342,8 @@ export async function registerScopedVaultCliCommand(input: {
 }
 
 async function createScopedVaultServices() {
-  const { createIntegratedVaultServices } = await import(
-    '@murphai/vault-usecases/vault-services'
+  const { createCliVaultUsecaseServices } = await import(
+    './vault-cli-services.js'
   )
-  return createIntegratedVaultServices()
+  return createCliVaultUsecaseServices()
 }
