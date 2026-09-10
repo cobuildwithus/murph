@@ -496,3 +496,5 @@ nonreplacement responses preserve the current cache. No new state or logout
 step was added. All 90 focused login, session and live-vault checks and Web
 typecheck pass. This source change requires ReviewGPT round 2 and current-head
 CI before PR #3132 is ready again.
+
+Retirement candidate #3134 is open as draft at 112c29f25657e919e1863ed5b0ec549586d94493. The ordinary merge of PR 3's cache correction retained the equivalent retirement code and removed duplicate legacy test imports. Four current Chromium journeys pass: phone/email code entry and product-loading retry, plus account presentation at 390px and 1280px. The actual passkey/recovery, connected-account and focused-code captures were inspected. This browser lane uses synthetic API replies; it supplements startup and canonical PostgreSQL proof without claiming the blocked full runner journey. The parent renewal-ordering correction must be integrated before this candidate's final review.
