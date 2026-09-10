@@ -1,3 +1,4 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -18,9 +19,6 @@ import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
 } from "../src/browser-vault-store.ts";
-import {
-  createHostedBundleStore,
-} from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import hostedLocalTestWorker from "../src/hosted-local-test-index.ts";
 import worker from "../src/index.ts";
@@ -1851,7 +1849,7 @@ describe("cloudflare worker routes", () => {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       NODE_ENV: "test",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: env.BUNDLES,
       key: getTestHostedRuntimeRootKey("runtime"),
       keyId: "udrk:runtime:test-root",
