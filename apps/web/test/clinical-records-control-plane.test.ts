@@ -369,6 +369,11 @@ describe("Clinical Records authorization persistence", () => {
               queryScopeId: "vital-sign-observations",
               resourceType: "Observation",
             }),
+            expect.objectContaining({
+              coverage: "whole-family",
+              queryScopeId: "outside-vital-sign-observations",
+              resourceType: "Observation",
+            }),
           ],
         },
         retrievalProtocol: "query-slices-v2",

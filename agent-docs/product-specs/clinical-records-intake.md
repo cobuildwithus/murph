@@ -10,7 +10,7 @@ the provider's own SMART-on-FHIR sign-in, and import the authorized record
 families into the member's encrypted vault. The common path asks for no portal
 password inside Murph and no manual file download.
 
-The Epic policy collects 24 queries across 17 resource families, including
+The Epic policy collects 28 queries across 17 resource families, including
 labs, reports, medications, allergies and other chart records. Supported facts
 become canonical records; other evidence remains raw. This is a bounded
 one-time import, not a complete medical record or continuous sync.
@@ -19,6 +19,24 @@ This first release is an Epic SMART foundation, not a TEFCA/QHIN replacement.
 It does not claim nationwide identity matching, discover every organization a
 person has visited, connect email, or retrieve records from a provider that
 does not expose a compatible patient-facing SMART endpoint.
+
+### Additional patient-facing Epic variants
+
+New plans include radiology DocumentReferences (category `imaging-result`),
+external C-CDA documents (`external-ccda`), outside clinical notes
+(`external-clinical-note`) and outside vital signs (`external-vital-signs`).
+Each uses the authorized patient, normal pagination and its own stable query
+identity, with no client date cutoff. Existing search permissions suffice;
+register the four additional patient-facing APIs in the Epic app before rollout.
+Existing frozen plans retain their original query set.
+
+The variants retain source evidence through the current importer. Linked document
+bodies still require the separate Binary/dependency acquisition work; these
+queries do not claim to fetch every attachment or bypass provider release limits.
+Official patient-app request contracts: [radiology](https://fhir.epic.com/Specifications?api=10235),
+[external C-CDA](https://fhir.epic.com/Specifications?api=10135),
+[outside notes](https://fhir.epic.com/Specifications?api=10999), and
+[outside vital signs](https://fhir.epic.com/Specifications?api=11422).
 
 ## Member flow
 
@@ -138,8 +156,8 @@ Epic's official R4 sandbox. It uses only
 `epic-policy.ts` authors one ordered literal query catalog: stable ids,
 resource family, operation, fingerprint template, fixed search parameters,
 optional executed window, and registration API keys. Scopes, family order and
-frozen plans derive from that catalog. All 24 queries across 17 families remain
-active; each granted family expands into all of its variants. The 37 API
+frozen plans derive from that catalog. All 28 queries across 17 families remain
+active; each granted family expands into all of its variants. The 41 API
 registration entries also cover supporting reads, but runtime performs no
 reference traversal or backfill. Unused capability and traversal metadata is
 absent; directory presence is not a capability guarantee.
@@ -203,7 +221,7 @@ single retrieval representation; completed-slice references own completion.
 Families and counts are derived. Every page request, opaque cursor,
 server-derived request fingerprint, durable request claim, and terminal outcome
 is checked against the frozen query-scope and slice identity before provider
-egress or outcome mutation. New OAuth requests deduplicate the 24 queries into
+egress or outcome mutation. New OAuth requests deduplicate the 28 queries into
 17 resource permissions, and each granted family expands back into every active
 query variant in the frozen run plan. A partial grant still requires Patient plus
 at least one clinical family and executes all active queries for each granted
@@ -316,7 +334,7 @@ Register an incoming OAuth 2.0 app for the patient consumer with a
 non-confidential client and S256 PKCE in
 [Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, use the
 Murph product name without adding `Epic` to the app name, set Automatic
-Client Distribution to `None`, and register the following exact 37 names from
+Client Distribution to `None`, and register the following exact 41 names from
 Epic's current
 [FHIR catalog](https://open.epic.com/Interface/FHIR):
 
@@ -358,9 +376,13 @@ Provenance.Read (R4)
 ServiceRequest.Read (Orders) (R4)
 ServiceRequest.Search (Orders) (R4)
 Specimen.Read (Patient Chart) (R4)
+DocumentReference.Search (Radiology Results) (R4)
+DocumentReference.Search (External CCDA) (R4)
+DocumentReference.Search (Outside Record - Clinical Notes) (R4)
+Observation.Search (Outside Record Vital Signs) (R4)
 ```
 
-Registration covers both the 24 active primary queries and supporting dependency
+Registration covers both the 28 active primary queries and supporting dependency
 reads. Runtime requests only the 17 unique primary resource permissions and does
 not execute dependency traversal. Resource families without a canonical mapper
 are retained as patient-bound raw evidence with an explicit review decision; no

@@ -213,7 +213,7 @@ describe("Clinical Records retrieval control plane", () => {
     if (readResult.status !== "ready" || !("retrievalSlices" in readResult.run)) {
       throw new TypeError("Expected a query-aware retrieval descriptor.");
     }
-    expect(readResult.run.retrievalSlices).toHaveLength(5);
+    expect(readResult.run.retrievalSlices).toHaveLength(6);
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
       entry: [],
       resourceType: "Bundle",
