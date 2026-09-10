@@ -39,4 +39,14 @@ reads remain where current authority requires them.
   and Family allowance cases pass. Full Web typecheck, final prepared typecheck and changelog SSR proof pass;
   the complete focused run passed 251 cases.
 - Complexity guard passed; all five reported >20 hotspots are unchanged allowance
-  pricing/period functions outside this correction. Final review and CI pending.
+  pricing/period functions outside this correction. Final ReviewGPT passed on 15bed5d4502a4fb37484a93885a55267bf7157a3;
+  verified requested/response model gpt-6-pro, exact response hash and capture
+  identity, full snapshot, and over six minutes of response wait. No findings.
+- Broad CI caught one incomplete group-tool member-access mock after select
+  extraction. Changed it to preserve the real exports. Its 166 cases and final
+  prepared Web typecheck pass. This isolated fixture correction and plan closure
+  do not change the reviewed production source. Exact-head CI remains the final
+  PR gate; no merge or deployment was performed.
+Status: completed
+Updated: 2026-09-10
+Completed: 2026-09-10
