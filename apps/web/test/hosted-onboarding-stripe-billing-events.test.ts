@@ -21,12 +21,10 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberStripeBillingLookupState: vi.fn(),
-  readHostedLegacyTrialConsumedUsageUsdMicrosTx: vi.fn(),
   reconcileHostedAiUsageGateForBillingModeChangeTx: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   stripeRefundsList: vi.fn(),
   suspendHostedMemberForBillingReversalTx: vi.fn(),
-  clearHostedMemberLegacyTrialBillingUnderLockTx: vi.fn(),
   clearHostedMemberStripeCheckoutAttemptForSessionTx: vi.fn(),
   ensureHostedStarterUsageGrantTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
@@ -86,8 +84,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
     ...actual,
     acceptHostedMemberStripeCheckoutCompletionTx:
       mocks.acceptHostedMemberStripeCheckoutCompletionTx,
-    clearHostedMemberLegacyTrialBillingUnderLockTx:
-      mocks.clearHostedMemberLegacyTrialBillingUnderLockTx,
     clearHostedMemberStripeCheckoutAttemptForSessionTx:
       mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
     readHostedMemberStripeBillingLookupState:
@@ -150,8 +146,6 @@ vi.mock("@/src/lib/hosted-onboarding/starter-usage-grant", async () => {
     ...actual,
     ensureHostedStarterUsageGrantTx:
       mocks.ensureHostedStarterUsageGrantTx,
-    readHostedLegacyTrialConsumedUsageUsdMicrosTx:
-      mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx,
   };
 });
 
@@ -209,7 +203,6 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(member.core);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
-    mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx.mockResolvedValue(0n);
     mocks.ensureHostedStarterUsageGrantTx.mockResolvedValue({
       balanceUsdMicros: 4_500_000n,
       effectiveAt: new Date("2026-04-12T00:00:00.000Z"),
@@ -302,7 +295,6 @@ describe("hosted onboarding stripe billing events", () => {
         session,
         {} as never,
         undefined,
-        undefined,
         makePreparedStandardCheckoutCompletion({
           stripeCheckoutEmail: "payer@example.com",
           stripeCustomerId: "cus_123",
@@ -355,7 +347,7 @@ describe("hosted onboarding stripe billing events", () => {
       id: "cs_accepted_terminal_replay",
       metadata: { checkoutOffer: "standard" },
       subscription: "sub_123",
-    } as unknown as Stripe.Checkout.Session, {} as never, undefined, undefined,
+    } as unknown as Stripe.Checkout.Session, {} as never, undefined,
     makePreparedStandardCheckoutCompletion({
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -393,7 +385,7 @@ describe("hosted onboarding stripe billing events", () => {
         checkoutOffer: "standard",
       },
       subscription: "sub_pending_terminal",
-    } as unknown as Stripe.Checkout.Session, {} as never, undefined, undefined,
+    } as unknown as Stripe.Checkout.Session, {} as never, undefined,
     makePreparedStandardCheckoutCompletion({
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_pending_terminal",
@@ -476,7 +468,7 @@ describe("hosted onboarding stripe billing events", () => {
           checkoutOffer: "standard",
         },
         subscription: "sub_loser_123",
-      } as unknown as Stripe.Checkout.Session, {} as never, undefined, undefined,
+      } as unknown as Stripe.Checkout.Session, {} as never, undefined,
       makePreparedStandardCheckoutCompletion({
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_loser_123",
@@ -511,7 +503,7 @@ describe("hosted onboarding stripe billing events", () => {
           checkoutOffer: "standard",
         },
         subscription: "sub_family_loser_123",
-      } as unknown as Stripe.Checkout.Session, {} as never, undefined, undefined,
+      } as unknown as Stripe.Checkout.Session, {} as never, undefined,
       makePreparedStandardCheckoutCompletion({
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_family_loser_123",
@@ -548,7 +540,7 @@ describe("hosted onboarding stripe billing events", () => {
           checkoutOffer: "standard",
         },
         subscription: "sub_123",
-      } as unknown as Stripe.Checkout.Session, {} as never, undefined, undefined,
+      } as unknown as Stripe.Checkout.Session, {} as never, undefined,
       makePreparedStandardCheckoutCompletion({
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
@@ -1606,71 +1598,44 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
-  it("converts a canonical legacy trial_will_end event to Starter without resetting recorded usage", async () => {
-    vi.stubEnv(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-      "price_pulse_base",
-    );
-    const trialStartedAt = new Date("2025-04-12T00:00:00.000Z");
-    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: "trial",
-        currentBillingPlanCode: "launch_monthly",
-        currentCheckoutOffer: "pulse_trial_7d",
-        currentTrialStartedAt: trialStartedAt,
-        memberId: "member_123",
-        pulseTrialRedeemedAt: trialStartedAt,
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_123",
-      },
-    }));
-    mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx.mockResolvedValueOnce(
-      1_250_000n,
-    );
-    mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValueOnce({
-      activated: false,
-      hostedExecutionEventId: "wake_trial_conversion_existing",
-      hostedExecutionMailboxItemId: "mailbox_trial_conversion_existing",
-      memberId: "member_123",
-    });
-
-    await expect(applyStripeSubscriptionUpdated(
-      makeExactLegacyPulseTrialSubscription({ status: "trialing" }),
-      {
-        eventCreatedAt: new Date("2026-04-18T00:00:00.000Z"),
-        occurredAt: "2026-04-18T00:00:00.000Z",
-        sourceEventId: "evt_exact_trial_will_end",
-        sourceType: "stripe.customer.subscription.trial_will_end",
-      },
-      {} as never,
-    )).resolves.toMatchObject({
-      activatedMemberId: "member_123",
-      cleanupPulseTrialStripeSubscriptionId: "sub_123",
-      hostedExecutionEventId: "wake_trial_conversion_existing",
-      hostedExecutionMailboxItemId: "mailbox_trial_conversion_existing",
-      runtimeRecheckMemberIds: ["member_123"],
-      subscriptionCancellationEmail: null,
-    });
-
-    expect(
-      mocks.readHostedLegacyTrialConsumedUsageUsdMicrosTx,
-    ).toHaveBeenCalledWith({
-      memberId: "member_123",
-      trialStartedAt,
-      tx: {},
-    });
-    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledWith({
-      effectiveAt: trialStartedAt,
-      initialConsumedUsdMicros: 1_250_000n,
-      memberId: "member_123",
-      source: "legacy_trial_migration",
-      tx: {},
-    });
-    expect(
-      mocks.clearHostedMemberLegacyTrialBillingUnderLockTx,
-    ).toHaveBeenCalledWith({ memberId: "member_123", tx: {} });
-    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
-  });
+  it.each(["trialing", "paused", "incomplete", "incomplete_expired", "canceled"] as const)(
+    "ignores an unpaid legacy %s subscription without changing Starter credit or billing",
+    async (status) => {
+      vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_base");
+      mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          currentBillingPhase: "trial",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "pulse_trial_7d",
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: null,
+        },
+      }));
+      await expect(applyStripeSubscriptionUpdated(
+        makeExactLegacyPulseTrialSubscription({ status }),
+        {
+          eventCreatedAt: new Date("2026-09-10T00:00:00.000Z"),
+          occurredAt: "2026-09-10T00:00:00.000Z",
+          sourceEventId: "evt_retired_trial",
+          sourceType: "stripe.customer.subscription.updated",
+        },
+        {} as never,
+      )).resolves.toEqual({
+        activatedMemberId: null,
+        activatedMembers: [],
+        hostedExecutionEventId: null,
+        newlyActivatedMemberIds: [],
+        runtimeRecheckMemberIds: [],
+        subscriptionCancellationEmail: null,
+        welcomeEmailMemberId: null,
+      });
+      expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+      expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+      expect(mocks.prepareHostedMemberStripeBillingWrite).not.toHaveBeenCalled();
+      expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    },
+  );
 
   it("ignores an unknown trial_will_end subscription without mutating billing", async () => {
     vi.stubEnv(
@@ -1748,14 +1713,20 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
-  it("lets an invoice-proven legacy subscription cancellation clear paid access", async () => {
+  it.each([
+    ["paid", HostedBillingStatus.active],
+    [null, HostedBillingStatus.past_due],
+    [null, HostedBillingStatus.unpaid],
+    [null, HostedBillingStatus.canceled],
+  ] as const)("reconciles exact legacy cancellation after phase %s and status %s", async (phase, billingStatus) => {
     vi.stubEnv(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
       "price_pulse_base",
     );
     const paidMember = makeMemberSnapshot({
+      billingStatus,
       billingRef: {
-        currentBillingPhase: "paid",
+        currentBillingPhase: phase,
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
         memberId: "member_123",
@@ -1781,6 +1752,8 @@ describe("hosted onboarding stripe billing events", () => {
       {} as never,
     );
 
+    expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
       expect.objectContaining({
         canonicalBillingStatus: HostedBillingStatus.canceled,
