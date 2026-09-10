@@ -55,5 +55,5 @@ Updated: 2026-09-10
 - Product UX: Patch / Ready for candidate review. Ordinary eligible Linq messages start the existing hint sooner. Inactive, wrong-owner, participant-denied, and cancelled access paths never start it. Signal failure still fails webhook acknowledgement and retains provider retry. Other channels and missing-checkpoint fallback retain their prior ordering.
 - Existing mailbox import and Worker decode/fetch tests pass (69 and 12 cases). Focused Web signal, handoff, mailbox-wake, and webhook idempotency tests cover delivery and authority boundaries.
 - Focused Web proof: 91 cases pass across signal, direct wake, mailbox wake, and webhook idempotency suites. One stale mock argument assertion was corrected and its 19-case suite rerun green. Web typecheck passes. Complexity passes with no hotspots; handoff maximum drops from 12 to 11.
-- Content-only changelog rendering, CI, and final external review remain pending.
+- Content-only changelog rendering passes (10 cases) after generating the ignored fragment module. PR #3155 is draft; final CI and external review remain pending.
 - Existing production timing is diagnostic evidence only; no post-change production speedup is claimed without a live measurement.

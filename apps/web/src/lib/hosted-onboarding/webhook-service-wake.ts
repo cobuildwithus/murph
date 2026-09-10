@@ -141,13 +141,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   } finally {
     // Keep an authorized hint alive on both acknowledgement and signal failure.
     // The webhook still reports Temporal failure so the provider can retry.
-    if (directEnsureWake) {
-      const wake = directEnsureWake;
-      if (input.scheduleAfterResponse) {
-        input.scheduleAfterResponse(() => wake);
-      } else {
-        void wake;
-      }
+    const wake = directEnsureWake;
+    if (wake && input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(() => wake);
     }
   }
 
