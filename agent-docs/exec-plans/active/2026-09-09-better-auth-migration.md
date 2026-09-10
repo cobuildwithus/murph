@@ -179,11 +179,22 @@ and both public logout routes. The prior logout implementation fails all four
 race/storage regressions.
 
 Two composed native-auth fixture suites now follow the shared verifier and
-preserve the original identity-verification/member-lookup stage boundaries. An
-unintended OpenAI peer-lock change duplicated Zod in the CLI bundle; its previous
-peer resolution is restored without raising the size budget. Final focused checks pass: 40 PostgreSQL cases, 119 affected native-route
-regressions, Web typecheck, changed-file lint, documentation drift and complexity.
-The second substantive review and exact-head CI gate this remediation.
+preserve the original identity-verification/member-lookup stage boundaries. The prior OpenAI peer resolution was restored, but CI proved that it was not
+the bundle-size cause. The second substantive review passed on
+`ae758d69d46cc680f88fb86ebdc25126cd505236`; all application checks passed on that
+head, while the independent runner budget remained failing. Focused checks pass:
+40 PostgreSQL cases, 119 affected native-route regressions, Web typecheck,
+changed-file lint, documentation drift and complexity.
+
+The standalone runner seed included registry versions used only by the Web app.
+Adding Better Auth therefore moved its existing Zod resolution from 4.4.3 to
+4.5.4 and grew the CLI by 153704 bytes. The installer now asks the pinned pnpm
+CLI for the runner's production lockfile graph and limits seed package records
+to that closure. Source manifests, dependency versions and size budgets stay
+unchanged. Real assembly reproduces the original CLI size of 10053128 bytes,
+passes both absolute budgets and all eight command-parity probes. Focused
+installer tests and Cloudflare typecheck pass. This tooling correction requires
+a third exact-head review and CI before PR 2 is mergeable.
 
 Tooling retries did not advance the review counter. The invalid first capture
 requested missing installed dependency source. A plaintext-source staging retry
