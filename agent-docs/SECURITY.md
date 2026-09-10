@@ -1420,8 +1420,11 @@ locally readable.
   unprivileged public CI. Separately, after a revision reaches protected public
   `main`, the existing deployment controller may request `release_admission`
   against exact private `main`. Only the unprivileged hosted jobs check out that
-  exact released public revision; they select the canonical foreground-priority
-  lane and force its standby mode to `allocate`. Credentialed Temporal setup
+  exact released public revision. The `production_core` scope requires the
+  canonical Linq delivery, scheduled reminder, hosted-web browser smoke,
+  foreground reply priority, and foreground checkpoint ordering lanes, with
+  foreground standby mode forced to `allocate`. Each lane must return a unique
+  successful receipt bound to the same release digest. Credentialed Temporal setup
   and attestation jobs remain isolated jobs that check out only private
   controller or immutable reader source. The final private release attestation
   consumes job results, independently re-reads both protected branches, and
@@ -1432,7 +1435,9 @@ locally readable.
   credentials, poller identities, or timestamps. Neither side may
   restore candidate-controlled caches beside credentials, read private logs or
   artifacts, expose reader revisions publicly, or accept workflow/check names
-  from the candidate.
+  from the candidate. Deploy private support for `production_core` before the
+  public controller requests it. Missing support blocks production admission;
+  the controller must not fall back to the older foreground-only scope.
 - Hosted Web production has one deployment authority: Vercel's Git integration
   creates a candidate for every exact `main` commit, and configured Deployment
   Checks alone admit it to production domains. Do not grant Full Production
