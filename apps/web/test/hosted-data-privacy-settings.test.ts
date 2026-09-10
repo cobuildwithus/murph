@@ -33,7 +33,6 @@ const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   publishBrowserVaultSessionEnding: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
-  privyLogoutOnDone: null as (() => void) | null,
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultExport: vi.fn(),
@@ -111,13 +110,6 @@ vi.mock("../src/components/settings/hosted-settings-session-state", () => ({
   HostedSettingsSessionState: mocks.HostedSettingsSessionState,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
-  HostedPrivyLogout: ({ onDone }: { onDone: () => void }) => {
-    mocks.privyLogoutOnDone = onDone;
-    return null;
-  },
-}));
-
 vi.mock("@/src/components/ui/alert", () => ({
   Alert: createPassthrough("div"),
   AlertDescription: createPassthrough("div"),
@@ -165,7 +157,6 @@ beforeEach(() => {
   mocks.useStateRecords = [];
   mocks.useStateSetters = [];
   mocks.useStateValues = [];
-  mocks.privyLogoutOnDone = null;
   mocks.authorize.mockResolvedValue({
     signature: `0x${"11".repeat(65)}`,
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
@@ -1110,7 +1101,7 @@ describe("HostedDataPrivacySettings", () => {
     assert.equal([...container.querySelectorAll("button")].length, 0);
   });
 
-  test("replaces the deleted dashboard with the public farewell after Privy logout", async () => {
+  test("replaces the deleted dashboard with the public farewell after canonical deletion", async () => {
     mockHostedDataPrivacyDeletedState();
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -1135,17 +1126,11 @@ describe("HostedDataPrivacySettings", () => {
     await act(async () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
-    assert.ok(mocks.privyLogoutOnDone);
-
-    await act(async () => {
-      mocks.privyLogoutOnDone?.();
-    });
 
     expect(replace).toHaveBeenCalledWith("/farewell");
   });
 
-  test("falls back to the pending-cleanup farewell when Privy logout does not settle", async () => {
-    vi.useFakeTimers();
+  test("preserves pending cleanup on the immediate farewell navigation", async () => {
     mockHostedDataPrivacyDeletedState({ cleanupPending: true });
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -1169,11 +1154,6 @@ describe("HostedDataPrivacySettings", () => {
 
     await act(async () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
-    });
-    expect(replace).not.toHaveBeenCalled();
-
-    await act(async () => {
-      vi.advanceTimersByTime(8_000);
     });
 
     expect(replace).toHaveBeenCalledWith("/farewell?cleanup=pending");
@@ -1440,6 +1420,7 @@ function installGlobals(
   window: Window & typeof globalThis,
   document: Document,
 ) {
+  if (!window.location) Object.defineProperty(window, "location", { configurable: true, value: { replace: vi.fn() } });
   vi.stubGlobal("window", window);
   vi.stubGlobal("self", window);
   vi.stubGlobal("document", document);

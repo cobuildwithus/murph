@@ -22,7 +22,6 @@ import {
 import { BrandMark } from "@/src/components/ui/brand-mark";
 
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
-import type { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
@@ -139,7 +138,6 @@ function AccountMenu({
     useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
   const [signOutPending, setSignOutPending] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
-  const [PrivyLogout, setPrivyLogout] = useState<typeof HostedPrivyLogout | null>(null);
   const hasAccount = initialAuth.authenticated;
   const userKey = hasAccount ? "app-session" : null;
 
@@ -194,23 +192,13 @@ function AccountMenu({
     setSignOutPending(true);
 
     try {
-      // Resolve the cleanup code before clearing the app session so a failed
-      // chunk download leaves the existing sign-out retry available.
-      const { HostedPrivyLogout } = await import(
-        "@/src/components/hosted-onboarding/hosted-privy-logout"
-      );
       await logoutHostedAppSession();
-      setPrivyLogout(() => HostedPrivyLogout);
+      router.refresh();
     } catch {
       setSignOutError("Sign out did not finish. Try again.");
+    } finally {
       setSignOutPending(false);
     }
-  }
-
-  function handlePrivyLogoutDone() {
-    setPrivyLogout(null);
-    setSignOutPending(false);
-    router.refresh();
   }
 
   return (
@@ -269,7 +257,6 @@ function AccountMenu({
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
-      {PrivyLogout ? <PrivyLogout onDone={handlePrivyLogoutDone} /> : null}
       {signOutError ? (
         <p
           className="mt-2 px-2 text-[0.6875rem] leading-snug text-[#f0c6b0]"

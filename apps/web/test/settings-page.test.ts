@@ -171,6 +171,7 @@ const mocks = vi.hoisted(() => ({
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedUsageCreditPurchaseTargetForPayer: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
+  readApprovalPasskeyState: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
     serverApprovedPrivyUser?: unknown;
     snapshot: unknown;
@@ -178,6 +179,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/src/lib/sensitive-actions/passkey-store", () => ({ readApprovalPasskeyState: mocks.readApprovalPasskeyState }));
 
 const redirectMock = vi.hoisted(() => vi.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
@@ -668,6 +670,23 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   assert.match(markup, /external carrier, Telegram, Linq, or email systems cannot be recalled/);
   assert.match(markup, /mailto:legal@justco\.build/);
   assert.match(markup, /href="\/legal\/privacy"/);
+});
+
+test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion and selects optional SDK for %s factor state", async (state) => {
+  const original = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  process.env.NEXT_PUBLIC_PRIVY_APP_ID = "synthetic-app";
+  try {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({ authenticated: true, session: { member: { id: "synthetic-member" }, privyUserId: "did:privy:synthetic" } });
+    if (state === "outage") mocks.readApprovalPasskeyState.mockRejectedValueOnce(new Error("storage unavailable"));
+    else mocks.readApprovalPasskeyState.mockResolvedValueOnce({ credentials: state === "passkey" ? [{ id: "synthetic" }] : [] });
+    const { default: Page } = await import("../app/settings/data-privacy/page");
+    expect(renderToStaticMarkup(await Page())).toContain("Hosted data privacy settings true");
+    expect(mocks.HostedPrivyProvider).toHaveBeenCalledTimes(state === "legacy" ? 1 : 0);
+    expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
+  } finally {
+    if (original === undefined) delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    else process.env.NEXT_PUBLIC_PRIVY_APP_ID = original;
+  }
 });
 
 test("SettingsPage redirects signed-out visitors before reading member settings", async () => {

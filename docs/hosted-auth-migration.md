@@ -134,6 +134,13 @@ the daily renewal threshold and primary-proof timestamp. Hidden/offline tabs do
 not sign out or fall back to another provider. A legacy renewal request only
 reads its existing record and never sets a replacement cookie or extends expiry.
 
+Browser sign-out waits for durable server revocation, then refreshes canonical
+state without loading the legacy SDK. Confirmed deletion navigates immediately
+to the public farewell and preserves its pending-cleanup status. Leftover SDK
+browser state is never primary-login authority after cutover; old completion and
+credential writers remain fenced. The temporary approval port independently
+checks the current member before using any restored SDK principal.
+
 `/settings/accounts` shares the dashboard's credential and passkey controls but
 uses identity admission before subscription setup. Email-only onboarding links
 there to add a messaging method, then returns through `/join` to the canonical

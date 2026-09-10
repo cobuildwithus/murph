@@ -336,3 +336,14 @@ independent recovery, remaining legacy entry/logout cleanup, native work and
 candidate UI/CI/ReviewGPT remain Hold. The earlier hook-separation and legacy
 reauthentication implementation gaps are closed; this is still an intermediate
 checkpoint and no deployment or import has occurred.
+
+Production sign-out now waits only for confirmed server revocation and refreshes
+the canonical page; the legacy SDK cleanup component is deleted. Canonical
+account deletion navigates directly to the farewell, retaining the durable
+cleanup status. Approval and data-privacy pages omit the SDK for migrated
+factors; an optional factor-read outage leaves the decision/deletion surface
+available, while the action endpoints retain authorization authority.
+
+The focused sign-out/privacy run passes 57 tests, and the approval/Settings page
+run passes 79 tests. Web typecheck, changed-file lint and the five-source-file
+complexity check pass. The cleanup adds no persisted state or dependencies.
