@@ -92,11 +92,7 @@ import {
   type HostedRuntimeApplyPreparedTokenWrite,
   type HostedRuntimeApplyTokenWritePreparation,
 } from "./connection-secrets";
-import {
-  createDirtyPayloadClassificationPendingError,
-  isHostedDirtyPayloadClassificationPendingError,
-  supersedeHostedCredentialScopedDirtyStateForConnectionTx,
-} from "./dirty-connections";
+import { supersedeHostedCredentialScopedDirtyStateForConnectionTx } from "./dirty-connections";
 import { toPrismaJsonObject } from "./prisma-json";
 
 export {
@@ -205,8 +201,7 @@ export class PrismaHostedConnectionStore {
         );
       } catch (error) {
         if (
-          (isHostedDirtyPayloadClassificationPendingError(error)
-            || error instanceof HostedDomainRootPreparationMismatchError)
+          error instanceof HostedDomainRootPreparationMismatchError
           && attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS - 1
         ) {
           continue;
@@ -356,14 +351,11 @@ export class PrismaHostedConnectionStore {
           : replacementMetadata;
 
         if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
-          const dirtyState = await supersedeHostedCredentialScopedDirtyStateForConnectionTx({
+          await supersedeHostedCredentialScopedDirtyStateForConnectionTx({
             connectionId: existing.id,
             tx,
             userId: existing.userId,
           });
-          if (dirtyState === "classification_pending") {
-            return null;
-          }
         }
 
         if (preparedRoot) {
@@ -471,12 +463,6 @@ export class PrismaHostedConnectionStore {
         previousRecord: null,
       };
     });
-
-    if (!result) {
-      // Commit legacy annotations before retrying; no connection epoch, token,
-      // dirty-marker reset, payload deletion or OAuth claim changed in this pass.
-      throw createDirtyPayloadClassificationPendingError();
-    }
 
     return {
       account: await this.buildDurableConnectionRecord(result.record),
