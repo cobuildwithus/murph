@@ -1,6 +1,6 @@
 # Reduce unchanged Personal Patterns model runs
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -64,5 +64,25 @@ Deployment and measured production savings are outside this PR's local proof.
   No production credential or member data is used.
 - Parent candidate review found no new state owner, notification write in the
   precondition, foreground call, or migration requirement. Direct proof is Ready.
-  PR #3204 now awaits exact-head CI and final ReviewGPT. The current candidate
-  merges with the current base.
+  PR #3204 passed all 32 CI checks at the reviewed candidate, with three
+  deliberately skipped jobs and no failures. The candidate merges with the freshly
+  fetched base. The closing documentation commit still requires its own CI.
+
+## Final review
+
+ReviewGPT round 1 passed at `bbe92835c0263c4208e9f41ca6459da079c2cef2`.
+The first attempt was diagnostic only because it completed in 246 seconds, below
+the 270-second minimum. A fresh full-snapshot retry on the eragon lane hit a browser
+refresh capture failure. The original capture metadata recovered the same accepted
+turn with compatible `gpt-6-pro` response metadata, a complete marker, and a PASS.
+Observed recovery elapsed time was 2,186 seconds; this measures capture latency,
+not model thinking time. The review checked all 12 patch postimages and the actual
+report, ledger, cron, reconciliation, retry, and delivery paths. Parent acceptance:
+substantive and proportionate, zero findings to resolve. The exact owned recovery
+target was closed. The capture issue is recorded in Frog entry
+`20260910151258-reviewgpt-hard-refresh` without private evidence.
+
+The final delta only closes this plan and records developer friction. It changes
+no production behavior and qualifies for the explanatory-documentation review
+exemption. Production rollout and measured savings remain outside this PR.
+Completed: 2026-09-10
