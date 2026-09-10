@@ -1,6 +1,6 @@
 # Retire live legacy hosted snapshot restoration
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -34,9 +34,11 @@ New and existing supported runners continue producing/reading v2. Before the res
 ## Verification
 
 - Passed the focused continuity/checkpoint/restore suites during fixture migration; the standalone restore suite passed all 23 cases.
-- The broad affected-entrypoint run passed 509 of 517 tests. Five failures were retired fixture assumptions, two were existing short realtime waits that passed unchanged in isolation, and one was an optional mailbox-poll count assertion replaced with semantic ordering proof. Subsequent selected reruns passed the updated mailbox/preemption/causal-input cases.
+- The broad affected-entrypoint run passed 509 of 517 tests. Five failures required migrating retired snapshot/sidecar fixture assumptions; that migration exposed the ordinary-file availability bug fixed above. Two were existing short realtime waits that passed unchanged in isolation, and one was an optional mailbox-poll count assertion replaced with semantic ordering proof. Subsequent selected reruns passed the updated mailbox/preemption/causal-input cases.
 - After fixing the existing v2 ordinary-file availability false negative, the full artifact, retention, receipt, and restore suites passed all 77 tests.
 - Assistant-runtime typecheck passed. No Cloudflare implementation or shared public wire types changed.
 - Complexity guard passed for all four source files; artifact maximum fell 13 to 7, snapshot maximum 60 to 56, restore maximum 23 to 17, and the deleted legacy owner fell 15 to 0.
-- Documentation drift and whitespace checks passed before current-main integration. Startup and bridge integration proof remains pending; the parent owns final candidate review, ReviewGPT, and exact-head CI.
+- Merged current main through the hosted startup cleanup and operator authentication fix, retaining lazy archive recovery and direct Web-checkpoint lease proof. All 118 tests across startup, invocation bridge, and Codex continuity passed after integration.
+- Post-integration assistant-runtime typecheck, `pnpm complexity:diff --base origin/main`, `pnpm docs:drift`, and `git diff --check` passed. The parent owns final candidate review, ReviewGPT, and exact-head CI.
 - No production actions or provider-input changes were performed.
+Completed: 2026-09-10

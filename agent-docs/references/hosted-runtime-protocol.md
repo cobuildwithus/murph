@@ -3561,8 +3561,8 @@ wakes from the post-side-effect state, not from a pre-side-effect base wake.
 Live hosted workspace restore accepts a v2 direct-R2 snapshot ref or null
 bootstrap state. Pre-v2 full/base, working `{base, delta}`, and layered
 `{base, hot}` refs fail before local mutation or artifact reads. Shared legacy
-ref decoders remain for stored-object cleanup and historical metadata compatibility. Live v2 snapshots
-are one encrypted zstd-compressed
+ref decoders remain for stored-object cleanup and historical metadata
+compatibility. Live v2 snapshots are one encrypted zstd-compressed
 tar object uploaded directly from the container to R2 through a short-lived
 presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
 abort, and data-key unwrap metadata, stores a short-lived upload session without
