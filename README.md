@@ -87,7 +87,7 @@ Installed package:
 murph onboard
 murph use ./vault
 murph model
-murph chat
+murph assistant ask "Hello"
 murph run
 ```
 
@@ -203,7 +203,7 @@ pnpm vault-cli --help
 ```bash
 pnpm onboard --vault ./vault
 murph use ./vault
-pnpm chat
+murph assistant ask "Summarize my recent activity"
 murph run
 murph device daemon start
 ```
