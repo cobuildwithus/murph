@@ -483,3 +483,16 @@ Retirement candidate verification update:
 - The composed hosted-local browser command stopped during runner bundle preparation: its static boot closure measured 2056177 bytes against a 2046662-byte budget. It did not reach browser startup, so authenticated full-stack rendering is still a proof gap. Do not weaken the runner budget to complete this authentication change.
 - PR 3 head 82d5147a74b274e222ca1cf5f9c32a11c741aa9a now has green CI; second external review remains pending. Android review round 1 reported an interrupted-first-write recovery defect; it is accepted for correction in the existing secure-store owner before that release is ready.
 - The standalone Web startup smoke passes with Privy environment variables absent and the prepared local-environment entrypoint. This proves Web startup independently of the runner bundle gap.
+
+### Adoption session-cache correction
+
+Retirement verification exposed a first-party login boundary gap: a successful
+OTP or Telegram response can replace the browser cookie before its body is
+read, while the previous member's decrypted vault remains mounted. Both
+composed login regression cases failed before the correction. Verification
+now uses the existing session client owner to invalidate every tab at successful
+headers and reload after an unreadable or invalid success body. Failed
+nonreplacement responses preserve the current cache. No new state or logout
+step was added. All 90 focused login, session and live-vault checks and Web
+typecheck pass. This source change requires ReviewGPT round 2 and current-head
+CI before PR #3132 is ready again.
