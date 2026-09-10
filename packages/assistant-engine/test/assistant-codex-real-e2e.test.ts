@@ -1,3 +1,4 @@
+import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
@@ -13249,7 +13250,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () => {
+describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2e', () => {
   it.each([false, true])('sends a clear bounded digest with a full link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -13346,6 +13347,10 @@ describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () =
         expect(await readFile(vocabularyCapturePath, 'utf8')).toContain('yard-work')
       }
       expect(await readFile(ledgerCapturePath, 'utf8')).toContain('yard-work')
+      const savedLedger = parsePersonalPatternNotificationLedger(await readFile(ledgerCapturePath, 'utf8'))
+      expect(savedLedger).toMatchObject({ version: 1, initialDigestSent: true, reviewedFactorIds: ['yard-work'] })
+      expect(savedLedger?.results).toHaveLength(4)
+      expect(savedLedger?.results.every((entry) => entry.factorId === 'yard-work')).toBe(true)
       expect(finishCalls).toHaveLength(0)
       expect(message).toMatch(/yard work/iu)
       expect(message).not.toMatch(/\bgrade\b|\b[A-E][- ](?:grade|association)\b|evidence days|classification|ledger/iu)
@@ -34798,7 +34803,14 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *"knowledge upsert --slug personal-pattern-notifications"*)',
-      `    printf '%s\\n' "$*" > ${JSON.stringify(input.ledgerCapturePath)}`,
+      '    while [ "$#" -gt 0 ]; do',
+      '      if [ "$1" = "--body" ]; then',
+      '        shift',
+      `        printf '%s\\n' "$1" > ${quoteNutritionShellLiteral(input.ledgerCapturePath)}`,
+      '        break',
+      '      fi',
+      '      shift',
+      '    done',
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *)',
