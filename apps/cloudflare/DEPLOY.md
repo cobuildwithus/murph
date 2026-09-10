@@ -2631,3 +2631,26 @@ namespaces, and removing the flag would change process topology and widen
 Use bounded structured runtime logs, Durable Object status, Container
 application and instance inventory, and the managed deploy smoke for production
 diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.
+
+## Retiring pre-v2 live workspace restore
+
+Deploy the runner removal only after the canonical workspace pointer inventory
+contains no pre-v2 refs and all current snapshot writers produce v2. These gates
+were checked before the removal; repeat them if the deployment baseline changes
+to a legacy writer. No migration, backfill, or object deletion accompanies this
+release. Current and older v2 writers can coexist during a gradual rollout; Web
+and Worker require no ordering change. A null pointer remains bootstrap state.
+
+This cleanup requires a v2-capable reader and v2-only writer at the rollback
+floor; all stricter existing fleet and receipt-format rollback floors still
+apply. This release does not permit a pre-v2 writer rollback or direct restoration of a
+pre-v2 backup pointer. Such a recovery requires a separately reviewed conversion
+path before publishing the pointer. Reverting this code removal alone adds the
+old reader without changing stored data.
+
+Keep legacy ref decoding, Durable Object orphan candidates, legacy object and
+artifact cleanup, canonical write receipt recovery, and the omitted
+`replacedSnapshotRef` fallback for older v2 snapshot-session producers. Canonical
+pointer drain does not prove those independent stores empty. After rollout,
+confirm normal managed-container smoke and supported v2 cold restore/checkpoint
+behavior; an unsupported-ref rejection means the pointer/writer gate failed.
