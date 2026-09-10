@@ -103,6 +103,7 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
 }): HostedWorkspaceRuntimeBridgeImportItem {
   return async (item, context) => {
     const importConversationItem = createHostedConversationMailboxImportItem({
+      assistantBootstrap: context?.assistantBootstrap ?? null,
       assistantTarget: context?.assistantTarget ?? null,
       decodePayload: {
         decode: async (decodeInput) => {

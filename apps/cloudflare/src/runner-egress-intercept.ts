@@ -61,7 +61,7 @@ import {
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
   applyRunnerRuntimeUsageSettlement,
-  requireRunnerRuntimeWriteFenceWrite,
+  requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
 import type {
@@ -3298,7 +3298,7 @@ async function authorizeHostedProviderEgress(input: {
       userId: input.userId,
     });
     try {
-      await requireRunnerRuntimeWriteFenceWrite({
+      await requireRunnerRuntimeWriteFence({
         env: input.env,
         request: input.request,
         userId: input.userId,
