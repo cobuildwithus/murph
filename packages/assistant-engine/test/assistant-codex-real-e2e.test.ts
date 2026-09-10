@@ -52,6 +52,7 @@ import {
   upsertGoal,
   upsertHabitatAspect,
   upsertMemory,
+  upsertRegimen,
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
@@ -16333,6 +16334,107 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         workingDirectory,
         ...config.temporaryPaths,
       ])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex canonical plan reminder targets e2e', () => {
+  it('keeps canonical rotation across adjacent dates, copied anchors, exceptions and pauses', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-canonical-target-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const plan = await upsertRegimen({
+        vaultRoot: workingDirectory, kind: 'habit', status: 'active',
+        title: 'Synthetic alternating movement plan', startedOn: '2026-04-10',
+        schedule: 'Daily at 09:00 local time',
+        note: 'Alternate local calendar days from 2026-04-10: seated row, calf raise, repeat. All cues on a date use that date’s exercise. On 2026-04-17 only, repeat seated rows; the rotation anchor remains 2026-04-10.',
+      })
+      const canonical = await readFile(path.join(workingDirectory, plan.record.document.relativePath), 'utf8')
+      const contextReferences = [{ entityKind: 'regimen', entityId: plan.record.entity.regimenId }]
+      const scenarios = [
+        { label: 'repeat exception', date: '2026-04-17', anchor: '2026-04-16', target: /rows?/iu, forbidden: /calf/iu },
+        { label: 'day after repeat', date: '2026-04-18', anchor: '2026-04-13', target: /rows?/iu, forbidden: /calf/iu },
+        { label: 'following day with stale anchor', date: '2026-04-19', anchor: '2026-04-13', target: /calf/iu, forbidden: /rows?/iu },
+        { label: 'same day with aligned anchor', date: '2026-04-19', anchor: '2026-04-16', target: /calf/iu, forbidden: /rows?/iu },
+        { label: 'one-day pause', date: '2026-04-20', anchor: '2026-04-13', target: null, forbidden: null },
+        { label: 'resume after pause', date: '2026-04-21', anchor: '2026-04-13', target: /calf/iu, forbidden: /rows?/iu },
+        { label: 'missing owner', date: '2026-04-19', anchor: '2026-04-13', target: null, forbidden: null },
+        { label: 'fixed cue without a plan', date: '2026-04-19', anchor: '2026-04-13', target: /herb|water/iu, forbidden: /rows?|calf/iu },
+      ]
+      for (const [index, scenario] of scenarios.entries()) {
+        const occurrenceAt = `${scenario.date}T13:00:00.000Z`
+        const fixedCue = scenario.label === 'fixed cue without a plan'
+        const saved = await upsertAutomation({
+          vaultRoot: workingDirectory, title: 'Synthetic seated row cue',
+          slug: `synthetic-target-${index}`, status: 'active', continuityPolicy: 'fresh',
+          supportKind: fixedCue ? null : 'reminder',
+          contextReferences: fixedCue ? [] : contextReferences,
+          tags: fixedCue ? [] : [`system:support-series:habit:${plan.record.entity.regimenId}`],
+          now: new Date('2026-04-16T12:00:00.000Z'),
+          schedule: { kind: 'dailyLocal', localTime: '09:00' },
+          route: { channel: 'linq', deliveryTarget: 'synthetic-target', threadId: 'synthetic-target', threadIsDirect: true, identityId: null, participantId: null },
+          instructions: fixedCue ? 'Remind me to water the herb pots.' : `Send a brief cue for the linked plan. Rotation anchor: ${scenario.anchor} = seated row; even local-day offsets mean seated row, odd mean calf raise. Read the plan for context. Skip on 2026-04-20 only.`,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory), saved.record.automationId,
+        )
+        if (!source || source.kind !== 'automation') throw new Error('Expected canonical automation.')
+        const automationPath = path.join(workingDirectory, source.relativePath)
+        const automationDocument = await readFile(automationPath, 'utf8')
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt,
+        })
+        const instructions = buildAssistantCronExecutionInstructions({
+          source, runtimeState, kind: 'canonical',
+          job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+        }, { automationId: null, contextReferences: [] })
+        const prepared = await prepareAssistantCronNotificationInput({
+          instructions, vault: workingDirectory, workingDirectory,
+          outboxAutomationAuthority: { automationId: source.automationId, expectedUpdatedAt: source.updatedAt },
+          recurringReminderConversation: true,
+          scheduledAutomationScheduleKind: source.schedule.kind,
+          scheduledInvocationAuthority: { automationId: source.automationId, occurrenceAt },
+          turnTrigger: 'automation-cron',
+        }, { sessionId: `session-synthetic-target-${index}` })
+        const developerInstructions = buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantHostedGroupToolSurface: 'none', assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: scenario.date,
+          currentTimeZone: 'America/New_York', hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, developerInstructions, dynamicTools: [],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+          model: config.model, modelProvider: config.modelProvider,
+          reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+          prompt: [prepared.instructions,
+            scenario.label === 'missing owner' || fixedCue
+              ? 'Canonical read result for the exact referenced owner: unavailable. No canonical plan data is available for this occurrence.'
+              : `Full current canonical read result for the exact referenced owner:\n${canonical}`,
+          ].join('\n\n'),
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        process.stdout.write(`[real-codex canonical target ${scenario.label}] ${decision.kind === 'send_message' ? decision.text.replaceAll(/\s+/gu, ' ').trim() : 'skip'}\n`)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+        expect(await readFile(automationPath, 'utf8')).toBe(automationDocument)
+        expect(decision.kind, decision.privateSummary).toBe(scenario.target ? 'send_message' : 'skip')
+        if (decision.kind === 'send_message' && scenario.target && scenario.forbidden) {
+          expect(decision.text).toMatch(scenario.target)
+          expect(decision.text).not.toMatch(scenario.forbidden)
+          expect(decision.text).not.toMatch(/logged|completed|fixed|repaired|anchor|automation|regimen|exp_|reg_/iu)
+          expect(decision.text).not.toContain('?')
+        }
+      }
+      expect(await readFile(path.join(workingDirectory, plan.record.document.relativePath), 'utf8')).toBe(canonical)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 360_000)
 })
