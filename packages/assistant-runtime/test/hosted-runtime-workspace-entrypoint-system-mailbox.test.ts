@@ -3978,8 +3978,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.ok(checkpoint);
       assert.equal(checkpoint.reason, "idle_shutdown");
       assert.equal(checkpoint.expectedWorkspaceVersion, "2");
-      assert.equal(checkpoint.nextWakeAt, staleDeviceWakeAt);
-      assert.equal(checkpoint.nextWakeReason, "device-sync.reconcile");
+      assert.equal(checkpoint.nextWakeAt, null);
+      assert.equal(checkpoint.nextWakeReason, null);
       assert.equal(
         checkpoint.nextDefaultProcessingWakeAt,
         recoveryWakeAt,
@@ -3996,10 +3996,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(checkpoint.redactedStatus?.hostedMailboxFetchedCount, 0);
       assert.equal(checkpoint.redactedStatus?.hostedMailboxImportedCount, 0);
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(result.nextWakeAt, staleDeviceWakeAt);
-      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.status, "idle");
+      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.nextWakeReason, undefined);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
@@ -8669,11 +8669,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeAt,
-        followUpWakeAt,
+        defaultOwnedSystemMailboxWakeAt === TEST_NOW ? TEST_NOW : followUpWakeAt,
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeReason,
-        "device-sync.reconcile",
+        defaultOwnedSystemMailboxWakeAt === TEST_NOW ? "assistant" : "device-sync.reconcile",
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt,
@@ -8694,8 +8694,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           : [deviceItem.id, defaultOwnedItem.id],
       );
       const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
-        request.nextWakeAt === followUpWakeAt
-        && request.nextWakeReason === "device-sync.reconcile"
+        request.nextWakeAt === (defaultOwnedSystemMailboxWakeAt === TEST_NOW ? TEST_NOW : followUpWakeAt)
+        && request.nextWakeReason === (defaultOwnedSystemMailboxWakeAt === TEST_NOW ? "assistant" : "device-sync.reconcile")
       );
       assert.ok(followUpCheckpointIndex >= 0);
       assert.equal(

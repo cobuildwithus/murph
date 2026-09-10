@@ -366,3 +366,32 @@ to 58 and max 71 to 70, independent owner max 16. The former final fixture failu
 is resolved by the eight-case delegated-owner/timer rerun. Parent review keeps the
 existing claims, bootstrap/connection authority, canonical locks, and exact
 acknowledgments; no new service, schema, dependency, or second executor was added.
+
+
+### Round-five CI correction
+
+The exact pushed integrated candidate failed three assertions in the broad
+platform-a runtime job (2,976 cases passed). A cold restore kept the original
+connection task but also materialized its overdue workspace alarm as another
+task. The original completed and advanced canonical cadence; the duplicate
+remained due. Admission now reuses an existing due device mailbox item while
+continuing to admit a standalone timer beside another connection's future retry.
+No new state or executor is added. The unchanged closed-loop test proves one
+durable task, bounded provider replay, completion publication, and quiescence.
+
+The other two failures preserved obsolete wake expectations: a completed device
+alarm should clear while the canonical running-claim recovery deadline stays in
+the default projection, and an already-due assistant mailbox item must precede a
+future device retry. Updated assertions retain the restart and eventual-automation
+proof and the subsequent assistant-to-device follow-up proof.
+
+Both complete affected files pass all 72 cases. Runtime typecheck and complexity
+guard pass; the independent owner remains below the threshold. Temporary
+diagnostic probes are removed. The PR returned to draft/Hold while round five
+finishes against its original pushed head; the correction needs the next exact
+candidate review and CI.
+
+The focused foreground suite also passes 29 preemption and six concurrent-import
+cases, including bounded reply dispatch. The corrected candidate is pushed for
+CI while the existing round-five capture remains its original review owner; no
+duplicate review is launched. Its result and this delta need the next round.

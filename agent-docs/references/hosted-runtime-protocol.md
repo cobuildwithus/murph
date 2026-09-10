@@ -829,7 +829,8 @@ dirty work requires execution and blocks idle retirement across it. Coverage
 never grants continuation authority or bypasses invocation filters. Claimed
 attempts publish completion through the workspace instead of projecting another
 immediate wake. Restoring a newly fenced workspace releases stale in-process
-claims through the existing pending state. A due workspace device timer enters
+claims through the existing pending state. A due mailbox item already owns
+the restored device alarm. When none exists, a due workspace device timer enters
 that same mailbox claim path; a future retry for another connection does not
 suppress it. After completion, remaining mailbox work and returned provider
 deadlines replace the consumed alarm.

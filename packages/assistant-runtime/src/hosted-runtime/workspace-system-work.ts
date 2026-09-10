@@ -157,11 +157,14 @@ export function createHostedWorkspaceSystemWork(input: {
         && input.preparation.runtime.resolvedConfig.deviceSync !== null
         && workspace?.nextWakeReason === "device-sync.reconcile"
         && Date.parse(workspace.nextWakeAt ?? "") <= now) {
-        // Existing workspace alarms enter the same claim/retry path as incoming hints.
+        // A due mailbox item already owns this alarm. Otherwise, materialize the
+        // legacy timer through the same claim/retry path as incoming hints.
         const itemId = `device-sync.wake:workspace:${workspace.nextWakeAt}`;
         await updateHostedSystemMailboxState(input.preparation.vaultRoot, (state) => {
           if (state.pending.some((item) => item.routeAction === "run-device-sync-wake"
-            && item.wake.kind === "device-sync.wake" && !item.wake.connectionId)) {
+            && item.wake.kind === "device-sync.wake"
+            && (!item.wake.connectionId
+              || Date.parse(item.nextAttemptAt ?? item.occurredAt) <= now))) {
             return { result: undefined, write: false };
           }
           return { pending: [...state.pending, {
