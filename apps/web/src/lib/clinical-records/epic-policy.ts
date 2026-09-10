@@ -8,7 +8,7 @@ import {
 } from "@murphai/clinical-records";
 
 export const EPIC_ACQUISITION_POLICY_ID = "epic-r4-longitudinal-v1";
-export const EPIC_ACQUISITION_POLICY_VERSION = "2026-07-21.longitudinal-active-v4";
+export const EPIC_ACQUISITION_POLICY_VERSION = "2026-09-10.lifetime-history-v5";
 export const EPIC_BETA_FHIR_PAGE_COUNT = "100";
 
 const REQUIRED_BASE_SCOPES = Object.freeze(["fhirUser", "launch/patient", "openid"] as const);
@@ -33,7 +33,8 @@ export interface EpicQuery {
   fingerprintTemplate: string;
   fixedSearchParameters: readonly Readonly<{ name: string; value: string }>[];
   registrationApiKeys: readonly string[];
-  window?: Readonly<{ parameter: string; days: number }>;
+  // Used only to resume plans frozen before lifetime acquisition.
+  legacyWindowParameter?: string;
 }
 
 export interface EpicAcquisitionPolicy {
@@ -169,7 +170,7 @@ const QUERIES: readonly EpicQuery[] = [
       "epic-fhir-r4:DocumentReference:search:patient:category=clinical-note:_count={pageCount}:v1",
     fixedSearchParameters: [{ name: "category", value: "clinical-note" }],
     registrationApiKeys: ["document-reference-search-clinical-notes"],
-    window: { parameter: "period", days: 90 },
+    legacyWindowParameter: "period",
   },
   {
     queryScopeId: "encounters",
@@ -178,7 +179,7 @@ const QUERIES: readonly EpicQuery[] = [
     fingerprintTemplate: "epic-fhir-r4:Encounter:search:patient:_count={pageCount}:v1",
     fixedSearchParameters: [],
     registrationApiKeys: ["encounter-search-patient-chart"],
-    window: { parameter: "date", days: 365 },
+    legacyWindowParameter: "date",
   },
   {
     queryScopeId: "family-member-history",
@@ -195,7 +196,7 @@ const QUERIES: readonly EpicQuery[] = [
     fingerprintTemplate: "epic-fhir-r4:Immunization:search:patient:_count={pageCount}:v1",
     fixedSearchParameters: [],
     registrationApiKeys: ["immunization-search-patient-chart"],
-    window: { parameter: "date", days: 365 },
+    legacyWindowParameter: "date",
   },
   {
     queryScopeId: "medication-dispenses",
@@ -221,7 +222,7 @@ const QUERIES: readonly EpicQuery[] = [
       "epic-fhir-r4:Observation:search:patient:category=survey:_count={pageCount}:v1",
     fixedSearchParameters: [{ name: "category", value: "survey" }],
     registrationApiKeys: ["observation-search-assessments"],
-    window: { parameter: "date", days: 365 },
+    legacyWindowParameter: "date",
   },
   {
     queryScopeId: "observation-sdoh-assessments",
@@ -231,7 +232,7 @@ const QUERIES: readonly EpicQuery[] = [
       "epic-fhir-r4:Observation:search:patient:category=sdoh:_count={pageCount}:v1",
     fixedSearchParameters: [{ name: "category", value: "sdoh" }],
     registrationApiKeys: ["observation-search-sdoh-assessments"],
-    window: { parameter: "date", days: 365 },
+    legacyWindowParameter: "date",
   },
   {
     queryScopeId: "observation-social-history",
@@ -241,7 +242,7 @@ const QUERIES: readonly EpicQuery[] = [
       "epic-fhir-r4:Observation:search:patient:category=social-history:_count={pageCount}:v1",
     fixedSearchParameters: [{ name: "category", value: "social-history" }],
     registrationApiKeys: ["observation-search-social-history"],
-    window: { parameter: "issued", days: 365 },
+    legacyWindowParameter: "issued",
   },
   {
     queryScopeId: "procedure-orders",
@@ -250,7 +251,7 @@ const QUERIES: readonly EpicQuery[] = [
     fingerprintTemplate: "epic-fhir-r4:Procedure:search:patient:_count={pageCount}:v1",
     fixedSearchParameters: [],
     registrationApiKeys: ["procedure-search-orders"],
-    window: { parameter: "date", days: 365 },
+    legacyWindowParameter: "date",
   },
   {
     queryScopeId: "procedure-surgeries",
@@ -260,7 +261,7 @@ const QUERIES: readonly EpicQuery[] = [
       "epic-fhir-r4:Procedure:search:patient:category=387713003:_count={pageCount}:v1",
     fixedSearchParameters: [{ name: "category", value: "387713003" }],
     registrationApiKeys: ["procedure-search-surgeries"],
-    window: { parameter: "date", days: 365 },
+    legacyWindowParameter: "date",
   },
   {
     queryScopeId: "procedure-surgical-history",
@@ -295,7 +296,7 @@ const QUERIES: readonly EpicQuery[] = [
       "epic-fhir-r4:Observation:search:patient:category=vital-signs:_count={pageCount}:v1",
     fixedSearchParameters: [{ name: "category", value: "vital-signs" }],
     registrationApiKeys: ["observation-search-vital-signs"],
-    window: { parameter: "date", days: 365 },
+    legacyWindowParameter: "date",
   },
 ];
 
@@ -398,13 +399,10 @@ export function buildEpicBetaInitialFhirPageUrl(input: {
     throw new TypeError("Epic beta retrieval identity does not match its active query scope.");
   }
   const template = query;
-  const window = query.window;
+  const windowParameter = query.legacyWindowParameter;
   if (
-    (!window &&
-      (input.retrievalSlice.coverage !== "whole-family" ||
-        input.retrievalSlice.sliceId !== "whole")) ||
-    (window !== undefined &&
-      (input.retrievalSlice.coverage !== "bounded-window" || !window.parameter))
+    (input.retrievalSlice.coverage === "whole-family" && input.retrievalSlice.sliceId !== "whole") ||
+    (input.retrievalSlice.coverage === "bounded-window" && !windowParameter)
   ) {
     throw new TypeError("Epic beta retrieval slice does not match its active slicing policy.");
   }
@@ -417,9 +415,9 @@ export function buildEpicBetaInitialFhirPageUrl(input: {
   for (const parameter of template.fixedSearchParameters) {
     url.searchParams.set(parameter.name, parameter.value);
   }
-  if (input.retrievalSlice.coverage === "bounded-window" && window?.parameter) {
-    url.searchParams.append(window?.parameter, `ge${input.retrievalSlice.from}`);
-    url.searchParams.append(window?.parameter, `lt${input.retrievalSlice.to}`);
+  if (input.retrievalSlice.coverage === "bounded-window" && windowParameter) {
+    url.searchParams.append(windowParameter, `ge${input.retrievalSlice.from}`);
+    url.searchParams.append(windowParameter, `lt${input.retrievalSlice.to}`);
   }
   url.searchParams.set("_count", input.pageCount);
   return url;
@@ -470,28 +468,12 @@ function buildActiveRetrievalSlice(input: {
       queryScopeId: input.query.queryScopeId,
     }),
   );
-  const window = input.query.window;
-  if (!window) {
-    return {
-      coverage: "whole-family",
-      queryFingerprint,
-      queryScopeId: input.query.queryScopeId,
-      resourceType,
-      sliceId: "whole",
-    };
-  }
-  const to = input.frozenAt.toISOString();
-  const from = new Date(
-    input.frozenAt.getTime() - window.days * 24 * 60 * 60 * 1_000,
-  ).toISOString();
   return {
-    coverage: "bounded-window",
-    from,
+    coverage: "whole-family",
     queryFingerprint,
     queryScopeId: input.query.queryScopeId,
     resourceType,
-    sliceId: `window-${compactIsoDate(from)}-${compactIsoDate(to)}`,
-    to,
+    sliceId: "whole",
   };
 }
 
@@ -504,9 +486,6 @@ function requireEpicBetaResourceType(value: string): EpicBetaResourceType {
   return value;
 }
 
-function compactIsoDate(value: string): string {
-  return value.slice(0, 10).replaceAll("-", "");
-}
 
 function assertValidFrozenAt(value: Date): void {
   if (!Number.isFinite(value.getTime()))

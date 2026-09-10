@@ -174,12 +174,14 @@ Once an import is queued, the retrieval runtime uses three signed POST operation
 The web control plane fetches only the exact configured FHIR origin and exact
 resource-family path. Patient uses a direct patient read; the other 23 primary
 queries use their policy-owned patient search template and fixed category where
-required. Fifteen queries use one whole-family slice. Nine use one initial
-newest-first bounded slice: clinical notes cover 90 days, and Encounter,
-Immunization, assessment, social-history, Procedure, and vital-sign searches
-cover 365 days. The frozen run creation time owns both endpoints; searches send
-repeated `ge`/`lt` values through the Epic-documented `period`, `date`, or
-`issued` parameter. Provider redirects are disabled. A continuation must remain
+required. All new queries use a whole-family slice without a client-supplied lower
+or upper date cutoff. Clinical notes are no longer limited to 90 days, and
+encounters, vaccinations, assessments, social history, procedures and vital signs
+are no longer limited to one year. Previously frozen bounded plans resume with
+their original `period`, `date` or `issued` parameters; new plans never create
+those windows. Whole-family describes the requested date scope, not proof that
+a hospital exposed or returned every record. Existing budgets and typed partial
+outcomes still apply. Provider redirects are disabled. A continuation must remain
 on the same origin and family path; only its query may change. Root pages omit
 `pageUrlHash`; continuation pages include it, while the
 raw Bundle retains its provider `next` link for the importer to prove a
