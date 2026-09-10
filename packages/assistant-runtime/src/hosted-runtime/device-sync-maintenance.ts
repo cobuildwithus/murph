@@ -15,7 +15,6 @@ import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
 import type {
-  SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 import type {
   DeviceSyncJobFailureDiagnostic,
@@ -220,7 +219,6 @@ export async function runHostedDeviceSyncPass(
     deviceSyncConfig,
     deviceSyncPort,
     hasHostedConnections: (preloadedSnapshot?.connections.length ?? 0) > 0,
-    memberProviderConfigs: preloadedSnapshot?.providerConfigs ?? {},
     platformEnv,
     shouldYield,
     vaultRoot,
@@ -2157,7 +2155,6 @@ function createHostedDeviceSyncRuntime(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
   hasHostedConnections: boolean;
-  memberProviderConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
   platformEnv: Readonly<Record<string, string>>;
   shouldYield?: (() => boolean) | null;
   vaultRoot: string;
@@ -2170,7 +2167,6 @@ function createHostedDeviceSyncRuntime(input: {
     createConfiguredDeviceSyncProvidersFromConfigs(
       resolveHostedRuntimeDeviceSyncProviderConfigs(
         input.deviceSyncConfig.providerConfigs,
-        input.memberProviderConfigs,
         input.platformEnv,
       ),
     ),
