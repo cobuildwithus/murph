@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -81,9 +81,8 @@ test.each([
             vault: vaultRoot,
           }))?.projection.status ?? null;
         }
-        return { snapshotRef: createBundleRef({
+        return { snapshotRef: createSnapshotFixtureRef({
           hash: 'f'.repeat(64),
-          key: 'users/bundles/member-synthetic/hot-provider-probe.bundle.json',
           size: 512,
         }) };
       },

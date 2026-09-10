@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -100,9 +100,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-success.bundle.json",
                 size: 512,
               }),
             };
@@ -169,7 +168,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         async importItem() { return { status: "imported" }; },
         async createCheckpointSnapshot() {
           assert.ok(checkpointRequests.length < 4, "Ready completion was starved by empty wake checkpoint churn.");
-          return { snapshotRef: createBundleRef({ hash: "a".repeat(64), key: "users/bundles/member-synthetic/ready-completion.bundle.json", size: 512 }) };
+          return { snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }) };
         },
         platform: createPlatform({
           mailboxPort: {
@@ -261,9 +260,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "f".repeat(64),
-                  key: "users/bundles/member-synthetic/durable-effect-external-wake.bundle.json",
                   size: 512,
                 }),
               };
@@ -406,11 +404,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `round1-durable-wake-survives-reschedule-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -548,11 +543,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               checkpointStartedAtMs.push(Date.now());
               events.push(`snapshot:${snapshotInput.reason}:${checkpointStartedAtMs.length}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointStartedAtMs.length}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `round3-hot-work-durable-reconcile-${checkpointStartedAtMs.length}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -739,9 +731,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/effects-blocked-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -932,11 +923,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/effects-blocked-dirty-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1104,11 +1092,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/competing-effects-blocked-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1257,11 +1242,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/checkpoint-gated-dirty-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1414,9 +1396,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/durable-effect-follow-up-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1544,11 +1525,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/follow-up-fresh-due-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1706,9 +1684,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key: `users/bundles/member-synthetic/follow-up-preempted-replacement-wake-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1836,9 +1813,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/projected-follow-up-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1956,9 +1932,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/checkpoint-blocked-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -2081,9 +2056,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key: `users/bundles/member-synthetic/replaced-plain-due-wake-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };

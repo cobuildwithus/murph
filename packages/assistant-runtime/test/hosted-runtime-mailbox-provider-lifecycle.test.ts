@@ -1,6 +1,6 @@
 import {
   TEST_NOW,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -18,10 +18,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initializeVault } from '@murphai/core';
 import { readAssistantInputEvent } from '@murphai/assistant-engine';
-import { buildHostedExecutionLayeredSnapshotRef } from '@murphai/hosted-execution/parsers';
 import {
   sha256HostedBundleHex,
-  snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
 } from '@murphai/runtime-state/node';
 import type {
@@ -134,9 +132,8 @@ test('an empty settings-only hot wake hands off without another assistant turn o
     }), {
       async importItem() { throw new Error('Settings-only wake must not import an item.'); },
       async createCheckpointSnapshot() {
-        return { snapshotRef: createBundleRef({
+        return { snapshotRef: createSnapshotFixtureRef({
           hash: 'b'.repeat(64),
-          key: 'users/bundles/member-synthetic/empty-provider-wake.bundle.json',
           size: 512,
         }) };
       },
@@ -267,27 +264,16 @@ async function createStagedProviderWorkspace(vaultRoot: string) {
     kind: 'vault', roots: [{ root: vaultRoot, rootKey: 'vault' }],
   });
   assert.ok(base);
-  const hot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
   const baseHash = sha256HostedBundleHex(base);
-  const hotHash = sha256HostedBundleHex(hot.bundle);
   return {
     artifactBytesByHash: new Map([
       [baseHash, base],
-      [hotHash, hot.bundle],
     ]),
     pendingInputId,
     workspace: createWorkspaceState({
-      snapshotRef: buildHostedExecutionLayeredSnapshotRef({
-        base: createBundleRef({
-          hash: baseHash,
-          key: 'users/bundles/member-synthetic/staged-provider-base.bundle.json',
-          size: base.byteLength,
-        }),
-        hot: createBundleRef({
-          hash: hotHash,
-          key: 'users/bundles/member-synthetic/staged-provider-hot.bundle.json',
-          size: hot.bundle.byteLength,
-        }),
+      snapshotRef: createSnapshotFixtureRef({
+        hash: baseHash,
+        size: base.byteLength,
       }),
     }),
   };

@@ -399,7 +399,6 @@ describe.skipIf(!runPostgresProof)(
         // Phone A is a fully configured sending line that currently holds the
         // provider id — the strongest candidate the lister can return.
         const rowA = await upsertHostedLinqLineForPhoneTx({
-          activeMemberLimit: null,
           observedAt: new Date(),
           phoneNumber: phoneA,
           prisma,
@@ -487,7 +486,6 @@ describe.skipIf(!runPostgresProof)(
         // A pre-rollout row: configured and holding a provider id written by
         // the former lenient path, with no snapshot confirmation.
         const row = await upsertHostedLinqLineForPhoneTx({
-          activeMemberLimit: null,
           observedAt: new Date(),
           phoneNumber: phone,
           prisma,
@@ -597,7 +595,6 @@ describe.skipIf(!runPostgresProof)(
       try {
         for (const [phone, id] of [[phoneA, providerId], [phoneOther, otherProviderId]] as const) {
           const seeded = await upsertHostedLinqLineForPhoneTx({
-            activeMemberLimit: null,
             observedAt: new Date(),
             phoneNumber: phone,
             prisma,
@@ -915,7 +912,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("updates a legacy configured row and fills its active-member limit in one bulk apply", async () => {
+    it("updates a legacy configured row in one bulk apply without creating a new-key duplicate", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const phone = buildSyntheticProofPhoneNumber();
       const configuredAt = new Date("2026-08-09T15:00:00.000Z");
@@ -931,18 +928,16 @@ describe.skipIf(!runPostgresProof)(
           throw new Error("Expected a legacy lookup key.");
         }
         await upsertHostedLinqLineForPhoneTx({
-          activeMemberLimit: null,
           observedAt: new Date("2026-08-09T14:00:00.000Z"),
           phoneNumber: phone,
           prisma,
           source: "configured",
         });
 
-        process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(TEST_KEYRING_ENTRIES)
-          .map(([version, key]) => `${version}:${key}`)
-          .join(",");
-        process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-        clearHostedOnboardingEnvCache();
+        configureHostedContactPrivacyKeyringForTest({
+          currentVersion: "v2",
+          entries: TEST_KEYRING_ENTRIES,
+        });
         const currentLookupKey = createHostedPhoneLookupKey(phone);
         lookupKeys = createHostedPhoneLookupKeyReadCandidates(phone);
         if (!currentLookupKey || currentLookupKey === legacyLookupKey) {
@@ -950,7 +945,6 @@ describe.skipIf(!runPostgresProof)(
         }
 
         await expect(syncHostedLinqConfiguredLinesTx({
-          activeMemberLimit: 175,
           observedAt: configuredAt,
           phoneNumbers: [phone],
           prisma,
@@ -959,13 +953,11 @@ describe.skipIf(!runPostgresProof)(
         expect(await prisma.hostedLinqLine.findUnique({
           where: { phoneNumberLookupKey: legacyLookupKey },
           select: {
-            activeMemberLimit: true,
             configuredAt: true,
             phoneNumberHint: true,
             source: true,
           },
         })).toEqual({
-          activeMemberLimit: 175,
           configuredAt,
           phoneNumberHint: `*** ${phone.slice(-4)}`,
           source: "configured",
@@ -1026,7 +1018,6 @@ describe.skipIf(!runPostgresProof)(
 
         await expect(Promise.all([
           syncHostedLinqConfiguredLinesTx({
-            activeMemberLimit: null,
             phoneNumbers: [phoneOne, phoneTwo],
             prisma,
           }),
