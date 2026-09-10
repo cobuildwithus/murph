@@ -19,7 +19,6 @@ import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   preinitializeCodexAssistantProcess as preinitializeCodexAssistantProcessUnchecked,
   resolveCodexAssistantLabel as resolveCodexAssistantConfigLabel,
-  resolveCodexStaticModels as resolveCodexStaticModelCatalog,
 } from './providers/codex-cli.js'
 import { createCatalogModel } from './providers/catalog.js'
 import type {
@@ -89,13 +88,6 @@ export function resolveCodexAssistantLabel(
 ): string {
   const normalized = normalizeAssistantProviderConfig(input)
   return resolveCodexAssistantConfigLabel(normalized)
-}
-
-export function resolveCodexStaticModels(
-  input: AssistantProviderConfigLike | null | undefined,
-): readonly AssistantCatalogModel[] {
-  normalizeAssistantProviderConfig(input)
-  return resolveCodexStaticModelCatalog()
 }
 
 export async function executeCodexAssistantTurn(

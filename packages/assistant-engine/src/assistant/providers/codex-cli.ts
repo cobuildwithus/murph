@@ -23,9 +23,6 @@ import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
 } from '@murphai/hosted-execution/assistant-capabilities'
 import {
-  DEFAULT_CODEX_MODELS,
-} from './catalog.js'
-import {
   getAssistantBindingContextLines,
 } from '../bindings.js'
 import {
@@ -1381,8 +1378,4 @@ export function resolveCodexAssistantLabel(
   config: AssistantProviderTurnExecutionInput['providerConfig'],
 ): string {
   return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
-}
-
-export function resolveCodexStaticModels(): typeof DEFAULT_CODEX_MODELS {
-  return DEFAULT_CODEX_MODELS
 }
