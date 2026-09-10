@@ -1,8 +1,28 @@
 # Testing And CI Map
 
-Last verified: 2026-09-05
+Last verified: 2026-09-10
 
 ## Current Repo Checks
+
+`node scripts/run-postgres-tests.mjs --shard 1/4` runs the first of four
+required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
+service with the checked-in Prisma migrations, then discovers Web tests that
+declare a `MURPH_TEST_*POSTGRES*` flag and all `*.db.test.ts` files. The runner
+uses the broad Web Vitest config, enables the concurrency, runtime-log, and
+iMessage enrollment database owners, and executes files serially in each shard.
+Its in-memory receipt requires every selected file exactly once, at least one
+executed case per file, and no skipped, pending, or failed cases. Missing files,
+collection errors, interrupted runs, and an empty inventory fail the existing
+required `Release checks (ubuntu)` aggregator. Consent and supplement search
+retain their separate required database lanes below.
+
+For local proof, use an isolated loopback `murph_test_<slug>` database, run
+`pnpm --dir apps/web prisma:generate` and
+`pnpm --dir apps/web prisma:migrate:deploy` with that `DATABASE_URL`, then invoke
+the same runner. `--shard 1/1` selects the full discovered inventory; other shard
+counts partition it without accepting file filters that could silently narrow
+the required proof. Provider boundaries remain synthetic in these existing
+suites; the gate proves production database owners, not live provider behavior.
 
 Vault-share replacement deadline proof lives in `projection-store.test.ts` and
 `vault-share-deliver-route.test.ts`. With an isolated migrated loopback
@@ -1387,8 +1407,9 @@ database. The shard prepares the current Prisma schema with `prisma db push`;
 supplement search retains its own database and transactional fixtures. This
 proves decline uniqueness under real PostgreSQL contention, immutable retry audit
 values, accepted-scope exclusion, event/grant coherence, sequential withdrawal
-replay, and rollback after real event and grant writes. Existing opt-in
-`MURPH_TEST_POSTGRES_CONCURRENCY` suites are not enabled by this CI change.
+replay, and rollback after real event and grant writes. The broader
+`MURPH_TEST_POSTGRES_CONCURRENCY` suites run in the separate required
+PostgreSQL shards described above.
 
 For local proof, prepare an isolated loopback `murph_dev_<slug>` database with the
 same schema command, then run

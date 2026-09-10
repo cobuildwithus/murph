@@ -921,7 +921,7 @@ describe.skipIf(!runPostgresProof)(
       const configuredAt = new Date("2026-08-09T15:00:00.000Z");
       const restoreKeyring = configureHostedContactPrivacyKeyringForTest({
         currentVersion: "v1",
-        entries: TEST_KEYRING_ENTRIES,
+        entries: { v1: TEST_KEYRING_ENTRIES.v1 },
       });
       let lookupKeys: string[] = [];
 
@@ -938,6 +938,9 @@ describe.skipIf(!runPostgresProof)(
           source: "configured",
         });
 
+        process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(TEST_KEYRING_ENTRIES)
+          .map(([version, key]) => `${version}:${key}`)
+          .join(",");
         process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
         clearHostedOnboardingEnvCache();
         const currentLookupKey = createHostedPhoneLookupKey(phone);

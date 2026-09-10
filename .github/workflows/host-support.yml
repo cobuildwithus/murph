@@ -481,6 +481,69 @@ jobs:
       - name: Run hosted-Web test shard
         run: pnpm --dir apps/web verify
 
+  release-web-postgres-linux:
+    name: Release Web PostgreSQL (${{ matrix.shard }}/4)
+    needs: markdown-docs-scope
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:17
+        env:
+          POSTGRES_DB: murph_test_gate
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_test_gate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test_gate
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma clients
+        run: pnpm --dir apps/web prisma:generate
+
+      - name: Verify PostgreSQL discovery and execution receipts
+        run: node --test scripts/run-postgres-tests.test.mjs
+
+      - name: Apply production database migrations
+        run: pnpm --dir apps/web prisma:migrate:deploy
+
+      - name: Run discovered PostgreSQL test shard
+        run: node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/4
+
   release-cloudflare-verification-linux:
     name: Release Cloudflare verification (ubuntu)
     needs: markdown-docs-scope
@@ -659,6 +722,7 @@ jobs:
       - release-package-coverage-linux
       - release-web-build-linux
       - release-web-tests-linux
+      - release-web-postgres-linux
       - release-cloudflare-verification-linux
       - release-fixture-coverage-linux
       - production-runner-bundle-budget-linux
@@ -681,6 +745,7 @@ jobs:
           PACKAGE_RESULT: ${{ needs.release-package-coverage-linux.result }}
           WEB_BUILD_RESULT: ${{ needs.release-web-build-linux.result }}
           WEB_TEST_RESULT: ${{ needs.release-web-tests-linux.result }}
+          WEB_POSTGRES_RESULT: ${{ needs.release-web-postgres-linux.result }}
           CLOUDFLARE_RESULT: ${{ needs.release-cloudflare-verification-linux.result }}
           FIXTURE_RESULT: ${{ needs.release-fixture-coverage-linux.result }}
           BUNDLE_RESULT: ${{ needs.production-runner-bundle-budget-linux.result }}
@@ -698,7 +763,7 @@ jobs:
                 echo "Markdown documentation proof did not succeed." >&2
                 exit 1
               fi
-              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$WEB_POSTGRES_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
                 if [[ "$result" != "skipped" ]]; then
                   echo "Markdown documentation proof requires every release shard to remain skipped." >&2
                   exit 1
@@ -711,7 +776,7 @@ jobs:
                 echo "Full release proof requires the documentation-only job to remain skipped." >&2
                 exit 1
               fi
-              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$WEB_POSTGRES_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
                 if [[ "$result" != "success" ]]; then
                   echo "Full release proof requires every release shard to succeed." >&2
                   exit 1
