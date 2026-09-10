@@ -21,6 +21,18 @@ const releasedContainers = [
 ] as const;
 
 describe("runHostedWorkerDeployment", () => {
+  it("refuses to enable small runners without synchronizing the private selector", async () => {
+    const dependencies = createDependencies();
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc", dependencies,
+      env: { CF_WORKER_NAME: "hosted-worker", HOSTED_EXECUTION_INCLUDE_SECRETS: "false",
+        HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "true",
+        HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256: "a".repeat(64) },
+      resultPath: "/tmp/deployment-result.json", runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json", workerName: "hosted-worker",
+    })).rejects.toThrow("syncing the private Worker selector");
+    expect(dependencies.deployDirect).not.toHaveBeenCalled();
+  });
   it("runs a direct deploy and records the final deployment traffic", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
