@@ -22,46 +22,9 @@ const staticProviderConfigs = {
 };
 
 describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
-  it("overlays member credentials without retaining platform-only secrets or functions", () => {
-    const resolved = resolveHostedRuntimeDeviceSyncProviderConfigs(
-      staticProviderConfigs,
-      {
-        strava: {
-          clientId: "member-strava-client",
-          clientSecret: "member-strava-secret",
-        },
-      },
-      {},
-    );
-
-    expect(resolved).toEqual({
-      oura: staticProviderConfigs.oura,
-      strava: {
-        apiBaseUrl: "https://platform-strava.example.test",
-        clientId: "member-strava-client",
-        clientSecret: "member-strava-secret",
-      },
-    });
-  });
-
-  it("constructs a member-only provider when no platform provider is configured", () => {
-    expect(
-      resolveHostedRuntimeDeviceSyncProviderConfigs(
-        {},
-        {
-          strava: {
-            clientId: "member-strava-client",
-            clientSecret: "member-strava-secret",
-          },
-        },
-        {},
-      ),
-    ).toEqual({
-      strava: {
-        clientId: "member-strava-client",
-        clientSecret: "member-strava-secret",
-      },
-    });
+  it("retains the configured Strava and Oura providers", () => {
+    expect(resolveHostedRuntimeDeviceSyncProviderConfigs(staticProviderConfigs, {}))
+      .toEqual(staticProviderConfigs);
   });
 
   it("preserves all 48 code-owned Junction production resources for hosted members", () => {
@@ -72,7 +35,6 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
           region: "us",
         },
       },
-      {},
       {
         JUNCTION_API_KEY: "sk_us_test_runtime",
         JUNCTION_CLIENT_USER_ID_SECRET: "runtime-client-user-secret",

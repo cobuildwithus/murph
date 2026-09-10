@@ -2071,24 +2071,6 @@ Last verified: 2026-09-04
   at most one replay per admitted day while keeping the existing 32-workout
   serial cap. Existing canonical facets remain untouched. A stream above the
   admitted sample limit remains a terminal bounded-cardinality failure.
-- A member-owned device provider application's revision is its credential
-  epoch. OAuth state and established connections retain the exact application
-  id and revision; credential replacement is blocked while a bound connection
-  is active and clears disconnected bindings plus unconsumed application state
-  before advancing the epoch. A missing, malformed, or permanently
-  undecryptable application makes the affected connection require
-  reauthorization without running credential-dependent provider work, and
-  every agent token-return path revalidates that exact application authority.
-  Disconnect, consent withdrawal, and account deletion may still use the
-  connection's stored OAuth access token for a provider's credential-free
-  revoke operation before the existing local purge; they never fall back to
-  operator credentials. Transient secure-box, root-key, database, and KMS
-  failures propagate as operational failures so a valid credential is never
-  misclassified as member-repairable state. Shared webhook admission rereads
-  the raw connection binding inside the existing health-data admission lock;
-  an application-bound row completes the trace without dirty state, wake,
-  signal, or provider job. Such connections retain scheduled reconciliation
-  until private-application webhook ownership is explicitly designed.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued
@@ -2867,11 +2849,20 @@ Last verified: 2026-09-04
   classification; the six per-pass `blockedCaptureCounts` start at zero and stay
   ephemeral. The warning emits all six counts, which sum to the blocked total.
   These describe the caught code, not a diagnosed production cause: changed or
-  absent image bytes share the precondition category; `VAULT_FILE_MISSING` stays
+  unreported absent image bytes share the precondition category; `VAULT_FILE_MISSING` stays
   separate. No error objects, messages, IDs, paths, or arbitrary keys enter these
   details. Successful passes stay silent; warning frequency, abort/unknown-error
   propagation, protection, batching, canonical writes, and retention/retry timing
   are unchanged.
+- A due generated-image capture whose exact attachment path is reported missing
+  by the hosted materializer can complete canonical retirement without restoring
+  expired bytes. Core still validates the generated-image event, manifest owner,
+  path and original attachment hash. A present file must match that hash even if
+  reported missing. Absent files receive a create-only raw tombstone; present
+  files retain their inspected-preimage replacement guard. The existing receipt
+  format replays both forms idempotently and rejects conflicting bytes. Already
+  absent bytes contribute zero to retired-byte counts. Unreported loss, invalid
+  metadata, protected captures and fresh captures keep their existing disposition.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
   start the selected requests, then use ordinary shell waits and exact replay to
   poll every accepted request until it returns completed or unavailable. The

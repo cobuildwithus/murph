@@ -4,7 +4,8 @@ import path from "node:path";
 import { readHostedRunnerDeployment, type HostedRunnerDeployment, type HostedRunnerRelease } from "../src/hosted-runner-release.ts";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 import type { ListCloudflareContainerApplications } from "./container-release-receipt.ts";
-import { runnerApplicationExecutionIdentity, runnerApplicationResources, runnerApplicationSpecification, type RunnerApplicationSpecification } from "./runner-release-application.ts";
+import { runnerApplicationExecutionIdentity, runnerApplicationMatches, runnerApplicationResources, runnerApplicationSpecification, type RunnerApplicationSpecification } from "./runner-release-application.ts";
+import { readSmallRunnerEnabled } from "../src/small-runner-profile.ts";
 
 export interface RunnerApplicationPreparation {
   applicationId: string | null;
@@ -22,6 +23,60 @@ export interface StagedRunnerRelease {
   deployment: HostedRunnerDeployment;
   promotionConfigPath: string;
   workerOnly: boolean;
+}
+
+/** Namespace migrations require deploy, so retain every native application and
+ * disable new selection for this one-time infrastructure publication. */
+export async function prepareSmallRunnerNamespaceBootstrap(input: {
+  allowed: boolean;
+  configPath: string;
+  currentVersion: unknown;
+  currentVersionId: string;
+  listApplications: ListCloudflareContainerApplications;
+}): Promise<string | null> {
+  const config: unknown = JSON.parse(await readFile(input.configPath, "utf8"));
+  if (!isObjectRecord(config) || !isObjectRecord(config.vars) || !Array.isArray(config.containers)) throw invalid();
+  if (!config.containers.some(entry => isObjectRecord(entry) && entry.class_name === "SmallRunnerContainer")) return null;
+  const exists = readVersionBindings(input.currentVersion).some(binding => isObjectRecord(binding)
+    && binding.type === "durable_object_namespace" && binding.class_name === "SmallRunnerContainer");
+  if (exists) { readNamespaceId(input.currentVersion, "SmallRunnerContainer"); return null; }
+  if (!input.allowed) throw new Error("Small runner namespace provisioning requires CF_BOOTSTRAP_SMALL_RUNNER=true in the protected deployment.");
+  const liveVars = readReleaseVariables(input.currentVersion);
+  const deployment = readHostedRunnerDeployment(liveVars) ?? { active: {
+    bank: "primary", id: input.currentVersionId,
+    bundleFingerprint: requiredString(liveVars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT),
+    sourceFingerprint: requiredString(liveVars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT),
+  }, candidate: null, previous: null };
+  if (deployment.candidate) throw pendingConflict();
+  const containers: Record<string, unknown>[] = [];
+  const logsEnabled = readLogsEnabled(config);
+  for (const value of config.containers) {
+    if (!isObjectRecord(value)) throw invalid();
+    const className = requiredString(value.class_name);
+    if (className === "SmallRunnerContainer") continue;
+    const live = await readNativeApplication(input.listApplications, applicationName(config, value));
+    if (!live) {
+      if (isOptionalBootstrapApplication(className, deployment)) continue;
+      throw invalid();
+    }
+    if (!isObjectRecord(live.configuration) || !isObjectRecord(live.durable_objects)
+      || live.durable_objects.namespace_id !== readNamespaceId(input.currentVersion, className)
+      || live.active_rollout != null) throw invalid();
+    const retained = retainNativeContainer(value, live);
+    if (!runnerApplicationMatches(live, runnerApplicationSpecification(retained, logsEnabled))) throw invalid();
+    containers.push(retained);
+  }
+  const output = path.join(path.dirname(input.configPath), `wrangler.bootstrap-small-${randomUUID()}.jsonc`);
+  await writeFile(output, `${JSON.stringify({ ...config, containers, vars: {
+    ...config.vars, ...liveVars, HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "false",
+    HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment),
+  } }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  return output;
+}
+
+function isOptionalBootstrapApplication(className: string, deployment: HostedRunnerDeployment): boolean {
+  return className === "StandbyRunnerContainer"
+    || (className === "NextRunnerContainer" && deployment.active.bank !== "next");
 }
 
 /** The renderer declares one budget; live authority chooses its physical namespace. */
@@ -100,10 +155,15 @@ export async function stageHostedRunnerRelease(input: {
     if (live && (!isObjectRecord(live.configuration) || !Number.isSafeInteger(live.max_instances)
       || Number(live.max_instances) < 0 || !isObjectRecord(live.durable_objects)
       || live.durable_objects.namespace_id !== readNamespaceId(input.currentVersion, className))) throw invalid();
-    return { rendered, className, name, live };
+    const updateImage = className === "DeploySmokeRunnerContainer"
+      || (!input.retainServingRunner && (className === activeClass || className === "SmallRunnerContainer"));
+    return { rendered, className, name, live, updateImage };
   }));
   const serving = entries.find(entry => entry.className === activeClass);
   const smoke = entries.find(entry => entry.className === "DeploySmokeRunnerContainer");
+  const small = entries.find(entry => entry.className === "SmallRunnerContainer");
+  assertSmallRunnerDeploymentMode({ small, currentVersion: input.currentVersion,
+    workerOnly: !!input.retainServingRunner, vars });
   if (!serving?.live || !smoke?.live || smoke.live.max_instances !== 1 || smoke.rendered.max_instances !== 1) throw invalid();
   const specification = runnerApplicationSpecification(serving.rendered, logsEnabled);
   const artifact = {
@@ -115,9 +175,8 @@ export async function stageHostedRunnerRelease(input: {
     artifact, specification, liveConfiguration: serving.live.configuration,
     retainServingRunner: !!input.retainServingRunner });
   const retirements: StagedRunnerRelease["retirements"] = [];
-  const effectiveContainers = entries.filter(entry => entry.live || entry.className === activeClass).map(entry => {
-    if (entry.className === "DeploySmokeRunnerContainer"
-      || (!input.retainServingRunner && entry.className === activeClass)) return entry.rendered;
+  const effectiveContainers = entries.filter(entry => entry.live || entry.updateImage).map(entry => {
+    if (entry.updateImage) return entry.rendered;
     if (!entry.live || !isObjectRecord(entry.live.configuration)) throw invalid();
     const retire = !input.retainServingRunner && entry.className === inactiveClass;
     if (retire && Number(entry.live.max_instances) > 0) retirements.push({
@@ -125,17 +184,10 @@ export async function stageHostedRunnerRelease(input: {
       namespaceId: readNamespaceId(input.currentVersion, entry.className),
     });
     const maxInstances = retire ? 0 : entry.live.max_instances;
-    const { rollout_step_percentage: steps, constraints: _constraints, ...rendered } = entry.rendered;
-    const resources = runnerApplicationResources(entry.live.configuration);
-    const constraints = isObjectRecord(entry.live.constraints) ? entry.live.constraints : {};
-    return { ...rendered, image: requiredString(entry.live.configuration.image), max_instances: maxInstances,
-      instance_type: { vcpu: resources.vcpu, memory_mib: resources.memoryMiB, disk_mb: resources.diskMB },
-      rollout_active_grace_period: entry.live.rollout_active_grace_period,
-      ...(Array.isArray(constraints.regions) ? { constraints: { regions: constraints.regions } } : {}),
-      ...(Number(maxInstances) > 0 && steps !== undefined ? { rollout_step_percentage: steps } : {}) };
+    return retainNativeContainer(entry.rendered, entry.live, maxInstances);
   });
-  const applications = [smoke, ...(!input.retainServingRunner ? [serving] : [])].map(entry => ({
-    applicationId: requiredString(entry.live?.id), className: entry.className, name: entry.name,
+  const applications = [smoke, ...entries.filter(entry => entry.updateImage && entry !== smoke)].map(entry => ({
+    applicationId: entry.live ? requiredString(entry.live.id) : null, className: entry.className, name: entry.name,
     namespaceId: readNamespaceId(input.currentVersion, entry.className),
     specification: runnerApplicationSpecification(entry.rendered, logsEnabled),
   }));
@@ -143,13 +195,42 @@ export async function stageHostedRunnerRelease(input: {
   const attempt = randomUUID();
   const configPath = path.join(path.dirname(input.configPath), `wrangler.stage-${attempt}.jsonc`);
   const promotionConfigPath = path.join(path.dirname(input.configPath), `wrangler.promote-${attempt}.jsonc`);
-  const render = (release: HostedRunnerDeployment) => `${JSON.stringify({
-    ...config, containers: effectiveContainers, vars: { ...vars, HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
+  const render = (release: HostedRunnerDeployment, staging = false) => `${JSON.stringify({
+    ...config, containers: effectiveContainers, vars: { ...vars,
+      ...(!input.retainServingRunner && staging && small ? { HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "false" } : {}),
+      HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
   }, null, 2)}\n`;
-  await writeFile(configPath, render(deployment), { encoding: "utf8", flag: "wx" });
+  await writeFile(configPath, render(deployment, true), { encoding: "utf8", flag: "wx" });
   await writeFile(promotionConfigPath, render(promoted), { encoding: "utf8", flag: "wx" });
   return { activeApplicationName: serving.name, applications, retirements, configPath, deployment,
     promotionConfigPath, workerOnly: !!input.retainServingRunner };
+}
+
+function assertSmallRunnerDeploymentMode(input: {
+  small: { className: string; live: Record<string, unknown> | undefined } | undefined;
+  currentVersion: unknown;
+  workerOnly: boolean;
+  vars: Record<string, unknown>;
+}): void {
+  if (!input.small) return;
+  if (!input.workerOnly) readNamespaceId(input.currentVersion, input.small.className);
+  else if (!input.small.live && readSmallRunnerEnabled(input.vars)) {
+    throw new Error("Enabling small runners requires a full container deployment.");
+  }
+}
+
+/** Both bootstrap and retained releases use native resource ownership. */
+function retainNativeContainer(rendered: Record<string, unknown>, live: Record<string, unknown>, maxInstances: unknown = live.max_instances): Record<string, unknown> {
+  if (!isObjectRecord(live.configuration)) throw invalid();
+  const resources = runnerApplicationResources(live.configuration);
+  const { rollout_step_percentage: steps, constraints: _constraints, ...rest } = rendered;
+  const constraints = isObjectRecord(live.constraints) ? live.constraints : {};
+  return { ...rest, image: requiredString(live.configuration.image), max_instances: maxInstances,
+    instance_type: { vcpu: resources.vcpu, memory_mib: resources.memoryMiB, disk_mb: resources.diskMB },
+    rollout_active_grace_period: live.rollout_active_grace_period,
+    ...(Array.isArray(constraints.regions) ? { constraints: { regions: constraints.regions } } : {}),
+    ...(Number(maxInstances) > 0 && steps !== undefined ? { rollout_step_percentage: steps } : {}),
+  };
 }
 
 function prepareImageTransition({ active, liveDeployment, artifact, specification, liveConfiguration, retainServingRunner }: {

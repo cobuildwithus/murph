@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import { destroyHostedExecutionContainer, RunnerContainer } from "../src/runner-container.js";
+import { SmallRunnerContainer } from "../src/small-runner-container.ts";
 import {
   HOSTED_RUNNER_REGION,
   HOSTED_STANDBY_LOCATION_HINT,
@@ -88,6 +90,37 @@ describe("hosted standby contract", () => {
 });
 
 describe("RunnerContainer slot lifecycle", () => {
+  it("admits only the selected member to a small runner, preserves replay after disabling, and retires the exact target", async () => {
+    const userId = "member-small-synthetic";
+    const environment = {
+      HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "true",
+      HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256: createHash("sha256").update(userId).digest("hex"),
+    };
+    const h = createStandbyContainerHarness({ small: true, environment });
+    const input = { userId, slotName: h.slotName, releaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, claimId: createHostedStandbyClaimId() };
+    await expect(h.container.bindStandbySlot({ ...input, userId: "member-ordinary-synthetic" }))
+      .rejects.toThrow("not eligible");
+    await expect(h.container.prepareStandbySlot({ ...input, timeoutMs: 1000 }))
+      .rejects.toThrow("do not provide shared standby inventory");
+    await expect(h.container.bindStandbySlot(input)).resolves.toMatchObject({ bound: true, userId });
+    h.environment.HOSTED_EXECUTION_SMALL_RUNNER_ENABLED = "false";
+    await expect(h.container.bindStandbySlot(input)).resolves.toMatchObject({ bound: true, userId });
+    await expect(h.container.bindStandbySlot({ ...input, userId: "member-ordinary-synthetic" })).rejects.toThrow();
+    await destroyHostedExecutionContainer({ runnerContainerNamespace: {
+      getByName(name) { expect(name).toBe(h.slotName); return h.container; },
+    }, runnerContainerName: h.slotName, userId });
+    expect((await h.container.readStandbySlotBinding()).state).toBe("retired");
+    expect(h.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a small target addressed through the normal namespace", async () => {
+    const h = createStandbyContainerHarness();
+    await expect(h.container.bindStandbySlot({ userId: "member-small-synthetic",
+      claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      slotName: createHostedRunnerSlotName(RELEASE_ID, "small"),
+    })).rejects.toThrow("different namespace");
+  });
   it("uses SIGTERM for the hosted-local shutdown checkpoint control", async () => {
     const stop = vi.fn(async () => undefined);
     const container: HostedLocalTestStandbyRunnerContainer = Object.create(
@@ -1225,6 +1258,7 @@ function seedLegacyCoordinator(db: DatabaseSync, ready: string, pending: string,
 }
 
 function createStandbyContainerHarness(input: {
+  small?: boolean;
   destroy?: () => Promise<void>;
   nativeStatus?: string;
   environment?: Record<string, unknown>;
@@ -1239,17 +1273,19 @@ function createStandbyContainerHarness(input: {
     preflightReady = true;
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
-  const slotName = createHostedRunnerSlotName(RELEASE_ID);
-  const container = new RunnerContainer({
-    ...state,
-    id: { name: slotName },
-    container: { get running() { return nativeStatus !== "stopped"; } },
-  }, {
+  const slotName = createHostedRunnerSlotName(RELEASE_ID, input.small ? "small" : "default");
+  const environment: Record<string, unknown> = {
     CF_VERSION_METADATA: { id: RELEASE_ID },
     HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: BUNDLE_FINGERPRINT,
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,
     ...input.environment,
-  });
+  };
+  const ContainerClass = input.small ? SmallRunnerContainer : RunnerContainer;
+  const container = new ContainerClass({
+    ...state,
+    id: { name: slotName },
+    container: { get running() { return nativeStatus !== "stopped"; } },
+  }, environment);
   const platformDestroy = input.destroy;
   const destroy = vi.fn(async () => {
     await platformDestroy?.();
@@ -1286,6 +1322,7 @@ function createStandbyContainerHarness(input: {
   return {
     codexPreflight,
     container,
+    environment,
     destroy,
     renewActivityTimeout,
     setNativeStatus(status: string) {

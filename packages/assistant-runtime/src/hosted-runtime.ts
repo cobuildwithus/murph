@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  ensureHostedAssistantOperatorDefaults,
+  type HostedAssistantBootstrapResult,
+} from "@murphai/operator-config/hosted-assistant-config";
+
+import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeLatencyPhaseBreakdown,
@@ -25,7 +30,6 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
-  recoverInterruptedClosedIntegrationIngestArchives,
   CURRENT_VAULT_FORMAT_VERSION,
   runIntegrationIngestMigration,
   VaultError,
@@ -503,10 +507,9 @@ function hasHostedVaultMetadata(vaultRoot: string): boolean {
 
 async function prepareHostedVaultForRuntime(input: {
   assertRuntimeNotAborted: () => void;
-  runtimeAbortSignal: AbortSignal;
   vaultRoot: string;
 }): Promise<HostedVaultStartupPreparationResult> {
-  const { assertRuntimeNotAborted, runtimeAbortSignal, vaultRoot } = input;
+  const { assertRuntimeNotAborted, vaultRoot } = input;
   if (!hasHostedVaultMetadata(vaultRoot)) {
     return { mutated: false };
   }
@@ -540,20 +543,6 @@ async function prepareHostedVaultForRuntime(input: {
     }
   }
 
-  assertRuntimeNotAborted();
-  const archiveRecovery = await recoverInterruptedClosedIntegrationIngestArchives({
-    signal: runtimeAbortSignal,
-    vaultRoot,
-  });
-  assertRuntimeNotAborted();
-  if (archiveRecovery.blockedConflictCount > 0) {
-    throw new VaultError(
-      "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT",
-      "Hosted vault startup found conflicting integration ingest shard representations that could not be repaired safely.",
-      { blockedConflictCount: archiveRecovery.blockedConflictCount },
-    );
-  }
-  mutated ||= archiveRecovery.repairedShardCount > 0;
   return { mutated };
 }
 
@@ -571,6 +560,7 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 }
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
+  plan: HostedInitialMailboxImportPlan;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   lanes: readonly HostedMailboxLane[];
   mailboxFetchSignal?: AbortSignal | null;
@@ -578,9 +568,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
 }): Promise<HostedInitialMailboxImportResult> {
-  const plan = resolveHostedInitialMailboxImportPlan({
-    vaultRoot: input.runnerInput.vaultRoot,
-  });
+  const { plan } = input;
   const prefetch = plan.bootstrapRequired
     ? null
     : await createHostedForegroundMailboxPrefetch({
@@ -817,6 +805,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  assistantBootstrap?: HostedAssistantBootstrapResult | null;
   assistantTarget?: AssistantModelTarget | null;
   assistantAskRequestTargetKind?: "joined_group";
   onConversationActivityObserved?: (() => void) | null;
@@ -1840,6 +1829,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
+      assistantBootstrap: context?.assistantBootstrap ?? null,
       ...(invocationAssistantTarget
         ? { assistantTarget: invocationAssistantTarget }
         : {}),
@@ -1965,7 +1955,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     assertRuntimeNotAborted();
     const hostedVaultStartupPreparation = await prepareHostedVaultForRuntime({
       assertRuntimeNotAborted,
-      runtimeAbortSignal: runtimeAbortController.signal,
       vaultRoot: restored.vaultRoot,
     });
     assertRuntimeNotAborted();
@@ -2437,9 +2426,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       });
       return preparedCodexRuntime;
     };
+    let initialAssistantBootstrap: HostedAssistantBootstrapResult | null = null;
     if (!systemMailboxProcessingMode) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
+      initialAssistantBootstrap = await ensureHostedAssistantOperatorDefaults({
+        allowMissing: true,
+        env: hostedCodexRuntime.runtimeEnv,
+        homeDirectory: restored.operatorHomeRoot,
+      });
       invocationAssistantTarget = await readHostedAssistantExecutionDefaultTarget({
+        assistantBootstrap: initialAssistantBootstrap,
         homeDirectory: restored.operatorHomeRoot,
         runtimeEnv: hostedCodexRuntime.runtimeEnv,
       });
@@ -2567,12 +2563,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         initialPendingRuntimeWake.requestedProcessingMode ?? null,
       );
     }
-    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
-      mergeHostedRuntimeWakeLatencySeeds(
-        initialPendingRuntimeWake,
-        invocationOrchestrationLatencySeed,
+    const initialMailboxImportContext: HostedWorkspaceRunnerMailboxImportContext = {
+      ...createHostedRuntimeWakeInitialImportContext(
+        mergeHostedRuntimeWakeLatencySeeds(
+          initialPendingRuntimeWake,
+          invocationOrchestrationLatencySeed,
+        ),
       ),
-    );
+      assistantBootstrap: initialAssistantBootstrap,
+    };
     emitPhaseLog({
       details: {
         initialMailboxImportLanes: [...initialMailboxImportLanes],
@@ -2589,6 +2588,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let initialMailboxImportResult: HostedInitialMailboxImportResult;
     if (returnSystemMailboxBeforeInitialImport === null) {
       initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+        plan: initialMailboxImportPlan,
         importItemContext: initialMailboxImportContext,
         lanes: initialMailboxImportLanes,
         prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
@@ -2625,6 +2625,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       try {
         initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+          plan: initialMailboxImportPlan,
           importItemContext: initialMailboxImportContext,
           lanes: initialMailboxImportLanes,
           mailboxFetchSignal: initialMailboxFetchWakeInterruption.signal,
@@ -3419,8 +3420,29 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         }
         if (shouldYieldSystemMailboxWork()) return;
+        let recordingComplete = false;
         const interruption = createHostedRuntimeCheckpointWakeInterruption({
           enabled: true, runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          // A scheduler nudge can arrive with an empty conversation mailbox.
+          // Only real foreground input may discard this completion snapshot.
+          async shouldInterrupt() {
+            if (!recordingComplete) return true;
+            if (assistantExecutionBlocked) return false;
+            const prefetch = await createHostedForegroundMailboxPrefetch({
+              lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+              limitPerLane: mailboxBudget.fetchLimitPerLane,
+              requestId: `${requestId}:independent-completion-foreground-check`,
+              runnerInput: baseRunnerInput,
+              signal: backgroundWorkSignal,
+            });
+            if (!(await prefetch.response).items.some((item) => item.lane === "conversation")) {
+              return false;
+            }
+            systemMailboxForegroundWakePrefetch = prefetch;
+            foregroundWakeObserved = true;
+            defaultOwnerWakeObserved = true;
+            return true;
+          },
         });
         const recordSignal = interruption.signal
           ? AbortSignal.any([backgroundWorkSignal, interruption.signal])
@@ -3438,6 +3460,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               completion?.nextWakeReason ?? null,
             ));
           }
+          recordingComplete = true;
           await checkpointSystemMailboxMode(
             "system_mailbox.checkpoint.independent_completion", [], interruption.signal,
           );
@@ -5007,6 +5030,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       latencySeed: HostedRuntimeWakeLatencySeed;
       requestId: string;
     }): Promise<{
+      caughtUpToEveryLaneHighWater: boolean;
       containsOnlyBrowserVaultRefreshWakes: boolean;
       containsOnlyDeviceSyncWakes: boolean;
       wake: HostedVaultShareOfferWake;
@@ -5023,6 +5047,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             initialMailboxPrefetch,
           );
         return {
+          caughtUpToEveryLaneHighWater: inspection.caughtUpToEveryLaneHighWater,
           containsOnlyBrowserVaultRefreshWakes:
             inspection.containsOnlyBrowserVaultRefreshWakes,
           containsOnlyDeviceSyncWakes:
@@ -5034,8 +5059,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
         };
       } catch {
-        // Empty, mixed, or uninspectable wakes preserve foreground priority.
+        // Failed classification preserves foreground priority.
         return {
+          caughtUpToEveryLaneHighWater: false,
           containsOnlyBrowserVaultRefreshWakes: false,
           containsOnlyDeviceSyncWakes: false,
           wake: {
@@ -5048,6 +5074,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     };
     let vaultShareWakeClassificationOrdinal = 0;
     const invocationWorkspaceVersion = input.request.workspaceVersion;
+    const invocationProcessingMode = input.request.processingMode;
     const offerHostedVaultShareProjectionDuringIdle = async (input: {
       deferDeviceSyncWakes?: boolean;
       deferredDeviceSyncWake?: HostedVaultShareOfferWake | null;
@@ -5067,7 +5094,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         latencySeed: HostedRuntimeWakeLatencySeed,
       ): Promise<{
         mayWaitForProjection: boolean;
-        wake: HostedVaultShareOfferWake;
+        wake: HostedVaultShareOfferWake | null;
       }> => {
         const foregroundWake = {
           deferredForProjection: false,
@@ -5089,6 +5116,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           requestId:
             `${requestId}:vault-share-wake-classify:${vaultShareWakeClassificationOrdinal}`,
         });
+        // A fully caught-up empty prefix is a notification, not new work.
+        // Retaining it as a foreground wake would dirty the runtime again
+        // before checkpoint-backed completions can drain.
+        if (
+          !shutdownWasSignaled()
+          && !runtimeStateDirty
+          && !imageGenerationController?.hasCompleted()
+          && (latencySeed.requestedProcessingMode == null
+            || latencySeed.requestedProcessingMode === (invocationProcessingMode ?? "default"))
+          && classification.caughtUpToEveryLaneHighWater
+        ) {
+          return { mayWaitForProjection: true, wake: null };
+        }
         return {
           mayWaitForProjection:
             !shutdownWasSignaled()
@@ -5100,9 +5140,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         };
       };
       const rememberDeferredDeviceSyncWake = (
-        wake: HostedVaultShareOfferWake,
+        wake: HostedVaultShareOfferWake | null,
       ): void => {
-        deferredDeviceSyncWake = wake;
+        if (wake) deferredDeviceSyncWake = wake;
       };
       const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
       const consumePendingProjectionWake = async (): Promise<
@@ -8333,6 +8373,7 @@ interface HostedRuntimeCheckpointWakeInterruption {
 function createHostedRuntimeCheckpointWakeInterruption(input: {
   enabled: boolean;
   runtimeWakeSignal: RuntimeWakeSignal | null;
+  shouldInterrupt?(notification: RuntimeWakeNotification): Promise<boolean>;
 }): HostedRuntimeCheckpointWakeInterruption {
   if (!input.enabled || !input.runtimeWakeSignal) {
     return {
@@ -8345,21 +8386,28 @@ function createHostedRuntimeCheckpointWakeInterruption(input: {
   const checkpointAbortController = new AbortController();
   const waitAbortController = new AbortController();
   let notification: RuntimeWakeNotification | null = null;
-  const waitCompletion = input.runtimeWakeSignal.wait(waitAbortController.signal).then(
-    (nextNotification) => {
-      notification = nextNotification;
-      checkpointAbortController.abort(
-        new HostedRuntimeCheckpointInterruptedByWakeError({
-          notification: nextNotification,
-        }),
-      );
-    },
-    (error: unknown) => {
+  const runtimeWakeSignal = input.runtimeWakeSignal;
+  const waitCompletion = (async () => {
+    try {
+      while (!waitAbortController.signal.aborted) {
+        const nextNotification = await runtimeWakeSignal.wait(waitAbortController.signal);
+        if (input.shouldInterrupt && !await input.shouldInterrupt(nextNotification)) continue;
+        // A consumed wake still belongs to the caller if disposal has begun.
+        // Preserve it for takeNotification() and the foreground handoff.
+        notification = nextNotification;
+        checkpointAbortController.abort(
+          new HostedRuntimeCheckpointInterruptedByWakeError({
+            notification: nextNotification,
+          }),
+        );
+        return;
+      }
+    } catch (error) {
       if (!waitAbortController.signal.aborted) {
         checkpointAbortController.abort(error);
       }
-    },
-  );
+    }
+  })();
 
   return {
     async dispose() {

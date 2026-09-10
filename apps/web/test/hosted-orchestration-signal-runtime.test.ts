@@ -110,6 +110,91 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
+  it("starts an authorized latency hint without waiting for Temporal acknowledgement", async () => {
+    let acceptSignal!: () => void;
+    mocks.signalWithStart.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      acceptSignal = resolve;
+    }));
+    const onSignalStarted = vi.fn();
+    const request = {
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: { lane: "conversation" as const, laneSeq: "42", userId: "member_123" },
+      mailboxItemId: "mailbox_123",
+      onSignalStarted,
+    };
+    let settled = false;
+    const signal = signalHostedMailboxAppendRuntime(request).then((result) => {
+      settled = true;
+      return result;
+    });
+    await vi.waitFor(() => expect(mocks.signalWithStart).toHaveBeenCalledTimes(1));
+    try {
+      expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(1);
+      expect(onSignalStarted).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+    } finally {
+      acceptSignal();
+      await signal;
+    }
+  });
+
+  it("removes a slow Temporal acknowledgement from hint latency while preserving access and success ordering", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const onSignalStarted = vi.fn();
+      mocks.hostedMemberFindUnique.mockImplementationOnce(() => new Promise((resolve) => {
+        setTimeout(() => resolve(buildActiveMemberRecord()), 80);
+      }));
+      mocks.signalWithStart.mockImplementationOnce(() => new Promise<void>((resolve) => {
+        setTimeout(resolve, 250);
+      }));
+      let settled = false;
+      const signal = signalHostedMailboxAppendRuntime({
+        client: buildClient(),
+        expectedUserId: "member_123",
+        knownCheckpoint: { lane: "conversation", laneSeq: "42", userId: "member_123" },
+        mailboxItemId: "mailbox_123",
+        onSignalStarted,
+      }).then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(79);
+      expect(onSignalStarted).not.toHaveBeenCalled();
+      expect(mocks.signalWithStart).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(Date.now() - startedAt).toBe(80);
+      expect(onSignalStarted).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(250);
+      await signal;
+      expect(Date.now() - startedAt).toBe(330);
+      expect(settled).toBe(true);
+      expect(onSignalStarted).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not launch a hint after cancellation during access validation", async () => {
+    const controller = new AbortController();
+    const reason = new Error("synthetic handoff deadline");
+    mocks.hostedMemberFindUnique.mockImplementationOnce(async () => {
+      controller.abort(reason);
+      return buildActiveMemberRecord();
+    });
+    const onSignalStarted = vi.fn();
+    await expect(signalHostedMailboxAppendRuntime({
+      abortSignal: controller.signal,
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: { lane: "conversation", laneSeq: "42", userId: "member_123" },
+      mailboxItemId: "mailbox_123",
+      onSignalStarted,
+    })).rejects.toBe(reason);
+    expect(onSignalStarted).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
   it("signals the per-user workflow with only a mailbox pointer", async () => {
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
@@ -246,6 +331,7 @@ describe("hosted runtime Temporal signaling", () => {
   });
 
   it("does not signal planner lane facts without active owner or participant access", async () => {
+    const onSignalStarted = vi.fn();
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "canceled",
       threadContainer: {
@@ -259,6 +345,7 @@ describe("hosted runtime Temporal signaling", () => {
 
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
+      onSignalStarted,
       expectedUserId: "member_123",
       knownCheckpoint: {
         lane: "conversation",
@@ -271,13 +358,16 @@ describe("hosted runtime Temporal signaling", () => {
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
     expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
+    expect(onSignalStarted).not.toHaveBeenCalled();
   });
 
   it("does not signal planner-checkpoint pointers for inactive members", async () => {
+    const onSignalStarted = vi.fn();
     mocks.hostedMemberFindUnique.mockResolvedValue(null);
 
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
+      onSignalStarted,
       expectedUserId: "member_123",
       knownCheckpoint: {
         lane: "conversation",
@@ -287,11 +377,14 @@ describe("hosted runtime Temporal signaling", () => {
       mailboxItemId: "mailbox_123",
     })).rejects.toThrow("Hosted runtime user is not active.");
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
+    expect(onSignalStarted).not.toHaveBeenCalled();
   });
 
   it("rejects planner lane facts whose owner does not match the expected user", async () => {
+    const onSignalStarted = vi.fn();
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
+      onSignalStarted,
       expectedUserId: "member_123",
       knownCheckpoint: {
         lane: "conversation",
@@ -301,6 +394,7 @@ describe("hosted runtime Temporal signaling", () => {
       mailboxItemId: "mailbox_123",
     })).rejects.toThrow("Hosted mailbox item owner does not match runtime signal user.");
     expect(mocks.signalWithStart).not.toHaveBeenCalled();
+    expect(onSignalStarted).not.toHaveBeenCalled();
   });
 
   it("signals duplicate mailbox append attempts safely", async () => {

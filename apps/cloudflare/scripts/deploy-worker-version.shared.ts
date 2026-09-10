@@ -10,6 +10,7 @@ import type {
 } from "./container-release-receipt.ts";
 
 import { readContainerRolloutMode, type ContainerRolloutMode } from "./container-rollout-policy.ts";
+import { assertSmallRunnerSelection, readSmallRunnerEnabled } from "../src/small-runner-profile.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 export type { ContainerRolloutMode } from "./container-rollout-policy.ts";
@@ -193,6 +194,10 @@ function resolveHostedWorkerDeploymentSettings(
   now: () => Date,
 ): HostedWorkerDeploymentSettings {
   const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
+  assertSmallRunnerSelection(env);
+  if (readSmallRunnerEnabled(env) && !includeSecrets) {
+    throw new Error("Enabling small runners requires syncing the private Worker selector.");
+  }
   const deployContext = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
     ?? normalizeOptionalString(env.GITHUB_REF_NAME)
     ?? "manual";

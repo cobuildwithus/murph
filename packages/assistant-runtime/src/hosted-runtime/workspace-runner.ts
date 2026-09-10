@@ -1,6 +1,8 @@
 import {
   existsSync,
 } from "node:fs";
+
+import type { HostedAssistantBootstrapResult } from "@murphai/operator-config/hosted-assistant-config";
 import {
   resolveAssistantStatePaths,
 } from "@murphai/runtime-state/node/assistant-state-fs";
@@ -397,6 +399,7 @@ export type HostedWorkspaceDurableCheckpointEffects =
 const HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
+  assistantBootstrap?: HostedAssistantBootstrapResult | null;
   assistantAskRequestTargetKind?: "joined_group";
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onConversationActivityObserved?: (() => void) | null;
