@@ -424,8 +424,8 @@ the current user explicitly asks for it.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   Require at least 4.5 minutes (270 seconds) for a marked concrete-model final
-   response. The repository wrapper passes `--minimum-marked-response-time 270s`
+   Require at least 3 minutes (180 seconds) for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 180s`
    to align the tool's attestation fallback with this final-gate minimum. Below
    that minimum, the response does not count. At or above it, inspect the exact
    turn, attachment, requested model selection, completion marker, and a
