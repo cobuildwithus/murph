@@ -1,6 +1,6 @@
 # Classify blocked generated-image retention
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -38,8 +38,10 @@ ReviewGPT authored the two production files, two focused test files, and Reliabi
 - Fail-before proof: the mixed missing-event/changed-bytes test and both nonzero hosted-warning cases fail original production source only because the new counts are absent. The no-warning case already passes.
 - Pass-after proof: all 16 core retention cases and all 42 hosted idle-maintenance cases pass, including valid-neighbor progress, six recognized reasons, per-pass reset, unknown-error propagation, abort precedence, bounded warning shape, and privacy exclusion.
 - Both affected package typechecks and the core emitted build pass. Log privacy guard passes. Complexity is unchanged: core retention loop 23, hosted maintenance 44; the added counting and log projection introduce no branches, so broader refactoring is not justified here.
-- No production replay or mutation. Final PR review and required exact-head CI remain pending.
+- Final ReviewGPT round 1 PASS at `4ffe0b8ac46e2cab7a338059c019c5f779e292a1`; captured model verification confirms the requested model. Zero findings; parent final review complete. Source and tests remain unchanged by plan closure.
+- PR #3133 owns final-head CI and merge evidence. Implementation and review are complete; the automation memory tracks the separately authorized telemetry-only deployment, exact revision verification, and bounded natural-traffic query. No production replay or data mutation is part of this work.
 
 ## Deferred sweep work
 
 Device-sync failures belong to the separate lane. Historical provider receipts, partial scheduled runs, and observability access/retention gaps remain separate investigations; this one-change run selects only retention diagnostics.
+Completed: 2026-09-10
