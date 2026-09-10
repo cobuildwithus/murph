@@ -340,7 +340,6 @@ describe("hosted Linq webhook transport", () => {
         reservation: {
           assignedAt: new Date("2026-03-26T12:00:00.000Z"),
           line: {
-            activeMemberLimit: null,
             assignmentWeight: 100,
             maxNewConversationsPerDay: null,
             phoneNumber: "+15550100042",
@@ -354,7 +353,6 @@ describe("hosted Linq webhook transport", () => {
       });
     transportBoundaryMocks.listHostedLinqHealthyProactiveLines.mockResolvedValue([
       {
-        activeMemberLimit: null,
         assignmentWeight: 100,
         maxNewConversationsPerDay: null,
         phoneNumber: "+15550100042",
