@@ -38406,7 +38406,7 @@ describeRealCodex('real Codex imported hospital history e2e', () => {
           modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
         }),
         dynamicTools: [], env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
-        excludeResumeTurns: true, groupConversation: false,
+        groupConversation: false,
         model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
         prompt: 'Please check my connected hospital records. What did the old amoxicillin prescription say, and what reaction was recorded for penicillin? Does that old prescription establish that I take amoxicillin now? Just summarize the records; do not change anything.',
       })
