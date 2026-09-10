@@ -1,6 +1,6 @@
 # Recover incomplete device-sync snapshot reads within the existing deadline
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -31,13 +31,20 @@ Recover a transient, proven incomplete snapshot response without waiting for the
 
 ## Tasks
 
-1. Establish clean ownership and current base; complete the production author patch.
-2. Run focused tests and Cloudflare typecheck, review complexity and privacy, and write the member recovery note.
-3. Commit, push and open a draft PR; complete candidate review before Ready.
-4. Run applicable final ReviewGPT with exact-head CI, preserve any unresolved gate honestly, and return the PR link.
+1. Complete: clean owned branch based on current inspected main; exact ReviewGPT-authored patch applied.
+2. Complete: focused proof, typecheck, complexity and parent review pass; member recovery note included.
+3. Draft PR opened with the failing reproduction. Candidate implementation and plan closure are ready for the scoped final commit.
+4. PR-owned external gates: start final ReviewGPT concurrently with exact-head CI after this stable candidate is pushed. Those results remain pending at plan archival; do not infer merge/deployment approval.
 
 ## Verification
 
 - Red proof: six real-HTTP cases fail on unchanged production source across empty/partial identity, gzip and Brotli responses. They require the actual snapshot port to recover within one call and preserve the exact request body.
-- Documentation drift check passed for the active plan.
-- Production author patch and candidate checks pending. Earlier native-runtime investigations do not substitute for testing this candidate.
+- Documentation drift and gardening checks passed after updating the reliability index entry.
+- Exact production author patch applied and production postimages verified against its declared hashes.
+- Passed: 355 focused Cloudflare tests across snapshot replay, raw HTTP recovery, signed snapshot diagnostics and runner-platform regression coverage.
+- Passed: Cloudflare typecheck; complexity debt remains 20 and maximum remains 40, both unchanged. Existing request-attempt hotspot reviewed; it was not modified.
+- Passed: ten changelog archive rendering tests; current production presentation reference returns HTTP 200 and contains the archive anchor.
+- Parent review: classification only reuses existing diagnostic counts for already-invalid short snapshots; successful JSON acceptance and legacy markers are preserved. No new Worker buffering, encoding handling, request-loop owner, auth or provider behavior.
+- Product UX: Ready for PR review. Transient failures recover inside one call; persistent errors stop after two attempts; deadline and caller cancellation remain authoritative. Exact-head CI and final ReviewGPT are separate pending PR gates.
+- Scope exclusions: no new live production observation, provider replay, release or claimed repair of the initiating network interruption.
+Completed: 2026-09-10
