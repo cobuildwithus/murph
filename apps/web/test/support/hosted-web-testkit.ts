@@ -68,6 +68,7 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import type { HostedAssistantProvider } from "@murphai/hosted-execution/assistant-model";
+import type { HostedPhoneCallBrief } from "@murphai/hosted-execution/phone-calls";
 import {
   parseHostedExecutionWake,
   parseHostedRuntimeLatencyTraceEvent,
@@ -162,6 +163,10 @@ const hostedVaultShareGrantStoreModuleSpecifier = new URL(
 ).href;
 const hostedVaultShareProjectionStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-vault-share/projection-store.ts",
+  import.meta.url,
+).href;
+const hostedPhoneCallCryptoModuleSpecifier = new URL(
+  "../../src/lib/phone-calls/crypto.ts",
   import.meta.url,
 ).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
@@ -436,6 +441,15 @@ interface HostedPhoneCallForTestPrismaClient {
   };
 }
 
+interface HostedPhoneCallCryptoModule {
+  encryptHostedPhoneCallBrief(input: {
+    callId: string;
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    value: HostedPhoneCallBrief;
+  }): Promise<string>;
+}
+
 export interface HostedPhoneCallForTest {
   analyzedAt: Date | null;
   endedAt: Date | null;
@@ -445,7 +459,6 @@ export interface HostedPhoneCallForTest {
   providerCallId: string | null;
   requestKey: string;
   resultEncrypted: string | null;
-  resultJson: unknown;
   status: "calling" | "completed" | "ended" | "failed" | "needs_user" | "starting";
 }
 
@@ -1828,23 +1841,33 @@ export async function seedHostedPhoneCallForTest(input: {
   providerCallId: string;
   requestKey: string;
 }): Promise<HostedPhoneCallForTest> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedPhoneCall.create({
-      data: {
-        briefJson: {
-          allowTransferToUser: input.brief.allowTransferToUser ?? false,
-          goal: input.brief.goal,
-          instructions: input.brief.instructions ?? [],
-          shareableFacts: input.brief.shareableFacts ?? {},
-          successCriteria: input.brief.successCriteria,
-          timeZone: input.brief.timeZone,
-          to: {
-            ...input.brief.to,
-          },
-          ...(input.brief.callerName
-            ? { callerName: input.brief.callerName }
-            : {}),
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const cryptoModule = await import(
+      hostedPhoneCallCryptoModuleSpecifier
+    ) as HostedPhoneCallCryptoModule;
+    applyHostedWebTestkitEnvironment(deps.environment);
+    const briefEncrypted = await cryptoModule.encryptHostedPhoneCallBrief({
+      callId: input.id,
+      memberId: input.memberId,
+      prisma: deps.prisma,
+      value: {
+        allowTransferToUser: input.brief.allowTransferToUser ?? false,
+        goal: input.brief.goal,
+        instructions: input.brief.instructions ?? [],
+        shareableFacts: input.brief.shareableFacts ?? {},
+        successCriteria: input.brief.successCriteria,
+        timeZone: input.brief.timeZone,
+        to: {
+          ...input.brief.to,
         },
+        ...(input.brief.callerName
+          ? { callerName: input.brief.callerName }
+          : {}),
+      },
+    });
+    return deps.prisma.hostedPhoneCall.create({
+      data: {
+        briefEncrypted,
         id: input.id,
         memberId: input.memberId,
         originSessionId: input.originSessionId,
@@ -1853,8 +1876,8 @@ export async function seedHostedPhoneCallForTest(input: {
         requestKey: input.requestKey,
         status: "calling",
       },
-    })
-  );
+    });
+  });
 }
 
 export async function readHostedPhoneCallForTest(input: {

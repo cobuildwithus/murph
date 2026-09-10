@@ -177,6 +177,13 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // before a new Web build can present or persist it.
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
+  [
+    "20260910210000_require_hosted_phone_call_encrypted_private_content",
+    // Every supported phone writer already supplies a nonempty encrypted brief
+    // and never writes plaintext. Validate the completed hosted deletion before
+    // removing readers; retain legacy columns through the old reader drain.
+    new Set(["ADD CONSTRAINT CHECK", "ALTER COLUMN SET NOT NULL"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

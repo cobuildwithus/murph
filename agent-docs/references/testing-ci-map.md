@@ -4,13 +4,28 @@ Last verified: 2026-09-05
 
 ## Current Repo Checks
 
-Legacy phone-call deletion is covered by `hosted-ops-phone-call-deletion-route.test.ts`
-and `phone-calls-result-notification-store.test.ts`. With a dedicated loopback
-`DATABASE_URL` owned by the test role and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
-`phone-calls-legacy-deletion-postgres.test.ts` through the hosted Web test wrapper.
-The suite owns temporary synthetic schemas and proves JSON-null classification,
-selection bounds, provider-first deletion, retained usage, version conflicts,
-pending notification rejection, and the shared member-lock existence check.
+The encrypted-only phone-call predeploy guard is covered by
+`phone-calls-encrypted-private-content-guard-postgres.test.ts`. With a dedicated
+loopback `DATABASE_URL` and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run it through
+the hosted Web test wrapper. Temporary synthetic tables exercise the real
+migration against SQL NULL, JSON null, retained JSON objects/scalars/arrays,
+and missing/empty brief ciphertext. The suite also checks current encrypted-only
+writes, rejected later plaintext writes, retained encrypted content, and the
+continued presence of the physical JSON columns.
+
+`phone-calls-private-content.test.ts` covers bound encrypted briefs/results,
+absent results, and invalid ciphertext; `phone-calls-status.test.ts` covers
+bounded result decryption and ordering. Result/provider and service suites
+retain first-writer, request-key replay, consult, and notification recovery
+proof. `phone-calls-result-notification-store.test.ts` retains the member-first
+lock and call-row existence check for late result and stop callbacks.
+`hosted-phone-call-private-storage-classification.test.ts` classifies the
+encrypted-only Prisma model and preserves historical additive-migration proof.
+The cross-app `hosted-local-retell-call-result-roundtrip-e2e.test.ts` uses the
+shared Web testkit's bound brief encryption and covers durable encrypted results,
+webhook replay, and notification recovery. Local unit/PostgreSQL proof does not
+establish production deletion, deployment, or prior-function/Workflow drain;
+those staged gates are owned by `apps/web/README.md`.
 
 Vault-share replacement deadline proof lives in `projection-store.test.ts` and
 `vault-share-deliver-route.test.ts`. With an isolated migrated loopback

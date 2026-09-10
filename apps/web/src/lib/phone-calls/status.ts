@@ -21,7 +21,6 @@ type HostedPhoneCallStatusRecord = Pick<
   | "id"
   | "memberId"
   | "resultEncrypted"
-  | "resultJson"
   | "status"
   | "stopRequestedAt"
   | "updatedAt"
@@ -41,7 +40,6 @@ interface HostedPhoneCallStatusStore {
         id: true;
         memberId: true;
         resultEncrypted: true;
-        resultJson: true;
         status: true;
         stopRequestedAt: true;
         updatedAt: true;
@@ -62,7 +60,6 @@ const HOSTED_PHONE_CALL_STATUS_SELECT = {
   id: true,
   memberId: true,
   resultEncrypted: true,
-  resultJson: true,
   status: true,
   stopRequestedAt: true,
   updatedAt: true,

@@ -1,7 +1,9 @@
-import { Prisma, type HostedPhoneCall } from "@prisma/client";
+import type { HostedPhoneCall } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HookConflictError, HookNotFoundError } from "workflow/errors";
 import { RetryableError } from "workflow";
+
+import { encodeHostedPhoneCallBriefFixture } from "./support/phone-call-private-fixtures";
 
 const mocks = vi.hoisted(() => ({
   createHook: vi.fn(),
@@ -462,19 +464,21 @@ describe("hosted phone-call reconciliation Workflow", () => {
     const endedAt = new Date("2026-08-16T12:00:00.000Z");
     let currentCall: HostedPhoneCall | null = {
       analyzedAt: null,
-      briefEncrypted: null,
-      briefJson: {
-        allowTransferToUser: false,
-        goal: "Confirm the office schedule.",
-        instructions: [],
-        shareableFacts: {},
-        successCriteria: "The office confirms its schedule.",
-        timeZone: "America/Chicago",
-        to: {
-          label: "the office",
-          phoneNumber: "+15550102020",
+      briefEncrypted: encodeHostedPhoneCallBriefFixture({
+        memberId: "member_late_analysis",
+        value: {
+          allowTransferToUser: false,
+          goal: "Confirm the office schedule.",
+          instructions: [],
+          shareableFacts: {},
+          successCriteria: "The office confirms its schedule.",
+          timeZone: "America/Chicago",
+          to: {
+            label: "the office",
+            phoneNumber: "+15550102020",
+          },
         },
-      },
+      }),
       createdAt: endedAt,
       endedAt,
       id: "hpc_late_analysis",
@@ -487,7 +491,6 @@ describe("hosted phone-call reconciliation Workflow", () => {
       resultDeliveryStatus: null,
       resultDeliveryTerminalAt: null,
       resultEncrypted: null,
-      resultJson: null,
       resultNotificationChannel: "telegram",
       status: "failed",
       stopRequestedAt: null,
@@ -572,9 +575,6 @@ describe("hosted phone-call reconciliation Workflow", () => {
           resultDeliveryStatus:
             args.data.resultDeliveryStatus ?? currentCall.resultDeliveryStatus,
           resultEncrypted: args.data.resultEncrypted ?? currentCall.resultEncrypted,
-          resultJson: args.data.resultJson === Prisma.DbNull
-            ? null
-            : currentCall.resultJson,
           status: args.data.status,
         };
         resultCommitted.resolve();
