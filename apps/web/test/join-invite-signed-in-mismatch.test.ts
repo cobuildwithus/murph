@@ -90,7 +90,6 @@ test("JoinInvitePageView keeps terminal invite states ahead of account recovery"
 function createMismatchModel(): JoinInvitePageModel {
   return {
     awaitingInviteSessionResolution: false,
-    expectedPrivyUserId: "privy-current-account",
     familyBillingRecovery: null,
     inviteCode: "invite-code",
     launchConsent: {
@@ -99,9 +98,7 @@ function createMismatchModel(): JoinInvitePageModel {
       status: "not_required",
     },
     preview: false,
-    privySessionMatchesAppSession: true,
     status: createMismatchStatus(),
-    telegramAccountForMessagingSetup: null,
   };
 }
 

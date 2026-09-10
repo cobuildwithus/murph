@@ -4,11 +4,11 @@ import { useRef, useState } from "react";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { useRouter } from "next/navigation";
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import { HostedOnboardingApiError, requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
 export function useApprovalPasskeyEnrollment() {
-  const { openAuthDialog } = useAuth();
+  const { authenticated, openAuthDialog } = useAuth();
   const router = useRouter();
   const inFlight = useRef(false);
   const authorization = useSensitiveActionAuthorization();
@@ -18,7 +18,7 @@ export function useApprovalPasskeyEnrollment() {
 
   async function enroll() {
     if (inFlight.current) return;
-    if (!authorization.setup.clientAuthenticated) {
+    if (!authenticated) {
       openAuthDialog();
       return;
     }
@@ -26,14 +26,26 @@ export function useApprovalPasskeyEnrollment() {
     setPending(true);
     setError(null);
     try {
-      const proof = await authorization.authorize("approval.passkey.enroll");
-      const options = await requestHostedOnboardingJson<PublicKeyCredentialCreationOptionsJSON>({
-        method: "POST", payload: { authorization: proof }, url: "/api/settings/approval-passkeys/options",
-      });
+      const status = await requestHostedOnboardingJson<{ initialEnrollmentAllowed: boolean }>({ url: "/api/settings/approval-passkeys" });
+      let options: PublicKeyCredentialCreationOptionsJSON;
+      let proof: Record<string, unknown>;
+      if (status.initialEnrollmentAllowed === true) {
+        const initial = await requestHostedOnboardingJson<{ options: PublicKeyCredentialCreationOptionsJSON; token: string }>({
+          method: "POST", payload: {}, url: "/api/settings/approval-passkeys/initial-options",
+        });
+        options = initial.options;
+        proof = { initialToken: initial.token };
+      } else {
+        const authorizationProof = await authorization.authorize("approval.passkey.enroll");
+        options = await requestHostedOnboardingJson<PublicKeyCredentialCreationOptionsJSON>({
+          method: "POST", payload: { authorization: authorizationProof }, url: "/api/settings/approval-passkeys/options",
+        });
+        proof = { authorization: authorizationProof };
+      }
       const response = await startRegistration({ optionsJSON: options });
       try {
         await requestHostedOnboardingJson({
-          method: "POST", payload: { authorization: proof, response }, url: "/api/settings/approval-passkeys/register",
+          method: "POST", payload: { ...proof, response }, url: "/api/settings/approval-passkeys/register",
         });
       } finally {
         // A lost response may follow a committed registration. Re-read the
@@ -42,6 +54,7 @@ export function useApprovalPasskeyEnrollment() {
       }
       setRegistered(true);
     } catch (caught) {
+      if (caught instanceof HostedOnboardingApiError && caught.code === "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED") openAuthDialog();
       setError(caught instanceof Error ? caught.message : "Your passkey could not be saved. Please try again.");
     } finally {
       inFlight.current = false;

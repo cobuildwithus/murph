@@ -6,5 +6,8 @@ import { readApprovalPasskeyState } from "@/src/lib/sensitive-actions/passkey-st
 export const GET = withJsonError(async (request: Request) => {
   const session = await requireHostedAppSessionFromRequest(request);
   const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma: getPrisma() });
-  return jsonOk({ configured: state.credentials.length > 0 });
+  return jsonOk({
+    configured: state.credentials.length > 0,
+    initialEnrollmentAllowed: Boolean(session.authProof && !session.privyUserId && state.encrypted === null),
+  });
 });

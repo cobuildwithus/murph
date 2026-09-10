@@ -22,6 +22,7 @@ export function hostedBetterAuthOptions(input: {
   hooks?: BetterAuthOptions["databaseHooks"];
   generateId?: (input: { model: string }) => string;
   primaryAuthenticatedAt?: Date;
+  credentialEmailChange?: true;
   prisma: PrismaClient;
   secret: string;
 }) {
@@ -41,6 +42,7 @@ export function hostedBetterAuthOptions(input: {
     verification: { disableCleanup: true },
     session: {
       expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24, cookieCache: { enabled: false },
+      ...(input.credentialEmailChange ? { disableSessionRefresh: true } : {}),
       additionalFields: { primaryAuthenticatedAt: { type: "date", required: false, input: false, returned: false } },
     },
     advanced: {
@@ -85,8 +87,9 @@ export function hostedBetterAuthOptions(input: {
       bearer(),
       emailOTP({
         otpLength: 6, expiresIn: 300, allowedAttempts: 3, storeOTP: "hashed",
+        changeEmail: { enabled: input.credentialEmailChange === true },
         async sendVerificationOTP({ email, otp, type }) {
-          if (type !== "sign-in" || email.endsWith("@auth.invalid")) {
+          if ((type !== "sign-in" && !(input.credentialEmailChange && type === "change-email")) || email.endsWith("@auth.invalid")) {
             throw new TypeError("Unsupported authentication email operation.");
           }
           await input.delivery.email({ address: email, code: otp });

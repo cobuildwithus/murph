@@ -13,6 +13,7 @@ import {
 } from "@/src/lib/sensitive-actions/shared";
 
 import { usePasskeyWalletMfa } from "./use-passkey-wallet-mfa";
+import type { HostedCredentialChange } from "@/src/lib/better-auth/credential-change";
 
 const SIGN_MESSAGE_TIMEOUT_MS = 60_000;
 
@@ -39,10 +40,11 @@ export function useSensitiveActionAuthorization() {
 
   async function signChallenge(
     challenge: SensitiveActionChallengeResponse,
+    credentialChange?: HostedCredentialChange,
   ): Promise<SensitiveActionAuthorization> {
     const method = await requestHostedOnboardingJson<
       { method: "wallet" } | { method: "passkey"; options: PublicKeyCredentialRequestOptionsJSON }
-    >({ method: "POST", payload: { token: challenge.token }, url: "/api/settings/approval-passkeys/authenticate" });
+    >({ method: "POST", payload: { token: challenge.token, ...(credentialChange ? { credentialChange } : {}) }, url: "/api/settings/approval-passkeys/authenticate" });
     if (method.method === "passkey") {
       setPasskeyConfigured(true);
       const assertion = await startAuthentication({ optionsJSON: method.options });

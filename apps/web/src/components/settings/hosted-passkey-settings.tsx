@@ -28,7 +28,25 @@ export function HostedPasskeySettings({
   if (secureApprovalStatus.method === "passkey") {
     return <ApprovalPasskeyStatus />;
   }
+  if (secureApprovalStatus.method === "initial") return <InitialPasskeySetup enrollmentEnabled={enrollmentEnabled} />;
   return <PasskeySetup enrollmentEnabled={enrollmentEnabled} secureApprovalStatus={secureApprovalStatus} />;
+}
+
+function InitialPasskeySetup({ enrollmentEnabled }: { enrollmentEnabled: boolean }) {
+  const enrollment = useApprovalPasskeyEnrollment();
+  return (
+    <div className="flex flex-col gap-3 py-4">
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        Add a passkey to approve account changes and other protected actions.
+      </p>
+      {enrollment.registered ? <SettingsStatusLine message="Your passkey is ready." tone="success" /> : (
+        <Button className="self-start" disabled={!enrollmentEnabled || enrollment.pending} type="button" onClick={() => void enrollment.enroll()}>
+          {enrollment.pending ? "Setting up…" : "Set up passkey"}
+        </Button>
+      )}
+      {enrollment.error ? <SettingsStatusLine message={enrollment.error} tone="destructive" /> : null}
+    </div>
+  );
 }
 
 function PasskeySetup({

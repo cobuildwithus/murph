@@ -5,7 +5,7 @@ import { parseApprovalPasskeyRegistration, readApprovalPasskeyRequest } from "@/
 export const POST = withJsonError(async (request: Request) => {
   const { body, prisma, session } = await readApprovalPasskeyRequest(request);
   await registerApprovalPasskey({
-    authorization: body.authorization, prisma, request,
+    authorization: body.authorization, initialToken: body.initialToken, prisma, request,
     response: parseApprovalPasskeyRegistration(body.response), session,
   });
   return jsonOk({ registered: true });

@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
       null,
       `Customize murph settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  HostedAccountSettingsCards: vi.fn((props: {
+  HostedLoginMethodSettings: vi.fn((props: {
     account: unknown;
     murphPhoneNumber?: string | null;
     openEmailLink?: boolean;
@@ -270,8 +270,8 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
   HostedBillingSettings: mocks.HostedBillingSettings,
 }));
 
-vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
-  HostedAccountSettingsCards: mocks.HostedAccountSettingsCards,
+vi.mock("@/src/components/settings/hosted-login-method-settings", () => ({
+  HostedLoginMethodSettings: mocks.HostedLoginMethodSettings,
 }));
 
 vi.mock("@/src/components/settings/customize-murph-settings", () => ({
@@ -634,7 +634,7 @@ test.each(["active", "checkout"])(
       expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
       expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
         authenticated: true,
-        authorizationEnabled: false,
+        authorizationEnabled: true,
       }, undefined);
     } finally {
       if (originalPrivyAppId === undefined) {
@@ -1160,21 +1160,9 @@ test("SettingsPage reads the app session and persisted account settings into the
       prisma: mocks.prisma,
       privyUserId: "did:privy:user_123",
     });
-    expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);
-    expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-      snapshot: accountSnapshot,
-      serverApprovedPrivyUser: {
-        id: "did:privy:user_123",
-        linkedAccounts: [
-          {
-            id: 456,
-            type: "telegram",
-            username: "sample_user",
-          },
-        ],
-      },
-    });
-    expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+    expect(mocks.withServerApprovedPrivyAccountHints).not.toHaveBeenCalled();
+    expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(expect.objectContaining({
       account: accountSnapshot,
       murphPhoneNumber: "+15550100001",
       openEmailLink: true,
@@ -1260,7 +1248,7 @@ test("SettingsPage reads the app session and persisted account settings into the
 
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
       authenticated: true,
-      authorizationEnabled: false,
+      authorizationEnabled: true,
     }, undefined);
   } finally {
     if (originalPrivyAppId === undefined) {
@@ -2496,7 +2484,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
   assert.match(markup, /Hosted account settings \+15550100003/);
-  expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
     murphPhoneNumber: "+15550100003",
   }), undefined);
@@ -2910,12 +2898,6 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockImplementation(
     trackDatabaseRead("usageTopUpActivePurchase", null),
   );
-  // Privy network reads resolve after every database read so the render
-  // proves the page still waits for their values.
-  mocks.getHostedPrivySession.mockImplementation(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    return null;
-  });
   mocks.readHostedSecureApprovalStatus.mockImplementation(async () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     return { status: "configured" };
@@ -2959,7 +2941,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   }
 });
 
-test("SettingsPage preserves billing when optional usage and Privy reads fail", async () => {
+test("SettingsPage preserves billing when optional usage fails without querying Privy", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -2995,10 +2977,11 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
     }),
     undefined,
   );
-  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-    snapshot: EMPTY_ACCOUNT_SETTINGS,
-    serverApprovedPrivyUser: null,
-  });
+  expect(mocks.withServerApprovedPrivyAccountHints).not.toHaveBeenCalled();
+  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ account: EMPTY_ACCOUNT_SETTINGS }), undefined,
+  );
   expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
 });
 
@@ -3042,7 +3025,7 @@ test("SettingsPage renders fallback values without reading settings data when th
       }),
       undefined,
     );
-    expect(mocks.HostedAccountSettingsCards).not.toHaveBeenCalled();
+    expect(mocks.HostedLoginMethodSettings).not.toHaveBeenCalled();
     expect(mocks.HostedFamilySettings).not.toHaveBeenCalled();
   } finally {
     if (originalPrivyAppId === undefined) {
@@ -3053,7 +3036,7 @@ test("SettingsPage renders fallback values without reading settings data when th
   }
 });
 
-test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {
+test("SettingsPage renders canonical Telegram ownership without reading provider display hints", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
     identity: {
@@ -3098,10 +3081,11 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
-  expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
-    snapshot: accountSnapshot,
-    serverApprovedPrivyUser: null,
-  });
+  expect(mocks.withServerApprovedPrivyAccountHints).not.toHaveBeenCalled();
+  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+  expect(mocks.HostedLoginMethodSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ account: accountSnapshot }), undefined,
+  );
 });
 
 describe("settings subscription composition", () => {

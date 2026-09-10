@@ -31,6 +31,12 @@ activate PR 2 alone: PR 3 supplies the new login/settings clients, Telegram logi
 and credential-change/recovery journeys. Those must be usable before importing
 members or distributing a dependent native release.
 
+PR 3 changes the main Web dialog and invite entry to first-party authentication
+unconditionally. Deploy that client with issuance enabled only after the complete
+PR 3 qualification below; do not ship its new login UI with issuance still off.
+After cutover, pausing issuance keeps the new UI and both session readers in
+place. It must not reload Privy login or restore legacy credential writers.
+
 | Configuration | Purpose | Pause behavior |
 | --- | --- | --- |
 | `HOSTED_BETTER_AUTH_ENABLED=true` | Enable OTP send/verify, native exchange and importer apply; stop old full Privy completion | Unset/false pauses new issuance. Existing Better Auth sessions still read, renew and sign out. Handed-off members retain legacy-write guards. |
@@ -38,6 +44,7 @@ members or distributing a dependent native release.
 | `HOSTED_BETTER_AUTH_SECRET` | Independent canonical 32-byte base64url Better Auth signing secret | Retain while any replacement session exists. |
 | `HOSTED_AUTH_STORAGE_KEY` | Independent canonical 32-byte base64url pre-auth encryption and separated blind-lookup/rate-limit domains | Retain while auth records exist. Rotation needs a reviewed reindex/re-encryption procedure; do not replace it as a rollout toggle. |
 | `HOSTED_AUTH_EMAIL_FROM`, existing `RESEND_API_KEY` | OTP email delivery through the existing email owner | Qualify sender/delivery in hosted staging. |
+| `HOSTED_AUTH_TELEGRAM_CLIENT_ID` | Numeric Telegram login client ID; verified token audience and browser popup configuration | Qualify the registered Web origin, profile ID and bot messaging scopes before Telegram login is exposed. |
 | `HOSTED_AUTH_TWILIO_ACCOUNT_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SECRET`, `HOSTED_AUTH_TWILIO_MESSAGING_SERVICE_SID` | Dedicated SMS sender credentials/configuration | Qualify service, destination coverage and fraud controls before exposing phone login. |
 
 All secret provisioning occurs through the reviewed hosted configuration path.
@@ -48,7 +55,8 @@ headers. Vercel ingress supplies the client address for authentication budgets.
 No production secret is downloaded for local tests or previews.
 
 The closed route surface is `/api/auth/otp/send`, `/api/auth/otp/verify`,
-`/api/auth/session`, `/api/auth/logout` and `/api/auth/complete`. Native equivalents
+`/api/auth/telegram/start`, `/api/auth/telegram/verify`, `/api/auth/session`,
+`/api/auth/logout` and `/api/auth/complete`. Native OTP/session equivalents
 live below `/api/device-sync/companion/auth`, with an additional `/exchange` and
 existing companion admission for product bootstrap. No Better Auth catch-all
 handler is exposed. A successful browser OTP response sets only its cookie;
@@ -76,13 +84,59 @@ Use the same action challenge and member/session binding for both proof formats.
 
 Enrollment must be authorized by the member's existing approved factor, or by a separately defined independent recovery operation. A normal authenticated session alone cannot replace established protection. Verify authorization at options generation and final registration, then consume it with the credential write. Do not issue a login session from enrollment.
 
+New Better Auth accounts without any legacy identity or established approval credential can enroll their first passkey after primary authentication within five minutes. Silent exchange and session renewal do not count as primary proof. The fixed initial-options route creates an ordinary member/session-bound enrollment challenge; registration verifies WebAuthn, rechecks the current session and absent legacy binding, then atomically consumes the challenge and writes the first credential. Concurrent setup has one winner. An imported or protected member must use the existing-factor or independent-recovery path.
+
 Credential state is bounded and encrypted under the existing member crypto owner. Verify and prepare crypto before the transaction; recheck the exact state and current session under member locks. Commit signature-counter changes, one-use challenge acceptance and the protected mutation together. Counterless synced passkeys still depend on challenge consumption for replay protection.
 
 Once replacement protection is established, do not try a legacy wallet after a failed passkey assertion. Corrupt credential state fails closed. The legacy proof reader is temporary and cannot become a recovery mechanism that ignores newer revocations.
 
+## Credential settings
+
+The fixed `/api/settings/login-methods` reader and challenge, OTP send/verify,
+Telegram start/prepare/verify, and remove routes own first-party credential
+changes. They require the current browser session and canonical member, reject
+other members' contacts, and preserve the last usable sign-in. Existing approval
+covers the exact operation and old/new identity. Email changes use the pinned
+private Better Auth change-email API; phone proof uses its server-only consume
+API. Telegram verification binds numeric identity and nonce to this member and
+session, with a distinct purpose from login. No library catch-all is exposed.
+
+Proof, canonical contact/routing writes, encrypted login records, approval
+acceptance and the durable channel wake commit together. Delivery, crypto
+preparation and runtime signaling occur outside the transaction. Wrong-code
+budgets commit; later database failures roll back the proof for a safe retry.
+Email replacement also removes old routing authority and rotates its reply alias.
+
+Adding a method keeps existing sessions, including imported native sessions.
+Replacing/removing one preserves the authorizing first-party browser but revokes
+other sessions and blocks native legacy credentials. This security action may
+require those devices to sign in again. A later import cannot restore the old
+method. These routes remain gated by issuance activation; the settings clients
+and recovery journeys must be qualified before enabling them.
+
 ## Browser and native continuity
 
 Existing browser cookies are first-party Murph credentials and verify locally. Keep their reader and rows until old issuance has stopped and every valid old session has expired or been security-revoked. Preserve outstanding callback/handoff bindings and metadata. New authentication issues Better Auth sessions. No unconditional session purge occurs at activation.
+
+Visible authenticated Web pages make at most one renewal check per hour per
+mounted document and retry on later focus/visibility changes. The server keeps
+the daily renewal threshold and primary-proof timestamp. Hidden/offline tabs do
+not sign out or fall back to another provider. A legacy renewal request only
+reads its existing record and never sets a replacement cookie or extends expiry.
+
+`/settings/accounts` shares the dashboard's credential and passkey controls but
+uses identity admission before subscription setup. Email-only onboarding links
+there to add a messaging method, then returns through `/join` to the canonical
+onboarding owner. Targeted invites retain their member binding; phone invites
+show their existing masked hint and request the full number for first-party OTP.
+The server rejects proof for another member even if the entered contact changes.
+
+The native ephemeral settings browser opens `/settings/accounts?companion=ios`
+or `ios-dev`. Login resumes that page. Its explicit return link uses the fixed
+app/environment callback scheme with host `account-settings`, no query, token or
+member ID. Duplicate or unknown companion parameters produce only the local
+`/join` link. A callback only asks native admission to reread canonical setup;
+it never proves successful account linking or changes the stored app principal.
 
 Both current native auth services call the SDK's access-token refresh before reading a Privy identity token. The transition release must retain that restore/refresh ability long enough to exchange a valid token for a same-member Better Auth session. Store new credentials through native secure storage; prove lost-response recovery, account switching, offline restoration and renewable background use. Never accept an expired token as fresh authority or fall back after failed new-token verification.
 

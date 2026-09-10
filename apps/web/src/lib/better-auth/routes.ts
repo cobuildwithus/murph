@@ -23,7 +23,7 @@ export async function verifyHostedAuthCode(request: Request, transport: HostedAu
   // onboarding/status reads without consuming another code or losing a login
   // because an unrelated runtime or billing projection is unavailable.
   const response = jsonOk({ ok: true, memberId: issued.memberId,
-    ...(transport === "native" ? { token: serializeHostedNativeSessionToken(issued.token) } : {}),
+    ...(transport === "native" ? { token: serializeHostedNativeSessionToken(issued.token), expiresAt: issued.expiresAt.toISOString() } : {}),
   });
   if (transport === "browser") appendCookies(response, issued.headers.getSetCookie());
   return response;

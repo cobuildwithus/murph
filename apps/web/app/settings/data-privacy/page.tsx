@@ -35,7 +35,7 @@ export default async function SettingsDataPrivacyPage() {
         <section id="data-privacy" className="flex flex-col gap-4">
           <HostedDataPrivacySettings
             authenticated
-            authorizationEnabled={Boolean(privyAppId)}
+            authorizationEnabled
           />
         </section>
 

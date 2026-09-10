@@ -8,6 +8,7 @@ import { readApprovalPasskeyState } from "@/src/lib/sensitive-actions/passkey-st
 import { buildSensitiveActionMessage, buildSettingsSensitiveActionBinding } from "@/src/lib/sensitive-actions/server";
 import { isSensitiveActionKind, isSensitiveActionToken, isSettingsSensitiveActionKind } from "@/src/lib/sensitive-actions/shared";
 import { approvalPasskeyAuthenticationOptions } from "@/src/lib/sensitive-actions/webauthn";
+import { hostedCredentialChangeBinding, parseHostedCredentialChange } from "@/src/lib/better-auth/credential-change";
 
 export const POST = withJsonError(async (request: Request) => {
   const { body, prisma, session } = await readApprovalPasskeyRequest(request);
@@ -18,7 +19,9 @@ export const POST = withJsonError(async (request: Request) => {
   const origin = resolveHostedPublicOrigin();
   if (!challenge || challenge.memberId !== session.member.id || challenge.expiresAt <= new Date()
     || !isSensitiveActionKind(challenge.kind) || !origin) throw unavailable();
-  const bindingHash = isSettingsSensitiveActionKind(challenge.kind)
+  const bindingHash = challenge.kind === "account.credential.change"
+    ? hostedCredentialChangeBinding({ change: parseHostedCredentialChange(body.credentialChange), memberId: session.member.id, sessionId: session.sessionId })
+    : isSettingsSensitiveActionKind(challenge.kind)
     ? buildSettingsSensitiveActionBinding({ kind: challenge.kind, memberId: session.member.id, sessionId: session.sessionId })
     : challenge.approvalKey && challenge.actionId && challenge.actionHash && challenge.approvalStatus === "pending"
       ? buildHostedActionApprovalBinding({

@@ -10,6 +10,7 @@ const CODE_LENGTH = 6;
 
 export function HostedVerificationCodeStep({
   autoFocus = true,
+  autoSubmit = true,
   code,
   codeLabel = "Verification code",
   description,
@@ -25,6 +26,7 @@ export function HostedVerificationCodeStep({
   onSubmit,
 }: {
   autoFocus?: boolean;
+  autoSubmit?: boolean;
   code: string;
   codeLabel?: string;
   description: string;
@@ -60,7 +62,7 @@ export function HostedVerificationCodeStep({
   // auto-submits.
   const handleComplete = () => {
     codeInputRef.current?.blur();
-    onSubmit();
+    if (autoSubmit) onSubmit();
   };
 
   return (

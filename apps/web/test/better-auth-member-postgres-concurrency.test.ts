@@ -1,7 +1,10 @@
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const provider = vi.hoisted(() => ({ read: vi.fn(), codes: new Map<string, string>() }));
+const provider = vi.hoisted(() => ({ read: vi.fn(), signal: vi.fn(), codes: new Map<string, string>() }));
+vi.mock("../src/lib/hosted-orchestration/signal-runtime", async (original) => ({
+  ...await original<typeof import("../src/lib/hosted-orchestration/signal-runtime")>(), signalHostedMailboxAppendRuntime: provider.signal,
+}));
 vi.mock("../src/lib/better-auth/delivery", () => ({ hostedAuthDelivery: () => ({
   email: async ({ address, code }: { address: string; code: string }) => { provider.codes.set(address, code); },
   sms: async ({ phoneNumber, code }: { phoneNumber: string; code: string }) => { provider.codes.set(phoneNumber, code); },
@@ -19,9 +22,24 @@ vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
   revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({ rootKey: Buffer.alloc(32, 7) }) }),
 }));
 
+import { POST as initialPasskeyOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
+import { POST as registerPasskey } from "../app/api/settings/approval-passkeys/register/route";
+import { readApprovalPasskeyState, prepareApprovalPasskeyWrite, commitApprovalPasskeyWriteTx } from "../src/lib/sensitive-actions/passkey-store";
+import { lockHostedMemberRow } from "../src/lib/hosted-onboarding/shared";
+import { readHostedMailboxWakeByItemId } from "../src/lib/hosted-mailbox/store";
+import { authenticator } from "./approval-webauthn-fixture";
+import { POST as credentialChallenge } from "../app/api/settings/login-methods/challenge/route";
+import { POST as sendCredentialCode } from "../app/api/settings/login-methods/otp/send/route";
+import { POST as verifyCredentialCode } from "../app/api/settings/login-methods/otp/verify/route";
+import { POST as removeCredential } from "../app/api/settings/login-methods/remove/route";
+import { POST as credentialAuthenticationOptions } from "../app/api/settings/approval-passkeys/authenticate/route";
+import { GET as loginMethods } from "../app/api/settings/login-methods/route";
+import { readHostedLoginMethods, type HostedCredentialChange } from "../src/lib/better-auth/credential-change";
+
 import { POST as sendBrowserCode } from "../app/api/auth/otp/send/route";
 import { POST as verifyBrowserCode } from "../app/api/auth/otp/verify/route";
 import { POST as logoutBrowser } from "../app/api/auth/logout/route";
+import { POST as renewBrowser } from "../app/api/auth/session/route";
 import { POST as logoutNative } from "../app/api/device-sync/companion/auth/logout/route";
 import { POST as completeBrowserAuthentication } from "../app/api/auth/complete/route";
 import { claimHostedSignupReferralLink, issueHostedSignupReferralLink } from "../src/lib/hosted-growth/signup-referral";
@@ -48,14 +66,14 @@ import { importHostedAuthMember, lockHostedAuthImportContacts, revalidateHostedA
 import { prepareHostedAuthImport } from "../src/lib/better-auth/migration-source";
 import { createHostedLinqParticipantContact } from "../src/lib/hosted-onboarding/linq-participant-contact";
 import { readHostedMemberIdentity, upsertHostedMemberIdentity } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
-import { readHostedMemberEmailAuthorization } from "../src/lib/hosted-onboarding/hosted-member-store";
+import { readHostedMemberEmailAuthorization, upsertHostedMemberEmailAuthorization } from "../src/lib/hosted-onboarding/hosted-member-store";
 import { buildHostedMemberPhoneIdentityFields } from "../src/lib/hosted-onboarding/member-identity-fields";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.searchParams.has("host") || url.pathname !== "/murph_dev_better_auth_login") throw new Error("Canonical auth proof requires its isolated local task database.");
+    || url.searchParams.has("host") || !["/murph_dev_better_auth_login", "/murph_dev_better_auth_adoption"].includes(url.pathname)) throw new Error("Canonical auth proof requires its isolated local task database.");
 }
 const configuration = () => ({ baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma: getPrisma() });
 const jwtKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -79,6 +97,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "false");
     vi.stubEnv("VERCEL", "");
     provider.read.mockReset();
+    provider.signal.mockReset();
     provider.codes.clear();
   });
   afterAll(async () => { if (enabled) await getPrisma().$disconnect(); });
@@ -96,6 +115,315 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     if (!result) throw new Error("Invalid synthetic contact");
     return result;
   }
+
+  async function withInitialPasskeyMember(run: (f: {
+    prisma: ReturnType<typeof getPrisma>; memberId: string; token: string;
+    request(body: unknown, cookieOverride?: string): Request;
+    loginAgain(): Promise<string>;
+  }) => Promise<void>, initialKind: "email" | "phone" = "email") {
+    const prisma = getPrisma();
+    const secret = Buffer.alloc(32, 29).toString("base64url");
+    const baseURL = "https://www.withmurph.ai";
+    vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", secret);
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
+    vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
+    const value = initialKind === "email" ? `initial-passkey-${randomUUID()}@example.test` : "+12025550179";
+    const prepared = await prepareHostedAuthOtpMember({ prisma, contact: contact(initialKind, value) });
+    const issue = async () => commitHostedAuthOtp({ baseURL, secret, prisma,
+      ...await prepareHostedAuthOtpMember({ prisma, contact: contact(initialKind, value) }), otp: await send(initialKind, value),
+    });
+    // Use the originally prepared member for first issuance; a second prepare
+    // before commit would generate another canonical ID for an unclaimed email.
+    const issued = await commitHostedAuthOtp({ baseURL, secret, prisma, ...prepared, otp: await send(initialKind, value) });
+    const cookieFor = (headers: Headers) => headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="))?.split(";")[0] ?? "";
+    const cookie = cookieFor(issued.headers);
+    expect(cookie).not.toBe("");
+    try {
+      await run({ prisma, memberId: issued.memberId, token: issued.token,
+        request: (body, cookieOverride = cookie) => new Request(`${baseURL}/api/settings/approval-passkeys/register`, {
+          method: "POST", headers: { origin: baseURL, cookie: cookieOverride, "content-type": "application/json" }, body: JSON.stringify(body),
+        }),
+        loginAgain: async () => cookieFor((await issue()).headers),
+      });
+    } finally { await prisma.hostedMember.deleteMany({ where: { id: issued.memberId } }); }
+  }
+
+  async function initialEnrollment(request: (body: unknown) => Request) {
+    const optionsResponse = await initialPasskeyOptions(request({}));
+    expect(optionsResponse.status).toBe(200);
+    const result: { token: string; options: { challenge: string } } = await optionsResponse.json();
+    const key = authenticator("synthetic initial enrollment");
+    return { initialToken: result.token, response: key.registration(true, result.options.challenge) };
+  }
+
+  async function withCredentialMember(run: (f: {
+    memberId: string; prisma: ReturnType<typeof getPrisma>; email: string | null;
+    request(path: string, body: unknown, cookie?: string): Request;
+    loginAgain(): Promise<string>;
+    authorize(change: HostedCredentialChange): Promise<{ method: "passkey"; token: string; assertion: ReturnType<ReturnType<typeof authenticator>["assertion"]> }>;
+    send(change: HostedCredentialChange): Promise<string>;
+  }) => Promise<void>, initialKind: "email" | "phone" = "email") {
+    return withInitialPasskeyMember(async (f) => {
+      vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+      vi.stubEnv("VERCEL", "1");
+      const ip = `2001:db8::${randomUUID().slice(0, 4)}`;
+      const baseURL = "https://www.withmurph.ai";
+      const request = (path: string, body: unknown, cookie = f.request({}).headers.get("cookie") ?? "") => new Request(`${baseURL}${path}`, {
+        method: "POST", headers: { origin: baseURL, cookie, "content-type": "application/json", "x-vercel-forwarded-for": ip }, body: JSON.stringify(body),
+      });
+      const initial: { token: string; options: { challenge: string } } = await (await initialPasskeyOptions(f.request({}))).json();
+      const key = authenticator();
+      expect((await registerPasskey(f.request({ initialToken: initial.token, response: key.registration(true, initial.options.challenge) }))).status).toBe(200);
+      const initialMethods = await (await loginMethods(request("/api/settings/login-methods", {}))).json();
+      const email: string | null = initialMethods.methods.email;
+      const initialUserEmail = (await readHostedLoginMethods(f.prisma, f.memberId)).user.email;
+      const touchedCodes: HostedCredentialChange[] = [];
+      try {
+        await run({ ...f, email, request,
+          authorize: async (change) => {
+            const response = await credentialChallenge(request("/api/settings/login-methods/challenge", { change }));
+            const challenge = await response.json();
+            expect(challenge, `credential challenge status ${response.status}`).toHaveProperty("token");
+            const optionsResponse = await credentialAuthenticationOptions(request("/api/settings/approval-passkeys/authenticate", { token: challenge.token, credentialChange: change }));
+            const options = await optionsResponse.json();
+            expect(options, `credential options status ${optionsResponse.status}`).toHaveProperty("options.challenge");
+            return { method: "passkey", token: challenge.token, assertion: key.assertion({ counter: 0, challenge: options.options.challenge }) };
+          },
+          send: async (change) => {
+            touchedCodes.push(change);
+            const rateIds = [`send:contact:${change.method}:${change.value}`, `verify:contact:${change.method}:${change.value}`, `send:cooldown:${change.method}:${change.value}`]
+              .map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`);
+            await f.prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: rateIds } } });
+            const response = await sendCredentialCode(request("/api/settings/login-methods/otp/send", { change }));
+            expect(await response.json(), `send status ${response.status}`).toEqual({ ok: true });
+            const code = provider.codes.get(change.value!);
+            expect(code).toMatch(/^\d{6}$/u);
+            return code!;
+          },
+        });
+      } finally {
+        for (const change of touchedCodes) {
+          const identifier = change.method === "phone" ? change.value! : `change-email-otp-${initialUserEmail}-${change.value}`;
+          await hostedAuthAdapter(f.prisma)({}).deleteMany({ model: "verification", where: [{ field: "identifier", value: identifier }] });
+        }
+      }
+    }, initialKind);
+  }
+
+  it("adds a verified phone with bound approval and preserves existing first-party sessions", () => withCredentialMember(async (f) => {
+    const otherCookie = await f.loginAgain();
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550171" };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const response = await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }));
+    expect(await response.json()).toEqual({ ok: true });
+    expect(await readHostedMemberIdentity(f)).toMatchObject({ phoneNumber: change.value, privyUserId: null });
+    expect((await (await loginMethods(f.request("/api/settings/login-methods", {}))).json()).methods).toEqual({ email: f.email, phone: change.value, telegram: null });
+    expect((await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie)))?.member.id).toBe(f.memberId);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(409);
+    const prepared = await prepareHostedAuthOtpMember({ prisma: f.prisma, contact: contact("phone", change.value!) });
+    expect(prepared.memberId).toBe(f.memberId);
+    expect(provider.read).not.toHaveBeenCalled();
+  }));
+
+  it.each([false, true])("replaces verified email atomically with existing reply alias = %s", (withAlias) => withCredentialMember(async (f) => {
+    if (withAlias) await f.prisma.hostedMemberRouting.update({ where: { memberId: f.memberId }, data: { replyAliasGeneration: 4, replyAliasLookupKey: "0123456789abcdef0123456789abcdef" } });
+    const otherCookie = await f.loginAgain();
+    const change: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: f.email, value: `replacement-${randomUUID()}@example.test` };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const response = await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }));
+    expect(await response.json()).toEqual({ ok: true });
+    expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(change.value);
+    expect((await f.prisma.hostedMemberRouting.findUniqueOrThrow({ where: { memberId: f.memberId } })).replyAliasGeneration).toBe(withAlias ? 5 : 0);
+    expect(await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie))).toBeNull();
+    expect((await getHostedAppSessionFromRequest(f.request("/home", {})))?.member.id).toBe(f.memberId);
+    expect((await (await loginMethods(f.request("/api/settings/login-methods", {}))).json()).methods.email).toBe(change.value);
+    expect((await prepareHostedAuthOtpMember({ prisma: f.prisma, contact: contact("email", change.value!) })).memberId).toBe(f.memberId);
+  }));
+
+  it("binds credential approval to the target, original identity and browser session", () => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550172" };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const path = "/api/settings/login-methods/otp/verify";
+    expect((await verifyCredentialCode(f.request(path, { change: { ...change, value: "+12025550173" }, code, authorization }))).status).toBe(410);
+    expect((await verifyCredentialCode(f.request(path, { change, code, authorization }, await f.loginAgain()))).status).toBe(410);
+    expect((await verifyCredentialCode(f.request(path, { change, code, authorization }))).status).toBe(200);
+  }));
+
+  it("commits wrong-code budgets without consuming credential approval", () => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: f.email, value: `budget-${randomUUID()}@example.test` };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const wrong = code === "000000" ? "111111" : "000000";
+    for (let i = 0; i < 3; i++) expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, authorization, code: wrong }))).status).toBe(400);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, authorization, code }))).status).toBe(400);
+    expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(f.email);
+    const resent = await f.send(change);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, authorization, code: resent }))).status).toBe(200);
+  }));
+
+  it("refuses to remove the last sign-in and requires existing approval", () => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method: "email", operation: "remove", expectedIdentity: f.email, value: null };
+    const response = await removeCredential(f.request("/api/settings/login-methods/remove", { change, authorization: {} }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "LINKED_ACCOUNT_LAST_SIGN_IN" } });
+    const phone: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550174" };
+    const code = await f.send(phone);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change: phone, code, authorization: {} }))).status).toBe(400);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+  }));
+
+  it("adds email to a phone-only account without retiring the original app session", () => withCredentialMember(async (f) => {
+    expect(f.email).toBeNull();
+    const otherCookie = await f.loginAgain();
+    const change: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: null, value: `added-${randomUUID()}@example.test` };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(200);
+    expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(change.value);
+    expect((await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie)))?.member.id).toBe(f.memberId);
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods).toEqual({ email: change.value, phone: "+12025550179", telegram: null });
+  }, "phone"));
+
+  it("removes a phone atomically and revokes other sessions while preserving the authorizing browser", () => withCredentialMember(async (f) => {
+    const add: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550175" };
+    const code = await f.send(add);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change: add, code, authorization: await f.authorize(add) }))).status).toBe(200);
+    const otherCookie = await f.loginAgain();
+    const change: HostedCredentialChange = { method: "phone", operation: "remove", expectedIdentity: add.value, value: null };
+    const authorization = await f.authorize(change);
+    expect((await removeCredential(f.request("/api/settings/login-methods/remove", { change, authorization }))).status).toBe(200);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods).toEqual({ email: f.email, phone: null, telegram: null });
+    expect(await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie))).toBeNull();
+    expect((await getHostedAppSessionFromRequest(f.request("/home", {})))?.member.id).toBe(f.memberId);
+    expect((await removeCredential(f.request("/api/settings/login-methods/remove", { change, authorization }))).status).toBe(409);
+  }));
+
+  it.each(["email", "phone"] as const)("rolls back %s proof, canonical writes, approval and revocation on a database failure", (method) => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method, operation: "set", expectedIdentity: method === "email" ? f.email : null,
+      value: method === "email" ? `rollback-${randomUUID()}@example.test` : "+12025550176" };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const otherCookie = await f.loginAgain();
+    const before = await readHostedLoginMethods(f.prisma, f.memberId);
+    // The trigger belongs to this test and names only its synthetic member.
+    if (!/^[A-Za-z0-9_-]+$/u.test(f.memberId)) throw new Error("Unsafe synthetic trigger target");
+    await f.prisma.$executeRawUnsafe("CREATE FUNCTION auth_test_reject_credential() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = TG_ARGV[0] THEN RAISE EXCEPTION 'synthetic credential failure'; END IF; RETURN NEW; END $$");
+    try {
+      await f.prisma.$executeRawUnsafe(`CREATE TRIGGER auth_test_reject_credential BEFORE UPDATE ON hosted_auth_record FOR EACH ROW WHEN (NEW.model = 'user') EXECUTE FUNCTION auth_test_reject_credential('${f.memberId}')`);
+      const failed = await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }));
+      expect(failed.status).toBe(500);
+      expect(await readHostedLoginMethods(f.prisma, f.memberId)).toEqual(before);
+      expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+      expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(f.email);
+      expect((await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie)))?.member.id).toBe(f.memberId);
+    } finally {
+      await f.prisma.$executeRawUnsafe("DROP TRIGGER IF EXISTS auth_test_reject_credential ON hosted_auth_record");
+      await f.prisma.$executeRawUnsafe("DROP FUNCTION auth_test_reject_credential()");
+    }
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(200);
+  }));
+
+  it("accepts one concurrent credential completion and rejects replay", () => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550177" };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const results = await Promise.all([0, 1].map(() => verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))));
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.phone).toBe(change.value);
+  }));
+
+  it("commits the active member's channel wake even when its best-effort runtime signal fails", () => withCredentialMember(async (f) => {
+    await f.prisma.hostedMember.update({ where: { id: f.memberId }, data: { billingStatus: "active" } });
+    provider.signal.mockRejectedValue(new Error("Synthetic signal outage"));
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550180" };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const response = await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }));
+    expect(await response.json()).toEqual({ ok: true });
+    const rows = await f.prisma.hostedMailboxItem.findMany({ where: { userId: f.memberId }, select: { id: true, kind: true }, take: 2 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("member.channels.updated");
+    const wake = await readHostedMailboxWakeByItemId({ prisma: f.prisma, mailboxItemId: rows[0].id });
+    expect(wake).toMatchObject({ kind: "member.channels.updated", userId: f.memberId, memberChannels: { email: true, telegram: false } });
+    expect(provider.signal).toHaveBeenCalledWith({ expectedUserId: f.memberId, mailboxItemId: rows[0].id });
+  }));
+
+  it("normalizes legacy canonical email casing before admitting a credential change", () => withCredentialMember(async (f) => {
+    await f.prisma.$transaction((tx) => upsertHostedMemberEmailAuthorization({
+      memberId: f.memberId, prisma: tx, verifiedEmail: { address: f.email!.toUpperCase(), verifiedAt: new Date() },
+      preparedControlRoot: { domain: "control", userId: f.memberId, rootKeyId: "synthetic-root" },
+    }));
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550181" };
+    const code = await f.send(change);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization: await f.authorize(change) }))).status).toBe(200);
+  }));
+
+  it("does not let contact proof or another member's approval transfer a credential", () => withCredentialMember(async (a) => withCredentialMember(async (b) => {
+    const claimed: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: a.email, value: b.email };
+    const response = await credentialChallenge(a.request("/api/settings/login-methods/challenge", { change: claimed }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "AUTH_CONTACT_IN_USE" } });
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550178" };
+    const code = await a.send(change);
+    const authorization = await a.authorize(change);
+    expect((await verifyCredentialCode(b.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(410);
+    expect((await verifyCredentialCode(a.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(200);
+    expect((await readHostedLoginMethods(b.prisma, b.memberId)).methods.phone).toBeNull();
+  })));
+
+  it("enrolls the first approval passkey after real OTP login and cannot use initial setup to replace it", () => withInitialPasskeyMember(async (f) => {
+    const registration = await initialEnrollment(f.request);
+    expect((await registerPasskey(f.request(registration))).status).toBe(200);
+    expect((await readApprovalPasskeyState(f)).credentials).toHaveLength(1);
+    expect((await initialPasskeyOptions(f.request({}))).status).toBe(403);
+    expect((await registerPasskey(f.request(registration))).status).toBe(403);
+    expect(await f.prisma.hostedSensitiveActionChallenge.count({ where: { memberId: f.memberId } })).toBe(0);
+    expect(provider.read).not.toHaveBeenCalled();
+  }));
+
+  it("admits only one concurrent first-factor enrollment", () => withInitialPasskeyMember(async (f) => {
+    const registrations = await Promise.all([initialEnrollment(f.request), initialEnrollment(f.request)]);
+    const results = await Promise.all(registrations.map((registration) => registerPasskey(f.request(registration))));
+    expect(results.filter((result) => result.status === 200)).toHaveLength(1);
+    expect((await readApprovalPasskeyState(f)).credentials).toHaveLength(1);
+  }));
+
+  it.each(["exchanged", "stale", "future"] as const)("rejects %s primary proof for initial factor setup", (kind) => withInitialPasskeyMember(async (f) => {
+    const primaryAuthenticatedAt = kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000);
+    await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt },
+    });
+    expect((await initialPasskeyOptions(f.request({}))).status).toBe(403);
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+  }));
+
+  it("rejects initial setup for a fresh login once a legacy identity is bound", () => withInitialPasskeyMember(async (f) => {
+    const registration = await initialEnrollment(f.request);
+    await f.prisma.$transaction((tx) => upsertHostedMemberIdentity({
+      maskedPhoneNumberHint: null, phoneLookupKey: null, phoneNumber: null, memberId: f.memberId,
+      privyUserId: `did:privy:${f.memberId}`, phoneNumberVerifiedAt: null,
+      signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+      preparedControlRoot: { domain: "control", userId: f.memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+    }));
+    expect((await initialPasskeyOptions(f.request({}))).status).toBe(403);
+    expect((await registerPasskey(f.request(registration))).status).toBe(403);
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+    expect(provider.read).not.toHaveBeenCalled();
+  }));
+
+  it("binds initial registration to the original session and rechecks revocation", () => withInitialPasskeyMember(async (f) => {
+    const registration = await initialEnrollment(f.request);
+    const secondCookie = await f.loginAgain();
+    expect((await registerPasskey(f.request(registration, secondCookie))).status).toBe(403);
+    expect((await logoutBrowser(f.request({}))).status).toBe(200);
+    expect((await registerPasskey(f.request(registration))).status).toBe(401);
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+  }));
 
   it.each(["email", "phone"] as const)("creates one canonical %s member and reuses it on subsequent login", async (kind) => {
     const prisma = getPrisma();
@@ -164,7 +492,8 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
         expect(await readHostedMemberIdentity({ memberId: result.memberId, prisma })).toMatchObject({ privyUserId: null });
         expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: result.memberId } })).billingStatus).toBe("not_started");
       } else {
-        expect(Object.keys(result).sort()).toEqual(["memberId", "ok", "token"]);
+        expect(Object.keys(result).sort()).toEqual(["expiresAt", "memberId", "ok", "token"]);
+        expect(new Date(result.expiresAt).getTime()).toBeGreaterThan(Date.now());
         expect(result.token).toMatch(/^murph_auth_v1\.[A-Za-z0-9]{32}$/u);
         expect(response.headers.getSetCookie()).toEqual([]);
       }
@@ -279,6 +608,50 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     } finally { await prisma.hostedMember.deleteMany({ where: { id: memberId } }); }
   }
 
+  it("keeps imported native sessions on an addition, then fences old authority on credential removal", () => legacyFixture(async (memberId, phone) => {
+    const prisma = getPrisma(); const baseURL = "https://www.withmurph.ai";
+    const secret = Buffer.alloc(32, 29).toString("base64url");
+    vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", secret); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
+    const legacy = await issueHostedAppSession({ memberId, privyUserId: `did:privy:${memberId}` });
+    const prepared = await prepareHostedAuthOtpMember({ prisma, contact: contact("phone", phone) });
+    const issued = await commitHostedAuthOtp({ baseURL, secret, prisma, ...prepared, otp: await send("phone", phone) });
+    const cookie = issued.headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="))!.split(";")[0];
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true"); vi.stubEnv("VERCEL", "1");
+    const ip = `2001:db8::${randomUUID().slice(0, 4)}`;
+    const request = (path: string, body: unknown) => new Request(`${baseURL}${path}`, { method: "POST", body: JSON.stringify(body), headers: {
+      origin: baseURL, cookie, "content-type": "application/json", "x-vercel-forwarded-for": ip,
+    } });
+    const key = authenticator();
+    // Represent a factor already migrated by the separately tested enrollment
+    // owner; this journey starts with an established approval credential.
+    const credential = await prepareApprovalPasskeyWrite({ prisma, credentials: [key.credential], state: await readApprovalPasskeyState({ memberId, prisma }) });
+    await prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, memberId);
+      await commitApprovalPasskeyWriteTx({ prepared: credential, prisma: tx });
+    });
+    const approve = async (change: HostedCredentialChange) => {
+      const challenge = await (await credentialChallenge(request("/api/settings/login-methods/challenge", { change }))).json();
+      return { method: "passkey", token: challenge.token, assertion: key.assertion({ counter: 0, customMessage: challenge.message }) };
+    };
+    const legacyRequest = new Request(`${baseURL}/api/device-sync/companion/bootstrap`, { headers: { authorization: `Bearer ${identityToken(memberId)}` } });
+    const oldBrowser = new Request(`${baseURL}/home`, { headers: { cookie: legacy.cookie.split(";")[0] } });
+    const change: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: null, value: `legacy-add-${randomUUID()}@example.test` };
+    expect((await sendCredentialCode(request("/api/settings/login-methods/otp/send", { change }))).status).toBe(200);
+    expect((await verifyCredentialCode(request("/api/settings/login-methods/otp/verify", { change, code: provider.codes.get(change.value!), authorization: await approve(change) }))).status).toBe(200);
+    expect((await readHostedLoginMethods(prisma, memberId)).user.credentialsChangedAt).toBeNull();
+    expect((await readHostedNativeMemberAuth(legacyRequest, prisma)).member.id).toBe(memberId);
+    expect((await getHostedAppSessionFromRequest(oldBrowser))?.member.id).toBe(memberId);
+    const removal: HostedCredentialChange = { method: "phone", operation: "remove", expectedIdentity: phone, value: null };
+    expect((await removeCredential(request("/api/settings/login-methods/remove", { change: removal, authorization: await approve(removal) }))).status).toBe(200);
+    expect((await readHostedLoginMethods(prisma, memberId)).user.credentialsChangedAt).toBeInstanceOf(Date);
+    await expect(readHostedNativeMemberAuth(legacyRequest, prisma)).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
+    expect(await getHostedAppSessionFromRequest(oldBrowser)).toBeNull();
+    expect((await getHostedAppSessionFromRequest(request("/home", {})))?.member.id).toBe(memberId);
+    expect(await importHostedAuthMember({ prisma, memberId })).toBe("already_owned");
+    expect((await readHostedLoginMethods(prisma, memberId)).methods.phone).toBeNull();
+    expect(provider.read).toHaveBeenCalledTimes(1);
+  }));
+
   it("imports an independently reconciled member once and never refreshes credentials from Privy afterward", () => legacyFixture(async (memberId, phone) => {
     const prisma = getPrisma();
     expect(await importHostedAuthMember({ memberId, prisma })).toBe("imported");
@@ -302,6 +675,13 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const legacy = await issueHostedAppSession({ memberId, privyUserId: `did:privy:${memberId}` });
     const oldCookie = legacy.cookie.split(";")[0];
     expect((await getHostedAppSessionFromRequest(request(oldCookie)))?.member.id).toBe(memberId);
+    const beforeRenewal = await prisma.hostedWebSession.findUniqueOrThrow({ where: { id: legacy.sessionId } });
+    const legacyRenewal = await renewBrowser(new Request("http://localhost:3000/api/auth/session", {
+      method: "POST", headers: { cookie: oldCookie, origin: "http://localhost:3000" },
+    }));
+    expect(legacyRenewal.status).toBe(200);
+    expect(legacyRenewal.headers.getSetCookie()).toEqual([]);
+    expect(await prisma.hostedWebSession.findUniqueOrThrow({ where: { id: legacy.sessionId } })).toEqual(beforeRenewal);
     const prepared = await prepareHostedAuthOtpMember({ prisma, contact: contact("phone", phone) });
     const issued = await commitHostedAuthOtp({ ...configuration(), baseURL: "http://localhost:3000", secret, ...prepared, otp: await send("phone", phone) });
     const newCookie = issued.headers.getSetCookie().find((cookie) => cookie.startsWith("murph-auth-session="))?.split(";")[0];

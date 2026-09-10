@@ -15,7 +15,7 @@ import { HostedAuthMigrationConflictError, prepareHostedAuthImport, readHostedAu
 import { lockHostedAuthImportContacts, revalidateHostedAuthImportTx, type PreparedHostedAuthImport } from "./import";
 
 type Client = PrismaClient | Prisma.TransactionClient;
-export type PreparedHostedAuthOtpMember = {
+export type PreparedHostedAuthMember = {
   memberId: string;
   preparedControlRoot: PreparedHostedDomainRootForWeb;
   initialUser?: HostedAuthUserFields;
@@ -46,7 +46,7 @@ export async function prepareHostedAuthOtpMember(input: {
   contact: HostedLinqParticipantContact;
   prisma: PrismaClient;
   inviteCode?: string;
-}): Promise<PreparedHostedAuthOtpMember> {
+}): Promise<PreparedHostedAuthMember> {
   const invite = input.inviteCode
     ? await requireHostedInviteForAuthentication(input.inviteCode, input.prisma, new Date()) : null;
   const prepared = await prepareContactMember({ ...input, invitedMemberId: invite?.member.id });
@@ -59,7 +59,7 @@ export async function prepareHostedAuthOtpMember(input: {
   } };
 }
 
-async function prepareContactMember(input: { contact: HostedLinqParticipantContact; prisma: PrismaClient; invitedMemberId?: string }): Promise<PreparedHostedAuthOtpMember> {
+async function prepareContactMember(input: { contact: HostedLinqParticipantContact; prisma: PrismaClient; invitedMemberId?: string }): Promise<PreparedHostedAuthMember> {
   const { contact, prisma } = input;
   const selector = authLookupKey("user", contact.kind === "email" ? "email" : "phoneNumber", contact.value);
   const row = await prisma.hostedAuthRecord.findFirst({ where: {
@@ -95,7 +95,7 @@ async function prepareContactMember(input: { contact: HostedLinqParticipantConta
   return prepareUnclaimedLogin(prisma, contact, member?.id ?? null, member ? undefined : input.invitedMemberId);
 }
 
-async function prepareImportedLogin(prepared: PreparedHostedAuthImport, contact: HostedLinqParticipantContact, prisma: PrismaClient): Promise<PreparedHostedAuthOtpMember> {
+async function prepareImportedLogin(prepared: PreparedHostedAuthImport, contact: HostedLinqParticipantContact, prisma: PrismaClient): Promise<PreparedHostedAuthMember> {
   const matches = contact.kind === "email"
     ? prepared.user.emailVerified && prepared.user.email === contact.value
     : prepared.user.phoneNumberVerified && prepared.user.phoneNumber === contact.value;
@@ -112,7 +112,7 @@ async function prepareImportedLogin(prepared: PreparedHostedAuthImport, contact:
   } };
 }
 
-async function assertPristineInviteMember(prisma: Client, memberId: string): Promise<void> {
+export async function assertHostedAuthPristineInviteMember(prisma: Client, memberId: string): Promise<void> {
   const [member, identity, email, routing, user] = await Promise.all([
     prisma.hostedMember.findUnique({ where: { id: memberId }, select: {
       billingStatus: true, suspendedAt: true, initialOnboardingCompletedAt: true,
@@ -129,9 +129,9 @@ async function assertPristineInviteMember(prisma: Client, memberId: string): Pro
   }
 }
 
-async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqParticipantContact, existingId: string | null, invitedMemberId?: string): Promise<PreparedHostedAuthOtpMember> {
+async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqParticipantContact, existingId: string | null, invitedMemberId?: string): Promise<PreparedHostedAuthMember> {
   const memberId = existingId ?? invitedMemberId ?? generateHostedMemberId();
-  if (invitedMemberId) await assertPristineInviteMember(prisma, memberId);
+  if (invitedMemberId) await assertHostedAuthPristineInviteMember(prisma, memberId);
   const snapshot = await readHostedAuthSourceSnapshot(prisma, memberId);
   const identity = existingId || invitedMemberId ? await readHostedMemberIdentity({ memberId, prisma }) : null;
   if (identity?.privyUserId) throw new HostedAuthMigrationConflictError();
@@ -141,7 +141,7 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
   return { memberId, preparedControlRoot: root, commitMember: async (tx) => {
     await acquireHostedLinqParticipantContactLockTx({ contact, tx, lockTimeoutMs: 5_000 });
     await lockHostedMemberRow(tx, memberId, { timeoutMs: 5_000 });
-    if (invitedMemberId) await assertPristineInviteMember(tx, memberId);
+    if (invitedMemberId) await assertHostedAuthPristineInviteMember(tx, memberId);
     const current = await findCanonicalMember(tx, contact);
     const owned = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } } });
     if ((current?.id ?? null) !== existingId || owned || snapshot !== await readHostedAuthSourceSnapshot(tx, memberId)) {

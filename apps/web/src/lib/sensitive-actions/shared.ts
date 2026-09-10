@@ -10,6 +10,7 @@ export const SETTINGS_SENSITIVE_ACTION_KINDS = [
 
 export const SENSITIVE_ACTION_KINDS = [
   ...SETTINGS_SENSITIVE_ACTION_KINDS,
+  "account.credential.change",
   "assistant.action.approve",
 ] as const;
 
@@ -107,4 +108,4 @@ export type HostedSecureApprovalStatus = (
   | { status: "needs_support" }
   | { status: "not_configured" }
   | { status: "unavailable" }
-) & { method?: "passkey" };
+) & { method?: "passkey" | "initial" };
