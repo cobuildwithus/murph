@@ -85,10 +85,18 @@ describe("hosted Resend plain-text email sender", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload).toEqual({
-        from: "Murph <auth@example.test>", to: ["member@example.test"], ...content,
+        from: "Murph <auth@example.test>", to: ["member@example.test"],
+        subject: content.subject, text: content.text, html: content.html,
+        attachments: [{
+          content: content.attachments[0]?.content,
+          content_type: "image/png", content_id: "murph-logo", filename: "murph-logo.png",
+        }],
       });
       expect(payload.text).toContain("012345");
-      expect(payload.html).toContain(">012345</td>");
+      expect(payload.html).toContain(">012345</span>");
+      expect(payload.html).toContain('src="cid:murph-logo"');
+      expect(Buffer.from(payload.attachments[0].content, "base64").subarray(0, 8))
+        .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
       return new Response(JSON.stringify({ id: "synthetic-auth-email" }), { status: 200 });
     });
     await sendHostedResendPlainTextEmail({

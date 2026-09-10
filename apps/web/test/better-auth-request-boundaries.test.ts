@@ -66,7 +66,7 @@ describe("auth code delivery", () => {
     expect(mocks.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: expect.stringMatching(/^auth-/u), subject: "Your Murph sign-in code", to: ["member@example.test"],
       text: expect.stringContaining("123456"),
-      html: expect.stringContaining(">123456</td>"),
+      html: expect.stringContaining(">123456</span>"),
     }));
     for (const code of ["invalid", "12345", "1234567", "<img src=x onerror=alert(1)>"]) {
       await expect(hostedAuthDelivery().email({ address: "member@example.test", code })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });

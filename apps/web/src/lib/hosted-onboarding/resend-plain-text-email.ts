@@ -43,6 +43,7 @@ export class HostedResendPlainTextEmailError extends Error {
 }
 
 export async function sendHostedResendPlainTextEmail(input: {
+  attachments?: CreateEmailOptions["attachments"];
   config: HostedResendPlainTextEmailConfig;
   fetchImpl?: typeof fetch;
   html?: string;
@@ -66,6 +67,7 @@ export async function sendHostedResendPlainTextEmail(input: {
   });
   const replyTo = normalizeHostedResendReplyTo(input.replyTo);
   const email: CreateEmailOptions = {
+    ...(input.attachments ? { attachments: input.attachments } : {}),
     from: input.config.from,
     ...(replyTo ? { replyTo } : {}),
     subject: input.subject,

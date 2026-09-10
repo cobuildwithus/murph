@@ -1,4 +1,6 @@
-/** Image-free, inline-styled email with a required plain-text alternative. */
+import { hostedAuthEmailLogoPng } from "./code-email-logo.generated";
+
+/** Inline-styled email with an embedded logo and a plain-text alternative. */
 export function hostedAuthCodeEmail(code: string) {
   if (!/^\d{6}$/u.test(code)) {
     throw new TypeError("Auth email requires a six-digit code.");
@@ -7,6 +9,12 @@ export function hostedAuthCodeEmail(code: string) {
   return {
     subject: "Your Murph sign-in code",
     text: `Your Murph sign-in code is ${code}. It expires in 5 minutes. If you did not request this code, you can ignore this email.`,
+    attachments: [{
+      content: hostedAuthEmailLogoPng,
+      contentType: "image/png",
+      contentId: "murph-logo",
+      filename: "murph-logo.png",
+    }],
     html: `<!doctype html>
 <html lang="en">
   <head>
@@ -22,7 +30,9 @@ export function hostedAuthCodeEmail(code: string) {
           <!--[if mso]><table role="presentation" width="520" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;">
             <tr>
-              <td style="padding-bottom:48px;font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:40px;font-weight:bold;letter-spacing:-1.5px;">Murph</td>
+              <td style="padding-bottom:48px;">
+                <img src="cid:murph-logo" alt="Murph" width="197" height="44" style="display:block;border:0;width:197px;height:44px;color:#2d3436;font-size:24px;">
+              </td>
             </tr>
             <tr>
               <td>
@@ -31,7 +41,9 @@ export function hostedAuthCodeEmail(code: string) {
               </td>
             </tr>
             <tr>
-              <td style="padding:26px 24px;background-color:#f5f0e8;border-radius:12px;font-family:'Courier New',Courier,monospace;font-size:36px;line-height:44px;font-weight:bold;letter-spacing:6px;">${code}</td>
+              <td height="96" valign="middle" style="height:96px;padding:0 24px;vertical-align:middle;background-color:#f5f0e8;border-radius:12px;font-size:0;line-height:0;">
+                <span style="display:inline-block;vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:36px;line-height:44px;font-weight:600;letter-spacing:6px;white-space:nowrap;">${code}</span>
+              </td>
             </tr>
             <tr>
               <td style="padding-top:20px;">
