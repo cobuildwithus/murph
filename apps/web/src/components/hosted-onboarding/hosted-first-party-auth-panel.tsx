@@ -8,7 +8,7 @@ import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { requestHostedOnboardingJson } from "./client-api";
-import { declineHostedLaunchConsent, logoutHostedAppSession } from "./hosted-app-session-client";
+import { declineHostedLaunchConsent, logoutHostedAppSession, verifyHostedAppSession } from "./hosted-app-session-client";
 import { HostedAuthLegalNotice } from "./hosted-auth-shared";
 import { HostedContactCodeForm } from "./hosted-contact-code-form";
 import { HostedTelegramProofButton } from "./hosted-telegram-proof-button";
@@ -75,11 +75,8 @@ export function HostedFirstPartyAuthPanel({
     }
   }
 
-  async function verify(url: string, payload: Record<string, unknown>, signal: AbortSignal) {
-    const result = await requestHostedOnboardingJson<{ ok: true; memberId: string }>({
-      url, payload: { ...payload, ...signupContext(inviteCode) }, signal,
-    });
-    if (result.ok !== true || !result.memberId) throw new Error("Sign-in could not be confirmed. Request a new code or reload to check your session.");
+  async function verify(url: "/api/auth/otp/verify" | "/api/auth/telegram/verify", payload: Record<string, unknown>, signal: AbortSignal) {
+    await verifyHostedAppSession({ url, payload: { ...payload, ...signupContext(inviteCode) }, signal });
     if (signal.aborted || !mounted.current) return;
     setStep("resume"); setActive(false);
     await complete();

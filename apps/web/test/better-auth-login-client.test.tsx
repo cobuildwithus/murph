@@ -8,14 +8,18 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 const mocks = vi.hoisted(() => ({
-  request: vi.fn(), completed: vi.fn(), declined: vi.fn(), logout: vi.fn(), navigate: vi.fn(),
+  invalidated: vi.fn(), reloaded: vi.fn(), request: vi.fn(), completed: vi.fn(), declined: vi.fn(), logout: vi.fn(), navigate: vi.fn(),
   contact: null as ComponentProps<typeof HostedContactCodeForm> | null,
   telegram: null as ComponentProps<typeof HostedTelegramProofButton> | null,
   consent: null as ComponentProps<typeof HostedLegalConsentCard> | null,
 }));
+vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
+  BROWSER_VAULT_SESSION_ENDING_LEASE_MS: 30_000,
+  publishBrowserVaultSessionEnding: vi.fn(), publishBrowserVaultSessionInvalidation: mocks.invalidated,
+}));
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({ requestHostedOnboardingJson: mocks.request }));
-vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({ declineHostedLaunchConsent: mocks.declined, logoutHostedAppSession: mocks.logout }));
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({ navigateHostedAuthRedirect: mocks.navigate }));
+vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", async (original) => ({ ...await original<typeof import("@/src/components/hosted-onboarding/hosted-app-session-client")>(), declineHostedLaunchConsent: mocks.declined, logoutHostedAppSession: mocks.logout }));
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({ navigateHostedAuthRedirect: mocks.navigate, reloadCurrentHostedAuthDocument: mocks.reloaded }));
 vi.mock("@/src/components/hosted-onboarding/hosted-contact-code-form", () => ({ HostedContactCodeForm: (props: ComponentProps<typeof HostedContactCodeForm>) => {
   mocks.contact = props; return createElement("button", { type: "button" }, "Send code");
 } }));
@@ -146,4 +150,25 @@ test("closing during product bootstrap prevents a late completion callback", asy
   await rendered!.cleanup(); rendered = null;
   await act(async () => { finish(payload); await pending; });
   expect(mocks.completed).not.toHaveBeenCalled();
+});
+
+test.each(["phone", "telegram"] as const)("clears the previous vault at %s login headers even when its response cannot be read", async (method) => {
+  mocks.request.mockImplementation(async (input: { url: string; onSuccessfulResponseHeaders?: () => void; onSuccessfulResponseError?: () => void }) => {
+    if (!input.url.endsWith("/verify")) throw new Error("Unexpected completion after failed response.");
+    input.onSuccessfulResponseHeaders?.();
+    expect(mocks.invalidated).toHaveBeenCalledOnce();
+    input.onSuccessfulResponseError?.();
+    throw new Error("response body unavailable");
+  });
+  await render({ methods: [method] });
+  await act(async () => {
+    const signal = new AbortController().signal;
+    const operation = method === "phone"
+      ? mocks.contact!.onVerify("+15555550127", "123456", signal)
+      : mocks.telegram!.onProof("synthetic-telegram-proof", signal);
+    await expect(operation).rejects.toThrow("response body unavailable");
+  });
+  expect(mocks.reloaded).toHaveBeenCalledOnce();
+  expect(mocks.completed).not.toHaveBeenCalled();
+  expect(mocks.logout).not.toHaveBeenCalled();
 });

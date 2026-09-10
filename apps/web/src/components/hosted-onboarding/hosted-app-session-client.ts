@@ -9,6 +9,23 @@ import {
 import { requestHostedOnboardingJson } from "./client-api";
 import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 
+/** A 2xx verification response may already have replaced the browser cookie. */
+export async function verifyHostedAppSession(input: {
+  url: "/api/auth/otp/verify" | "/api/auth/telegram/verify";
+  payload: Record<string, unknown>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const result = await requestHostedOnboardingJson<{ ok?: unknown; memberId?: unknown }>({
+    ...input,
+    onSuccessfulResponseHeaders: publishBrowserVaultSessionInvalidation,
+    onSuccessfulResponseError: reloadCurrentHostedAuthDocument,
+  });
+  if (result.ok !== true || typeof result.memberId !== "string" || !result.memberId) {
+    reloadCurrentHostedAuthDocument();
+    throw new Error("Sign-in could not be confirmed. Reload to check your session.");
+  }
+}
+
 export async function logoutHostedAppSession(input: {
   logoutPrivy?: () => Promise<void> | void;
 } = {}): Promise<void> {

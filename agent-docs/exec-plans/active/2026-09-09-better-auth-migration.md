@@ -398,3 +398,16 @@ and retirement remain outstanding.
 The Web adoption candidate is PR #3132, stacked on #3128. Its release note uses
 the existing archive renderer; all ten fragment/page cases and Web typecheck
 pass. Public preview and final review are being prepared on the stable candidate.
+
+### Adoption session-cache correction
+
+Retirement verification exposed a first-party login boundary gap: a successful
+OTP or Telegram response can replace the browser cookie before its body is
+read, while the previous member's decrypted vault remains mounted. Both
+composed login regression cases failed before the correction. Verification
+now uses the existing session client owner to invalidate every tab at successful
+headers and reload after an unreadable or invalid success body. Failed
+nonreplacement responses preserve the current cache. No new state or logout
+step was added. All 90 focused login, session and live-vault checks and Web
+typecheck pass. This source change requires ReviewGPT round 2 and current-head
+CI before PR #3132 is ready again.
