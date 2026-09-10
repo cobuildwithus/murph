@@ -89,19 +89,6 @@ Last verified: 2026-08-31
   a replacement-line candidate pin across the sole preparation retry; never
   substitute a different setup or sender fallback after ownership was observed.
 - Lower-level hosted browser device-sync assertions retain the HMAC signature and exact signed member, audience, method, path, and origin bindings, and every nonce remains single-use. With integer-second `exp` and the 60-second skew policy, the assertion is first invalid exactly at `(exp + 61) * 1000`; every earlier millisecond remains admissible. `HOSTED_USER_ASSERTION_FIRST_INVALID_OFFSET_SECONDS` is the shared verifier, persisted-horizon, cleanup, and test policy owner. New nonce rows store that first-invalid instant. Request admission performs one primary-key insert, treats only the exact nonce conflict as replay, and uses the database clock to refuse delayed first admission at or after that persisted horizon while keeping the inserted row as a replay tombstone. During mixed-version rollout, the bounded hourly hosted-retention owner deletes only rows whose stored `expiresAt <= now - 61 seconds`, retaining legacy raw-`exp` rows through their full acceptance window and intentionally retaining new-format rows for one extra 61-second interval.
-- Member-owned device provider credentials are personal-member-only Web
-  authority. Encrypt them in their dedicated hosted secure-box lane with AAD
-  bound to the application row and revision; never project ciphertext,
-  plaintext credentials, or provider configuration into browsers, prompts,
-  logs, workspace state, or durable assistant runtime state. OAuth creation,
-  callback consumption, connection use, refresh, revoke, disconnect, and
-  deletion must all resolve the same member, provider, application id, and
-  revision. A rotated or replaced application cannot consume old OAuth state
-  or authorize a stale connection. Shared provider webhook authentication does
-  not authorize an app-bound connection: durable admission rechecks the raw
-  binding under the connection lock and terminally drops that work. Only
-  credential-bearing runtime snapshots may decrypt and project the
-  invocation-scoped configuration.
 - Established shared Junction account preservation is one closed persistence
   contract across hosted and local operation. Shared ingress selects
   `preserve_established` for a source addition and `replace` for an account

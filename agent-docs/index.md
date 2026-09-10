@@ -71,7 +71,6 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
 | `agent-docs/product-specs/imessage-workout-tracking.md` | iMessage workout product spec and chat-only routine access. | iMessage workout product spec | High | 2026-09-08 |
 | `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
-| `agent-docs/product-specs/member-owned-device-provider-applications.md` | Member-owned OAuth client application contract for provider-portal provisioning, exact app revision binding, polling-first runtime config, and optional signed webhooks. | Device-provider connection product spec | High | 2026-08-09 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history. | Biomarkers product spec | High | 2026-07-20 |
 | `agent-docs/product-specs/journal.md` | Private web and native timelines derived from canonical health records. | Journal product spec | High | 2026-09-06 |
 | `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards with changed results, compact neutral states, tappable recorded-day counts, and inline comparison sample sizes. | Personal Patterns product spec | High | 2026-09-06 |
