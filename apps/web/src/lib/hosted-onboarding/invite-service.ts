@@ -50,7 +50,6 @@ import {
   readHostedMemberSignupPhoneCodeAttempt,
   writeHostedMemberSignupPhoneState,
 } from "./hosted-member-identity-store";
-import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
   getHostedOnboardingEnvironment,
@@ -225,32 +224,6 @@ export async function buildHostedInvitePageData(input: {
   prisma?: PrismaClient;
 }) {
   return getHostedInviteStatus(input);
-}
-
-export async function issueHostedInviteForPhone(input: {
-  channel?: "share" | "web";
-  phoneNumber: string;
-  prisma?: PrismaClient;
-}): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMemberCoreState }> {
-  const prisma = input.prisma ?? getPrisma();
-
-  return prisma.$transaction(async (tx) => {
-    const member = await ensureHostedMemberForPhoneTx({
-      phoneNumber: input.phoneNumber,
-      prisma: tx,
-    });
-    const invite = await issueHostedInviteTx({
-      channel: input.channel ?? "share",
-      memberId: member.id,
-      prisma: tx,
-    });
-
-    return {
-      invite,
-      inviteUrl: buildHostedInviteUrl(invite.inviteCode),
-      member,
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function issueHostedInvite(input: {

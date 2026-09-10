@@ -9,17 +9,13 @@ import {
   eventSourceSchema,
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
-  experimentExpectedDirectionsSchema,
-  experimentPrimaryOutcomeSchema,
   effectiveProtocolSnapshotSchema,
   experimentOutcomeSchema,
   experimentFrontmatterSchema,
   experimentOnboardingCaptureSchema,
   commonsProtocolRefSchema,
-  experimentRunLoggingSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
-  healthCommonsKeySchema,
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
@@ -57,7 +53,7 @@ import {
   summarizeExperimentOutcomeEvidencePlan,
   validateExperimentSessionMetricValue,
 } from '@murphai/query'
-import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
+import type { IntegratedVaultServiceDependencies } from './types.js'
 import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
@@ -82,18 +78,15 @@ import {
   uniqueStrings,
 } from './vault-usecase-helpers.js'
 import {
-  normalizeExperimentMeasurementAnchorFlagOption,
-  normalizeExperimentPlannedMeasurementFlagOption,
-} from '../option-utils.js'
-import {
+  buildAnalysisPlanForOnboardingApply,
+  buildCommonsProtocolRefForOnboardingApply,
+  buildRunLoggingForOnboardingApply,
+  buildRunPlanDatePatch,
   buildExperimentAssistantSupportFromOptions,
   buildExperimentOnboardingCaptureFromOptions,
   normalizeRequiredTextOption,
-  normalizeStableIdListOption,
-  normalizeStableIdOption,
   normalizeTextListOption,
-  type ExperimentAssistantSupportOptions,
-  type ExperimentOnboardingCaptureOptions,
+  type ApplyExperimentOnboardingRecordInput,
 } from '../experiment-onboarding-options.js'
 import { upsertEventRecord } from './provider-event.js'
 import {
@@ -102,6 +95,8 @@ import {
   detachInterventionSessionFromExperiment,
 } from './intervention-experiment-link.js'
 import type { JsonObject } from '../health-cli-method-types.js'
+
+export type { ApplyExperimentOnboardingRecordInput } from '../experiment-onboarding-options.js'
 
 type EntityFamily = 'experiment' | 'journal'
 type JournalLinkKind = 'eventIds' | 'sampleStreams'
@@ -320,10 +315,8 @@ interface ExperimentJournalVaultCoreRuntime {
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
 type ExperimentStatusValue = z.infer<typeof experimentStatusSchema>
-const experimentSignalDirectionSchema = z.enum(['increase', 'decrease', 'stabilize'])
 type ExperimentFrontmatterValue = z.infer<typeof experimentFrontmatterSchema>
 type CommonsProtocolRefValue = z.infer<typeof commonsProtocolRefSchema>
-type ExperimentRunLoggingValue = z.infer<typeof experimentRunLoggingSchema>
 type ExperimentRunPlanValue = z.infer<typeof experimentRunPlanSchema>
 type ExperimentAnalysisPlanValue = z.infer<typeof experimentAnalysisPlanSchema>
 const EXPERIMENT_OUTCOME_WRITE_MAX_ATTEMPTS = 3
@@ -380,52 +373,6 @@ const experimentSelectorPayloadSchema = z
       typeof value.slug === 'string',
     'Expected one of lookup, experimentId, or slug.',
   )
-
-export interface ApplyExperimentOnboardingRecordInput
-  extends ExperimentOnboardingCaptureOptions,
-    ExperimentAssistantSupportOptions {
-  vault: string
-  lookup: string
-  status?: ExperimentStatusValue
-  protocolKey?: string
-  pageRevisionId?: string
-  runSpecRevisionId?: string
-  testPlanId?: string
-  baselineStart?: string
-  baselineEnd?: string
-  baselineDays?: number
-  interventionStart?: string
-  interventionEnd?: string
-  interventionDays?: number
-  modality?: string
-  schedule?: ExperimentRunScheduleIntent
-  scheduleInputFile?: string
-  scheduleKind?: ExperimentRunScheduleIntent['kind']
-  scheduleCron?: string
-  scheduleLocalTime?: string
-  scheduleTimeZone?: string
-  dose?: string
-  sessionsPerWeek?: number
-  targetSessions?: number
-  minimumUsefulSessions?: number
-  sessionField?: readonly string[]
-  confounderField?: readonly string[]
-  stopCondition?: readonly string[]
-  primaryBiomarkerKey?: string
-  primaryOutcomeKey?: string
-  primaryOutcomeKind?: ExperimentPrimaryOutcome['kind']
-  primaryOutcomeLabel?: string
-  primaryOutcomeSessionField?: string
-  primaryOutcomeSourceMetricKey?: string
-  primaryOutcomeUnit?: string
-  comparisonStatistic?: ExperimentOutcomeStatistic
-  secondaryBiomarkerKey?: readonly string[]
-  desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
-  expectedDirection?: readonly string[]
-  analysisAnchor?: readonly string[]
-  plannedMeasurement?: readonly string[]
-  analysisNote?: readonly string[]
-}
 
 const privateProtocolPlanInputSchema = z
   .object({
@@ -1605,7 +1552,7 @@ export async function logExperimentSessionRecordFromInput(input: {
   vault: string
   lookup: string
   inputFile: string
-}) {
+}, dependencies: IntegratedVaultServiceDependencies = {}) {
   const payload = experimentSessionPayloadSchema.parse(
     await readJsonPayload(input.inputFile, 'experiment session payload'),
   )
@@ -1614,7 +1561,7 @@ export async function logExperimentSessionRecordFromInput(input: {
     vault: input.vault,
     lookup: input.lookup,
     ...payload,
-  })
+  }, dependencies)
 }
 
 type ExperimentSessionRecordInput = {
@@ -1660,7 +1607,10 @@ const EXPERIMENT_REMINDER_REPLAY_EFFECT_FIELDS = [
   'fields',
 ] as const
 
-export async function logExperimentSessionRecord(input: ExperimentSessionRecordInput) {
+export async function logExperimentSessionRecord(
+  input: ExperimentSessionRecordInput,
+  dependencies?: IntegratedVaultServiceDependencies,
+) {
   const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const frontmatter = requireExperimentFrontmatter(experiment)
   const reminderProof = input.reminderIntentId === undefined
@@ -1669,7 +1619,7 @@ export async function logExperimentSessionRecord(input: ExperimentSessionRecordI
         experimentId: frontmatter.experimentId,
         reminderIntentId: input.reminderIntentId,
         vault: input.vault,
-      })
+      }, dependencies)
   if (reminderProof !== null) {
     assertExperimentReminderSessionInput(input)
   }
@@ -1821,7 +1771,7 @@ async function resolveExperimentReminderOccurrenceProof(input: {
   experimentId: string
   reminderIntentId: string
   vault: string
-}): Promise<ExperimentReminderOccurrenceProof> {
+}, dependencies: IntegratedVaultServiceDependencies | undefined): Promise<ExperimentReminderOccurrenceProof> {
   const parsedIntentId = assistantOutboxIntentIdSchema.safeParse(
     input.reminderIntentId,
   )
@@ -1832,12 +1782,14 @@ async function resolveExperimentReminderOccurrenceProof(input: {
     )
   }
   const intentId = parsedIntentId.data
-  const intentPath = path.join(
-    resolveAssistantStatePaths(input.vault).outboxDirectory,
-    `${intentId}.json`,
-  )
+  if (!dependencies?.readAssistantOutboxIntent) {
+    throw new VaultCliError(
+      'runtime_unavailable',
+      'Delivered reminder provenance requires the assistant outbox reader.',
+    )
+  }
   const parsedIntent = assistantOutboxIntentSchema.safeParse(
-    await readJsonPayload(intentPath, 'delivered reminder provenance'),
+    await dependencies.readAssistantOutboxIntent(input.vault, intentId),
   )
   if (!parsedIntent.success || parsedIntent.data.intentId !== intentId) {
     throw new VaultCliError(
@@ -3190,54 +3142,6 @@ function hasExperimentOnboardingApplyPatch(input: ApplyExperimentOnboardingRecor
   return false
 }
 
-function buildCommonsProtocolRefForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentFrontmatterValue['commonsProtocolRef'],
-): CommonsProtocolRefValue | undefined {
-  const touched =
-    input.protocolKey !== undefined ||
-    input.pageRevisionId !== undefined ||
-    input.runSpecRevisionId !== undefined ||
-    input.testPlanId !== undefined
-
-  if (!touched) {
-    return undefined
-  }
-
-  const key =
-    input.protocolKey === undefined
-      ? existing?.key
-      : normalizeProtocolKeyOption(input.protocolKey, 'protocol-key')
-  const pageRevisionId =
-    input.pageRevisionId === undefined
-      ? existing?.pageRevisionId
-      : normalizeSha256RevisionOption(input.pageRevisionId, 'page-revision-id')
-  const runSpecRevisionId =
-    input.runSpecRevisionId === undefined
-      ? existing?.runSpecRevisionId
-      : normalizeSha256RevisionOption(input.runSpecRevisionId, 'run-spec-revision-id')
-  const testPlanId =
-    input.testPlanId === undefined
-      ? existing?.testPlanId
-      : normalizeStableIdOption(input.testPlanId, 'test-plan-id')
-
-  if (!key || !pageRevisionId || !runSpecRevisionId) {
-    throw new VaultCliError(
-      'invalid_payload',
-      'Applying a protocol reference requires --protocol-key, --page-revision-id, and --run-spec-revision-id unless the experiment already has them.',
-    )
-  }
-
-  return commonsProtocolRefSchema.parse(
-    compactObject({
-      key,
-      pageRevisionId,
-      runSpecRevisionId,
-      testPlanId,
-    }),
-  )
-}
-
 async function buildRunPlanForOnboardingApply(
   input: ApplyExperimentOnboardingRecordInput,
   existing: ExperimentFrontmatterValue['runPlan'],
@@ -3413,460 +3317,6 @@ function parseExperimentRunScheduleIntent(
   return parsed.data
 }
 
-function buildRunLoggingForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentRunLoggingValue | undefined,
-): ExperimentRunLoggingValue | undefined {
-  const sessionFields = normalizeStableIdListOption(input.sessionField, 'session-field')
-  const confounderFields = normalizeStableIdListOption(
-    input.confounderField,
-    'confounder-field',
-  )
-
-  if (sessionFields === undefined && confounderFields === undefined) {
-    return undefined
-  }
-
-  const next = compactObject({
-    ...(existing ?? {}),
-    ...(sessionFields === undefined ? {} : { sessionFields }),
-    ...(confounderFields === undefined ? {} : { confounderFields }),
-  })
-
-  if (!Array.isArray(next.sessionFields) || next.sessionFields.length === 0) {
-    throw new VaultCliError(
-      'invalid_payload',
-      '--confounder-field requires --session-field unless the experiment already has runPlan.logging.sessionFields.',
-    )
-  }
-
-  return experimentRunLoggingSchema.parse(next)
-}
-
-function buildAnalysisPlanForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentFrontmatterValue['analysisPlan'],
-): ExperimentAnalysisPlanValue | undefined {
-  if (
-    input.primaryOutcomeKey !== undefined &&
-    input.primaryBiomarkerKey !== undefined
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      'experiment edit accepts either --primary-outcome-key or the legacy --primary-biomarker-key, not both.',
-    )
-  }
-  const patch: Partial<ExperimentAnalysisPlanValue> = {}
-  const normalizedPrimaryKey = input.primaryBiomarkerKey === undefined
-    ? undefined
-    : normalizeHealthCommonsKeyOption(
-        input.primaryBiomarkerKey,
-        'primary-biomarker-key',
-      )
-
-  if (normalizedPrimaryKey !== undefined && existing?.primaryOutcome === undefined) {
-    patch.primaryBiomarkerKey = normalizedPrimaryKey
-  }
-
-  const primaryOutcome = buildPrimaryOutcomeForOnboardingApply(
-    input,
-    existing?.primaryOutcome,
-    normalizedPrimaryKey ?? existing?.primaryBiomarkerKey,
-  )
-  if (primaryOutcome !== undefined) {
-    patch.primaryOutcome = primaryOutcome
-  }
-
-  const secondaryBiomarkerKeys = normalizeHealthCommonsKeyListOption(
-    input.secondaryBiomarkerKey,
-    'secondary-biomarker-key',
-  )
-  if (secondaryBiomarkerKeys !== undefined) {
-    patch.secondaryBiomarkerKeys = secondaryBiomarkerKeys
-  }
-
-  if (input.desiredDirection !== undefined) {
-    patch.desiredDirection = experimentSignalDirectionSchema.parse(input.desiredDirection)
-  }
-
-  const expectedDirections = normalizeExpectedDirectionEntriesOption(
-    input.expectedDirection,
-    existing?.expectedDirections,
-  )
-  if (expectedDirections !== undefined) {
-    patch.expectedDirections = expectedDirections
-  }
-
-  const measurementAnchors = normalizeExperimentMeasurementAnchorFlagOption(
-    input.analysisAnchor,
-    existing?.measurementAnchors,
-  )
-  if (measurementAnchors !== undefined) {
-    patch.measurementAnchors = measurementAnchors
-  }
-
-  const plannedMeasurements = normalizeExperimentPlannedMeasurementFlagOption(
-    input.plannedMeasurement,
-    existing?.plannedMeasurements,
-  )
-  if (plannedMeasurements !== undefined) {
-    patch.plannedMeasurements = plannedMeasurements
-  }
-
-  const notes = normalizeTextListOption(input.analysisNote, 'analysis-note')
-  if (notes !== undefined) {
-    patch.notes = notes
-  }
-
-  if (Object.keys(patch).length === 0) {
-    return undefined
-  }
-
-  const next = compactObject({
-    ...(existing ?? {}),
-    ...patch,
-  })
-  if (primaryOutcome !== undefined) {
-    delete next.primaryBiomarkerKey
-  }
-  return experimentAnalysisPlanSchema.parse(next)
-}
-
-function buildPrimaryOutcomeForOnboardingApply(
-  input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentPrimaryOutcome | undefined,
-  legacyKey: string | undefined,
-): ExperimentPrimaryOutcome | undefined {
-  const touched =
-    input.primaryOutcomeKey !== undefined ||
-    (input.primaryBiomarkerKey !== undefined && existing !== undefined) ||
-    input.primaryOutcomeKind !== undefined ||
-    input.primaryOutcomeLabel !== undefined ||
-    input.comparisonStatistic !== undefined ||
-    input.primaryOutcomeSessionField !== undefined ||
-    input.primaryOutcomeSourceMetricKey !== undefined ||
-    input.primaryOutcomeUnit !== undefined
-  if (!touched) {
-    return undefined
-  }
-
-  const kind = input.primaryOutcomeKind ?? existing?.kind ?? 'metric'
-  const key =
-    input.primaryOutcomeKey === undefined
-      ? input.primaryBiomarkerKey === undefined
-        ? existing?.key ?? legacyKey
-        : normalizeHealthCommonsKeyOption(
-            input.primaryBiomarkerKey,
-            'primary-biomarker-key',
-          )
-      : normalizeHealthCommonsKeyOption(
-          input.primaryOutcomeKey,
-          'primary-outcome-key',
-        )
-  if (!key) {
-    throw new VaultCliError(
-      'invalid_option',
-      'A configured primary outcome requires --primary-outcome-key as its stable outcome key.',
-    )
-  }
-  const label =
-    input.primaryOutcomeLabel === undefined
-      ? existing?.label
-      : normalizeRequiredTextOption(
-          input.primaryOutcomeLabel,
-          'primary-outcome-label',
-        )
-  if (kind === 'structured_review') {
-    if (
-      input.comparisonStatistic !== undefined ||
-      input.primaryOutcomeSessionField !== undefined ||
-      input.primaryOutcomeSourceMetricKey !== undefined ||
-      input.primaryOutcomeUnit !== undefined
-    ) {
-      throw new VaultCliError(
-        'invalid_option',
-        'Comparison and metric-capture options are only valid for metric outcomes.',
-      )
-    }
-    return experimentPrimaryOutcomeSchema.parse(
-      compactObject({ kind, key, label }),
-    )
-  }
-
-  if (
-    input.primaryOutcomeSessionField !== undefined &&
-    input.primaryOutcomeSourceMetricKey !== undefined
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      'A metric outcome cannot use both a session field and a derived source metric.',
-    )
-  }
-  if (
-    input.primaryOutcomeUnit !== undefined &&
-    input.primaryOutcomeSessionField === undefined
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      '--primary-outcome-unit requires --primary-outcome-session-field.',
-    )
-  }
-  const existingStatistic = existing?.kind === 'metric' ? existing.statistic : undefined
-  const existingCapture = existing?.kind === 'metric' ? existing.capture : undefined
-  const capture = input.primaryOutcomeSessionField !== undefined
-    ? {
-        kind: 'session_field' as const,
-        fieldId: normalizeStableIdOption(
-          input.primaryOutcomeSessionField,
-          'primary-outcome-session-field',
-        ),
-        unit: input.primaryOutcomeUnit === undefined
-          ? undefined
-          : normalizeRequiredTextOption(
-              input.primaryOutcomeUnit,
-              'primary-outcome-unit',
-            ),
-      }
-    : input.primaryOutcomeSourceMetricKey !== undefined
-      ? {
-          kind: 'derived_metric' as const,
-          sourceMetricKey: normalizeRequiredTextOption(
-            input.primaryOutcomeSourceMetricKey,
-            'primary-outcome-source-metric-key',
-          ),
-        }
-      : existingCapture
-  return experimentPrimaryOutcomeSchema.parse(compactObject({
-    kind,
-    key,
-    label,
-    statistic: input.comparisonStatistic ?? existingStatistic,
-    capture,
-  }))
-}
-
-function buildRunPlanDatePatch(input: ApplyExperimentOnboardingRecordInput) {
-  let baselineStart = normalizeLocalDateOption(input.baselineStart, 'baseline-start')
-  let baselineEnd = normalizeLocalDateOption(input.baselineEnd, 'baseline-end')
-  let interventionStart = normalizeLocalDateOption(
-    input.interventionStart,
-    'intervention-start',
-  )
-  let interventionEnd = normalizeLocalDateOption(input.interventionEnd, 'intervention-end')
-
-  if (input.baselineDays !== undefined) {
-    if (input.baselineDays < 0) {
-      throw new VaultCliError('invalid_option', '--baseline-days must be zero or greater.')
-    }
-
-    if (input.baselineDays === 0) {
-      baselineStart = undefined
-      baselineEnd = undefined
-    } else {
-      if (baselineStart) {
-        baselineEnd = mergeComputedDate(
-          baselineEnd,
-          addLocalDays(baselineStart, input.baselineDays - 1, 'baseline-start'),
-          'baseline-end',
-          'baseline-days',
-        )
-      } else if (baselineEnd) {
-        baselineStart = addLocalDays(baselineEnd, 1 - input.baselineDays, 'baseline-end')
-      } else if (interventionStart) {
-        baselineEnd = addLocalDays(interventionStart, -1, 'intervention-start')
-        baselineStart = addLocalDays(interventionStart, -input.baselineDays, 'intervention-start')
-      } else {
-        throw new VaultCliError(
-          'invalid_payload',
-          '--baseline-days requires --baseline-start, --baseline-end, or --intervention-start so Murph can write canonical baseline dates.',
-        )
-      }
-    }
-  }
-
-  if (input.interventionDays !== undefined) {
-    if (input.interventionDays <= 0) {
-      throw new VaultCliError('invalid_option', '--intervention-days must be greater than zero.')
-    }
-
-    if (!interventionStart && !interventionEnd && baselineEnd) {
-      interventionStart = addLocalDays(baselineEnd, 1, 'baseline-end')
-    }
-
-    if (interventionStart) {
-      interventionEnd = mergeComputedDate(
-        interventionEnd,
-        addLocalDays(interventionStart, input.interventionDays - 1, 'intervention-start'),
-        'intervention-end',
-        'intervention-days',
-      )
-    } else if (interventionEnd) {
-      interventionStart = addLocalDays(
-        interventionEnd,
-        1 - input.interventionDays,
-        'intervention-end',
-      )
-    } else {
-      throw new VaultCliError(
-        'invalid_payload',
-        '--intervention-days requires --intervention-start, --intervention-end, or a baseline window so Murph can write canonical intervention dates.',
-      )
-    }
-  }
-
-  return compactObject({
-    baselineStart,
-    baselineEnd,
-    interventionStart,
-    interventionEnd,
-  })
-}
-
-function mergeComputedDate(
-  existing: string | undefined,
-  computed: string,
-  optionName: string,
-  sourceOptionName: string,
-) {
-  if (existing !== undefined && existing !== computed) {
-    throw new VaultCliError(
-      'invalid_payload',
-      `--${optionName} conflicts with --${sourceOptionName}; expected ${computed}.`,
-    )
-  }
-
-  return existing ?? computed
-}
-
-function normalizeLocalDateOption(value: string | undefined, optionName: string) {
-  if (value === undefined) {
-    return undefined
-  }
-
-  const parsed = localDateSchema.safeParse(value)
-  if (!parsed.success) {
-    throw new VaultCliError('invalid_option', `--${optionName} must use YYYY-MM-DD.`)
-  }
-
-  assertValidLocalDate(parsed.data, optionName)
-  return parsed.data
-}
-
-function assertValidLocalDate(value: string, optionName: string) {
-  const [yearText, monthText, dayText] = value.split('-')
-  const year = Number(yearText)
-  const month = Number(monthText)
-  const day = Number(dayText)
-  const date = new Date(Date.UTC(year, month - 1, day))
-
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
-    throw new VaultCliError('invalid_option', `--${optionName} must be a real calendar date.`)
-  }
-}
-
-function addLocalDays(value: string, days: number, optionName: string) {
-  assertValidLocalDate(value, optionName)
-  const [yearText, monthText, dayText] = value.split('-')
-  const date = new Date(Date.UTC(
-    Number(yearText),
-    Number(monthText) - 1,
-    Number(dayText) + days,
-  ))
-  return [
-    date.getUTCFullYear(),
-    String(date.getUTCMonth() + 1).padStart(2, '0'),
-    String(date.getUTCDate()).padStart(2, '0'),
-  ].join('-')
-}
-
-function normalizeHealthCommonsKeyOption(value: string, optionName: string) {
-  const normalized = normalizeRequiredTextOption(value, optionName)
-  const parsed = safeParseContract(healthCommonsKeySchema, normalized)
-
-  if (!parsed.success) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${optionName} must be a Health Commons key such as protocol:family/variant or biomarker:name.`,
-    )
-  }
-
-  return parsed.data
-}
-
-function normalizeProtocolKeyOption(value: string, optionName: string) {
-  const normalized = normalizeHealthCommonsKeyOption(value, optionName)
-
-  if (!normalized.startsWith('protocol_variant:')) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${optionName} must be a Health Commons protocol_variant key.`,
-    )
-  }
-
-  return normalized
-}
-
-function normalizeHealthCommonsKeyListOption(
-  values: readonly string[] | undefined,
-  optionName: string,
-) {
-  const normalized = normalizeTextListOption(values, optionName)
-  if (normalized === undefined) {
-    return undefined
-  }
-
-  return normalized.map((entry) => normalizeHealthCommonsKeyOption(entry, optionName))
-}
-
-function normalizeExpectedDirectionEntriesOption(
-  values: readonly string[] | undefined,
-  existing: ExperimentAnalysisPlanValue['expectedDirections'] | undefined,
-) {
-  const normalized = normalizeTextListOption(values, 'expected-direction')
-  if (normalized === undefined) {
-    return undefined
-  }
-
-  const next = new Map<string, z.infer<typeof experimentSignalDirectionSchema>>()
-  for (const entry of existing ?? []) {
-    next.set(entry.biomarkerKey, entry.direction)
-  }
-
-  for (const entry of normalized) {
-    const delimiterIndex = entry.lastIndexOf('=')
-    if (delimiterIndex <= 0 || delimiterIndex === entry.length - 1) {
-      throw new VaultCliError(
-        'invalid_option',
-        '--expected-direction must use biomarker:key=increase|decrease|stabilize.',
-      )
-    }
-
-    const biomarkerKey = normalizeHealthCommonsKeyOption(
-      entry.slice(0, delimiterIndex),
-      'expected-direction',
-    )
-    const direction = experimentSignalDirectionSchema.safeParse(
-      entry.slice(delimiterIndex + 1).trim(),
-    )
-    if (!direction.success) {
-      throw new VaultCliError(
-        'invalid_option',
-        '--expected-direction values must be increase, decrease, or stabilize.',
-      )
-    }
-
-    next.set(biomarkerKey, direction.data)
-  }
-
-  return experimentExpectedDirectionsSchema.parse(
-    [...next].map(([biomarkerKey, direction]) => ({ biomarkerKey, direction })),
-  )
-}
-
 type HealthCommonsBiomarkerDirectionRuntime = {
   resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
     biomarkerKey: string,
@@ -3889,18 +3339,6 @@ function isMissingHealthCommonsBiomarkerDirectionArtifactError(
     'code' in error &&
     error.code === 'ENOENT'
   )
-}
-
-function normalizeSha256RevisionOption(value: string, optionName: string) {
-  const normalized = normalizeRequiredTextOption(value, optionName)
-  if (!/^sha256:[a-f0-9]{64}$/u.test(normalized)) {
-    throw new VaultCliError(
-      'invalid_option',
-      `--${optionName} must use sha256:<64 lowercase hex>.`,
-    )
-  }
-
-  return normalized
 }
 
 function requireExperimentFrontmatter(entity: QueryCanonicalEntity) {

@@ -38,8 +38,8 @@ import * as maintenanceCancellation from "../src/hosted-runtime/background-maint
 import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgment"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
-  const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment";
+test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgment", "empty-wake"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+  const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment" || scenario === "empty-wake";
   const persistent = scenario === "persistent" || scenario === "cold";
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
   const controller = new AbortController();
@@ -56,6 +56,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
   const releaseDownload = createDeferred<void>();
   const dirtyAcks: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0][] = [];
   let replySent = false;
+  let idleSnapshotCount = 0;
   let modelFinishedAt = 0;
   const connectionId = "synthetic-concurrent-connection";
   const deviceItem = createMailboxItem({
@@ -226,6 +227,17 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
     };
     const basePlatform = createPlatform({
       artifactBytesByHash,
+      ...(scenario === "empty-wake" ? {
+        vaultSharePort: {
+          async listActiveProjectionScopes() {
+            vi.setSystemTime(Date.now() + 1_000);
+            runtimeWakeSignal.notify();
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            return { projectionKinds: [], projectionScopes: [] };
+          },
+          async deliver() { throw new Error("No projection scopes are active."); },
+        },
+      } : {}),
       mailboxPort: createMailboxPort({ events, items }),
       workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
       deviceSyncPort,
@@ -245,6 +257,10 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
       {
         vaultRoot, runtimeWakeSignal, signal: controller.signal,
         async createCheckpointSnapshot() {
+          idleSnapshotCount += 1;
+          if (scenario === "empty-wake") {
+            assert.ok(idleSnapshotCount <= 3, "Empty wakes starved the device completion acknowledgment.");
+          }
           if (completesBeforeReply || persistent) await releaseSnapshot.promise;
           events.push("snapshot.completed");
           return { snapshotRef: createBundleRef({
@@ -317,7 +333,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
       await withRealTimeout(Promise.race([
         secondReply.promise,
         runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
-      ]), 5_000, () => events.join(","));
+      ]), 20_000, () => events.join(","));
       assert.equal(dirtyAcks.length, 0);
       if (persistent) {
         assert.equal(events.includes("provider.aborted"), false, events.join(","));

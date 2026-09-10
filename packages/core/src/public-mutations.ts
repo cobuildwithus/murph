@@ -8,16 +8,14 @@ import {
 import {
   addMeal as addMealInternal,
   dedupeDeviceEventsByExternalRef as dedupeDeviceEventsByExternalRefInternal,
-  listInboxDocumentDefaultPromotionCorrelations as listInboxDocumentDefaultPromotionCorrelationsInternal,
-  listLiveExactDocumentImportEvidence as listLiveExactDocumentImportEvidenceInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
   recordInboxDocumentDefaultPromotion as recordInboxDocumentDefaultPromotionInternal,
   importSamples as importSamplesInternal,
   validateSampleImport as validateSampleImportInternal,
-  resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal,
 } from "./mutations.ts";
+import { resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal } from "./domains/documents/source-evidence.ts";
 import {
   promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
   promoteInboxJournal as promoteInboxJournalInternal,
@@ -108,18 +106,6 @@ export {
   removeAutomaticMealPhotoInternal as removeAutomaticMealPhoto,
   upsertEventInternal as upsertEvent,
 };
-
-export async function listLiveExactDocumentImportEvidence(
-  input: Parameters<typeof listLiveExactDocumentImportEvidenceInternal>[0],
-): ReturnType<typeof listLiveExactDocumentImportEvidenceInternal> {
-  return listLiveExactDocumentImportEvidenceInternal(input);
-}
-
-export async function listInboxDocumentDefaultPromotionCorrelations(
-  input: Parameters<typeof listInboxDocumentDefaultPromotionCorrelationsInternal>[0],
-): ReturnType<typeof listInboxDocumentDefaultPromotionCorrelationsInternal> {
-  return listInboxDocumentDefaultPromotionCorrelationsInternal(input);
-}
 
 export interface CanonicalTextWriteInput {
   relativePath: string;
