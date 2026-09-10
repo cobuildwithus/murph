@@ -1,6 +1,6 @@
 # Remove obsolete snapshot artifact index and align recovery fixtures
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -26,4 +26,13 @@ Exact-head CI also exposed retired snapshot fixtures in the Cloudflare bridge an
 3. Reconcile current main, then run affected runtime and Cloudflare suites, both relevant typechecks, complexity, docs drift, and privacy/whitespace checks.
 4. Commit and push the stable correction; retain the first reviewed head in the PR body and hand the same-thread review continuation to the parent.
 
-Progress: source deletion and cross-consumer audit complete. The first focused runtime run passed 216 of 217 tests; the sole failure exposed fixture overlay behavior, and the staged replacement correction passed the exact stale-import regression. Final merged-tree proof is pending.
+## Results
+
+- Removed 175 production lines with no new production code. Full consumer searches found no remaining index reader/writer/export or count metric; legacy codec handling of old filenames remains inert.
+- The first focused runtime run passed 216 of 217 tests; the sole failure exposed fixture overlay behavior. Staged fixture replacement then passed the exact stale-import regression without weakening its missing-file assertion.
+- After merging main `e0b43e207c2f9cead9720b4e3aa12a706362ecb0`, the full artifacts, retention, receipts, restore, and foreground-input suites passed 99 of 99 tests. This includes no-index reconstruction, valid media reuse without a second download, corrupt media repair, size/expiry/path/missing denials, promoted-document retention, and upstream generated-capture expiry.
+- Cloudflare `runtime-bridge-workspace.test.ts` passed 31 of 31 tests, preserving current encrypted archive, Codex, lease, and filesystem boundary proof.
+- Both `pnpm --filter @murphai/assistant-runtime typecheck` and `pnpm --filter @murphai/cloudflare-runner typecheck` passed on the merged correction.
+- `pnpm complexity:diff --base e0b43e207c2f9cead9720b4e3aa12a706362ecb0`, exact PR base/head docs drift, merge-tree, privacy, and whitespace checks passed. Unchanged runtime hotspots remain in an export-only edit; the index owner is deleted.
+- Parent reviewed the correction and owns same-thread round-two review plus final exact-head CI. No deployment or production data action was performed.
+Completed: 2026-09-10
