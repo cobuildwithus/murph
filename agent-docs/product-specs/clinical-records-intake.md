@@ -20,24 +20,6 @@ It does not claim nationwide identity matching, discover every organization a
 person has visited, connect email, or retrieve records from a provider that
 does not expose a compatible patient-facing SMART endpoint.
 
-### Additional patient-facing Epic variants
-
-New plans include radiology DocumentReferences (category `imaging-result`),
-external C-CDA documents (`external-ccda`), outside clinical notes
-(`external-clinical-note`) and outside vital signs (`external-vital-signs`).
-Each uses the authorized patient, normal pagination and its own stable query
-identity, with no client date cutoff. Existing search permissions suffice;
-register the four additional patient-facing APIs in the Epic app before rollout.
-Existing frozen plans retain their original query set.
-
-The variants retain source evidence through the current importer. Linked document
-bodies still require the separate Binary/dependency acquisition work; these
-queries do not claim to fetch every attachment or bypass provider release limits.
-Official patient-app request contracts: [radiology](https://fhir.epic.com/Specifications?api=10235),
-[external C-CDA](https://fhir.epic.com/Specifications?api=10135),
-[outside notes](https://fhir.epic.com/Specifications?api=10999), and
-[outside vital signs](https://fhir.epic.com/Specifications?api=11422).
-
 ## Member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,
@@ -161,6 +143,24 @@ active; each granted family expands into all of its variants. The 41 API
 registration entries also cover supporting reads, but runtime performs no
 reference traversal or backfill. Unused capability and traversal metadata is
 absent; directory presence is not a capability guarantee.
+
+### Additional patient-facing Epic variants
+
+New plans include radiology DocumentReferences (category `imaging-result`),
+external C-CDA documents (`external-ccda`), outside clinical notes
+(`external-clinical-note`) and outside vital signs (`external-vital-signs`).
+Each uses the authorized patient, normal pagination and its own stable query
+identity, with no client date cutoff. Existing search permissions suffice;
+register the four additional patient-facing APIs in the Epic app before rollout.
+Existing frozen plans retain their original query set.
+
+The variants retain source evidence through the current importer. Linked document
+bodies still require the separate Binary/dependency acquisition work; these
+queries do not claim to fetch every attachment or bypass provider release limits.
+Official patient-app request contracts: [radiology](https://fhir.epic.com/Specifications?api=10235),
+[external C-CDA](https://fhir.epic.com/Specifications?api=10135),
+[outside notes](https://fhir.epic.com/Specifications?api=10999), and
+[outside vital signs](https://fhir.epic.com/Specifications?api=11422).
 
 ## Retrieval contract and limits
 
