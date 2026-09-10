@@ -46,8 +46,8 @@ message setup with identical accepted assistant input; live latency awaits deplo
   payload/import cases and 10 changelog SSR cases pass. The composed check
   also covers the maximum 100-row conversation batch and resolves crypto context
   once. Cloudflare and assistant-runtime typechecks pass, including final stable
-  formatting and no-store response policy. Maximum-batch proof and its final
-  Cloudflare typecheck are the remaining candidate checks before Ready.
+  formatting and no-store response policy. The final 15-case composed batch
+  proof and final Cloudflare typecheck also pass.
 - Complexity guard passes. The web-control handler drops from 47 to 46 by deriving
   five POST-only classifications from the already-validated route policy. Its
   broader dispatch ownership and two unrelated runtime hotspots remain unchanged.
@@ -55,5 +55,23 @@ message setup with identical accepted assistant input; live latency awaits deplo
   identity checks remain unchanged. Success is deterministic transport equality,
   so no live-Codex behavioral journey or provider token measurement is applicable.
 - Parent candidate review found no new durable state, key disclosure, additional
-  success-path network call or changed usage/access authority. External review
-  and exact-head CI remain pending. No merge or deployment is included.
+  success-path network call or changed usage/access authority. No merge or
+  deployment is included. Final-head CI remains the PR completion gate.
+
+## Final review and handoff
+
+ReviewGPT round 1 passed on `526ddd0bfa678e34842f50a7b2a86149d9bd237d`
+with no qualifying bugs or material Complexity Collapse findings. The reviewer
+checked the full patch and snapshot through crypto, authority, import, batching
+and both rollout directions; tests were inspected rather than executed there.
+The parent ran the focused checks above. Persisted gpt-6-pro model metadata,
+response hash and captured response/user-turn identity agree. Managed browser
+response waiting exceeded the required 270 seconds. The final follow-up only
+closes this plan and records existing evidence; production source is unchanged.
+
+The two mailbox PRs merge cleanly with each other and with the earlier-wake PR.
+Current-base mergeability and all applicable final-head CI checks remain required
+at PR handoff. Production timing improvement remains unmeasured until deployment.
+Status: completed
+Updated: 2026-09-10
+Completed: 2026-09-10
