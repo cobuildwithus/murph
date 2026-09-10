@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { withHostedSessionCookieWrite } from "./hosted-app-session-client";
 
 const RENEWAL_CHECK_MS = 60 * 60 * 1_000;
 
@@ -8,7 +9,9 @@ const RENEWAL_CHECK_MS = 60 * 60 * 1_000;
 // sessions are read unchanged; this never exchanges or extends their lifetime.
 export function HostedSessionRenewal({ authenticated }: { authenticated: boolean }) {
   useEffect(() => {
-    if (!authenticated) return;
+    // Without origin-wide ordering, retain the existing cookie lifetime.
+    // Native renewal has no browser cookie and does not need this lock.
+    if (!authenticated || !navigator.locks) return;
     let nextAttempt = 0;
     let request: AbortController | null = null;
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -19,10 +22,10 @@ export function HostedSessionRenewal({ authenticated }: { authenticated: boolean
       request = controller;
       timeout = setTimeout(() => controller.abort(), 10_000);
       try {
-        await fetch("/api/auth/session", {
+        await withHostedSessionCookieWrite(() => fetch("/api/auth/session", {
           method: "POST", credentials: "same-origin", cache: "no-store",
           redirect: "error", signal: controller.signal,
-        });
+        }), controller.signal);
       } catch {
         // An offline tab keeps its credential. Product requests remain the
         // authority for admission; a late renewal result cannot sign it out.
