@@ -306,7 +306,7 @@ describe("hosted runtime shutdown signal", () => {
     const workspaceRoot = await mkdtemp(
       path.join(tmpdir(), "murph-image-retention-wake-"),
     );
-    const vaultRoot = path.join(workspaceRoot, "vault");
+    const vaultRoot = path.join(workspaceRoot, "durable", "vault");
     const sourceImagePath = path.join(workspaceRoot, "generated-source.webp");
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -415,6 +415,7 @@ describe("hosted runtime shutdown signal", () => {
           },
           platform: createPlatform({
             artifactBytesByHash,
+            snapshotFixtureVaultRelativePath: "vault",
             mailboxPort: createMailboxPort({
               events,
               items: mailboxItems,

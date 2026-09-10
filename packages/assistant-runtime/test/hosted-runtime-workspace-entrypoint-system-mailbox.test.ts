@@ -6777,6 +6777,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           },
           platform: createPlatform({
             artifactBytesByHash: new Map([[assistantWorkspace.hash, assistantWorkspace.bytes]]),
+            snapshotFixtureVaultRelativePath: "vault",
             assistantAskPort: {
               async request(request) {
                 if (request.action === "complete") {

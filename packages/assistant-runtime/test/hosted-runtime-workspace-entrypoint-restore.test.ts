@@ -53,6 +53,7 @@ import {
 import assert from "node:assert/strict";
 import { mkdir,
   mkdtemp,
+  readFile,
   writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -157,6 +158,49 @@ async function createWorkspaceRestoreFixture(snapshotId: string) {
 }
 
 describe("hosted workspace runtime entrypoint", () => {
+  test.each(["flat", "nested"] as const)("restores %s fixture vault roots while removing stale files", async (layout) => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-fixture-layout-"));
+    const sourceVaultRoot = path.join(tempRoot, "source");
+    const durableRoot = path.join(tempRoot, "durable");
+    const vaultRelativePath = layout === "nested" ? "vault" : undefined;
+    const vaultRoot = path.join(durableRoot, vaultRelativePath ?? "");
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
+      const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+        item: createMailboxItem({ id: "mailbox_fixture_layout", laneSeq: "1" }),
+        vaultRoot: sourceVaultRoot,
+      });
+      const snapshot = await createVaultSnapshotBundle({ vaultRoot: sourceVaultRoot });
+      await mkdir(vaultRoot, { recursive: true });
+      await writeFile(path.join(vaultRoot, "stale.md"), "remove me\n");
+      const platform = createPlatform({
+        artifactBytesByHash: new Map([[snapshot.hash, snapshot.bytes]]),
+        mailboxPort: null,
+        snapshotFixtureVaultRelativePath: vaultRelativePath,
+        workspacePort: null,
+      });
+      assert.ok(platform.workspaceSnapshotPort);
+      await platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref: snapshot.snapshotRef,
+        signal: null,
+      });
+
+      assert.equal(
+        await readFile(path.join(vaultRoot, "vault.json"), "utf8"),
+        await readFile(path.join(sourceVaultRoot, "vault.json"), "utf8"),
+      );
+      assert.ok(await readAssistantInputEvent({ inputId, vault: vaultRoot }));
+      await assert.rejects(readFile(path.join(vaultRoot, "stale.md")), { code: "ENOENT" });
+      if (layout === "nested") {
+        await assert.rejects(readFile(path.join(durableRoot, "vault.json")), { code: "ENOENT" });
+      }
+    } finally {
+      await removeTempRoot(tempRoot);
+    }
+  });
+
   test("waits for and consumes the exact prepared restore once before later runtime work", async () => {
     const fixture = await createWorkspaceRestoreFixture("snapshot-prepared-restore-gate");
     const preparation = startHostedWorkspaceRestorePreparation({

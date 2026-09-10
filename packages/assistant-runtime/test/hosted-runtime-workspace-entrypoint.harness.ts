@@ -935,6 +935,7 @@ function createPlatform(input: {
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
+  snapshotFixtureVaultRelativePath?: "vault";
   stageSamples?: StageTimingSample[];
   vaultSharePort?: HostedRuntimePlatform["vaultSharePort"] | null;
   workspacePort: HostedRuntimeWorkspacePort | null;
@@ -1078,7 +1079,7 @@ function createPlatform(input: {
           await restoreHostedBundleRoots({
             bytes,
             expectedKind: "vault",
-            roots: { vault: stagedRoot },
+            roots: { vault: path.join(stagedRoot, input.snapshotFixtureVaultRelativePath ?? "") },
           });
           await rm(durableRoot, { force: true, recursive: true });
           await rename(stagedRoot, durableRoot);
