@@ -8,7 +8,7 @@ import {
 } from "@murphai/clinical-records";
 
 export const EPIC_ACQUISITION_POLICY_ID = "epic-r4-longitudinal-v1";
-export const EPIC_ACQUISITION_POLICY_VERSION = "2026-09-10.lifetime-history-v5";
+export const EPIC_ACQUISITION_POLICY_VERSION = "2026-09-10.additional-records-v6";
 export const EPIC_BETA_FHIR_PAGE_COUNT = "100";
 
 const REQUIRED_BASE_SCOPES = Object.freeze(["fhirUser", "launch/patient", "openid"] as const);
@@ -84,6 +84,10 @@ const REGISTRATION_APIS = [
   registrationApi("service-request-read-orders", "ServiceRequest.Read (Orders) (R4)", "ServiceRequest", "read"),
   registrationApi("service-request-search-orders", "ServiceRequest.Search (Orders) (R4)", "ServiceRequest", "search"),
   registrationApi("specimen-read-patient-chart", "Specimen.Read (Patient Chart) (R4)", "Specimen", "read"),
+  registrationApi("document-reference-search-radiology-results", "DocumentReference.Search (Radiology Results) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-external-ccda", "DocumentReference.Search (External CCDA) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-outside-clinical-notes", "DocumentReference.Search (Outside Record - Clinical Notes) (R4)", "DocumentReference", "search"),
+  registrationApi("observation-search-outside-vital-signs", "Observation.Search (Outside Record Vital Signs) (R4)", "Observation", "search"),
 ] as const satisfies readonly EpicRegistrationApi[];
 
 const QUERIES: readonly EpicQuery[] = [
@@ -297,6 +301,39 @@ const QUERIES: readonly EpicQuery[] = [
     fixedSearchParameters: [{ name: "category", value: "vital-signs" }],
     registrationApiKeys: ["observation-search-vital-signs"],
     legacyWindowParameter: "date",
+  },
+
+  {
+    queryScopeId: "document-references-imaging",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=imaging-result:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "imaging-result" }],
+    registrationApiKeys: ["document-reference-search-radiology-results"],
+  },
+  {
+    queryScopeId: "document-references-external-ccda",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=external-ccda:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "external-ccda" }],
+    registrationApiKeys: ["document-reference-search-external-ccda"],
+  },
+  {
+    queryScopeId: "document-references-outside-notes",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=external-clinical-note:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "external-clinical-note" }],
+    registrationApiKeys: ["document-reference-search-outside-clinical-notes"],
+  },
+  {
+    queryScopeId: "outside-vital-sign-observations",
+    resourceType: "Observation",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:Observation:search:patient:category=external-vital-signs:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "external-vital-signs" }],
+    registrationApiKeys: ["observation-search-outside-vital-signs"],
   },
 ];
 
