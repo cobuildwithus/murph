@@ -28,6 +28,8 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
+import { hostedAiUsageMemberSelect } from "@/src/lib/hosted-execution/usage-allowance";
+import { hostedRuntimeAiMemberAccessSelect } from "@/src/lib/hosted-onboarding/member-access";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
@@ -35,9 +37,27 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  const access = await requireHostedRuntimeMailboxActiveAccess(userId);
-  const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const prisma = getPrisma();
+  // One fresh projection supplies access, consent and read-first allowance.
+  const memberState = await prisma.hostedMember.findUnique({
+    where: { id: userId },
+    select: {
+      ...hostedRuntimeAiMemberAccessSelect,
+      ...hostedAiUsageMemberSelect,
+      assistantProviderPreference: true,
+      threadContainer: {
+        select: {
+          ...hostedRuntimeAiMemberAccessSelect.threadContainer.select,
+          monthlyUsageLimitUsdMicros: true,
+        },
+      },
+    },
+  });
+  const access = await requireHostedRuntimeMailboxActiveAccess(userId, {
+    prisma,
+    memberState,
+  });
+  const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const fetchedAt = new Date();
   const projection = await fetchHostedRuntimeMailboxProjection({
     cursorMode: body.cursorMode ?? null,
@@ -65,6 +85,7 @@ export const POST = withJsonError(async (request: Request) => {
         consumedSeqByLane: projection.consumedSeqByLane,
         lanes: body.lanes,
         maxSeqByLane: projection.maxSeqByLane,
+        memberState: memberState ?? undefined,
         prisma,
         userId,
       })
@@ -113,11 +134,14 @@ async function readHostedRuntimeMailboxAiUsageAccess(input: {
   maxSeqByLane: Parameters<
     typeof readHostedMailboxConversationAiUsageHighWater
   >[0]["lanes"];
+  memberState: Parameters<typeof resolveHostedRuntimeAiUsageGate>[0]["memberState"];
   prisma: PrismaClient;
   userId: string;
 }): Promise<{ allowed: boolean; runningLow: boolean }> {
   const gate = await resolveHostedRuntimeAiUsageGate({
     mode: "read_first",
+    memberState: input.memberState,
+    prisma: input.prisma,
     userId: input.userId,
   });
 

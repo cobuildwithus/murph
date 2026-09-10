@@ -756,6 +756,18 @@ convenience.
 
 ## Current Protocol
 
+### Mailbox Fetch Member Projection
+
+Web loads one fresh member projection per mailbox fetch and passes it explicitly
+to the existing access, consent and read-first allowance owners. No projection
+survives the request. Empty, consumed-replay and system-only batches still skip
+AI usage evaluation. Conversation batches still read current usage periods;
+denials are confirmed by the mutating allowance owner with a new member read.
+Group owner/participant authority and Family sponsorship keep their canonical
+readers. Read-only group allowance derives owner access from its supplied member
+state rather than reloading the same container. Locking and spend accounting are
+unchanged. The encrypted mailbox response and runtime contract are unchanged.
+
 ### Foreground Priority Rule
 
 Fresh user conversation input has absolute priority over background hosted
