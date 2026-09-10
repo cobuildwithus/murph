@@ -30,9 +30,18 @@ Android #39 is stacked on [review tooling #38](https://github.com/cobuildwithus/
 which only corrects the required reviewer model target. Merge that prerequisite
 before its product PR. iOS #150 has an independent PASS at
 `c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e`. Android #39's first review found an interrupted initial secure-write recovery defect. The correction passes real Keystore/AtomicFile instrumentation and full Android verification; its new exact-head review and CI are required.
-Web #3132 at `4dd15d07dabb7d37e1ae3763e79693d01150a42c` includes both response-header vault invalidation and origin-wide cookie-write ordering. Its third external review and current-head CI are running. Real Chromium proved OTP/Telegram ordering in one and two tabs; the rollout gates still require real delivery and installed-device qualification.
-These links identify candidates, not deployed versions. Final retirement remains
-under implementation and must not be deployed until every retirement gate passes.
+Web #3132 at `4dd15d07dabb7d37e1ae3763e79693d01150a42c` includes both response-header vault invalidation and origin-wide cookie-write ordering. Its third external review is running. CI found a TypeScript 5 inference incompatibility in the cookie-write helper; a runtime-equivalent async wrapper passes the actual compiler and is being integrated before current-head CI is rerun. Real Chromium proved OTP/Telegram ordering in one and two tabs; the rollout gates still require real delivery and installed-device qualification.
+Native SDK retirement is prepared in [iOS #151](https://github.com/cobuildwithus/murph-ios/pull/151)
+and [Android #40](https://github.com/cobuildwithus/murph-android/pull/40), stacked on their adoption PRs.
+The isolated [Android CI cleanup #41](https://github.com/cobuildwithus/murph-android/pull/41)
+follows #40 and has independent trusted review. Both native product candidates
+preserve the existing version-1 secure credential record and local member ownership. iOS passes 601 unit tests and a Release simulator build; Android passes
+full verification and eight real emulator auth-boundary tests. Final reviews,
+current-head CI and actual installed/signed-device upgrades remain required.
+These links identify candidates, not deployed versions. Do not merge the
+retirement candidates or distribute SDK-free apps until every retirement gate
+passes. Keep the transition app available while eligible installed sessions
+still need its one-time bridge.
 
 ## Backend configuration and deployment
 

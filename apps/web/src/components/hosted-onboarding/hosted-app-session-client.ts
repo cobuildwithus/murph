@@ -11,7 +11,7 @@ import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 
 // Cookie responses share authority across tabs. Wait for older writers before
 // dispatching a replacement; discarding a late JS result cannot undo Set-Cookie.
-export function withHostedSessionCookieWrite<T>(write: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+export async function withHostedSessionCookieWrite<T>(write: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   return navigator.locks
     ? navigator.locks.request("murph-auth-session-cookie", { signal }, write)
     : write();

@@ -182,7 +182,7 @@ importers:
         version: 6.2.3
       openai:
         specifier: 6.45.0
-        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.5.4)
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.3
