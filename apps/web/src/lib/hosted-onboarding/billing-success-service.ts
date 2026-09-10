@@ -5,9 +5,6 @@ import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
-  signalHostedMemberActivationRuntimeWakeBestEffortResult,
-} from "./member-activation-runtime-wake";
-import {
   readHostedMemberCoreState,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
@@ -18,9 +15,6 @@ import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
-import {
-  scheduleHostedSignupNotificationEmails,
-} from "./signup-notification-email";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
@@ -69,55 +63,44 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     session,
   });
 
-  const activationOutcome = await applyHostedCheckoutSessionSuccess({
+  const checkoutOutcome = await applyHostedCheckoutSessionSuccess({
     memberId: invite.memberId,
     prisma,
     session,
   });
-  if (activationOutcome.newlyActivatedMemberIds.length > 0) {
-    scheduleHostedSignupNotificationEmails({
-      activationSurface: "website",
-      memberIds: activationOutcome.newlyActivatedMemberIds,
-      prisma,
-    });
-  }
-  if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
+  if (checkoutOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
     await cleanupHostedFamilySponsoredDirectSubscription({
       memberId: invite.memberId,
       prisma,
       sourceEventId: `checkout-success:${session.id}:family-sponsored-cleanup`,
-      subscriptionId: activationOutcome.cleanupFamilySponsoredStripeSubscriptionId,
+      subscriptionId: checkoutOutcome.cleanupFamilySponsoredStripeSubscriptionId,
     });
   }
-  if (activationOutcome.cleanupFamilySponsoredCheckout) {
+  if (checkoutOutcome.cleanupFamilySponsoredCheckout) {
     await cleanupHostedFamilySponsoredDirectSubscription({
       checkoutSessionId:
-        activationOutcome.cleanupFamilySponsoredCheckout.checkoutSessionId,
+        checkoutOutcome.cleanupFamilySponsoredCheckout.checkoutSessionId,
       memberId: invite.memberId,
       prisma,
       sourceEventId:
         `checkout-success:${session.id}:family-sponsored-checkout-cleanup`,
       subscriptionId:
-        activationOutcome.cleanupFamilySponsoredCheckout.subscriptionId,
+        checkoutOutcome.cleanupFamilySponsoredCheckout.subscriptionId,
     });
   }
-  if (activationOutcome.cleanupStandardCheckout) {
+  if (checkoutOutcome.cleanupStandardCheckout) {
     await cleanupHostedStandardCheckoutAndRetireAttempt({
       checkoutSessionId:
-        activationOutcome.cleanupStandardCheckout.checkoutSessionId,
+        checkoutOutcome.cleanupStandardCheckout.checkoutSessionId,
       memberId: invite.memberId,
       prisma,
       stripe,
       subscriptionId:
-        activationOutcome.cleanupStandardCheckout.subscriptionId,
+        checkoutOutcome.cleanupStandardCheckout.subscriptionId,
     });
   }
-  await nudgeHostedCheckoutSuccessActivationRunner({
-    ...activationOutcome,
-    prisma,
-  });
   await sendHostedCheckoutSuccessWelcomeEmailBestEffort({
-    memberId: activationOutcome.welcomeEmailMemberId,
+    memberId: checkoutOutcome.welcomeEmailMemberId,
     prisma,
   });
   return getHostedInviteStatus({
@@ -134,12 +117,9 @@ type HostedCheckoutSessionSuccessInput = {
 };
 
 type HostedCheckoutSessionSuccessOutcome = {
-  activatedMemberId: string | null;
   cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
-  hostedExecutionEventId: string | null;
-  newlyActivatedMemberIds: string[];
   welcomeEmailMemberId: string | null;
 };
 
@@ -160,14 +140,7 @@ async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
       prisma: input.prisma,
       session: input.session,
     });
-  let activationOutcome: HostedCheckoutSessionSuccessOutcome = {
-    activatedMemberId: null,
-    hostedExecutionEventId: null,
-    newlyActivatedMemberIds: [],
-    welcomeEmailMemberId: null,
-  };
-
-  activationOutcome = await withHostedMemberStripeMutationLock({
+  return withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
     run: async (tx) => {
@@ -195,8 +168,6 @@ async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
       return applyStripeCheckoutCompleted(input.session, tx);
     },
   });
-
-  return activationOutcome;
 }
 
 async function sendHostedCheckoutSuccessWelcomeEmailBestEffort(input: {
@@ -210,23 +181,6 @@ async function sendHostedCheckoutSuccessWelcomeEmailBestEffort(input: {
   await sendHostedSignupWelcomeEmailForMemberBestEffort({
     memberId: input.memberId,
     prisma: input.prisma,
-  });
-}
-
-async function nudgeHostedCheckoutSuccessActivationRunner(input: {
-  activatedMemberId: string | null;
-  hostedExecutionEventId: string | null;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (!input.activatedMemberId || !input.hostedExecutionEventId) {
-    return;
-  }
-
-  await signalHostedMemberActivationRuntimeWakeBestEffortResult({
-    hostedExecutionEventId: input.hostedExecutionEventId,
-    memberId: input.activatedMemberId,
-    prisma: input.prisma,
-    source: "checkout-success.activation",
   });
 }
 

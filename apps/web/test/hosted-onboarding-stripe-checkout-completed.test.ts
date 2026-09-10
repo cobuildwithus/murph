@@ -419,6 +419,7 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(
       mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
     ).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("cancels rather than binds a direct checkout completed after Family sponsorship", async () => {
@@ -1449,10 +1450,10 @@ describe("applyStripeCheckoutCompleted", () => {
     },
   );
 
-  it("binds an exact active legacy Checkout for invoice-owned paid reconciliation", async () => {
+  it.each(["active", "past_due", "unpaid"] as const)("binds an exact %s legacy Checkout without activation", async (status) => {
     mocks.retrieveStripeSubscription.mockResolvedValueOnce({
       ...makePulseTrialSubscription(),
-      status: "active",
+      status,
     });
 
     await expect(
