@@ -134,14 +134,12 @@ describe("settings phone sync route", () => {
     mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
     mocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockResolvedValue({
       rawFingerprint: "prepared-fingerprint",
-      sourceBillingRef: null,
       sourceIdentity: null,
       sourceMemberId: "member_unused",
       targetIdentity: null,
       targetMemberId: "member_123",
     });
     mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-      autoTrialBilling: null,
       sourceMemberId: "member_unused",
     });
     mocks.deleteHostedPrivyPhoneTransferSourceAccountData.mockResolvedValue({

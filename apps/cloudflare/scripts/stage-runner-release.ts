@@ -63,7 +63,9 @@ export async function prepareSmallRunnerNamespaceBootstrap(input: {
       || live.durable_objects.namespace_id !== readNamespaceId(input.currentVersion, className)
       || live.active_rollout != null) throw invalid();
     const retained = retainNativeContainer(value, live);
-    if (!runnerApplicationMatches(live, runnerApplicationSpecification(retained, logsEnabled))) throw invalid();
+    if (!runnerApplicationMatches(live, runnerApplicationSpecification(
+      retained, logsEnabled, requiredString(live.configuration.image),
+    ))) throw invalid();
     containers.push(retained);
   }
   const output = path.join(path.dirname(input.configPath), `wrangler.bootstrap-small-${randomUUID()}.jsonc`);

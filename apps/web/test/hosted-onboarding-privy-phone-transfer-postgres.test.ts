@@ -452,7 +452,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
           releaseProjection.resolve();
           await expect(retirement).resolves.toEqual({
-            autoTrialBilling: null,
             sourceMemberId: fixture.sourceMemberId,
           });
           expect(transactionStarted).toBe(true);

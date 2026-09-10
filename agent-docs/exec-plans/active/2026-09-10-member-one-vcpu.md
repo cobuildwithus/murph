@@ -69,15 +69,30 @@ Updated: 2026-09-10
   seven-test selector/namespace suite after adding unavailable-binding proof.
 - Passed: Cloudflare typecheck, complexity diff (no increased hotspot debt),
   and the real public/private environment forwarding contract (90 variables,
-  37 secrets). Full workspace/private verification and PR gates remain pending.
+  37 secrets).
 - Full workspace typecheck passed. Public final ReviewGPT round 1 passed on
   the initial candidate with verified Pro evidence and 366-second capture.
 - CI exposed missing local harness namespace parity and stale capacity
   expectations. The correction changes isolated local proof scaffolding only;
   142 focused tests, both affected typechecks and complexity diff passed.
-- Private exact-head CI verification passed. Local umbrella verification reached
-  four timeouts in unchanged Temporal deploy-controller tests; focused contract
-  coverage and private typecheck passed. Deployment and final CI remain pending.
+- Public PR #3206 and the matching private deployment change merged after their
+  required exact-head CI and routed reviews passed. Private preliminary review
+  found two coverage gaps; both were corrected in the existing contract test.
+- Private final ReviewGPT round 2 passed on the corrected candidate with verified
+  Pro evidence and a 489-second capture. The final local `pnpm verify` run passed,
+  including all deployment-controller and built-worker tests. An earlier local
+  run timed out in four unchanged deployment-controller tests.
+- Optional hosted integration repeated failures in unchanged foreground-priority,
+  reminder/device-sync and wearable-replay scenarios. The protected deployment
+  retains all of its predeployment gates.
+- The protected selector and first-provisioning controls are configured. All
+  protected predeployment gates passed. Namespace bootstrap stopped before any
+  Worker mutation because retained native image metadata failed the new-image
+  contract. A synthetic tagged-image regression reproduces the exact failure.
+- The forward fix permits an exact observed image reference only in the
+  namespace-only preservation path. New release admission remains digest-only;
+  native before/after receipts, resource checks and routing-off ordering remain.
+  Live convergence is pending the focused correction and its review/CI gates.
 
 - Focused allocation, slot lifecycle, namespace, configuration, staging and
   deployment tests; Cloudflare typecheck and complexity diff.

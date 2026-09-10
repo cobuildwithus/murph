@@ -25,7 +25,6 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
-    expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
     expect(environment.linqFirstContactAdmissionMode).toBe("off");
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.6-luna");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
@@ -106,7 +105,6 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS: "+15550000001, +1 (555) 000-0002",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         "+1 (555) 000-0003, +15550000003",
-      HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER: "250",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "enforce",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL: "gpt-5.4-mini",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY: "first-contact-openai-key",
@@ -125,7 +123,6 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqLocalAllowedInboundPhoneNumbers).toEqual([
       "+15550000003",
     ]);
-    expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(250);
     expect(environment.linqFirstContactAdmissionMode).toBe("enforce");
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.4-mini");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBe("first-contact-openai-key");
