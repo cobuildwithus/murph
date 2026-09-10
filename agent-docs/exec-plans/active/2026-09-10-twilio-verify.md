@@ -64,9 +64,24 @@ expiry and generation. Ambiguous provider/network failures remain fail-closed.
   47 passing, including composed browser/native completion and unchanged email.
 - Typecheck, focused ESLint and complexity guard passed. Parent reviewed the
   complete candidate, provider/transaction boundaries and privacy. No changed
-  source function exceeds complexity 20. Final ReviewGPT and exact-head CI remain
-  pending. No public changelog: replacement issuance is still gated off.
-- Live service read remains unauthorized; key permissions and live send/check
-  qualification are outstanding. No rollout flag has been enabled.
+  source function exceeds complexity 20. ReviewGPT Round 1 passed at
+  `e8421bcaa936411dd2bdfbfbb7c31446c3413046`, with exact-turn/hash matching,
+  a concrete `gpt-6-pro` model receipt, and a 293-second capture stage. Parent
+  accepted its full-snapshot boundary/race analysis; no findings remain. All
+  required CI passed on that head. No public changelog: issuance is still off.
+- Live diagnostic-key qualification confirmed the expected service/account,
+  six-digit configuration, actual SMS receipt, approved verification and rejected
+  replay. The application key's original policy allowed only Messaging create;
+  its actual Verify send was rejected before changing permissions.
+- Added only Verify verification/create and verification-check/create to the
+  existing restricted application key, preserving its old Messaging permission
+  through deployment. Readback confirms those three permissions and no others;
+  service-read/admin access was not added. The same application key then sent
+  successfully; positive verification of that second code is awaiting input.
+- Synced only the four selected application Twilio variables to Vercel production
+  using opaque local values, sensitive writes and metadata-only readback. The
+  diagnostic key stays local. No rollout flag has been enabled. Remaining work:
+  finish the application-key code check, final documentation/plan commit and
+  exact-head CI. The explanatory doc correction does not change reviewed code.
 - Held client-adoption credential-change owner needs the same preparation and
   transaction-bound approval check before activation; recorded in rollout owner.

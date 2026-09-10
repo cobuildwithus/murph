@@ -72,8 +72,9 @@ Use a dedicated [Twilio Verify service](https://www.twilio.com/docs/verify/api/s
 with the friendly name Murph, SMS enabled and six-digit codes. Verify manages
 sending numbers; do not provision a Programmable Messaging sender pool for login.
 The restricted API key needs `twilio/verify/verification/create` and
-`twilio/verify/verification-check/create`; operational service qualification also
-needs `twilio/verify/service/read`. Keep Verify fraud protection enabled and
+`twilio/verify/verification-check/create`. Service settings can be qualified in
+Console or with a separate diagnostic key; `twilio/verify/service/read` is not a
+runtime requirement. Keep Verify fraud protection enabled and
 qualify the intended destination countries before activation. See the
 [restricted-key permissions](https://www.twilio.com/docs/iam/api-keys/restricted-api-keys).
 
@@ -202,9 +203,11 @@ adapter, OTP and session code. Public contracts: [adapter factory](https://bette
 [email OTP](https://better-auth.com/docs/plugins/email-otp),
 [phone OTP](https://better-auth.com/docs/plugins/phone-number), and
 [sessions](https://better-auth.com/docs/concepts/session-management).
-SMS transport follows the [Twilio Message resource](https://www.twilio.com/docs/messaging/api/message-resource):
-bounded validity, discarded message content, obfuscated retained addresses and
-fraud checking. IP admission uses [Vercel request headers](https://vercel.com/docs/headers/request-headers).
+SMS transport follows [Twilio Verify start](https://www.twilio.com/docs/verify/api/verification)
+and [verification check](https://www.twilio.com/docs/verify/api/verification-check),
+with explicit fraud checking and local expiry/attempt bounds. The former
+Programmable Messaging content/address retention parameters do not apply to
+Verify. IP admission uses [Vercel request headers](https://vercel.com/docs/headers/request-headers).
 PR 3 must qualify [Telegram's current login contract](https://core.telegram.org/bots/telegram-login),
 including verified numeric user identity, nonce binding and one-use completion;
 the OIDC subject must not be assumed to equal the existing numeric bot user ID.
