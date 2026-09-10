@@ -50,6 +50,18 @@ const GENERATED_IMAGE_RETENTION_TOMBSTONE_SCHEMA =
 const GENERATED_IMAGE_RETENTION_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_GENERATED_IMAGE_RETENTION_BATCH_SIZE = 100;
 
+const EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS = {
+  GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_MISSING: 0,
+  GENERATED_IMAGE_RETENTION_MANIFEST_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED: 0,
+  VAULT_FILE_MISSING: 0,
+};
+
+type GeneratedImageRetentionBlockedCaptureCode =
+  keyof typeof EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS;
+
 export interface RunGeneratedImageCaptureRetentionInput {
   materializeCandidatePaths?: ((storedPaths: readonly string[]) => Promise<unknown>) | null;
   maxCaptures?: number;
@@ -62,6 +74,7 @@ export interface RunGeneratedImageCaptureRetentionInput {
 
 export interface RunGeneratedImageCaptureRetentionResult {
   blockedCaptureCount: number;
+  blockedCaptureCounts: Record<GeneratedImageRetentionBlockedCaptureCode, number>;
   hasMoreEligibleCaptures: boolean;
   nextEligibleAt: string | null;
   retiredByteCount: number;
@@ -150,6 +163,7 @@ async function runGeneratedImageCaptureRetentionLocked(
   ).toISOString();
   const ledgerRecords = new Map<string, EventRecord[]>();
   let blockedCaptureCount = 0;
+  const blockedCaptureCounts = { ...EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS };
   let hasMoreEligibleCaptures = false;
   let nextEligibleAt: string | null = null;
   let retiredByteCount = 0;
@@ -238,6 +252,7 @@ async function runGeneratedImageCaptureRetentionLocked(
         throw error;
       }
       blockedCaptureCount += 1;
+      blockedCaptureCounts[error.code] += 1;
       nextEligibleAt = selectEarlierTimestamp(nextEligibleAt, recheckAt);
       continue;
     }
@@ -261,6 +276,7 @@ async function runGeneratedImageCaptureRetentionLocked(
 
   return {
     blockedCaptureCount,
+    blockedCaptureCounts,
     hasMoreEligibleCaptures,
     nextEligibleAt,
     retiredByteCount,
@@ -609,20 +625,17 @@ function throwIfGeneratedImageRetentionAborted(signal?: AbortSignal | null): voi
   signal?.throwIfAborted();
 }
 
-function isGeneratedImageRetentionBlockedCaptureError(error: unknown): boolean {
-  return isVaultError(error) && [
-    "GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID",
-    "GENERATED_IMAGE_RETENTION_EVENT_INVALID",
-    "GENERATED_IMAGE_RETENTION_EVENT_MISSING",
-    "GENERATED_IMAGE_RETENTION_MANIFEST_INVALID",
-    "GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED",
-    "VAULT_FILE_MISSING",
-  ].includes(error.code);
+function isGeneratedImageRetentionBlockedCaptureError(
+  error: unknown,
+): error is VaultError & { code: GeneratedImageRetentionBlockedCaptureCode } {
+  return isVaultError(error) &&
+    Object.keys(EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS).includes(error.code);
 }
 
 function emptyRetentionResult(): RunGeneratedImageCaptureRetentionResult {
   return {
     blockedCaptureCount: 0,
+    blockedCaptureCounts: { ...EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS },
     hasMoreEligibleCaptures: false,
     nextEligibleAt: null,
     retiredByteCount: 0,

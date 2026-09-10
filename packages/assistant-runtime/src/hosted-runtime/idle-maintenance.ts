@@ -500,6 +500,18 @@ function emitGeneratedImageRetentionBlockedLog(input: {
     details: {
       failureCode: "generated_image_retention_capture_blocked",
       generatedImageRetentionBlockedCaptures: input.result.blockedCaptureCount,
+      generatedImageRetentionAttachmentInvalidCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID,
+      generatedImageRetentionEventInvalidCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_EVENT_INVALID,
+      generatedImageRetentionEventMissingCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_EVENT_MISSING,
+      generatedImageRetentionManifestInvalidCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_MANIFEST_INVALID,
+      generatedImageRetentionPreconditionFailedCaptures:
+        input.result.blockedCaptureCounts.GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED,
+      generatedImageRetentionVaultFileMissingCaptures:
+        input.result.blockedCaptureCounts.VAULT_FILE_MISSING,
       generatedImageRetentionRetiredCaptures: input.result.retiredCaptureCount,
     },
     level: "warn",
