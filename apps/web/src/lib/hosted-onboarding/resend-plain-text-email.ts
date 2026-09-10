@@ -45,6 +45,7 @@ export class HostedResendPlainTextEmailError extends Error {
 export async function sendHostedResendPlainTextEmail(input: {
   config: HostedResendPlainTextEmailConfig;
   fetchImpl?: typeof fetch;
+  html?: string;
   idempotencyKey: string;
   replyTo?: string | null;
   signal?: AbortSignal;
@@ -69,6 +70,7 @@ export async function sendHostedResendPlainTextEmail(input: {
     ...(replyTo ? { replyTo } : {}),
     subject: input.subject,
     text: input.text,
+    ...(input.html ? { html: input.html } : {}),
     to: input.to,
   };
   const requestOptions: CreateEmailRequestOptions = {

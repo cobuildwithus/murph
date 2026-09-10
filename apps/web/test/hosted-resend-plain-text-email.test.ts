@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hostedAuthCodeEmail } from "../src/lib/better-auth/code-email";
 
 import {
   HostedResendPlainTextEmailError,
@@ -77,6 +78,25 @@ describe("hosted Resend plain-text email sender", () => {
       providerMessageId: "resend_email_123",
     });
     expect(timeoutSpy).toHaveBeenCalledWith(1_000);
+  });
+
+  it("sends the auth HTML and plain-text alternative in the same SDK request", async () => {
+    const content = hostedAuthCodeEmail("012345");
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload).toEqual({
+        from: "Murph <auth@example.test>", to: ["member@example.test"], ...content,
+      });
+      expect(payload.text).toContain("012345");
+      expect(payload.html).toContain(">012345</td>");
+      return new Response(JSON.stringify({ id: "synthetic-auth-email" }), { status: 200 });
+    });
+    await sendHostedResendPlainTextEmail({
+      config: { apiKey: "re_test", from: "Murph <auth@example.test>", timeoutMs: 1_000 },
+      fetchImpl: fetchMock, idempotencyKey: "synthetic-auth-delivery",
+      to: ["member@example.test"], ...content,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("preserves an explicit empty idempotency header", async () => {
