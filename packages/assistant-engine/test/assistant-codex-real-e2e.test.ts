@@ -267,7 +267,7 @@ import {
   buildAssistantCliSurfaceContract,
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
-  readAssistantCliLlmsFullManifest,
+  readAssistantCliLlmsFullManifestFromCliEntry,
   type AssistantCliLlmsManifestCommandSchema,
 } from '../src/assistant/cli-surface-manifest.ts'
 import {
@@ -15088,8 +15088,8 @@ describeRealCodex('real Codex memory compact receipt e2e', () => {
       const binDirectory = path.join(workingDirectory, 'bin')
       const commandLogPath = path.join(workingDirectory, 'commands.log')
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
-      const manifest = await readAssistantCliLlmsFullManifest({
-        timeoutMs: 5 * 60_000,
+      const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
         workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
       })
       const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
@@ -15159,8 +15159,8 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
           vaultRoot: workingDirectory,
         })
         const [manifest] = await Promise.all([
-          readAssistantCliLlmsFullManifest({
-            timeoutMs: 5 * 60_000,
+          readAssistantCliLlmsFullManifestFromCliEntry({
+            cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
             workingDirectory: fileURLToPath(
               new URL('../../../', import.meta.url),
             ),
@@ -15308,8 +15308,8 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
           vaultRoot: workingDirectory,
         })
         const [manifest] = await Promise.all([
-          readAssistantCliLlmsFullManifest({
-            timeoutMs: 5 * 60_000,
+          readAssistantCliLlmsFullManifestFromCliEntry({
+            cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
             workingDirectory: fileURLToPath(
               new URL('../../../', import.meta.url),
             ),
@@ -22722,6 +22722,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
           toolCallCount: calls.length,
         })}\n`,
       )
+      expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(2)
       expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
       const firstCall = calls[0]
       const correctedCall = calls[1]
@@ -28368,8 +28369,8 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
       const operationsBefore =
         await listWriteOperationMetadataPaths(vaultRoot)
       const [manifest] = await Promise.all([
-        readAssistantCliLlmsFullManifest({
-          timeoutMs: 5 * 60_000,
+        readAssistantCliLlmsFullManifestFromCliEntry({
+          cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
           workingDirectory: fileURLToPath(
             new URL('../../../', import.meta.url),
           ),
@@ -33842,8 +33843,8 @@ async function runRepeatedSetResolutionProbe(
             : 'If the saved records do not uniquely identify today\'s exercise, ask only the one clarification needed and do not change any saved plan.',
         ].join(' ')
     const assistantCliContract = mode === 'group' ? null : buildAssistantCliSurfaceContract(
-      await readAssistantCliLlmsFullManifest({
-        timeoutMs: 5 * 60_000,
+      await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
         workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
       }),
     )
@@ -34518,8 +34519,8 @@ async function runLiveWorkoutRepetitionRecoveryProbe(
     if (saved) expect(currentStatePrompt).toContain(saved.record.text)
     const contextReferences = [{ entityKind: 'activity_session' as const, entityId: started.eventId }]
     const dynamicTools = [MURPH_ATTACH_RESPONSE_CARD_TOOL]
-    const assistantCliContract = buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifest({
-      timeoutMs: 5 * 60_000,
+    const assistantCliContract = buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifestFromCliEntry({
+      cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
       workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
     }))
     const developerInstructions = buildAssistantSystemPrompt({

@@ -11,10 +11,6 @@ export const DEFAULT_CODEX_MODEL_CAPABILITIES: AssistantModelCapabilities = {
   tools: true,
 }
 
-// Codex owns model availability. Murph only materializes explicit current
-// models for UI display; otherwise the Codex config default is authoritative.
-export const DEFAULT_CODEX_MODELS: readonly AssistantCatalogModel[] = [] as const
-
 export function createCatalogModel(input: {
   capabilities: AssistantModelCapabilities
   description: string
