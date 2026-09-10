@@ -4,6 +4,14 @@ Last verified: 2026-09-05
 
 ## Current Repo Checks
 
+Legacy phone-call deletion is covered by `hosted-ops-phone-call-deletion-route.test.ts`
+and `phone-calls-result-notification-store.test.ts`. With a dedicated loopback
+`DATABASE_URL` owned by the test role and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
+`phone-calls-legacy-deletion-postgres.test.ts` through the hosted Web test wrapper.
+The suite owns temporary synthetic schemas and proves JSON-null classification,
+selection bounds, provider-first deletion, retained usage, version conflicts,
+pending notification rejection, and the shared member-lock existence check.
+
 Vault-share replacement deadline proof lives in `projection-store.test.ts` and
 `vault-share-deliver-route.test.ts`. With an isolated migrated loopback
 `DATABASE_URL` and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
