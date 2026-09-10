@@ -2,7 +2,7 @@
 
 import { Link2, Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/src/components/ui/button";
 import type { HostedCredentialChange } from "@/src/lib/better-auth/credential-change";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
@@ -27,6 +27,19 @@ export function HostedLoginMethodSettings({ account, murphPhoneNumber, openEmail
     if (openEmailLink) setSelection({ method: "email", operation: "set" });
   }
   useEffect(() => { if (openEmailLink) stripSettingsQueryParam("addEmail"); }, [openEmailLink]);
+  return <>
+    <HostedLoginMethodSettingsView account={account} murphPhoneNumber={murphPhoneNumber} onSelect={setSelection}
+      referralAction={<HostedSignupReferralLinkButton identityKey={account.referralIdentityKey ?? "referral-settings-preview"} />} />
+    {selection ? <HostedLoginMethodDialog key={`${selection.method}:${selection.operation}`} {...selection} onOpenChange={(open) => { if (!open) setSelection(null); }} /> : null}
+  </>;
+}
+
+export function HostedLoginMethodSettingsView({ account, murphPhoneNumber, onSelect, referralAction }: {
+  account: HostedAccountSettingsSnapshot;
+  murphPhoneNumber?: string | null;
+  onSelect: (selection: Selection) => void;
+  referralAction: ReactNode;
+}) {
   const phone = account.phone.verifiedAt ? account.phone.number : null;
   const email = account.email.verifiedAt ? account.email.address : null;
   const telegram = account.telegram.telegramUserId;
@@ -39,21 +52,18 @@ export function HostedLoginMethodSettings({ account, murphPhoneNumber, openEmail
       href: email && account.email.murphEmailAddress ? `mailto:${account.email.murphEmailAddress}` : null, linkLabel: "Email Murph" },
   ] as const;
   const canRemove = [phone, email, telegram].filter(Boolean).length > 1;
-  return <>
-    <SettingsRowList>
+  return <SettingsRowList>
       {rows.map(({ method, label, value, icon: Icon, href, linkLabel }) => <SettingsRow key={method}
         icon={<Icon className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
         label={label} value={value ?? "Not connected"} empty={!value}
         meta={href ? <SettingsContactLink href={href} label={linkLabel} external={method === "telegram"}>{linkLabel}</SettingsContactLink> : null}
-        action={<div className="flex flex-wrap justify-end gap-1">
-          <Button type="button" size="sm" variant={value ? "ghost" : "default"} aria-label={`${value ? "Change" : "Add"} ${label}`} onClick={() => setSelection({ method, operation: "set" })}>{value ? "Change" : "Connect"}</Button>
-          {value && canRemove ? <Button type="button" size="sm" variant="ghost" aria-label={`Remove ${label}`} onClick={() => setSelection({ method, operation: "remove" })}>Remove</Button> : null}
+        action={<div className="flex flex-col justify-end gap-1 sm:flex-row">
+          <Button type="button" size="sm" variant={value ? "ghost" : "default"} aria-label={`${value ? "Change" : "Add"} ${label}`} onClick={() => onSelect({ method, operation: "set" })}>{value ? "Change" : "Connect"}</Button>
+          {value && canRemove ? <Button type="button" size="sm" variant="ghost" aria-label={`Remove ${label}`} onClick={() => onSelect({ method, operation: "remove" })}>Remove</Button> : null}
         </div>}
       />)}
       <SettingsRow icon={<Link2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
         label="Referral link" value="Your reusable link for inviting friends"
-        action={<HostedSignupReferralLinkButton identityKey={account.referralIdentityKey ?? "referral-settings-preview"} />} />
-    </SettingsRowList>
-    {selection ? <HostedLoginMethodDialog key={`${selection.method}:${selection.operation}`} {...selection} onOpenChange={(open) => { if (!open) setSelection(null); }} /> : null}
-  </>;
+        action={referralAction} />
+  </SettingsRowList>;
 }

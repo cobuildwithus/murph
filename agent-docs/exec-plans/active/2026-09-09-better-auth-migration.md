@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-09
-Updated: 2026-09-09
+Updated: 2026-09-10
 
 ## Goal
 
@@ -374,3 +374,22 @@ These totals overlap earlier runs. Web typecheck, changed-file lint and the ten
 changed-source complexity check pass. Full rendered journeys, final candidate
 review, Android/native qualification and retirement work remain outstanding;
 PR 3 is still unactivated.
+
+## PR 3 browser proof
+
+Six Chromium journeys pass across phone and desktop widths. Real login controls
+accept phone/email codes, focus OTP input, and preserve a confirmed login when
+product loading fails; an explicit retry repeats completion without another
+code. Public navigation and opening login load no Privy SDK. API responses in
+this browser lane are synthetic; PostgreSQL tests own authentication proof.
+The inert design study uses the production settings presenter with a static
+referral action, so it makes no account request. Stacking connection actions on
+phones keeps addresses readable. Selected synthetic images were inspected at
+native resolution. Web typecheck, the verified-contact/last-method regression,
+changed-file lint and full PR complexity guard pass; no new hotspot exceeds 20.
+
+The broader public-loading run also reported a recoverable server-render error
+on the unchanged experiment library. A baseline run is checking whether that
+error predates this change. No authentication failure appeared in the six
+journeys. Final review, exact-head CI, native qualification and retirement
+remain outstanding.

@@ -30,6 +30,7 @@ for (const width of [412, 1440]) {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("heading", { name: "Log in or sign up" })).toBeVisible();
     await expect(dialog.getByRole("textbox").first()).toBeVisible({ timeout: 60_000 });
+    expect(scripts.filter((url) => /@privy-io|@walletconnect|@reown/i.test(url))).toEqual([]);
     await page.evaluate(async () => {
       await document.fonts.ready;
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
