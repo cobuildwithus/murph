@@ -11,7 +11,6 @@ export {
   parseDelimitedRows,
   prepareCsvSampleImport,
   profileCsvSampleFile,
-  summarizeSampleSeries,
 } from "./csv-sample-importer.ts";
 export type {
   CsvSampleFileColumnProfile,
@@ -27,13 +26,6 @@ export type {
   CsvSampleImportSkipReasonCount,
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,
-  SampleSeriesInputRecord,
-  SampleSeriesSummaryInput,
-  SampleSummaryProfile,
-  SampleThresholdSummary,
-  SampleWindowGap,
-  SampleWindowScreen,
-  SampleWindowSummary,
 } from "./csv-sample-importer.ts";
 export {
   assertCanonicalWritePort,
