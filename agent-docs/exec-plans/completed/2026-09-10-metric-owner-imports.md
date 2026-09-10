@@ -1,6 +1,6 @@
 # Import neutral health metrics from their owning package
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -70,8 +70,13 @@ Documentation drift and gardening checks passed with zero gardening issues.
 The independent final consumer audit found no remaining shim imports, aliases,
 barrel leaks, or unrelated edits.
 
-## Pending completion gates
+## Completion
 
-The completion owner handles the scoped commit, PR creation, final ReviewGPT,
-exact-head CI, mergeability proof, and final plan closure. Keep this plan active
-until those gates finish. No merge or deployment is part of this task.
+- Implementation and parent candidate review are complete in PR #3146.
+- ReviewGPT round 1 passed at `4d441566ca81fabc980cc792b058a7f0348faf85`
+  with zero qualifying findings; the captured model identity is verified.
+- Plan closure changes documentation only. The reviewed production and test
+  patch remains unchanged.
+- Required CI on the final pushed head remains the PR merge-readiness gate;
+  this plan records implementation completion, not permission to merge or deploy.
+Completed: 2026-09-10
