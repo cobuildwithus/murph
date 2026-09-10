@@ -6,6 +6,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   ensureConfigured: vi.fn(),
+  loginForSetup: vi.fn(),
   hookState: {
     clientAuthenticated: false,
     configured: false,
@@ -24,11 +25,12 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   }),
 }));
 
-vi.mock("@/src/components/sensitive-actions/use-passkey-wallet-mfa", () => ({
-  usePasskeyWalletMfa: () => ({
+vi.mock("@/src/components/sensitive-actions/legacy-wallet-approval-context", () => ({
+  useLegacyWalletApproval: () => ({ setup: {
     ...mocks.hookState,
     ensureConfigured: mocks.ensureConfigured,
-  }),
+    loginForSetup: mocks.loginForSetup,
+  } }),
 }));
 
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
@@ -64,7 +66,7 @@ test("shows server-confirmed passkey enabled when the mobile Privy client user i
   await rendered.cleanup();
 });
 
-test("asks the user to sign in on this device before starting passkey setup", async () => {
+test("restores only the legacy setup client instead of opening primary login", async () => {
   const rendered = await renderClientComponent(
     createElement(HostedPasskeySettings, {
       authenticated: true,
@@ -74,13 +76,14 @@ test("asks the user to sign in on this device before starting passkey setup", as
 
   expect(rendered.container.textContent).toContain("Not set up");
   expect(rendered.container.textContent).toContain("Sign in on this device");
-  expect(rendered.button.textContent).toBe("Sign in");
+  expect(rendered.button.textContent).toBe("Verify existing sign-in");
 
   await act(async () => {
     rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+  expect(mocks.loginForSetup).toHaveBeenCalledOnce();
+  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
   expect(mocks.ensureConfigured).not.toHaveBeenCalled();
 
   await rendered.cleanup();

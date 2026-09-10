@@ -416,6 +416,23 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(provider.read).not.toHaveBeenCalled();
   }));
 
+  it("selects legacy factor restoration only for the canonical session identity", () => withInitialPasskeyMember(async (f) => {
+    const { token } = await (await initialPasskeyOptions(f.request({}))).json();
+    expect((await credentialAuthenticationOptions(f.request({ token }))).status).toBe(403);
+    const expectedUserId = `did:privy:${f.memberId}`;
+    await f.prisma.$transaction((tx) => upsertHostedMemberIdentity({
+      maskedPhoneNumberHint: null, phoneLookupKey: null, phoneNumber: null, memberId: f.memberId,
+      privyUserId: expectedUserId, phoneNumberVerifiedAt: null,
+      signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+      preparedControlRoot: { domain: "control", userId: f.memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+    }));
+    const response = await credentialAuthenticationOptions(f.request({ token, privyUserId: "did:privy:synthetic-other-member" }));
+    expect(await response.json()).toEqual({ method: "wallet", privyUserId: expectedUserId });
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+    expect(provider.read).not.toHaveBeenCalled();
+  }));
+
   it("binds initial registration to the original session and rechecks revocation", () => withInitialPasskeyMember(async (f) => {
     const registration = await initialEnrollment(f.request);
     const secondCookie = await f.loginAgain();

@@ -90,6 +90,16 @@ Credential state is bounded and encrypted under the existing member crypto owner
 
 Once replacement protection is established, do not try a legacy wallet after a failed passkey assertion. Corrupt credential state fails closed. The legacy proof reader is temporary and cannot become a recovery mechanism that ignores newer revocations.
 
+First-party approval hooks do not load the legacy SDK. Account settings omit its
+provider for initial or established Murph passkeys. For an unmigrated factor,
+the action endpoint selects the expected legacy principal from the current
+member; the temporary client restores that principal with its existing passkey,
+checks the same principal before and after wallet loading, and signs the bound
+action. It never creates a missing factor during approval or changes the Murph
+session. Legacy factor setup uses a separate provider dialog and checks the
+current member before provider mutations. Qualify passkey login in the existing
+provider configuration and real-device restoration before enabling migration.
+
 ## Credential settings
 
 The fixed `/api/settings/login-methods` reader and challenge, OTP send/verify,

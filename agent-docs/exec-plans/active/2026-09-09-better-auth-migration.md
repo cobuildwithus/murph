@@ -318,3 +318,21 @@ with enabled issuance after reader/recovery qualification; an issuance pause
 keeps the first-party UI and compatible session readers. Do not import or widen
 while these user journeys are incomplete. This is an intermediate checkpoint,
 not the final candidate or a claim of production continuity.
+
+First-party approval now has no SDK hooks, and account settings omit the legacy
+provider for initial or established Murph passkeys. The temporary wallet port
+restores an existing factor for the server-selected legacy principal, checks it
+again after wallet loading, and refuses missing-factor creation during approval.
+Legacy setup has a separate provider dialog and canonical member checks before
+provider changes; neither operation completes primary login or replaces the
+Murph session. Missing or invalid server-selected approval methods fail closed.
+
+The final focused follow-up passes 154 cases across eight client and real
+PostgreSQL suites. These include wrong restored accounts, changed accounts
+during wallet loading, first-party ownership blocking legacy setup, no fallback
+after passkey rejection, and server-owned principal selection. Web typecheck,
+changed-file lint and complexity pass. Real-device provider restoration,
+independent recovery, remaining legacy entry/logout cleanup, native work and
+candidate UI/CI/ReviewGPT remain Hold. The earlier hook-separation and legacy
+reauthentication implementation gaps are closed; this is still an intermediate
+checkpoint and no deployment or import has occurred.

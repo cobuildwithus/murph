@@ -6,7 +6,7 @@ import {
   HOSTED_ASSISTANT_TERRA_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 
-import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
+import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { HostedLoginMethodSettings } from "@/src/components/settings/hosted-login-method-settings";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
@@ -295,7 +295,6 @@ function renderAuthenticatedSettingsPage(input: {
   const {
     murphPhoneNumber,
     privyAppId,
-    privyClientId,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
@@ -520,9 +519,9 @@ function renderAuthenticatedSettingsPage(input: {
   );
 
   return privyAppId ? (
-    <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
+    <HostedPrivyBoundary legacyApprovalRequired={!secureApprovalStatus.method}>
       {settingsContent}
-    </HostedPrivyProvider>
+    </HostedPrivyBoundary>
   ) : settingsContent;
 }
 
@@ -606,7 +605,6 @@ function resolveSettingsAccountPresentation(input: {
   return {
     murphPhoneNumber,
     privyAppId: process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null,
-    privyClientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
@@ -968,7 +966,7 @@ function normalizeSettingsPageData(
       settingsData?.hasConfirmedGroupMembership === true,
     inferenceConnection: settingsData?.inferenceConnection ?? null,
     secureApprovalStatus:
-      settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const),
+      settingsData?.secureApprovalStatus ?? ({ status: "unavailable", method: undefined } as const),
     settingsSnapshot: settingsData?.settingsSnapshot ?? null,
     usageActivity: settingsData?.usageActivity ?? null,
     usageStatus: settingsData?.usageStatus ?? null,

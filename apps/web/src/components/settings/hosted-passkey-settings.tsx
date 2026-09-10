@@ -2,8 +2,7 @@
 
 import { Fingerprint } from "lucide-react";
 
-import { usePasskeyWalletMfa } from "@/src/components/sensitive-actions/use-passkey-wallet-mfa";
-import { AuthButton } from "@/src/components/ui/auth-button";
+import { useLegacyWalletApproval } from "@/src/components/sensitive-actions/legacy-wallet-approval-context";
 import { Button } from "@/src/components/ui/button";
 import type { HostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/shared";
 import { useApprovalPasskeyEnrollment } from "@/src/components/sensitive-actions/use-approval-passkey-enrollment";
@@ -60,10 +59,11 @@ function PasskeySetup({
     clientAuthenticated,
     configured,
     ensureConfigured,
+    loginForSetup,
     error,
     pendingLabel,
     ready,
-  } = usePasskeyWalletMfa();
+  } = useLegacyWalletApproval().setup;
   const isRunning = pendingLabel !== null;
   const serverConfigured = secureApprovalStatus.status === "configured";
   const effectiveConfigured = serverConfigured || configured;
@@ -135,15 +135,15 @@ function PasskeySetup({
           : showReauthAction
             ? (
                 <div className="shrink-0">
-                  <AuthButton
+                  <Button
                     type="button"
                     size="default"
                     variant="default"
                     disabled={isRunning}
-                    authSatisfied={clientAuthenticated}
+                    onClick={() => void loginForSetup()}
                   >
-                    Sign in
-                  </AuthButton>
+                    Verify existing sign-in
+                  </Button>
                 </div>
               )
           : null}

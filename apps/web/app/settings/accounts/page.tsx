@@ -26,6 +26,7 @@ export default async function AccountSettingsPage({ searchParams }: {
   const auth = await getHostedPageAuthSnapshot();
   const memberId = auth.authenticatedMember?.id;
   let controls;
+  let legacyFactor = false;
   if (!auth.authenticated || !memberId) {
     controls = <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">Sign in with the account you use in Murph to manage your connections.</p>
@@ -35,6 +36,7 @@ export default async function AccountSettingsPage({ searchParams }: {
     const prisma = getPrisma();
     const { account } = await readHostedAccountSettingsPageSnapshot({ memberId, prisma });
     const status = await readHostedSecureApprovalStatus({ memberId, prisma, privyUserId: auth.session?.privyUserId });
+    legacyFactor = status.method !== "passkey" && status.method !== "initial";
     controls = <>
       <section className="flex flex-col gap-4" aria-label="Connected accounts">
         <HostedLoginMethodSettings account={{ phone: account.phone, email: account.email, telegram: account.telegram, referralIdentityKey: account.referralIdentityKey }} />
@@ -58,7 +60,7 @@ export default async function AccountSettingsPage({ searchParams }: {
     </div>
   </main>;
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
-  return appId && auth.authenticated
+  return appId && legacyFactor
     ? <HostedPrivyProvider appId={appId} clientId={process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID}>{content}</HostedPrivyProvider>
     : content;
 }
