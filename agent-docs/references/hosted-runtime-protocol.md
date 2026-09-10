@@ -77,13 +77,24 @@ The live ownership split is:
   separation lets paused-member retention and an explicitly authorized
   Settings export restore encrypted workspace state without reopening ordinary
   assistant or model work.
-  During active mailbox import, the runner container calls a Worker-owned
-  mailbox-payload decode route over the invocation outbound proxy. That route
-  requires the runtime write fence, decrypts the mailbox payload with the
-  Worker-owned ingress crypto context, and returns only a parsed hosted wake or
-  a semantic blocked result. Legacy active-invocation RPC names remain only for
-  deployed-caller compatibility and must be deleted after 2026-05-25. The
-  container must not receive ingress root keys, callback-signing private
+  During active mailbox import, the container opts into Worker-side inline
+  conversation decryption on its existing mailbox fetch. The Worker validates
+  the current write fence, forwards the signed fetch to Web, and decrypts fresh
+  inline conversation items using one ingress context per batch. It returns an
+  ephemeral parsed `decodedWake` beside the original ciphertext. Only the
+  Cloudflare runtime port accepts that field; canonical Web mailbox parsing
+  discards it. Runtime keeps its existing identity, routing and import checks.
+  Consumed, system and sidecar items retain lazy processing. An unsuccessful
+  optional decode retains the original item so one bad payload cannot fail
+  unrelated lanes; ordinary import still owns that item's decode failure/retry.
+  Old containers omit the opt-in; old Workers return the original ciphertext,
+  and new containers keep the existing decode endpoint for that response and
+  for sidecars. Both directions of Worker/container skew are supported, with no
+  Web deployment dependency or persisted schema change. After convergence,
+  fresh inline messages omit the second request and its write-fence RPC.
+  Retire the opt-in once the supported Worker/runner rollback floor and all warm
+  callers consume decodedWake; the decoder remains for lazy sidecar/system work.
+  The container must not receive ingress root keys, callback-signing private
   material, private JWKs, or a root-fetch capability for mailbox import.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
   rows, stages assistant input, runs assistant/device work, and checkpoints the

@@ -107,13 +107,15 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
       assistantTarget: context?.assistantTarget ?? null,
       decodePayload: {
         decode: async (decodeInput) => {
-          const decoded = await input.decodeMailboxPayload.decode({
-            itemRef: decodeInput.itemRef,
-            payloadCiphertext: decodeInput.payloadCiphertext,
-            payloadRequestId: decodeInput.payloadRequestId,
-            payloadSchema: decodeInput.payloadSchema,
-            payloadSource: decodeInput.payloadSource,
-          });
+          const decoded = item.payload.decodedWake
+            ? { status: "decoded" as const, wake: item.payload.decodedWake }
+            : await input.decodeMailboxPayload.decode({
+                itemRef: decodeInput.itemRef,
+                payloadCiphertext: decodeInput.payloadCiphertext,
+                payloadRequestId: decodeInput.payloadRequestId,
+                payloadSchema: decodeInput.payloadSchema,
+                payloadSource: decodeInput.payloadSource,
+              });
 
           if (decoded.status === "blocked") {
             return decoded;
