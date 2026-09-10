@@ -8375,7 +8375,8 @@ function createHostedRuntimeCheckpointWakeInterruption(input: {
       while (!waitAbortController.signal.aborted) {
         const nextNotification = await runtimeWakeSignal.wait(waitAbortController.signal);
         if (input.shouldInterrupt && !await input.shouldInterrupt(nextNotification)) continue;
-        if (waitAbortController.signal.aborted) return;
+        // A consumed wake still belongs to the caller if disposal has begun.
+        // Preserve it for takeNotification() and the foreground handoff.
         notification = nextNotification;
         checkpointAbortController.abort(
           new HostedRuntimeCheckpointInterruptedByWakeError({
