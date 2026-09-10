@@ -1152,7 +1152,6 @@ function createPrisma(input: {
 
 function createStatefulThreadRoutePrisma() {
   type LinqLineFixture = {
-    activeMemberLimit: number | null;
     assignmentWeight: number;
     configuredAt: Date | null;
     egressPolicy: string;
@@ -1628,7 +1627,6 @@ function createStatefulThreadRoutePrisma() {
         throw new Error("Expected a managed Linq line lookup key.");
       }
       linqLines.set(lookupKey, {
-        activeMemberLimit: null,
         assignmentWeight: 100,
         configuredAt: new Date("2026-06-24T00:00:00.000Z"),
         egressPolicy: overrides.egressPolicy ?? "enabled",

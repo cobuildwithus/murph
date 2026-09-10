@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -151,9 +151,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-conversation-preempt.bundle.json",
                 size: 640,
               }),
             };
@@ -494,9 +493,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-vault-share-checkpoint.bundle.json",
                 size: 640,
               }),
             };
@@ -617,9 +615,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-stale-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -767,9 +764,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-device-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -905,9 +901,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-device-continuation-key.bundle.json",
                 size: 640,
               }),
             };
@@ -1039,9 +1034,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-foreground-outbox-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -1223,9 +1217,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-same-device-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -1329,9 +1322,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-replaced-device-gate.bundle.json",
                 size: 640,
               }),
             };
@@ -1423,9 +1415,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-timer.bundle.json",
                 size: 640,
               }),
             };
@@ -1484,9 +1475,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             events.push(`snapshot:${snapshotInput.reason}`);
             assert.equal(snapshotInput.reason, "idle_shutdown");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "6".repeat(64),
-                key: "users/bundles/member-synthetic/provider-cleanup-idle-delay.bundle.json",
                 size: 640,
               }),
             };
@@ -1572,9 +1562,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             events.push(`snapshot:${snapshotInput.reason}`);
             assert.equal(snapshotInput.reason, "idle_shutdown");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/provider-cleanup-replace-idle-delay.bundle.json",
                 size: 640,
               }),
             };
@@ -1666,9 +1655,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             firstCheckpointStartedAtMs ??= performance.now();
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-projected-wake.bundle.json",
                 size: 640,
               }),
             };
@@ -1767,9 +1755,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "9".repeat(64),
-                  key: "users/bundles/member-synthetic/runtime-projected-wake-deadline.bundle.json",
                   size: 640,
                 }),
               };
@@ -1887,9 +1874,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "b".repeat(64),
-                  key: "users/bundles/member-synthetic/runtime-projected-wake-at-floor.bundle.json",
                   size: 640,
                 }),
               };
@@ -1990,9 +1976,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "a".repeat(64),
-                  key: "users/bundles/member-synthetic/runtime-progressed-false-retry.bundle.json",
                   size: 640,
                 }),
               };
@@ -2107,9 +2092,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                key: "users/bundles/member-synthetic/runtime-receipt-status-followup.bundle.json",
                 size: 640,
               }),
             };
@@ -2209,9 +2193,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-external-after-projected.bundle.json",
                 size: 640,
               }),
             };
@@ -2300,11 +2283,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "runtime-post-checkpoint-external-future-wake.bundle.json",
                   size: 640,
                 }),
               };
@@ -2467,9 +2447,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-timer-before-wake.bundle.json",
                 size: 640,
               }),
             };
@@ -2534,9 +2513,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           async createCheckpointSnapshot(snapshotInput) {
             assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-wrong-user.bundle.json",
                 size: 256,
               }),
             };

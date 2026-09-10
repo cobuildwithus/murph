@@ -434,11 +434,6 @@ export {
   enqueueHostedSystemMailboxItem,
 };
 export {
-  readHostedMaterializedArtifactPaths,
-  recordHostedMaterializedArtifactPaths,
-  resolveHostedMaterializedArtifactStateRelativePath,
-} from "./hosted-runtime/materialized-artifact-state.ts";
-export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   parseHostedAssistantWorkspaceRuntimeJobRequest,

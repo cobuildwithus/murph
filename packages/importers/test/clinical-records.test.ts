@@ -250,16 +250,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       "measurement",
       "test",
       "measurement",
+      "measurement",
     ]);
     expect(upserts(plan).some((candidate) => candidate.kind === "clinical_assertion")).toBe(false);
-    expect(reviews(plan)).toHaveLength(2);
+    expect(reviews(plan)).toHaveLength(1);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          resourceType: "Observation",
-          resourceId: "height-1",
-          reason: "observation code is not importable",
-        }),
         expect.objectContaining({
           resourceType: "Condition",
           resourceId: "condition-positive-1",
@@ -309,6 +305,64 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         value: 91,
       },
     ]);
+  });
+
+  it.each([
+    ["8302-2", "cm", 175, "body-height", "cm"],
+    ["8302-2", "[in_i]", 69, "body-height", "in"],
+    ["39156-5", "kg/m2", 24.2, "bmi", "kg/m^2"],
+    ["9843-4", "[in_i]", 15, "head-circumference", "in"],
+    ["9843-4", "cm", 38.1, "head-circumference", "cm"],
+    ["2708-6", "%", 98, "spo2", "percent"],
+    ["8310-5", "[degF]", 98.6, "temperature", "degF"],
+    ["29463-7", "g", 3500, "body-weight", "g"],
+  ] as const)("imports standard vital %s in %s without changing the value", async (
+    code, sourceUnit, value, metric, unit,
+  ) => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation",
+        id: "standard-vital",
+        status: "final",
+        effectiveDateTime: "2010-04-02T12:00:00.000Z",
+        code: { coding: [{ system: "http://loinc.org", code }] },
+        valueQuantity: { value, system: "http://unitsofmeasure.org", code: sourceUnit },
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({
+      kind: "measurement",
+      occurredAt: "2010-04-02T12:00:00.000Z",
+      measurements: [{ metric, unit, value }],
+      externalRef: expect.objectContaining({ resourceId: "standard-vital" }),
+    })]);
+  });
+
+  it.each([
+    ["8302-2", "kg"],
+    ["39156-5", "percent"],
+    ["9843-4", "kg"],
+    ["2708-6", "mmHg"],
+    ["8310-5", "K"],
+  ])("retains vital %s with incompatible unit %s for review", async (code, unit) => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation",
+        id: "incompatible-vital",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: { coding: [{ system: "http://loinc.org", code }] },
+        valueQuantity: { value: 20, system: "http://unitsofmeasure.org", code: unit },
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([expect.objectContaining({
+      reason: "vital quantity unit is not importable",
+    })]);
   });
 
   it("preserves unqualified laboratory reference ranges", async () => {
@@ -626,9 +680,9 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
             },
             {
               code: {
-                coding: [{ system: "http://loinc.org", code: "8302-2", display: "Body height" }],
+                coding: [{ system: "http://loinc.org", code: "8887-2", display: "Heart rate device type" }],
               },
-              valueQuantity: { value: 170, unit: "cm" },
+              valueCodeableConcept: { text: "Device type" },
             },
           ],
         }],

@@ -57,7 +57,7 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
     importState.watermarks.system = "1";
     await writeMailboxImportStateFile(vaultRoot, importState);
     const initial = await createVaultSnapshotBundle({
-      key: "users/bundles/member-synthetic/background-convergence-initial.bundle.json", vaultRoot,
+      vaultRoot,
     });
     artifactBytesByHash.set(initial.hash, initial.bytes);
     let workspace = createWorkspaceState({ snapshotRef: initial.snapshotRef, version: "0" });
@@ -93,8 +93,9 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
             if (context?.signal?.aborted) interruptedCompletions += 1;
             context?.signal?.throwIfAborted();
           }
+          ++snapshotOrdinal;
           const snapshot = await createVaultSnapshotBundle({
-            key: `users/bundles/member-synthetic/background-convergence-${++snapshotOrdinal}.bundle.json`, vaultRoot,
+            vaultRoot,
           });
           artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return { snapshotRef: snapshot.snapshotRef };

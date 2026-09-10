@@ -1,6 +1,6 @@
 import {
   TEST_NOW,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createDeviceSyncResolvedConfig,
   createMailboxItem,
@@ -150,7 +150,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
           })),
         }));
       }
-      const initialSnapshot = await createVaultSnapshotBundle({ key: "users/bundles/member-synthetic/device-timer-base.bundle.json", vaultRoot });
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
       const artifactBytesByHash = new Map([[initialSnapshot.hash, initialSnapshot.bytes]]);
       const firstResult = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -164,7 +164,6 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:first:${snapshotInput.reason}`);
             const snapshot = await createVaultSnapshotBundle({
-              key: "users/bundles/member-synthetic/device-timer-next.bundle.json",
               vaultRoot,
             });
             artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -221,9 +220,8 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:second:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/device-sync-follow-up.bundle.json",
                 size: 512,
               }),
             };
@@ -344,9 +342,8 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
               snapshotInput.handledConversationFrontierSelected ?? false,
             );
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "6".repeat(64),
-                key: "users/bundles/member-synthetic/device-sync-pending-retry.bundle.json",
                 size: 512,
               }),
             };
@@ -461,9 +458,8 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:follow-up:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/device-sync-follow-up-after-retry.bundle.json",
                 size: 512,
               }),
             };
@@ -555,9 +551,8 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
             checkpointWatermarks.push(watermark);
             events.push(`snapshot:${snapshotInput.reason}:${watermark}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointWatermarks.length}`.repeat(64),
-                key: `users/bundles/member-synthetic/projection-stall-${checkpointWatermarks.length}.bundle.json`,
                 size: 512,
               }),
             };
@@ -769,9 +764,8 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "5".repeat(64),
-                key: "users/bundles/member-synthetic/pending-retry-system-mailbox.bundle.json",
                 size: 512,
               }),
             };
