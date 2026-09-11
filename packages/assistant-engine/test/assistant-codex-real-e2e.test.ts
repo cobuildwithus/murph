@@ -24200,6 +24200,61 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
   )
 })
 
+describeRealCodex('real Codex personalization schema e2e', () => {
+  it('saves sentence-case preference through the concrete personalization update schema', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personalization-schema-e2e-'))
+    const requests: unknown[] = []
+    const progressUpdates: string[] = []
+    const snapshot = {
+      mainPersona: 'classic' as const, supportingPersona: null,
+      tone: 'casual' as const, voice: 'classic' as const,
+      model: 'gpt-5.6-terra' as const, solAvailable: true,
+    }
+    try {
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand, codexHome: config.codexHome,
+        developerInstructions: buildCapabilityRoutingDeveloperInstructions(),
+        dynamicTools: [MURPH_PERSONALIZATION_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          currentAssistantInputId: () => 'ain_11111111111111111111111111111111',
+          personalizationTool: { async request(request) {
+            requests.push(request)
+            if (request.action === 'read') return { action: 'read', result: snapshot }
+            expect(request).toEqual({ action: 'update', tone: 'formal' })
+            return { action: 'update', result: {
+              ...snapshot, tone: 'formal', status: 'saved',
+              modelChangeAppliesNextRun: false, modelUpdated: false,
+            } }
+          } },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        progressDelivery: { async send(text) { progressUpdates.push(text); return { kind: 'sent', source: 'model' } } },
+        prompt: 'Please save sentence case as my preference for future replies. Keep my personality and voice the same.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const updates = requests.filter((request) => readRecord(request)?.action === 'update')
+      expect(updates).toEqual([{ action: 'update', tone: 'formal' }])
+      expect(requests.length).toBeLessThanOrEqual(2)
+      const attempts = readDynamicToolAttempts(result.jsonEvents).filter((attempt) => attempt.tool === MURPH_PERSONALIZATION_TOOL.name)
+      expect(attempts).toHaveLength(requests.length)
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(progressUpdates).toEqual([])
+      const reply = result.finalMessage.trim()
+      expect(reply).toMatch(/sentence case|capitali[sz]|capital letters/iu)
+      expect(reply).not.toMatch(/schema|mainPersona|couldn.t|unable|failed/iu)
+      process.stdout.write('[personalization-schema-live] ' + JSON.stringify({ requests, progressUpdates, reply }) + '\n')
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex automation edit progress e2e', () => {
   it.each([
     { count: 1, label: 'quick single edit', progressCount: 0 },

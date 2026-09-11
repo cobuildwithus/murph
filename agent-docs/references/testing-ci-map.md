@@ -525,6 +525,22 @@ one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
 
+The tool-contract suite inventories all exported and route-only registrations
+(currently 56) across eager native, deferred native, and code mode. It compares
+complete canonical JSON from the actual provider boundary and separately checks
+generated automation, nutrition, and personalization declarations. A catalog-wide
+guard rejects empty named-property schemas; intentionally generic connected-app
+arguments and no-argument tools remain supported. The pinned Codex converter can
+still shorten deep automation types, so the full JSON supplement remains required.
+The custom-inference adapter suite checks complete long descriptions for function,
+namespace, and custom tools through both top-level and additional-tool transport.
+
+Focused live personalization proof uses
+`-- --test 'saves sentence-case preference'`: one sparse saved tone update, no
+persona/voice rewrite, no progress chatter, and a truthful confirmation. Existing
+`-- --test 'uses one canonical nutrition context read for date-window'` covers
+one valid nutrition card from canonical saved data without Goal mutations.
+
 Automation editing has a focused real-App-Server regression in
 `assistant-codex-tool-input-contract.test.ts`: generated code-mode declarations
 must expose a required string `expectedUpdatedAt`, typed lookup/instructions,

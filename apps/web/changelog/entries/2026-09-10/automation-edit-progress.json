@@ -5,10 +5,13 @@
     "id": "automation-edit-progress",
     "kind": "improvement",
     "priority": 2,
-    "title": "Smoother reminder edits, clearer progress",
-    "summary": "Murph handles changes to existing reminders more reliably and gives a brief update when a request grows into several steps.",
-    "details": "Quick changes stay concise. Longer work gets an earlier progress note, while checks still protect reminder changes made elsewhere.",
-    "relevanceTags": ["reminders", "assistant"],
+    "title": "Smoother edits and clearer progress",
+    "summary": "Murph handles reminder changes, nutrition cards and saved reply preferences more reliably, with earlier progress during longer requests.",
+    "details": "Quick changes stay concise. Longer work gets a brief progress note, and changes preserve settings you did not ask to update.",
+    "relevanceTags": [
+      "reminders",
+      "assistant"
+    ],
     "sourcePullRequests": []
   }
 }

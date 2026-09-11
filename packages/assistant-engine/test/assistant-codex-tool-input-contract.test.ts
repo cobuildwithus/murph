@@ -18,6 +18,7 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_PERSONALIZATION_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import { MURPH_AUTOMATION_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import type { AssistantProviderDynamicTool } from '../src/assistant/providers/types.ts'
 import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
@@ -296,6 +297,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const tools = resolveMurphDynamicTools({
         allowFinishWithoutReply: true,
         automationAvailable: true,
+        personalizationAvailable: true,
         groupSharedReadAvailable: scope === 'group',
         imageGenerationAvailable: false,
         progressUpdatesAvailable: true,
@@ -344,6 +346,41 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     expect(observed.description.includes('Required current automation updatedAt'), 'canonical version readback documentation').toBe(true)
     expect(/lookup:\s*string/u.test(declaration), 'typed exact lookup').toBe(true)
     expect(/instructions\??:\s*string/u.test(declaration), 'typed replacement instructions').toBe(true)
+  })
+
+  it('keeps nutrition and personalization inputs concrete in real Codex declarations', { timeout: 180_000 }, async () => {
+    const [card, personalization] = await observeContracts([MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_PERSONALIZATION_TOOL], 'code-only')
+    assert.ok(card)
+    assert.ok(personalization)
+    const cardDeclaration = card.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
+    for (const field of ['carbsGrams', 'fatGrams', 'fiberGrams']) {
+      expect(cardDeclaration.match(new RegExp(`${field}: \\{`, 'gu')), `${field} totals and goal objects`).toHaveLength(2)
+      expect(cardDeclaration).not.toMatch(new RegExp(`${field}: unknown`, 'u'))
+    }
+    const personalizationDeclaration = personalization.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
+    expect(personalizationDeclaration).toMatch(/action: "update"/u)
+    for (const field of ['mainPersona', 'supportingPersona', 'tone', 'voice']) {
+      expect(personalizationDeclaration).toMatch(new RegExp(`${field}\\??:`, 'u'))
+      expect(personalizationDeclaration).not.toMatch(new RegExp(`${field}\\??: unknown`, 'u'))
+      expect(personalizationDeclaration).toMatch(new RegExp(`${field}\\??: \"`, 'u'))
+    }
+  })
+
+  it('never factors a named input property into an empty schema anywhere in the catalog', () => {
+    const inspect = (value: unknown, location: string): void => {
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => inspect(entry, `${location}[${index}]`))
+        return
+      }
+      const object = readRecord(value)
+      if (!object) return
+      const properties = readRecord(object.properties)
+      for (const [name, property] of Object.entries(properties ?? {})) {
+        expect(property, `${location}.properties.${name}`).not.toEqual({})
+      }
+      for (const [key, child] of Object.entries(object)) inspect(child, `${location}.${key}`)
+    }
+    for (const tool of inventory) inspect(tool.inputSchema, `${tool.namespace}.${tool.name}`)
   })
 
   it.each(MODES)('preserves complete sentinel contracts and rejects corrupted runtime evidence (%s)', { timeout: 180_000 }, async (mode) => {

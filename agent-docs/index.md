@@ -26,8 +26,10 @@ evidence) are specified in
 
 Automation edit schema discovery and attended progress guidance are owned by
 `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex declaration,
-versioned-edit, and quick-versus-long progress proof is indexed in
-`agent-docs/references/testing-ci-map.md`.
+versioned-edit, nutrition/personalization declarations, and quick-versus-long
+progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
+`agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
+tool-description transport and its existing byte/count bounds.
 
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the

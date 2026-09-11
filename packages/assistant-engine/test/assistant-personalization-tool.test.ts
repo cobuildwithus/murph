@@ -11,6 +11,30 @@ import type {
 } from '../src/assistant/hosted-tool-context.js'
 
 describe('assistant personalization tool', () => {
+  it('advertises sparse updates with paired persona fields and preserves runtime admission', () => {
+    expect(MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1]).toMatchObject({
+      type: 'object', additionalProperties: false, required: ['action'], minProperties: 2,
+      dependentRequired: {
+        mainPersona: ['supportingPersona'], supportingPersona: ['mainPersona'],
+      },
+    })
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain('send only the fields the user wants changed')
+    const fields = ['mainPersona', 'supportingPersona', 'tone', 'voice'] as const
+    for (const supportingPersona of ['classic', null]) {
+      const values = { mainPersona: 'scientist', supportingPersona, tone: 'formal', voice: 'upbeat' }
+      for (let mask = 0; mask < 16; mask += 1) {
+        const argumentsValue = { action: 'update', ...Object.fromEntries(
+          fields.filter((_field, bit) => mask & (1 << bit)).map((field) => [field, values[field]]),
+        ) }
+        const valid = mask !== 0 && Boolean(mask & 1) === Boolean(mask & 2)
+        const parsed = readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: {
+          arguments: argumentsValue, namespace: 'murph', tool: 'personalization',
+        } })
+        expect(parsed?.kind, JSON.stringify(argumentsValue)).toBe(valid ? 'personalization' : 'invalid-personalization-arguments')
+      }
+    }
+  })
+
   it('is available only when the hosted personalization owner is present', () => {
     expect(resolveMurphDynamicTools({
       personalizationAvailable: true,
