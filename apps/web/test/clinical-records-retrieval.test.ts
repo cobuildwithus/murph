@@ -213,7 +213,7 @@ describe("Clinical Records retrieval control plane", () => {
     if (readResult.status !== "ready" || !("retrievalSlices" in readResult.run)) {
       throw new TypeError("Expected a query-aware retrieval descriptor.");
     }
-    expect(readResult.run.retrievalSlices).toHaveLength(5);
+    expect(readResult.run.retrievalSlices).toHaveLength(6);
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
       entry: [],
       resourceType: "Bundle",
@@ -676,7 +676,7 @@ describe("Clinical Records retrieval control plane", () => {
     );
   });
 
-  it("executes a frozen bounded query through the query-aware egress path", async () => {
+  it("executes an all-history query through the query-aware egress path", async () => {
     const harness = createHarness(["Observation"], "query-slices-v2");
     harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() + 120_000);
     const slice = buildEpicBetaRetrievalPlan({
@@ -684,8 +684,8 @@ describe("Clinical Records retrieval control plane", () => {
       pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
       resourceTypes: ["Observation"],
     }).slices.find((candidate) => candidate.queryScopeId === "observation-assessments");
-    if (!slice || slice.coverage !== "bounded-window") {
-      throw new TypeError("Expected the assessment bounded query slice.");
+    if (!slice || slice.coverage !== "whole-family") {
+      throw new TypeError("Expected the assessment lifetime query slice.");
     }
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
       entry: [],
@@ -701,7 +701,7 @@ describe("Clinical Records retrieval control plane", () => {
         generation: 1,
         queryFingerprint: slice.queryFingerprint,
         queryScopeId: slice.queryScopeId,
-        requestId: "request_bounded_assessment",
+        requestId: "request_lifetime_assessment",
         resourceType: slice.resourceType,
         retrievalProtocol: "query-slices-v2",
         runId: RUN_ID,
@@ -710,7 +710,7 @@ describe("Clinical Records retrieval control plane", () => {
     })).resolves.toMatchObject({ status: "page" });
     expect(fetchImpl).toHaveBeenCalledWith(
       new URL(
-        "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=survey&date=ge2025-07-10T15%3A00%3A00.000Z&date=lt2026-07-10T15%3A00%3A00.000Z&_count=100",
+        "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=survey&_count=100",
       ),
       expect.objectContaining({ method: "GET", redirect: "manual" }),
     );
