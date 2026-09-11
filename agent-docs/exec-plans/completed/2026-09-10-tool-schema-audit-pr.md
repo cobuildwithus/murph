@@ -1,6 +1,6 @@
 # Audit tool schemas and publish the automation fix
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-11
 
@@ -90,11 +90,12 @@ failure class, correct proven related defects, and publish the reviewed PR.
 
 ## Explicit residual findings
 
-- Pinned Codex 0.151.0 still shortens some deep automation signature types. Its
+- Pinned Codex 0.151.0 still shortens some deep automation native JSON Schema
+  parameters and generated signature types, including reference array items. Its
   internal no-compaction API is not exposed through supported RPC/config. The
   complete canonical JSON remains model-visible and runtime validation remains
-  authoritative. This PR does not claim lossless generated TypeScript or fork the
-  CLI. A future upstream change needs the same real boundary proof.
+  authoritative. This PR does not claim lossless native parameters or generated
+  TypeScript, or fork the CLI. A future upstream change needs the same boundary proof.
 - Five existing group-family descriptors require action while conditional fields
   remain optional and are explained in prose/validated by the runtime. This is
   manual schema design, not reuse of the removed compactor; no live failure was
@@ -110,3 +111,41 @@ failure class, correct proven related defects, and publish the reviewed PR.
 - Production deployment and merge remain outside this request.
 - Draft PR: https://github.com/cobuildwithus/murph/pull/3256. The candidate is
   committed and pushed; merge-tree against current main passed without conflicts.
+
+## Final review and CI remediation
+
+- Round 1 full-snapshot ReviewGPT passed on
+  `44042af8221b02a9c33812d0c192c947356d8c04`, with no qualifying bug or Complexity
+  Collapse findings. Captured response identity/hash and the verified gpt-6-pro
+  model sidecar match. The review covered schemas, version fences, write ownership,
+  card audience limits, progress, transport bounds, and thread compatibility.
+- Broad CI found six stale assertions in four Assistant Engine test files; every
+  other completed required check passed. The scripted native-discovery test still
+  looked for a factored root property, two history-transition fixtures accidentally
+  used the now-current full schema as their prior schema, two prompt assertions
+  quoted replaced guidance, and the composed route-plan hashes changed as expected.
+- Corrected only proof: inspect the canonical save branch; use a minimal synthetic
+  prior factored schema; retain replay/resume, retention, strict validation, and
+  quiet-versus-long progress assertions; update the two affected prompt/descriptor
+  hashes. No production source, runtime artifact, dependency, or config changed
+  after the reviewed head. The isolated-test exemption does not require another
+  substantive external review.
+- Native discovery also normalizes const to a single-value enum and shortens deep
+  reference items. The scripted regression now checks the native array, exact full
+  discovered schema supplement, typed canonical reference fields, and one correct
+  save. The matching existing live journey checks that same preserved contract.
+- Focused remediation proof passed: 132 planning/domain/progress tests, the real
+  mixed-mode scripted condition-reminder regression, and Assistant Engine typecheck.
+- Both referenced-reminder live journeys passed: prescribed discovery and ordinary
+  request each perform one canonical condition read and one valid save with the
+  exact reference, followed by a concise truthful daily-time confirmation. The
+  ordinary fixture now supplies the production skills-root environment instead
+  of failing an incidental skill read. Final Assistant Engine typecheck passed.
+- Recorded public-safe Frog entry
+  `.agents/friction-log/20260911004707-focused-live-test/friction.md` for missing
+  candidate names in live-selector errors; it is included in the task commit.
+- Parent final review found no production changes after the reviewed head and no
+  unresolved accepted findings. Documentation drift/gardening and privacy checks
+  passed. The final proof commit still requires green exact-head CI on the PR;
+  its result remains in the PR checks rather than a claim of already-passed CI.
+Completed: 2026-09-11

@@ -531,7 +531,10 @@ complete canonical JSON from the actual provider boundary and separately checks
 generated automation, nutrition, and personalization declarations. A catalog-wide
 guard rejects empty named-property schemas; intentionally generic connected-app
 arguments and no-argument tools remain supported. The pinned Codex converter can
-still shorten deep automation types, so the full JSON supplement remains required.
+still shorten deep automation native parameters and code-mode types, so the full
+JSON supplement remains required. The mixed-mode condition-reminder journeys check
+the complete discovered supplement and exact saved reference, not shortened native
+reference-item fields.
 The custom-inference adapter suite checks complete long descriptions for function,
 namespace, and custom tools through both top-level and additional-tool transport.
 

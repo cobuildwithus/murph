@@ -25,8 +25,8 @@ evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 
 Automation edit schema discovery and attended progress guidance are owned by
-`ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex declaration,
-versioned-edit, nutrition/personalization declarations, and quick-versus-long
+`ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and
+declaration preservation, versioned edits, nutrition/personalization inputs, and quick-versus-long
 progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
 `agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
 tool-description transport and its existing byte/count bounds.

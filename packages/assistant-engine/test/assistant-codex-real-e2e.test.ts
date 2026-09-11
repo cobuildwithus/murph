@@ -306,6 +306,7 @@ import {
 import {
   writeHostedOpenAiMixedModeModelCatalogJson,
 } from './support/codex-model-catalog.ts'
+import { readVisibleCanonicalSchema } from './support/codex-tool-contract-proof.ts'
 import { createDeferred } from './test-helpers.ts'
 import { isAssistantGeneratedDeliveryRef } from '../src/assistant/generated-delivery-files.ts'
 
@@ -24820,6 +24821,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: {
             ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
             [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
             PATH: [binDirectory, config.env.PATH]
               .filter((value): value is string => Boolean(value))
@@ -24917,8 +24919,15 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             })
             .find((tool) => tool.name === 'automation')
           expect(automationSearchTool).not.toBeUndefined()
-          const automationParameters = readRecord(automationSearchTool?.parameters)
-          const automationProperties = readRecord(automationParameters?.properties)
+          const canonicalSchema = readRecord(readVisibleCanonicalSchema(
+            typeof automationSearchTool?.description === 'string' ? automationSearchTool.description : '',
+          ))
+          expect(canonicalSchema).toEqual(MURPH_AUTOMATION_TOOL.inputSchema)
+          const canonicalSaveContract = Array.isArray(canonicalSchema?.oneOf)
+            ? canonicalSchema.oneOf.map(readRecord).find((branch) =>
+                readRecord(readRecord(branch?.properties)?.action)?.const === 'save')
+            : null
+          const automationProperties = readRecord(canonicalSaveContract?.properties)
           const contextReferences = readRecord(
             automationProperties?.contextReferences,
           )
