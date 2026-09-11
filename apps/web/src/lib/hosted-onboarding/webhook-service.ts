@@ -594,6 +594,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: requireHostedLinqMessageReceivedEvent(planningEvent),
         phonePrefixes:
           getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
+        smsEnabled: getHostedOnboardingEnvironment().linqSmsInstantStartEnabled,
       });
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;

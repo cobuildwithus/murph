@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +58,7 @@ import {
   readHostedLocalJunctionBrowserConfigForTest,
   sanitizeHostedLocalJunctionBrowserFailureForTest,
   stopHostedLocalJunctionKernelTunnelForTest,
+  waitForHostedLocalJunctionCanonicalDataCheckForTest,
 } from "../scripts/run-hosted-local-junction-wearable-browser";
 
 interface FakeKernelTunnelChild extends EventEmitter {
@@ -1798,5 +1800,41 @@ describe("hosted-local Junction wearable browser authorization", () => {
         "Murph did not complete the Junction callback redirect.",
       );
     }
+  });
+});
+
+
+describe("live Garmin canonical-data browser rendezvous", () => {
+  it("retains connection-only mode unless canonical proof is explicitly selected", () => {
+    expect(createConfig().awaitCanonicalData).toBe(false);
+    expect(() => createConfig({ MURPH_E2E_JUNCTION_WEARABLE_DATA: "1" })).toThrow("requires Garmin");
+  });
+
+  it("announces readiness after registering its pipe and accepts a split completion message", async () => {
+    const input = new PassThrough();
+    const onReady = vi.fn(() => {
+      input.write("MURPH_E2E_GARMIN_DATA_CHECK_");
+      input.end("COMPLETE=1\n");
+    });
+    await expect(waitForHostedLocalJunctionCanonicalDataCheckForTest({ input, onReady, timeoutMs: 1000 })).resolves.toBeUndefined();
+    expect(onReady).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed if the parent exits before data verification completes", async () => {
+    const input = new PassThrough();
+    await expect(waitForHostedLocalJunctionCanonicalDataCheckForTest({
+      input,
+      onReady: () => input.end(),
+      timeoutMs: 1000,
+    })).rejects.toThrow("ended before completion");
+  });
+
+  it("rejects an invalid control message without including it in the error", async () => {
+    const input = new PassThrough();
+    await expect(waitForHostedLocalJunctionCanonicalDataCheckForTest({
+      input,
+      onReady: () => input.end("private-provider-content\n"),
+      timeoutMs: 1000,
+    })).rejects.toThrow(/^Garmin canonical data control message was invalid\.$/u);
   });
 });

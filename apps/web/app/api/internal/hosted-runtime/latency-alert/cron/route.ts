@@ -1,3 +1,4 @@
+import { runHostedStarterAbuseAlertMonitor } from "@/src/lib/hosted-execution/starter-abuse-alert-monitor";
 import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron";
 import { runHostedAiUsageOvershootAlertMonitor } from "@/src/lib/hosted-execution/usage-overshoot-alert-monitor";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -8,7 +9,7 @@ import { runHostedRuntimeProgressAlertMonitor } from "@/src/lib/hosted-runtime-p
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const [typingResult, latencyResult, progressResult, usageOvershootResult] = await Promise.allSettled([
+  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult] = await Promise.allSettled([
     runHostedRuntimeTypingAlertMonitor(),
     runHostedRuntimeLatencyAlertMonitor({
       signal: request.signal,
@@ -19,6 +20,7 @@ export const GET = withJsonError(async (request: Request) => {
     runHostedAiUsageOvershootAlertMonitor({
       signal: request.signal,
     }),
+    runHostedStarterAbuseAlertMonitor({ signal: request.signal }),
   ]);
 
   if (typingResult.status === "rejected") {
@@ -34,7 +36,10 @@ export const GET = withJsonError(async (request: Request) => {
     throw usageOvershootResult.reason;
   }
 
+  if (starterAbuseResult.status === "rejected") throw starterAbuseResult.reason;
+
   return jsonOk({
+    starterAbuseAlert: starterAbuseResult.value,
     runtimeLatencyAlert: latencyResult.value,
     runtimeTypingAlert: typingResult.value,
     runtimeProgressAlert: progressResult.value,

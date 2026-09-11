@@ -78,12 +78,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
           userId,
         }
       : undefined;
-  const directEnsureEligible = Boolean(knownCheckpoint && source === "linq");
 
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${source}.wake-handoff`,
     {
-      directEnsureWakeEligible: directEnsureEligible,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       plannerCheckpointPresent: Boolean(knownCheckpoint),
       responseReason: input.response.reason,
@@ -103,22 +101,22 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         expectedUserId: userId,
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,
-        ...(directEnsureEligible ? {
-          onSignalStarted: () => {
-            directEnsureWake = startHostedDirectRuntimeWakeBestEffort({
-              onTiming: async (timing) => {
-                await recordHostedDirectEnsureWakeTimingBestEffort({
-                  mailboxItemId,
-                  source: "linq",
-                  timing,
-                  userId,
-                });
-              },
-              source: "linq",
-              userId,
-            });
-          },
-        } : {}),
+        // The signal owner validates the durable checkpoint and active access
+        // before this callback, whether the checkpoint was cached or reread.
+        onSignalStarted: () => {
+          directEnsureWake = startHostedDirectRuntimeWakeBestEffort({
+            onTiming: async (timing) => {
+              await recordHostedDirectEnsureWakeTimingBestEffort({
+                mailboxItemId,
+                source,
+                timing,
+                userId,
+              });
+            },
+            source,
+            userId,
+          });
+        },
       }),
       signal: input.signal,
     });
@@ -172,7 +170,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
 async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   mailboxItemId: string;
-  source: "linq";
+  source: "linq" | "telegram";
   timing: CloudflareHostedControlRuntimeEnsureProcessingTiming;
   userId: string;
 }): Promise<void> {

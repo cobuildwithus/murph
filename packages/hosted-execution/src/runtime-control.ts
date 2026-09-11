@@ -3712,6 +3712,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.idle",
   "runner.lease_superseded",
   "runner.provider_egress_diagnostic",
+  "runner.processing_finished",
   "runner.started",
   "runner.web_control_preflight_rejected",
   "runtime.invocation_finished",

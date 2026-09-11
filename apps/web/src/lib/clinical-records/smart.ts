@@ -5,6 +5,8 @@ import { normalizeClinicalFhirPatientId } from "@murphai/clinical-records";
 import { clinicalRecordsError } from "./errors";
 import {
   buildEpicBetaSmartResourceScope,
+  buildEpicBinarySmartResourceScope,
+  buildEpicMediaSmartResourceScope,
   readGrantedEpicBetaResourceTypes,
 } from "./epic-policy";
 import {
@@ -128,6 +130,12 @@ export function selectSmartRequestedScopes(input: {
     scopes: [
       ...input.requestedBaseScopes,
       ...selected.map((selection) => selection.scope),
+      ...(resourceTypes.some((type) => type === "DocumentReference" || type === "DiagnosticReport")
+        ? [buildEpicBinarySmartResourceScope({ permissionVersion })]
+        : []),
+      ...(resourceTypes.includes("DiagnosticReport")
+        ? [buildEpicMediaSmartResourceScope({ permissionVersion })]
+        : []),
     ],
   };
 }

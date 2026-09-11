@@ -367,9 +367,9 @@ describe("hosted deploy automation helpers", () => {
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
         instance_type: { vcpu: 1, memory_mib: 3072, disk_mb: 6000 },
-        max_instances: 1,
+        max_instances: 10,
         rollout_active_grace_period: 300,
-        rollout_step_percentage: [100],
+        rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
       },
     ]);

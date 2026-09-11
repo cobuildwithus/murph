@@ -2999,6 +2999,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
       );
     };
+    const updateIdleCheckpointTimerAfterWorkspacePass = (
+      passResult: HostedWorkspaceRunnerResult,
+    ): void => {
+      if (!passResult.runtimeStateDirty) {
+        return;
+      }
+      if (passResult.assistantPhaseResult?.progressed === false
+        && passResult.assistantPhaseResult.runtimeProjectionCheckpointRequested === true) {
+        // Correcting a wake preserves an active quiet window, but does not
+        // start another one after the preceding checkpoint has completed.
+        ensureIdleCheckpointStartBy(Date.now());
+      } else {
+        markIdleCheckpointTimerAfterDirtyWork();
+      }
+    };
     if (runtimeStateDirty) {
       markIdleCheckpointTimerAfterDirtyWork();
     }
@@ -4582,6 +4597,33 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedBrowserVaultReplicaRefreshResult> => {
       const maintenanceSignal = maintenanceInput.signal ?? runtimeAbortController.signal;
+      const refreshWakeSignal = createCoalescingRuntimeWakeSignal();
+      const qualificationAbortController = new AbortController();
+      const qualificationSignal = AbortSignal.any([
+        maintenanceSignal,
+        qualificationAbortController.signal,
+      ]);
+      const wakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
+        enabled: true,
+        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+        async shouldInterrupt(notification) {
+          const classification = await classifyHostedPostCheckpointWake({
+            latencySeed: createHostedRuntimeWakeLatencySeed(notification)!,
+            requestId: `${requestId}:browser-vault-wake-classify`,
+            signal: qualificationSignal,
+          });
+          if (!runtimeStateDirty
+            && !runtimeOwnerHandoffRequested
+            && !imageGenerationController?.hasCompleted()
+            && (notification.requestedProcessingMode == null
+              || notification.requestedProcessingMode === (input.request.processingMode ?? "default"))
+            && classification.caughtUpToEveryLaneHighWater) {
+            return false;
+          }
+          refreshWakeSignal.notify(notification);
+          return true;
+        },
+      });
       emitPhaseLog({
         details: {
           workspacePresent: maintenanceInput.workspace !== null,
@@ -4598,7 +4640,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           force: browserVaultReplicaRefreshRequested,
           generatedAt: new Date().toISOString(),
           platform: guardedRuntime.platform,
-          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          runtimeWakeSignal: refreshWakeSignal,
           signal: maintenanceSignal,
           timeoutMs: null,
           vaultRoot: restored.vaultRoot,
@@ -4625,6 +4667,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
         }
         throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
+      } finally {
+        qualificationAbortController.abort();
+        await wakeInterruption.dispose();
+        const notification = wakeInterruption.takeNotification();
+        if (notification) options.runtimeWakeSignal?.notify(notification);
       }
     };
     const { createHostedImageGenerationController } = await import(
@@ -5037,6 +5084,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const classifyHostedPostCheckpointWake = async (input: {
       latencySeed: HostedRuntimeWakeLatencySeed;
       requestId: string;
+      signal?: AbortSignal;
     }): Promise<{
       caughtUpToEveryLaneHighWater: boolean;
       containsOnlyBrowserVaultRefreshWakes: boolean;
@@ -5049,6 +5097,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId: input.requestId,
           runnerInput: baseRunnerInput,
+          signal: input.signal,
         });
         const inspection =
           await inspectHostedPreCheckpointSystemMailboxPrefetch(
@@ -5637,9 +5686,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         pendingDurableCheckpointEffects.push(...passResult.afterDurableCheckpoint);
         systemMailboxProgressedSinceCheckpoint ||=
           passResult.assistantPhaseResult?.systemMailboxProgressed === true;
-        if (passResult.runtimeStateDirty) {
-          markIdleCheckpointTimerAfterDirtyWork();
-        }
+        updateIdleCheckpointTimerAfterWorkspacePass(passResult);
 
         const committedPassWorkspace = resolveHostedWorkspaceRunnerCommittedWorkspace({
           result: passResult,
@@ -5883,6 +5930,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           if (
             !runtimeOwnerHandoffRequested
             && !foregroundWorkPending
+            && pendingDurableCheckpointEffects.length === 0
+            && readyDurableCheckpointEffects.length === 0
             && (input.request.processingMode ?? "default") === "default"
             && hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
               assistantProgressed:
@@ -6024,6 +6073,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             input.rearmIdleCheckpointAfterEmptyProbe !== true
             || input.latencySeed === null
             || !shouldContinue()
+            || pendingDurableCheckpointEffects.length > 0
+            || readyDurableCheckpointEffects.length > 0
+            || durableCheckpointFollowUpPending
           ) {
             return;
           }
@@ -6695,6 +6747,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           // decision point so a just-claimed request is requeued and included in
           // the same checkpoint loop before the restored workspace is released.
           await closeDetachedAssistantAskBeforeWorkspaceRelease();
+          // A clean foreground pass may finish before independent system work.
+          // Settle its owned writes before choosing the checkpoint or return path.
+          await workspaceSystemWork.quiesce();
         }
       };
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
@@ -7523,68 +7578,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
           continue;
         }
-        if (
-          mayRunPostCheckpointWork()
-          && invocationStatus !== "budget_exhausted"
-          && hostedRuntimeWakeReasonIsAssistant(committedWorkspace?.nextWakeReason ?? null)
-          && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
-          && buildHostedRuntimeWakeKey({
-            nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
-            nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
-          }) !== hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint
-        ) {
-          const dueAssistantWakeHandled = await runOptionalPostCheckpointWork(async () => {
-            await runForegroundPass({
-              latencySeed: null,
-              preserveDueAssistantWakeOnNoProgress: true,
-              requestIdKind: "checkpoint-wake",
-              signal: postCheckpointWorkSignal,
-            });
-            return true;
-          });
-          if (
-            dueAssistantWakeHandled
-            && (runtimeStateDirty || await drainCleanDurableCheckpointEffects())
-          ) {
-            pendingCheckpointWakeLatencySeed ??=
-              deferredDeviceSyncWake?.latencySeed
-              ?? (mailboxWakeNeedsReplacement ? checkpointWakeLatencySeed : null);
-            continue;
-          }
-        }
-        if (
-          mayRunPostCheckpointWork()
-          && !mailboxBudgetExhausted()
-        ) {
-          const vaultShareOfferWake = deferredDeviceSyncWake;
-          let vaultShareWakeHandled = false;
-          if (vaultShareOfferWake) {
-            const vaultShareWakeResult = await runOptionalPostCheckpointWork(async () => {
-              await runForegroundPass({
-                initialMailboxPrefetch: vaultShareOfferWake.initialMailboxPrefetch,
-                latencySeed: vaultShareOfferWake.latencySeed,
-                requestIdKind: "idle-wake",
-                signal: postCheckpointWorkSignal,
-              });
-              return true;
-            });
-            vaultShareWakeHandled = vaultShareWakeResult === true;
-            if (
-              vaultShareWakeHandled
-              && (runtimeStateDirty || await drainCleanDurableCheckpointEffects())
-            ) {
-              continue;
-            }
-            if (runtimeStateDirty) {
-              continue;
-            }
-          }
-          if (!vaultShareWakeHandled && !mayRunPostCheckpointWork()) {
-            scheduleReplacementForRetainedMailboxWake();
-          }
-        } else if (!mayRunPostCheckpointWork()) {
-          scheduleReplacementForRetainedMailboxWake();
-        }
         let browserVaultRefresh = await runOptionalPostCheckpointWork(
           async () =>
             await runBrowserVaultRefreshMaintenance({
@@ -7617,28 +7610,93 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             );
           }
         }
+        // Keep refresh continuation outcomes until the existing return owner
+        // consumes them; later dirty maintenance would otherwise discard them.
         if (
-          deferredBrowserVaultWakePrefetch
-          && browserVaultRefresh?.status !== "deferred_runtime_wake"
+          browserVaultRefresh?.status !== "deferred_runtime_wake"
           && browserVaultRefresh?.status !== "deferred_timeout"
         ) {
-          const deferredBrowserWakeHandled = await runOptionalPostCheckpointWork(
-            async () =>
-              await runPostCheckpointMailboxWake({
-                initialMailboxPrefetch: deferredBrowserVaultWakePrefetch,
-                latencySeed: checkpointWakeLatencySeed,
-                shouldContinue: mayRunPostCheckpointWork,
-                signal: postCheckpointWorkSignal,
-              }),
-          );
-          if (runtimeStateDirty) {
-            continue;
+          if (deferredBrowserVaultWakePrefetch) {
+            const deferredBrowserWakeHandled = await runOptionalPostCheckpointWork(
+              async () =>
+                await runPostCheckpointMailboxWake({
+                  initialMailboxPrefetch: deferredBrowserVaultWakePrefetch,
+                  latencySeed: checkpointWakeLatencySeed,
+                  shouldContinue: mayRunPostCheckpointWork,
+                  signal: postCheckpointWorkSignal,
+                }),
+            );
+            if (runtimeStateDirty) {
+              continue;
+            }
+            if (
+              deferredBrowserWakeHandled
+              && await drainCleanDurableCheckpointEffects()
+            ) {
+              continue;
+            }
           }
           if (
-            deferredBrowserWakeHandled
-            && await drainCleanDurableCheckpointEffects()
+            mayRunPostCheckpointWork()
+            && invocationStatus !== "budget_exhausted"
+            && hostedRuntimeWakeReasonIsAssistant(committedWorkspace?.nextWakeReason ?? null)
+            && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
+            && buildHostedRuntimeWakeKey({
+              nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
+              nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
+            }) !== hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint
           ) {
-            continue;
+            const dueAssistantWakeHandled = await runOptionalPostCheckpointWork(async () => {
+              await runForegroundPass({
+                latencySeed: null,
+                preserveDueAssistantWakeOnNoProgress: true,
+                requestIdKind: "checkpoint-wake",
+                signal: postCheckpointWorkSignal,
+              });
+              return true;
+            });
+            if (
+              dueAssistantWakeHandled
+              && (runtimeStateDirty || await drainCleanDurableCheckpointEffects())
+            ) {
+              pendingCheckpointWakeLatencySeed ??=
+                deferredDeviceSyncWake?.latencySeed
+                ?? (mailboxWakeNeedsReplacement ? checkpointWakeLatencySeed : null);
+              continue;
+            }
+          }
+          if (
+            mayRunPostCheckpointWork()
+            && !mailboxBudgetExhausted()
+          ) {
+            const vaultShareOfferWake = deferredDeviceSyncWake;
+            let vaultShareWakeHandled = false;
+            if (vaultShareOfferWake) {
+              const vaultShareWakeResult = await runOptionalPostCheckpointWork(async () => {
+                await runForegroundPass({
+                  initialMailboxPrefetch: vaultShareOfferWake.initialMailboxPrefetch,
+                  latencySeed: vaultShareOfferWake.latencySeed,
+                  requestIdKind: "idle-wake",
+                  signal: postCheckpointWorkSignal,
+                });
+                return true;
+              });
+              vaultShareWakeHandled = vaultShareWakeResult === true;
+              if (
+                vaultShareWakeHandled
+                && (runtimeStateDirty || await drainCleanDurableCheckpointEffects())
+              ) {
+                continue;
+              }
+              if (runtimeStateDirty) {
+                continue;
+              }
+            }
+            if (!vaultShareWakeHandled && !mayRunPostCheckpointWork()) {
+              scheduleReplacementForRetainedMailboxWake();
+            }
+          } else if (!mayRunPostCheckpointWork()) {
+            scheduleReplacementForRetainedMailboxWake();
           }
         }
         const invocationResult = await finishDirtyRuntimeInvocation({
@@ -8857,6 +8915,15 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
   throw new TypeError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
+function createAbortGuardedClinicalDocumentFetcher(
+  platform: HostedRuntimePlatform,
+  guard: <T>(run: () => Promise<T>) => Promise<T>,
+): NonNullable<HostedRuntimePlatform["clinicalRecordsPort"]>["fetchDocument"] | undefined {
+  const fetchDocument = platform.clinicalRecordsPort?.fetchDocument;
+  if (!fetchDocument) return undefined;
+  return (fetchInput, options) => guard(() => fetchDocument(fetchInput, options));
+}
+
 function createAbortGuardedHostedRuntimePlatform(
   platform: HostedRuntimePlatform,
   assertLive: () => void,
@@ -8940,6 +9007,7 @@ function createAbortGuardedHostedRuntimePlatform(
                     guard(() => platform.clinicalRecordsPort!.createConnectLink!(options)),
                 }
               : {}),
+            fetchDocument: createAbortGuardedClinicalDocumentFetcher(platform, guard),
             fetchPage: (fetchInput, options) =>
               guard(() => platform.clinicalRecordsPort!.fetchPage(fetchInput, options)),
             readRun: (readInput, options) =>

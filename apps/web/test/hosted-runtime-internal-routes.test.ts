@@ -3585,6 +3585,33 @@ describe("hosted runtime internal web routes", () => {
     },
   );
 
+  it("persists a failed processing summary without triggering accepted-attempt recovery", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
+    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
+    const entry = {
+      at: FIXED_NOW,
+      component: "runner",
+      eventCode: "runner.processing_finished",
+      level: "warn",
+      phase: "invoke",
+      redactedJson: {
+        runtimeProcessingOutcome: "retry_later",
+        runtimeProcessingRetryReason: "container_rpc_timeout",
+        runtimeProcessingStage: "liveness",
+        runtimeLivenessOutcome: "indeterminate",
+        wakeStage: "dispatch",
+      },
+    };
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log", { entries: [entry] },
+    ));
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({ loggedCount: 1 });
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledWith(expect.objectContaining({ entries: [entry] }));
+    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
   it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);

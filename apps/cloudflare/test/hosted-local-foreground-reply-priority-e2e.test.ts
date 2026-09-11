@@ -51,6 +51,7 @@ import {
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
 } from "@murphai/hosted-execution/clinical-records";
 import {
+  HOSTED_RUNTIME_CURRENT_WAIT_REASONS,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -535,7 +536,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     );
   }, 300_000);
 
-  it("preserves a default-owned row ahead of Environment work", async () => {
+  it("preserves a default-owned row during independent Environment work", async () => {
     await seedProbe(environmentOrderingProbe);
     const baselineStatus = await requireScenario().harness.readUserStatus(
       environmentOrderingProbe.userId,
@@ -580,7 +581,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       });
       await waitForProcessingCheckpointBarrier(
         environmentOrderingProbe.userId,
-        "default",
+        "system_mailbox",
       );
       const heldStatus = await requireScenario().harness.readUserStatus(
         environmentOrderingProbe.userId,
@@ -594,7 +595,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         ? BigInt(heldThrough)
         : 0n;
       expect(heldThroughSeq).toBeLessThan(
-        BigInt(environmentCompletion.append.wake.seq),
+        BigInt(predecessor.wake.seq),
       );
       expect(requireScenario().assistantProviderRequests).toHaveLength(
         providerRequestBaseline,
@@ -944,11 +945,16 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       inserted: true,
     });
 
-    const shellPrewarmResponse = await requireScenario().harness.request(
-      `/internal/users/${encodeURIComponent(identity.userId)}/runtime/shell-prewarm`,
+    const harness = requireScenario().harness;
+    const shellPrewarmResponse = await fetch(
+      new URL(
+        `/internal/users/${encodeURIComponent(identity.userId)}/runtime/shell-prewarm`,
+        `${harness.workerBaseUrl}/`,
+      ),
       {
         body: "{}",
         headers: {
+          authorization: `Bearer ${harness.oidcToken}`,
           "content-type": "application/json; charset=utf-8",
           [HOSTED_EXECUTION_USER_ID_HEADER]: identity.userId,
         },
@@ -1443,7 +1449,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
 // remain unchanged while this race reaches a real idle snapshot deterministically.
 describe.sequential("hosted local foreground checkpoint ordering e2e", () => {
   beforeAll(async () => {
-    orderingLinqStub = await startHostedLocalLinqStub();
+    orderingLinqStub = await startHostedLocalLinqStub({
+      expectedAuthorizationToken: "linq-local-ordering-token",
+    });
     orderingScenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
@@ -2164,7 +2172,10 @@ async function waitForAssistantProviderInputInScenario(input: {
 }
 
 interface RuntimeWakeObservation {
+  currentWaitReason: string | null;
+  currentWaitUntil: string | null;
   lastExecutionAt: string | null;
+  lastReconciliationNextWakeAt: string | null;
   signalVersion: number;
 }
 
@@ -2182,15 +2193,36 @@ async function readRuntimeWakeObservation(input: {
   }
   const lastExecutionAt: unknown = Reflect.get(value, "lastExecutionAt");
   const signalVersion: unknown = Reflect.get(value, "signalVersion");
+  const currentWaitReason: unknown = Reflect.get(value, "currentWaitReason");
+  const currentWaitUntil: unknown = Reflect.get(value, "currentWaitUntil");
+  const lastReconciliationNextWakeAt: unknown = Reflect.get(value, "lastReconciliationNextWakeAt");
   if (
     (lastExecutionAt !== null && typeof lastExecutionAt !== "string")
+    || (currentWaitReason !== null && (
+      typeof currentWaitReason !== "string"
+      || !HOSTED_RUNTIME_CURRENT_WAIT_REASONS.some((reason) => reason === currentWaitReason)
+    ))
+    || (currentWaitUntil !== null && (
+      typeof currentWaitUntil !== "string" || !Number.isFinite(Date.parse(currentWaitUntil))
+    ))
+    || (lastReconciliationNextWakeAt !== null && (
+      typeof lastReconciliationNextWakeAt !== "string"
+      || !Number.isFinite(Date.parse(lastReconciliationNextWakeAt))
+    ))
     || typeof signalVersion !== "number"
     || !Number.isSafeInteger(signalVersion)
     || signalVersion < 0
   ) {
     throw new TypeError("Hosted runtime workflow query returned an invalid state.");
   }
-  return { lastExecutionAt, signalVersion };
+  return {
+    currentWaitReason,
+    currentWaitUntil: currentWaitUntil === null ? null : new Date(currentWaitUntil).toISOString(),
+    lastExecutionAt,
+    lastReconciliationNextWakeAt: lastReconciliationNextWakeAt === null
+      ? null : new Date(lastReconciliationNextWakeAt).toISOString(),
+    signalVersion,
+  };
 }
 
 async function waitForRuntimeWakeExecution(input: {

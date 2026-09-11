@@ -34,10 +34,17 @@ to `NextRunnerContainer` when the live release selects that namespace.
 
 ### Selected-account size experiment
 
-`SmallRunnerContainer` reserves one additional slot outside the regular fleet
-budget: 1 vCPU, 3,072 MiB memory and 6,000 MB disk. It uses the serving runner
-image, release identity, egress policy and member lifecycle. Include this slot
-in account quota accounting. It never supplies shared standby inventory.
+`SmallRunnerContainer` has a ten-instance ceiling outside the regular fleet
+budget; each instance has 1 vCPU, 3,072 MiB memory and 6,000 MB disk. The ceiling
+leaves room for immutable replacement targets while the provider releases
+previous capacity. It does not create or prewarm ten instances. The exact-member
+write fence remains the execution owner. A one-instance application ceiling
+must not be used as a substitute for that fence.
+
+It uses the serving runner image, release identity, egress policy and member
+lifecycle. Include all ten slots in account quota accounting; the protected
+full deploy checks the desired budget before increasing existing small capacity.
+It never supplies shared standby inventory.
 
 The protected Worker secret `HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256` holds
 the lowercase SHA-256 of the selected member ID. Keep both the ID and digest
@@ -225,6 +232,11 @@ A later protected observer must match the receipt to 100% Worker traffic and the
 final container versions, image digests, capacities, and rollout outcomes.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol, biomarker desired-direction, and Goal-index artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The broader web-only Health Commons artifact tree remains excluded; only the compact `generated/web/browse/goals.json` runtime index is retained. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
+The entrypoint bundler resolves its working directory to the canonical staged root.
+Emitted source comments and chunk hashes therefore stay independent of checkout
+and temporary-directory lengths; the existing startup byte caps still measure
+the actual emitted artifact. Lazy-chunk probes resolve metadata paths from that
+same root, including when the supplied staging path goes through a symlink.
 The standalone installer seeds registry resolutions from the committed production graph selected by `pnpm list --prod --depth Infinity --lockfile-only --json` for the runner and its packed workspace closure. Web-only package versions are excluded from that seed, so adding a Web dependency cannot silently select its newer version merely because the root lockfile contains it. Workspace tarballs, registry integrity checks, release-age policy and exact patch application retain their existing owners.
 
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.

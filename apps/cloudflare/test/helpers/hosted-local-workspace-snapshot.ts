@@ -47,7 +47,6 @@ export async function uploadHostedLocalWorkspaceSnapshot(input: {
   }
   const environment = readHostedExecutionEnvironment(source);
   assertLoopbackUrl(environment.hostedWebBaseUrl);
-  assertLoopbackUrl(r2Environment.controlEndpoint);
   // The runtime crypto route requires a workspace, but the checkpoint must
   // remain unpublished until its encrypted bytes and locator exist.
   const deps = await createHostedWebTestkitDeps(input.environment);
@@ -95,7 +94,7 @@ export async function uploadHostedLocalWorkspaceSnapshot(input: {
       archiveEntries: archivePlan.entries,
       dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
       durableRoot,
-      ivBase64: randomBytes(12).toString("base64"),
+      ivBase64: randomBytes(12).toString("base64url"),
       maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
       outputDir,
     });
@@ -183,7 +182,7 @@ function assertLoopbackUrl(value: string): void {
     || url.username
     || url.password
   ) {
-    throw new Error("Snapshot fixture requires loopback Web and object-store endpoints.");
+    throw new Error("Snapshot fixture requires a loopback Web endpoint.");
   }
 }
 

@@ -1671,9 +1671,11 @@ describe.skipIf(!runPostgresProof)(
           },
           where: { connectionId: fixture.connectionId },
         })).resolves.toEqual({
-          dirtyRevision: 1n,
-          eventCount: 1n,
-          latestEventType: null,
+          // One accepted hint advances the seeded marker, including when a
+          // source-establishment wake owns the runtime handoff.
+          dirtyRevision: 2n,
+          eventCount: 2n,
+          latestEventType: "daily.data.steps.created",
         });
         await expect(fixture.prisma.deviceSyncDirtyPayload.count({
           where: { connectionId: fixture.connectionId },
@@ -1922,6 +1924,15 @@ describe.skipIf(!runPostgresProof)(
           where: { connectionId: fixture.connectionId },
         })).resolves.toBe(0);
 
+        await expect(fixture.prisma.deviceSyncDirtyConnection.findUniqueOrThrow({
+          select: { dirtyRevision: true, eventCount: true, latestEventType: true },
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toEqual({
+          dirtyRevision: 1n,
+          eventCount: 1n,
+          latestEventType: null,
+        });
+
         await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
           accepted: true,
           duplicate: false,
@@ -1954,9 +1965,11 @@ describe.skipIf(!runPostgresProof)(
           },
           where: { connectionId: fixture.connectionId },
         })).resolves.toEqual({
-          dirtyRevision: 1n,
-          eventCount: 1n,
-          latestEventType: null,
+          // One accepted hint advances the seeded marker, including when a
+          // source-establishment wake owns the runtime handoff.
+          dirtyRevision: 2n,
+          eventCount: 2n,
+          latestEventType: "daily.data.steps.created",
         });
         await expect(fixture.prisma.deviceSyncSignal.count({
           where: { connectionId: fixture.connectionId },

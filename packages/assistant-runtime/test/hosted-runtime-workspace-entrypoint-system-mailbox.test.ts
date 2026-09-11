@@ -7951,7 +7951,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   }, 45_000);
 
-  test("system mailbox mode imports and runs a new device-sync row in the same invocation", async () => {
+  test.each(["mailbox", "timer"] as const)("system mailbox mode completes device work from a %s without a default-owner detour", async (source) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -8016,7 +8016,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
-              items: [deviceItem],
+              items: source === "mailbox" ? [deviceItem] : [],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -8024,6 +8024,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               workspace: createWorkspaceState({
                 snapshotRef: restoredWorkspace.snapshotRef,
                 version: "0",
+                ...(source === "timer" ? {
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "device-sync.reconcile",
+                } : {}),
               }),
             }),
           }),
@@ -8034,17 +8038,19 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         },
       );
 
-      assert.deepEqual(imported, ["system:device-sync.wake"]);
+      assert.deepEqual(imported, source === "mailbox" ? ["system:device-sync.wake"] : []);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq,
-        "1",
+        source === "mailbox" ? "1" : "0",
       );
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "1",
+        source === "mailbox" ? "1" : "0",
       );
+      assert.equal(checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt, null);
+      assert.equal(checkpointRequests.at(-1)?.nextDefaultProcessingWakeReason, null);
       assert.equal(checkpointRequests.at(-1)?.nextWakeAt, null);
       assert.equal(result.status, "idle");
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);

@@ -1604,7 +1604,33 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
-  it("keeps legacy sequence-less model-free kinds on the default owner", async () => {
+  it.each(["pending", "recording"] as const)("keeps sequence-less device work on the system owner while %s", async (status) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    try {
+      const timer = {
+        ...buildPendingDeviceSyncMailboxItem({ itemId: "local_timer", mailboxLaneSeq: "1" }),
+        mailboxLaneSeq: null,
+        status,
+      };
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [timer] }));
+      // Re-read persisted state at successive invocation times. Rewriting a
+      // due timer must never turn unchanged system work into foreground work.
+      for (const offsetMs of [0, 10_000, 30_000]) {
+        const now = new Date(Date.parse(dueAt) + offsetMs).toISOString();
+        await expect(resolveHostedSystemMailboxWakeCandidates({ now: () => now, vaultRoot }))
+          .resolves.toEqual({
+            defaultOwned: { at: null, reason: null },
+            next: { at: now, executionClass: "model_free", reason: "device-sync.reconcile" },
+          });
+      }
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending).toHaveLength(1);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps legacy sequence-less model-free kinds on the system owner", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     const dueAt = "2026-04-27T00:00:00.000Z";
 
@@ -1627,12 +1653,12 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         defaultOwned: {
-          at: dueAt,
-          reason: "mailbox",
+          at: null,
+          reason: null,
         },
         next: {
           at: dueAt,
-          executionClass: "default_owned",
+          executionClass: "model_free",
           reason: "mailbox",
         },
       });

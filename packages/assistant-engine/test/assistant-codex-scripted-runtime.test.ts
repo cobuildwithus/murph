@@ -4251,7 +4251,27 @@ text(result.output);
       .find((tool) => tool.name === 'automation')
     expect(automationSearchTool).not.toBeUndefined()
     const automationParameters = readRecord(automationSearchTool?.parameters)
-    const automationProperties = readRecord(automationParameters?.properties)
+    const automationSaveContract = Array.isArray(automationParameters?.oneOf)
+      ? automationParameters.oneOf.map(readRecord).find((branch) => {
+          // Native discovery normalizes const to a single-value enum.
+          const action = readRecord(readRecord(branch?.properties)?.action)
+          return Array.isArray(action?.enum)
+            && action.enum.length === 1 && action.enum[0] === 'save'
+        })
+      : null
+    expect(automationSaveContract).toBeTruthy()
+    expect(readRecord(automationSaveContract?.properties)?.contextReferences)
+      .toMatchObject({ type: 'array' })
+    // Codex shortens deep native parameters too; the complete description is authoritative.
+    const canonicalSchema = readRecord(readVisibleCanonicalSchema(
+      typeof automationSearchTool?.description === 'string' ? automationSearchTool.description : '',
+    ))
+    expect(canonicalSchema).toEqual(MURPH_AUTOMATION_TOOL.inputSchema)
+    const canonicalSaveContract = Array.isArray(canonicalSchema?.oneOf)
+      ? canonicalSchema.oneOf.map(readRecord).find((branch) =>
+          readRecord(readRecord(branch?.properties)?.action)?.const === 'save')
+      : null
+    const automationProperties = readRecord(canonicalSaveContract?.properties)
     const contextReferences = readRecord(
       automationProperties?.contextReferences,
     )

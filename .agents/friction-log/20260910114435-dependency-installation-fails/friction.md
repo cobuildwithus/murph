@@ -1,6 +1,7 @@
 ---
 title: 'Dependency installation fails when the shared worktree hook lock is busy'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3183'
 ---
 
 ## Expected Behavior

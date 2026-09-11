@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   runHostedRuntimeTypingAlertMonitor: vi.fn(),
   runHostedAiUsageOvershootAlertMonitor: vi.fn(),
+  runHostedStarterAbuseAlertMonitor: vi.fn(),
   runHostedRuntimeLatencyAlertMonitor: vi.fn(),
   runHostedRuntimeProgressAlertMonitor: vi.fn(),
 }));
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/hosted-runtime-latency/typing-alert-monitor", () => ({
   runHostedRuntimeTypingAlertMonitor: mocks.runHostedRuntimeTypingAlertMonitor,
 }));
+vi.mock("@/src/lib/hosted-execution/starter-abuse-alert-monitor", () => ({ runHostedStarterAbuseAlertMonitor: mocks.runHostedStarterAbuseAlertMonitor }));
 
 vi.mock("@/src/lib/hosted-execution/usage-overshoot-alert-monitor", () => ({
   runHostedAiUsageOvershootAlertMonitor:
@@ -35,6 +37,8 @@ describe("hosted runtime latency alert cron", () => {
     mocks.runHostedRuntimeTypingAlertMonitor.mockReset();
     mocks.runHostedRuntimeTypingAlertMonitor.mockResolvedValue({ queuedCount: 0, scanTruncated: false });
     process.env.CRON_SECRET = "latency-cron-secret";
+    mocks.runHostedStarterAbuseAlertMonitor.mockReset();
+    mocks.runHostedStarterAbuseAlertMonitor.mockResolvedValue({ configured: true, health: { anomalous: false }, outcome: "healthy" });
     mocks.runHostedAiUsageOvershootAlertMonitor.mockReset();
     mocks.runHostedAiUsageOvershootAlertMonitor.mockResolvedValue({
       configured: true,
