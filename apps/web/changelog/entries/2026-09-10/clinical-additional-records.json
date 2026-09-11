@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 70,
+  "item": {
+    "id": "clinical-additional-records",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Find more records from your hospital",
+    "summary": "Hospital connections also search for radiology documents, outside visit notes, care summaries and outside vital signs.",
+    "details": "Searches include all available dates. The records received depend on what your hospital shares, and incomplete searches remain visible.",
+    "relevanceTags": [
+      "medical-records"
+    ],
+    "sourcePullRequests": [
+      3203
+    ],
+    "tryIt": {
+      "label": "View connected records",
+      "href": "/records"
+    }
+  }
+}

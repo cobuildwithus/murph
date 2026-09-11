@@ -67,9 +67,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.reconcileRuntimeHealthDataConsentForUser(userId);
   }
 
-  // Remove after Worker versions that forward legacy hints have drained.
-  async prewarmRuntimeShellForUser(): Promise<void> {}
-
   async publishHostedPrivateMedia(
     input: Parameters<HostedUserRunner["publishHostedPrivateMedia"]>[0],
   ): ReturnType<HostedUserRunner["publishHostedPrivateMedia"]> {

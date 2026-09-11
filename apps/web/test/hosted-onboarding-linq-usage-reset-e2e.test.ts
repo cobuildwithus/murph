@@ -67,7 +67,6 @@ const mocks = vi.hoisted(() => {
       linqApiToken: "<REDACTED_SECRET>",
       linqConversationPhoneNumbers: [],
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
-      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -866,7 +865,6 @@ function createUsageResetPrismaFixture(input: {
           return [];
         }
         return [{
-          activeMemberLimit: null,
           assignmentWeight: 1,
           maxNewConversationsPerDay: null,
           phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(OWNER_PHONE),

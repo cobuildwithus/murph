@@ -28,9 +28,6 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   const assistantEngineManifest = JSON.parse(
     await readFile(new URL('../../assistant-engine/package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
-  const assistantdManifest = JSON.parse(
-    await readFile(new URL('../../assistantd/package.json', import.meta.url), 'utf8'),
-  ) as PackageManifest
   const vaultUsecasesManifest = JSON.parse(
     await readFile(new URL('../../vault-usecases/package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
@@ -81,9 +78,6 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantCliManifest.exports?.['./commands/assistant'] !== undefined, true)
   assert.equal(assistantCliManifest.exports?.['./run-terminal-logging'] !== undefined, true)
 
-  assert.equal(assistantdManifest.main, undefined)
-  assert.equal(assistantdManifest.types, undefined)
-  assert.equal(assistantdManifest.exports?.['.'], undefined)
   assert.equal(setupCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(setupCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(setupCliManifest.dependencies?.['@murphai/vault-usecases'], 'workspace:*')

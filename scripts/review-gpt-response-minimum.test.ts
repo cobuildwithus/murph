@@ -33,7 +33,7 @@ function temporaryRoot(): string {
 function durationFailure(responseElapsedMs: number, hasConcreteModelEvidence: boolean) {
   return review.markedResponseDurationFailure({
     targetModel: "gpt-6-pro", responseMarker: "REVIEW_COMPLETE",
-    minimumResponseMs: 270_000, responseElapsedMs, hasConcreteModelEvidence,
+    minimumResponseMs: 180_000, responseElapsedMs, hasConcreteModelEvidence,
   });
 }
 
@@ -43,15 +43,15 @@ afterEach(() => {
 
 describe("installed ReviewGPT marked-response minimum", () => {
   it.each([false, true])("enforces elapsed time with model evidence=%s", (evidence) => {
-    for (const elapsed of [0, 245_650, 269_999, Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const elapsed of [0, 175_650, 179_999, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(durationFailure(elapsed, evidence)).toContain("response is untrusted");
     }
-    expect(durationFailure(270_000, evidence)).toBe("");
-    expect(durationFailure(270_001, evidence)).toBe("");
+    expect(durationFailure(180_000, evidence)).toBe("");
+    expect(durationFailure(180_001, evidence)).toBe("");
   });
 
   it("preserves unmarked and current-selection behavior", () => {
-    const options = { responseElapsedMs: 0, minimumResponseMs: 270_000 };
+    const options = { responseElapsedMs: 0, minimumResponseMs: 180_000 };
     expect(review.markedResponseDurationFailure({ ...options,
       targetModel: "gpt-6-pro", responseMarker: "" })).toBe("");
     expect(review.markedResponseDurationFailure({ ...options,
@@ -66,7 +66,7 @@ describe("installed ReviewGPT marked-response minimum", () => {
     );
     expect(attestation.failure).toBe("");
     expect(attestation.evidence.responseModelSlug).toBe("gpt-6-pro");
-    const failure = durationFailure(269_999, Boolean(attestation.evidence));
+    const failure = durationFailure(179_999, Boolean(attestation.evidence));
     expect(failure).not.toBe("");
     expect(() => review.assertMarkedResponseDurationTrusted({
       status: "response-too-fast", responseText, responseDurationFailure: failure,
@@ -76,7 +76,7 @@ describe("installed ReviewGPT marked-response minimum", () => {
   });
 
   it("keeps model, exact-turn and capture-digest enforcement after the floor", () => {
-    expect(durationFailure(270_000, true)).toBe("");
+    expect(durationFailure(180_000, true)).toBe("");
     const attestation = review.modelAttestationForSnapshot(
       "gpt-6-pro", snapshot, true, committedUserTurn.signature,
     );

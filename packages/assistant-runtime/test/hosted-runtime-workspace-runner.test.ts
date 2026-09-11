@@ -1,3 +1,7 @@
+import {
+  createPlatform as createV2SnapshotFixturePlatform,
+  createSnapshotFixtureRef,
+} from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import * as assistantEngine from "@murphai/assistant-engine";
@@ -3350,9 +3354,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
-      const snapshotRef = createBundleRef({
+      const snapshotRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: `cloudflare-workspace-base/${baseHash}.bundle`,
         size: baseBundle.byteLength,
       });
       const artifactGetCalls: string[] = [];
@@ -3370,10 +3373,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createPlatform({
-          artifactBytesByHash,
-          artifactGetCalls,
-          mailboxPort,
+        platform: createV2SnapshotFixturePlatform({
+          artifactBytesByHash, artifactGetCalls, mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         vaultRoot,
@@ -3417,10 +3418,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       artifactGetCalls.length = 0;
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createPlatform({
-          artifactBytesByHash,
-          artifactGetCalls,
-          mailboxPort,
+        platform: createV2SnapshotFixturePlatform({
+          artifactBytesByHash, artifactGetCalls, mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         vaultRoot,

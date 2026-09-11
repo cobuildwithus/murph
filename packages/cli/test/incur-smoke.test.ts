@@ -471,7 +471,7 @@ test('root help exposes the Incur built-ins and simple health CRUD command group
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
-  assert.match(help, /chat\s+Open the same interactive assistant chat UI as/u)
+  assert.doesNotMatch(help, /^  chat\s+/mu)
   assert.match(help, /commons\s+Read-only Health Commons commands/u)
   assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
@@ -1667,7 +1667,7 @@ test('published config schema artifact stays on the native incur shape', async (
             properties?: {
               commands?: {
                 properties?: {
-                  chat?: {
+                  ask?: {
                     properties?: {
                       options?: {
                         properties?: {
@@ -1690,7 +1690,7 @@ test('published config schema artifact stays on the native incur shape', async (
     schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.show?.properties?.options?.properties?.requestId,
   )
   assert.ok(
-    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.properties?.options?.properties?.model,
+    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.ask?.properties?.options?.properties?.model,
   )
   assert.equal(schemaText.includes('"x-incur-'), false)
 })
@@ -3225,24 +3225,6 @@ test('knowledge upsert rejects whitespace-only bodies through the CLI boundary',
   }
 })
 
-test('root chat alias keeps the same command schema as assistant chat', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['chat', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'chat', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
 test('root run alias keeps the same command schema as assistant run', async () => {
   const rootSchema = JSON.parse(
     await runSourceCliRaw(['run', '--schema', '--format', 'json']),
@@ -3914,7 +3896,7 @@ test('compact llms json manifest remains available', async () => {
 
   assert.equal(manifest.version, 'incur.v1')
   assert.equal(manifest.commands.some((command) => command.name === 'init'), true)
-  assert.equal(manifest.commands.some((command) => command.name === 'chat'), true)
+  assert.equal(manifest.commands.some((command) => command.name === 'chat'), false)
   assert.equal(
     manifest.commands.some((command) => command.name === 'goal show'),
     true,
@@ -3984,7 +3966,7 @@ test('full llms json manifest remains available for schema-rich commands', async
   )
   assert.equal(
     manifest.commands.some((command) => command.name === 'chat'),
-    true,
+    false,
   )
   assert.equal(
     manifest.commands.some((command) => command.name === 'search query'),

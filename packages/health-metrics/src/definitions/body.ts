@@ -2,6 +2,28 @@ import type { MetricDefinition } from "../types.ts";
 
 export const BODY_METRICS = [
   {
+    aliases: ["height", "body_height"],
+    biomarkerKey: null,
+    canonicalUnit: "cm",
+    category: "body",
+    displayName: "Body height",
+    displayUnit: "cm",
+    key: "body-height",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 365 },
+    valuePrecision: 1,
+  },
+  {
+    aliases: ["head_circumference"],
+    biomarkerKey: null,
+    canonicalUnit: "cm",
+    category: "body",
+    displayName: "Head circumference",
+    displayUnit: "cm",
+    key: "head-circumference",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 45 },
+    valuePrecision: 1,
+  },
+  {
     aliases: ["bmi", "body-mass-index", "body_mass_index"],
     biomarkerKey: null,
     canonicalUnit: "kg/m^2",

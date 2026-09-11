@@ -363,12 +363,6 @@
       "@murphai/assistant-runtime/*": [
         "./packages/assistant-runtime/src/*.ts"
       ],
-      "@murphai/assistantd/client": [
-        "./packages/assistantd/src/client.ts"
-      ],
-      "@murphai/assistantd/*": [
-        "./packages/assistantd/src/*.ts"
-      ],
       "@murphai/operator-config/hosted-assistant-config-constants": [
         "./packages/operator-config/src/hosted-assistant-config-constants.ts"
       ],
