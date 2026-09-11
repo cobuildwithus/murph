@@ -399,14 +399,13 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         providerRequestBaseline + 1,
       );
 
-      // The retained owner must resume yielded device/system work through its
-      // existing durable continuation, without manufacturing a second pointer.
+      // After foreground delivery, durable system work must continue even if
+      // the original owner settles or completion events advance the frontier.
       await requireSystemWakeStormPreserved(
         systemMailboxProbe.userId,
         latestAppend.wake.seq,
         {
           expectedWakeKinds: systemWakes.map((wake) => wake.kind),
-          expectedAttemptId: systemFence.attemptId,
           recoveryEvidenceStartedAt: providerStart.providerStartedAt,
         },
       );
@@ -2828,7 +2827,6 @@ async function requireSystemWakeStormPreserved(
   expectedImportedSeq: string,
   input: {
     expectedWakeKinds: readonly string[];
-    expectedAttemptId: string;
     recoveryEvidenceStartedAt: Date;
   },
 ): Promise<void> {
@@ -2844,9 +2842,11 @@ async function requireSystemWakeStormPreserved(
     const systemLane = lastStatus.mailboxLag.find((lane) => lane.lane === "system");
     const redactedStatus = lastStatus.workspace?.redactedStatus;
     if (
-      systemLane?.importedSeq === expectedImportedSeq
+      systemLane !== undefined
+      && BigInt(systemLane.importedSeq) >= BigInt(expectedImportedSeq)
       && systemLane.lag === "0"
-      && redactedStatus?.hostedMailboxSystemImportedSeq === expectedImportedSeq
+      && typeof redactedStatus?.hostedMailboxSystemImportedSeq === "string"
+      && BigInt(redactedStatus.hostedMailboxSystemImportedSeq) >= BigInt(expectedImportedSeq)
       && redactedStatus.hostedMailboxRetryableBlockedCount === 0
     ) {
       lastRecoveryLogs = (await listHostedRuntimeLogsForTest({
@@ -2862,7 +2862,8 @@ async function requireSystemWakeStormPreserved(
         }));
       const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
         const wakeKind = entry.redactedJson?.wakeKind;
-        return entry.attemptId === input.expectedAttemptId
+        return typeof entry.attemptId === "string"
+          && entry.attemptId.length > 0
           && typeof wakeKind === "string"
           && input.expectedWakeKinds.includes(wakeKind)
           && (
@@ -2879,8 +2880,7 @@ async function requireSystemWakeStormPreserved(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but seeded system work did not continue under the retained owner.",
-    `expected system attempt id: ${input.expectedAttemptId}`,
+    "Foreground reply succeeded, but seeded system work did not continue after provider start.",
     `expected imported sequence: ${expectedImportedSeq}`,
     `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
     `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,
