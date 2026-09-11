@@ -43,7 +43,9 @@ const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.searchParams.has("host") || url.pathname !== "/murph_dev_better_auth_adoption") throw new Error("Telegram proof requires its isolated local task database.");
+    || url.search || !/^\/(?:murph_dev_better_auth_adoption|murph_test(?:_[a-z0-9_]+)?)$/u.test(url.pathname)) {
+    throw new Error("Telegram proof requires an isolated local test database.");
+  }
 }
 const baseURL = "http://localhost:3000";
 const clientId = "123456789";
