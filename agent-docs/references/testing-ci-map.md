@@ -867,7 +867,12 @@ limits, and local proof distinctions are owned by
   device-sync backlog. It admits 113 distinct valid Junction resources, holds
   the first receipt-bounded positive device pass at the existing publication
   barrier, then releases that barrier only after the recurring Linq reminder
-  is due. With the reminder provider response held at provider entry, it proves
+  is due. Its admission observer binds the accepted wake's runtime attempt and
+  requires exactly one owner across the full 30-second window, including a
+  helper-started or already active owner. Focused fake-clock tests in
+  `apps/cloudflare/test/helpers/hosted-local-runtime-admission-window.test.ts`
+  preserve that window, detect replacements, and reject a missing initial start
+  or insufficient reminder runway. With the reminder provider response held at provider entry, it proves
   that unfinished resources remain durable while exactly one scheduled
   provider request is active. It then releases the response and passively
   observes exactly one Linq send, at least two positive bounded device passes,
@@ -876,6 +881,14 @@ limits, and local proof distinctions are owned by
   boundary are observational. Private Murph Cloud owns its dedicated
   `Public Murph Integration` matrix leg and includes that leg in the Temporal
   orchestration aggregator.
+- Hosted assistant-provider stub failures include only the allowlisted request
+  kind, fixture match, queue size, and completed response status alongside the
+  existing request fingerprint and byte count. An unfinished held stream keeps
+  a null status. The Junction nudge's strict model-request assertion adds only
+  whether each request's latest user input matches the known synthetic nudge
+  instructions; historical matches do not identify the current turn. Focused
+  stub and failure-formatter tests preserve queue behavior and exclude request
+  text and identifiers from this metadata.
 - Focused hosted-local lifecycle tests prove that file teardown aborts and
   joins a scenario setup still pending after a suite-hook timeout, propagates
   that cancellation through the dev harness, and signals only the exact child
