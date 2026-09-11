@@ -1837,6 +1837,13 @@ describe("record service seams", () => {
     });
     const anchoredMetricPointFilters: unknown[] = [];
     const anchoredMetricQuery = {
+      readExperimentQuerySource: vi.fn(async () => ({
+        readModel: journalQuery.readVault(),
+        listMetricPoints: (filtersList: readonly unknown[]) => {
+          anchoredMetricPointFilters.push(...filtersList);
+          return [];
+        },
+      })),
       readVault: vi.fn(async () => journalQuery.readVault()),
       lookupEntityById: vi.fn(() => anchoredExperiment),
       resolveCanonicalEntityInFamily: vi.fn(async () => anchoredExperiment),
