@@ -36,6 +36,15 @@ Use synthetic evidence and closed diagnostic fields. Preserve unrelated work. Do
 3. Make the smallest proven correction and run focused integration proof plus typechecking.
 4. Review, commit, obtain required public CI, and hand the merged public head to private scheduler integration.
 
+## Reminder concurrency
+
+- Outcome: A due, authorized reminder can run while a device download remains active, using the existing single assistant and workspace owners.
+- Entry and promise: A scheduled occurrence becomes due during a system-only import; its delivery does not await that unrelated download.
+- Reaches: Already-due and newly-due reminders, ordinary conversations, blocked assistant execution, empty wake hints, and receipt-capacity recovery.
+- Architecture: Extend the existing foreground admission check to canonical due assistant work and wake its existing completion wait at the projected deadline. Retain import claims, canonical write serialization, receipt bounds and snapshot ownership. Add no persisted state, queue, service or processing mode.
+- Proof: Hold a synthetic download open, observe one reminder delivery, release and verify one import and exact acknowledgment; preserve blocked-policy and conversation concurrency regressions.
+- Done when: Focused composed proof and affected CI pass; no reminder or import duplication and no authorization bypass. Product walkthrough remains Hold until verified.
+
 ## Decisions
 
 - Keep the Junction global request-count assertion while identifying any extra request owner.
@@ -51,6 +60,8 @@ Use synthetic evidence and closed diagnostic fields. Preserve unrelated work. Do
 - Operator-config adapter tests passed 81 cases, both affected package typechecks passed, and changelog rendering passed 10 cases.
 - Current public main was reconciled without conflicts. Its shared host-upstream correction replaces the temporary per-fixture host URL workaround.
 - Fairness proof is rerunning with a budget for real log visibility and scheduler backoff; no admission or delivery assertion was relaxed.
+- That rerun exposed a production callback replacement: system-mode device work supplied a reminder-only yield predicate, discarding the receipt-capacity predicate after admission. A focused regression failed on the old owner when capacity became exhausted during the pass. Full local fairness E2E passed after restoring that guard, including positive receipt-bounded progress, one accepted reminder and final backlog drain.
+- The subsequent reminder-concurrency change removes the override parameter entirely: receipt capacity stays with independent work, and the projected deadline wakes assistant admission. The held-download concurrency suite passed all ten cases; the system-preemption fixture callbacks were then updated to supply their required checkpoint reasons.
 
 ## Broader verification audit
 

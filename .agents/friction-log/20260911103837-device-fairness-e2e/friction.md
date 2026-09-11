@@ -24,3 +24,5 @@ Run the Linq reminder/device-sync non-starvation E2E when the first system pass 
 ## Context
 
 The original failure formatter also omitted the existing finite pass-stage, outcome, and yield-reason fields needed to distinguish cooperative pre-drain yields from failed work.
+
+After correcting the barrier and retry budget, the same proof exposed a production defect: the system-work caller replaced the receipt-capacity predicate with a reminder-deadline predicate. The pass reached its 100-job ceiling instead of yielding at receipt capacity. The correction removes the override parameter entirely. Receipt capacity remains with the shared system-work owner; a due reminder wakes assistant admission while the import continues. The receipt-bounded E2E assertions are retained.
