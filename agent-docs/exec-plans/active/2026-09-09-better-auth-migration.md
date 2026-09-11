@@ -465,3 +465,28 @@ and the full adoption complexity guard pass. Both PostgreSQL suites pass all
 passes. Parent review confirms no provider work under credential locks, exact
 generation/code binding, one-use action consumption and unchanged session rules.
 Current-head CI and the additional final review remain before merge readiness.
+
+
+### Preview provisioning and CI follow-up
+
+A fresh, unseeded PlanetScale `auth-preview` development branch now has all 222
+candidate migrations, zero members, dedicated runtime/migration credentials,
+and independent branch-scoped Vercel auth keys. New Preview GCP identity and KMS
+resources pass exact subject, audience and key-scoped IAM readback. The protected
+application Preview is queued with issuance disabled. Email/SMS settings and
+actual hosted authentication, recovery and native continuity remain incomplete.
+Production provider secrets were not read locally. The older rehearsal branch
+is retained and main merges continue without a hold.
+
+Exact-head CI exposed a recovery fixture scheduling assumption: a losing request
+can reject an already-consumed key with 403 before reaching the transactional
+credential-generation conflict that returns 409. The corrected test still
+requires one success, one rejection, consumed recovery material, and only the
+winner's factor. All 56 canonical PostgreSQL cases, Web typecheck and focused
+ESLint pass. The isolated local test schema initially lacked an additive column;
+`prisma migrate deploy` rejected its existing unbaselined schema with P3005.
+`prisma db push` synchronized that local test database before the successful
+rerun. The hosted Preview database used the complete migration chain separately.
+No application auth code changed; this test correction uses the low-risk final
+review exemption. Exact-head CI and the independently owned WHOOP diagnostic
+fixture correction remain pending.

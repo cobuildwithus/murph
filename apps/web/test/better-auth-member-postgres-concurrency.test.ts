@@ -311,7 +311,11 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const responses = await Promise.all(replacements.map((replacement) => recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", {
       key, token: result.token, response: replacement.registration(true, result.options.challenge),
     }))));
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    // A loser that reads after the winning commit rejects the consumed key
+    // before reaching the transaction's credential-generation conflict.
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect(responses.filter((response) => response.status === 403 || response.status === 409)).toHaveLength(1);
+    expect((await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).recoveryHashEncrypted).toBeNull();
     expect((await readApprovalPasskeyState({ memberId: f.memberId, prisma: f.prisma })).credentials.map((entry) => entry.id))
       .toEqual([replacements[responses.findIndex((response) => response.status === 200)].credential.id]);
   }));
