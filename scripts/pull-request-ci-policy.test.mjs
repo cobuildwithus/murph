@@ -214,11 +214,23 @@ function inspectHostSupportReleaseGraph(source) {
     /package_dirs="\$\(node scripts\/release-verification-plan\.mjs --package-dirs "\$\{\{ matrix\.shard \}\}"\)"/u,
   );
   assert.match(packageCoverage, /if \[\[ -z "\$package_dirs" \]\]/u);
-  assert.match(packageCoverage, /if: \$\{\{ matrix\.shard == 'cli' \}\}/u);
+  assert.match(
+    packageCoverage,
+    /if: \$\{\{ matrix\.shard == 'cli' \}\}\n        run: pnpm --dir packages\/cli exec tsx scripts\/verify-package-shape\.ts/u,
+  );
   assert.equal(
     countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' }}"),
-    2,
-    "only the singleton CLI shard may prepare the runtime and package-shape proof",
+    1,
+    "only the singleton CLI shard may run the package-shape proof",
+  );
+  assert.match(
+    packageCoverage,
+    /if: \$\{\{ matrix\.shard == 'cli' \|\| matrix\.shard == 'assistant-engine' \}\}\n        run: pnpm build:test-runtime:prepared/u,
+  );
+  assert.equal(
+    countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}"),
+    1,
+    "CLI and assistant-engine shards must prepare their built runtime artifacts",
   );
   assert.doesNotMatch(packageCoverage, /verify:package-boundary/u);
 
@@ -481,6 +493,20 @@ test("Host Support consumes one exhaustive plan and isolates app owners", async 
 test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate an owner", async () => {
   const host = await workflow("host-support.yml");
   const mutations = [
+    host.replace(
+      "if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}",
+      "if: ${{ matrix.shard == 'cli' }}",
+    ),
+    host.replace(
+      "run: pnpm build:test-runtime:prepared",
+      "run: swapped-runtime-command",
+    ).replace(
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+      "run: pnpm build:test-runtime:prepared",
+    ).replace(
+      "run: swapped-runtime-command",
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+    ),
     host.replace(
       "needs.release-verification-plan-linux.outputs.package_matrix",
       "needs.release-verification-plan-linux.outputs.hosted_web_test_matrix",
