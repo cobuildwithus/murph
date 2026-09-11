@@ -1,6 +1,6 @@
 # Telegram follow-up typing evidence
 
-Status: active
+Status: completed
 Created: 2026-09-11
 
 ## Outcome and invariant
@@ -94,3 +94,25 @@ provider cooldown. No new durable state, timers, provider calls or database read
   evidence, retry and deduplication proof is unchanged by this producer-only edit.
 - User continuation authorizes substantive round 5 after the prior cap pause.
   Start on the stable pushed candidate alongside exact-head CI.
+
+- Round 5 passed on `ca7707051ec728fa607ce1a0e69e28c1ac7f563e`.
+  Requested/captured model: `gpt-6-pro`; exact committed user turn and response
+  hash match. The 45-file full snapshot and attachment were confirmed. Capture
+  completed after 680 seconds; the reviewer independently exercised 26 telemetry
+  scenarios and 9 provider lifetime scenarios, and verified all postimage hashes.
+  Response SHA-256: `f70aa0bd4e6a47b13e1c4b8fbd7adb9b46ce04a06381155a5e46ba6b675bf3df`.
+  All prior accepted findings are resolved; parent triage has zero open findings.
+- Necessary base reconciliation imports `99bb576ece91494a766eaf49c8a8bfa228d7995b`.
+  RELIABILITY retains both independent sections; the index retains both sets of
+  owner descriptions. The cron route mechanically combines this PR's typing
+  monitor with main's starter-abuse monitor, preserving both calls, result slots,
+  error checks and response fields; its test retains both mocks. No new behavior
+  is authored by conflict resolution. Both sides were compared hunk by hunk.
+- Base-update proof: all 5 cron tests and 72 mailbox-import tests pass; Web and
+  runtime typechecks pass. The reviewed typing implementation is unchanged.
+  The base-update-only exception applies; no further substantive review is needed.
+- Updated the explanatory reliability text to describe the reviewed turn owner
+  and removed references to the deleted telemetry maps. Implementation and review
+  are complete; final exact-head CI is tracked in the PR evidence before handoff.
+Updated: 2026-09-11
+Completed: 2026-09-11
