@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -61,6 +62,10 @@ import type {
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
 const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
@@ -677,7 +682,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     }).then((response) => response.status)).resolves.toBe(404);
   });
 
-  it("returns priceable modality usage from the hosted-local OpenAI Images stub", async () => {
+  it.each([true, false])("enforces image access before the hosted-local OpenAI Images stub (allowed=%s)", async (allowed) => {
+    const imageAccessFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      expect(url.pathname).toBe(HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH);
+      return Response.json({ allowed, reason: allowed ? "allowed" : "card_required" });
+    });
     const handler = readHostedLocalTestOutboundByHost()[
       HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
     ];
@@ -691,6 +701,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       { containerId: RUNNER_CONTAINER_NAME },
     );
 
+    expect(imageAccessFetch).toHaveBeenCalledTimes(1);
+    if (!allowed) {
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_CARD_REQUIRED" } });
+      return;
+    }
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       usage: {
