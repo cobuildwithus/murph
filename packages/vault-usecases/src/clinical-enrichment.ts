@@ -7,14 +7,18 @@ import {
   clinicalDocumentExtractionOutputSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
+  type ClinicalDocumentAttachment,
   type ClinicalDocumentExtractionOutput,
   type ClinicalDocumentExtractionPayload,
 } from "@murphai/clinical-records";
-import { eventImportDecisionSchema } from "@murphai/contracts";
+import { eventImportDecisionSchema, toLocalDayKey, vaultMetadataSchema, type ExternalRef } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
-import { importEventBatch, resolveVaultPathOnDisk, withCanonicalResourceLocks, withCanonicalWriteLock } from "@murphai/core";
-import { listCanonicalEntities, type CanonicalEntity } from "@murphai/query";
+import { importEventBatch, isVaultError, resolveVaultPathOnDisk, withCanonicalResourceLocks, withCanonicalWriteLock } from "@murphai/core";
+import { listCanonicalEntities, readVaultMetadataSource, type CanonicalEntity } from "@murphai/query";
 import { resolveRuntimePaths, writeJsonFileAtomic } from "@murphai/runtime-state/node";
+
+import { clinicalEnrichmentLabHoldReason } from "./clinical-enrichment-labs.ts";
+import { readClinicalEnrichmentParentEligibility } from "./clinical-enrichment-parent.ts";
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const manifestRefSchema = z.object({ manifestPath: clinicalRawPathSchema, sha256: digestSchema }).strict();
@@ -46,10 +50,6 @@ export type ClinicalEnrichmentWork =
   | { status: "apply" | "advance"; jobId: string };
 const indexSchema = z.object({ schema: z.literal("murph.clinical-enrichment-index.v1"), pending: z.array(digestSchema).max(128) }).strict();
 const families = ["labs", "measurements", "history"] as const;
-const SOURCE_SYSTEM = "clinical-document-extraction";
-// Content-addressed evidence has no upstream revision clock. This fixed revision
-// keeps accepted proposals replayable across retrievals and wall-clock changes.
-const SOURCE_REVISION = "1970-01-01T00:00:00.000Z";
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const rootPath = (vaultRoot: string) => path.join(resolveRuntimePaths(vaultRoot).clinicalRecordsRuntimeRoot, "enrichment");
 const jobPath = (vaultRoot: string, jobId: string) => path.join(rootPath(vaultRoot), `${digestSchema.parse(jobId)}.json`);
@@ -86,7 +86,8 @@ async function attestSource(vaultRoot: string, job: Job) {
   const manifest = await readManifest(vaultRoot, job.root);
   const attachment = "documentAttachments" in manifest ? manifest.documentAttachments?.[job.attachmentIndex] : undefined;
   if (!job.source || attachment?.status !== "downloaded" || attachment.sha256 !== job.source.sha256 || attachment.byteLength !== job.source.byteLength || attachment.mediaType !== job.source.mediaType || path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath) !== job.source.rawRef) throw new Error("Clinical enrichment source is no longer attested by its manifest.");
-  return verifySource(vaultRoot, job.source);
+  const parent = await readClinicalEnrichmentParentEligibility({ vaultRoot, manifestPath: job.root.manifestPath, manifest, attachment });
+  return { documentPath: await verifySource(vaultRoot, job.source), parent };
 }
 
 /** Portable clinical operations only; raw evidence and canonical records keep their existing owners. */
@@ -142,16 +143,8 @@ export async function readNextClinicalEnrichment(input: { vaultRoot: string; now
       while (job.attachmentIndex < attachments.length) {
         const attachment = attachments[job.attachmentIndex]!;
         if (attachment.status !== "downloaded") { job.counts.held++; job.attachmentIndex++; continue; }
-        job.source = sourceSchema.parse({ rawRef: path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath), sha256: attachment.sha256, mediaType: attachment.mediaType, byteLength: attachment.byteLength });
-        let documentPath;
-        try { documentPath = await verifySource(input.vaultRoot, job.source); }
-        catch {
-          holdCurrentDocument(job, "Clinical document bytes are missing or failed integrity validation.");
-          await saveJob(input.vaultRoot, job);
-          continue;
-        }
-        await saveJob(input.vaultRoot, job);
-        return { status: "extract", jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType }, documentPath, page: job.page };
+        const work = await prepareCurrentClinicalDocument(input.vaultRoot, job, attachment);
+        if (work) return work;
       }
       job.status = job.counts.held > 0 ? "blocked" : "complete";
       if (job.status === "blocked") job.reason = "Some clinical document records require review.";
@@ -163,13 +156,36 @@ export async function readNextClinicalEnrichment(input: { vaultRoot: string; now
   });
 }
 
+async function prepareCurrentClinicalDocument(
+  vaultRoot: string,
+  job: Job,
+  attachment: Extract<ClinicalDocumentAttachment, { status: "downloaded" }>,
+): Promise<Extract<ClinicalEnrichmentWork, { status: "extract" }> | null> {
+  job.source = sourceSchema.parse({ rawRef: path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath), sha256: attachment.sha256, mediaType: attachment.mediaType, byteLength: attachment.byteLength });
+  let attested;
+  try { attested = await attestSource(vaultRoot, job); }
+  catch {
+    holdCurrentDocument(job, "Clinical document or parent evidence failed integrity validation.");
+    await saveJob(vaultRoot, job);
+    return null;
+  }
+  if (!attested.parent.eligible) {
+    holdCurrentDocument(job, attested.parent.reason ?? "Clinical document parent is not eligible.");
+    await saveJob(vaultRoot, job);
+    return null;
+  }
+  await saveJob(vaultRoot, job);
+  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType }, documentPath: attested.documentPath, page: job.page };
+}
+
 export async function persistClinicalEnrichmentProposals(input: { vaultRoot: string; jobId: string; sourceSha256: string; page: number; totalPages: number; outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput> }): Promise<void> {
   await locked(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
     if (job.source?.sha256 !== input.sourceSha256 || job.page !== input.page) throw new Error("Clinical enrichment proposal cursor is stale.");
     if (job.status === "prepared") return; // First durable proposal wins; never resample accepted content.
     if (job.status !== "pending") throw new Error("Clinical enrichment job is terminal.");
-    await attestSource(input.vaultRoot, job);
+    const attested = await attestSource(input.vaultRoot, job);
+    if (!attested.parent.eligible) throw new Error("Clinical document parent is not eligible for proposals.");
     const outputs = outputsSchema.parse(Object.fromEntries(families.map((family) => [family, clinicalDocumentExtractionOutputSchemaForFamily(family).parse(input.outputs[family])])));
     if (input.page > input.totalPages || families.some((family) => outputs[family].records.some((record) => record.page !== undefined && record.page !== input.page))) throw new Error("Clinical enrichment proposals reference an unprocessed page.");
     if (job.totalPages !== undefined && job.totalPages !== input.totalPages) throw new Error("Clinical enrichment document page count changed.");
@@ -260,10 +276,11 @@ async function readClinicalDay(vaultRoot: string, day: string) {
   });
 }
 
-function findExtractedRecord(rows: CanonicalEntity[], resourceId: string) {
+function findExtractedRecord(rows: CanonicalEntity[], externalRef: ExternalRef) {
+  const fields = ["system", "resourceType", "resourceId", "facet", "version"] as const;
   return rows.find((row) => {
     const ref = object(row.attributes.externalRef);
-    return ref.system === SOURCE_SYSTEM && ref.resourceId === resourceId;
+    return fields.every((field) => ref[field] === externalRef[field]);
   });
 }
 
@@ -272,7 +289,9 @@ async function planClinicalEnrichmentPage(
   job: Job,
   prepared: NonNullable<Job["prepared"]>,
   source: NonNullable<Job["source"]>,
+  parent: { parentExternalRef: ExternalRef; parentRevision: string },
 ) {
+  const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
   const dayReads = new Map<string, CanonicalEntity[]>();
   const accepted = [];
   let existing = 0;
@@ -288,25 +307,28 @@ async function planClinicalEnrichmentPage(
     if (output.status === "blocked") hold(`${family}: ${output.reason}`.slice(0, 500));
     for (const record of output.records) {
       const payload = record.payload;
-      const resourceId = hash(`${source.sha256}\n${family}\n${factKey(payload)}`);
-      if (identities.has(resourceId)) { existing++; continue; }
-      identities.add(resourceId);
-      const day = new Date(payload.occurredAt).toISOString().slice(0, 10);
+      const labHold = clinicalEnrichmentLabHoldReason(payload);
+      if (labHold) { hold(labHold); continue; }
+      const facet = `document-extraction-${hash(`${source.sha256}\n${family}\n${factKey(payload)}`)}`;
+      const externalRef = { ...parent.parentExternalRef, facet, version: parent.parentRevision };
+      if (identities.has(facet)) { existing++; continue; }
+      identities.add(facet);
+      const day = toLocalDayKey(payload.occurredAt, metadata.timezone);
       if (!dayReads.has(day) && dayReads.size >= 32) { hold("Page exceeds the 32 distinct clinical-date lookup budget."); continue; }
       if (!dayReads.has(day)) dayReads.set(day, await readClinicalDay(vaultRoot, day));
       const rows = dayReads.get(day)!;
       // Source identity lookup precedes overlap checks so crash replay cannot
       // be reclassified when other canonical data arrived in the meantime.
-      const replay = findExtractedRecord(rows, resourceId);
+      const replay = findExtractedRecord(rows, externalRef);
       if (replay) { existing++; verifiedIds.push(replay.entityId); continue; }
       if (rows.length >= 501) { hold("Clinical date exceeds the bounded canonical overlap lookup."); continue; }
       const result = overlap(payload, rows);
       if (result === "existing") { existing++; continue; }
       if (result === "held") { hold("Clinical fact overlaps canonical data without a unique equivalent identity."); continue; }
-      accepted.push({ day, resourceId, decision: eventImportDecisionSchema.parse({ action: "upsert", payload: {
+      accepted.push({ day, externalRef, decision: eventImportDecisionSchema.parse({ action: "upsert", sourceParent: parent.parentExternalRef, payload: {
         ...payload, source: "import", rawRefs: [source.rawRef],
         evidence: [{ rawRef: source.rawRef, page: prepared.page, ...(record.excerpt ? { excerpt: record.excerpt } : {}) }],
-        externalRef: { system: SOURCE_SYSTEM, resourceType: family, resourceId, version: SOURCE_REVISION },
+        externalRef,
       } }) });
     }
   }
@@ -321,7 +343,7 @@ async function readbackClinicalEnrichmentPage(
   for (const day of new Set(accepted.map((entry) => entry.day))) {
     const rows = await readClinicalDay(vaultRoot, day);
     for (const entry of accepted.filter((value) => value.day === day)) {
-      const stored = findExtractedRecord(rows, entry.resourceId);
+      const stored = findExtractedRecord(rows, entry.externalRef);
       if (!stored) throw new Error("Clinical enrichment canonical readback did not prove the accepted record.");
       verifiedIds.push(stored.entityId);
     }
@@ -334,9 +356,20 @@ export async function applyClinicalEnrichmentProposals(input: { vaultRoot: strin
   return locked(input.vaultRoot, () => withCanonicalWriteLock(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
     if (job.status !== "prepared" || !job.prepared || !job.source) throw new Error("Clinical enrichment has no accepted proposals to apply.");
-    await attestSource(input.vaultRoot, job);
-    const { accepted, existing, held, verifiedIds } = await planClinicalEnrichmentPage(input.vaultRoot, job, job.prepared, job.source);
-    const canonical = accepted.length ? await importEventBatch({ vaultRoot: input.vaultRoot, apply: true, decisions: accepted.map((entry) => entry.decision) }) : null;
+    const attested = await attestSource(input.vaultRoot, job);
+    if (!attested.parent.eligible) {
+      return holdPreparedClinicalDocument(input.vaultRoot, job, attested.parent.reason ?? "Clinical document parent is not eligible.");
+    }
+    const { accepted, existing, held, verifiedIds } = await planClinicalEnrichmentPage(input.vaultRoot, job, job.prepared, job.source, attested.parent);
+    let canonical;
+    try {
+      canonical = accepted.length ? await importEventBatch({ vaultRoot: input.vaultRoot, apply: true, decisions: accepted.map((entry) => entry.decision) }) : null;
+    } catch (error) {
+      if (isVaultError(error) && (error.code === "EVENT_SOURCE_PARENT_WITHDRAWN" || error.code === "EVENT_SOURCE_PARENT_STALE")) {
+        return holdPreparedClinicalDocument(input.vaultRoot, job, "Clinical document parent was withdrawn or replaced by a newer revision.");
+      }
+      throw error;
+    }
     verifiedIds.push(...await readbackClinicalEnrichmentPage(input.vaultRoot, accepted));
     job.counts.created += canonical?.createdCount ?? 0;
     job.counts.existing += existing + (canonical?.skippedExistingCount ?? 0);
@@ -350,6 +383,15 @@ export async function applyClinicalEnrichmentProposals(input: { vaultRoot: strin
     await saveJob(input.vaultRoot, job);
     return { canonical, counts: job.counts, readback: job.lastReadback };
   }));
+}
+
+async function holdPreparedClinicalDocument(vaultRoot: string, job: Job, reason: string) {
+  holdCurrentDocument(job, reason);
+  delete job.prepared;
+  job.status = "pending";
+  job.lastReadback = { eventIds: [], verifiedCount: 0 };
+  await saveJob(vaultRoot, job);
+  return { canonical: null, counts: job.counts, readback: job.lastReadback };
 }
 
 export async function readClinicalEnrichmentStatus(input: { vaultRoot: string; jobId: string }) {

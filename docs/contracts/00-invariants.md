@@ -209,7 +209,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   The host's deterministic clinical enrichment apply may persist schema-validated,
   frozen read-only proposals through the canonical writer with host-derived
   source identity and provenance, bounded overlap checks, and readback before
-  progress. This grants no mutation or effect authority to the read-only child.
+  progress. Derived clinical facts retain their attested source parent revision:
+  authoritative parent changes retire older owned extraction facets, and stale
+  queued proposals cannot recreate them. These checks share the canonical
+  writer index and run before writes. This grants no mutation or effect
+  authority to the read-only child.
   The runtime must abort, await, and prove exit of the exact owned child before
   checkpoint release, workspace replacement, fence loss, shutdown, or
   invocation return.

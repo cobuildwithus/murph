@@ -1015,6 +1015,13 @@ but cannot defer pending canonical receipts or durable effects.
 private operational state. A separate short `apply-clinical-enrichment` action
 uses the canonical writer, attaches host-derived source identity and evidence,
 checks existing facts and reads back accepted writes before advancing the page.
+Derived records use the attested parent source identity, an extraction facet and
+the parent revision. The existing writer index enforces parent revision guards
+and retires older extraction facets when the authoritative parent changes.
+Overlap and readback use the canonical vault timezone. The host attests the
+exact FHIR parent and applies the shared document-status policy before extraction
+and application. Lab publication requires a supported catalog identity/specimen
+relationship; unresolved combinations remain explicit holds.
 It performs no model call. Missing or unsupported documents before extraction,
 exhausted document retries and ambiguous facts remain explicit holds while later
 documents can progress. Invalid manifests or changed prepared sources fail closed.

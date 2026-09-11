@@ -332,7 +332,14 @@ abort and join the exact owned children. Cancellation retains durable work.
 Validated proposals are frozen in private operational state. A separate bounded
 canonical action derives source identity and raw/page provenance, checks existing
 facts, applies accepted proposals, and reads back the writes before advancing.
-It makes no model call. Equivalent existing facts are skipped; ambiguous facts
+It makes no model call. The host checks the immutable parent status and uses
+the canonical vault timezone for overlap and readback. Derived facts retain
+parent revision authority; later corrections or withdrawals retire older
+extraction facets, and stale queued proposals become explicit holds. Eligible
+scanned documents retain a neutral canonical source receipt even when text
+parsing cannot recover content. Lab publication requires supported specimen
+and catalog identity; ambiguous labels cannot create conflicting biomarkers.
+Equivalent existing facts are skipped; ambiguous facts
 are held rather than replacing structured FHIR results. Missing or unsupported
 source documents before extraction receive explicit holds so later documents
 can progress. Invalid manifests and changes to prepared source bytes fail closed.

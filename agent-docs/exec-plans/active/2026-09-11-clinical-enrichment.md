@@ -16,7 +16,7 @@ After Epic/FHIR source documents are durably retained, recover remaining health 
 
 ## Product UX
 
-Outcome: uploaded clinical facts become usable without another member request. Reaches private connected-source vaults only, with no unsolicited member message or group disclosure. Foreground conversation remains responsive while extraction runs. Partial, unsupported or ambiguous evidence stays explicit and recoverable.
+Outcome: connected clinical facts become usable without another member request. Reaches private connected-source vaults only, with no unsolicited member message or group disclosure. Foreground conversation remains responsive while extraction runs. Partial, unsupported or ambiguous evidence stays explicit and recoverable.
 
 Journeys: text PDF; scanned/mixed PDF; source with existing FHIR lab; medication list; interruption/retry; foreground arrival; source instruction injection; unavailable parser/model.
 
@@ -28,7 +28,8 @@ Journeys: text PDF; scanned/mixed PDF; source with existing FHIR lab; medication
 - [x] Wire durable admission, background scheduling and short canonical application.
 - [x] Prove retry, duplicate, privacy and foreground boundaries; run relevant tests/typechecks and focused real-Codex journey.
 - [x] Complete parallel ReviewGPT exploratory audits and disposition findings.
-- [ ] Parent diff/complexity review, owner docs/changelog, scoped completion commit.
+- [x] Parent diff/complexity review and owner docs/changelog.
+- [ ] Complete final candidate review, exact-head CI and scoped plan closure.
 
 ## Evidence and decisions
 
@@ -75,3 +76,18 @@ Live model verdict: Ready for the tested synthetic journeys using `gpt-5.6-terra
 Parent complexity review: the guard passes with no increased hotspot debt. New modules have maximum function complexity at most 20; existing runtime/importer hotspots are unchanged. Further general runtime restructuring is outside this bounded clinical flow.
 
 Final candidate review and exact-head CI remain pending; no merge, deployment, production wake or historical-vault backfill has been performed.
+
+
+## Final candidate review, round one
+
+Reviewed production head: `5190a25d4159a0cccf79b7a564788798feaac2a6`. The verified final ReviewGPT capture returned three High findings. Parent source inspection accepts all three as defects in the authorized document flow:
+
+- UTC date lookups disagree with canonical vault-local day keys, so a successful write can fail mandatory readback indefinitely. Correction: use the existing vault metadata and local-date owner for both overlap and readback; preserve bounded reads.
+- Retained attachments from withdrawn FHIR parents can bypass the original importer's retraction. Correction: attest the exact parent and enforce its existing eligibility before extraction and application, while preserving eligible scanned sources.
+- Label-only urine glucose falls through to the blood-glucose metric alias. Correction: validate catalog identity against specimen before publishing; hold unsupported identities explicitly, preserving serum success.
+
+The three exact triggers are corrected. Focused regressions passed: both vault-local date-boundary directions and replay; withdrawn origin documents and restored prepared checkpoints; urine-glucose exclusion with serum success. The shared importer status owner is reused rather than duplicated. The final correction review remains pending. An earlier proof-only follow-up fixed a literal metric test type and an unchanged canary fixture's wall-clock dependence; both focused checks and affected typechecks pass.
+
+Additional lifecycle correction implemented and verified: parent-bound extraction facets and opt-in canonical revision checks cover later withdrawals, eligible corrections, stale queued proposals and raw-only source revisions. These reuse the existing canonical index and source-note receipt rather than introducing a new index, queue or ledger scan. No production admission is enabled by this task.
+
+Correction proof: 52 core import/revision tests, 131 importer tests, 34 real-vault enrichment tests and eight composed runtime tests pass. Affected typechecks pass. Subsequent withdrawal/correction, late queued extraction, strictly newer reinstatement, source receipts without clinical dates, same-revision text materialization and receipt replay are covered. The core complexity guard improves existing debt while keeping its maximum unchanged; no extra persisted index or ledger read was introduced.

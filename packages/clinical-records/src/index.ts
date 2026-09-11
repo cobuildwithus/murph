@@ -1,5 +1,6 @@
 import { clinicalDocumentAttachmentsSchema } from "./attachments.ts";
 export * from "./attachments.ts";
+export * from "./document-eligibility.ts";
 export * from "./enrichment.ts";
 import { createHash } from "node:crypto";
 

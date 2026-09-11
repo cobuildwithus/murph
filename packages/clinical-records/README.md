@@ -43,7 +43,13 @@ bounded canonical apply derives source identity and raw/page evidence, checks
 existing facts, and reads back accepted writes before progress. Replay reuses
 the frozen proposals. Unsupported or missing documents before extraction and
 ambiguous facts remain explicit holds while later documents can progress.
-Invalid manifests or changed prepared source bytes fail closed.
+Invalid manifests or changed prepared source bytes fail closed. The immutable
+parent resource must pass the shared document-status policy before extraction
+and application. Canonical overlap/readback use the vault timezone. Lab facts
+with unresolved catalog identity or specimen remain held rather than entering
+a conflicting biomarker projection. Parent-bound extraction facets retain
+source revision authority so a later correction or withdrawal cannot leave
+stale derived facts active or allow an older queued proposal to restore them.
 These contracts do not assert that every fact in a document was recovered.
 
 ## Raw retrieval contract

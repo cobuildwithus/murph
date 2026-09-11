@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { hashClinicalFhirBaseUrl, hashClinicalFhirPatientId, type ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
+import { externalRefForFhir, hashClinicalFhirBaseUrl, hashClinicalFhirPatientId, type ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import { initializeVault } from "@murphai/core";
 import { listCanonicalEntities, listMetricPoints } from "@murphai/query";
 import { importClinicalFhirSnapshot } from "@murphai/vault-usecases/clinical-records";
-import { enqueueClinicalEnrichment, readClinicalEnrichmentStatus } from "@murphai/vault-usecases/clinical-enrichment";
+import { applyClinicalEnrichmentProposals, enqueueClinicalEnrichment, persistClinicalEnrichmentProposals, readClinicalEnrichmentStatus, readNextClinicalEnrichment } from "@murphai/vault-usecases/clinical-enrichment";
 import { describe, expect, it, vi } from "vitest";
 
 import { runOneHostedClinicalEnrichment, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
@@ -40,35 +40,105 @@ function runtime(): HostedSystemMailboxRuntime {
   };
 }
 
-async function importSource(vaultRoot: string) {
-  const now = new Date().toISOString();
+async function importSource(vaultRoot: string, parent: { resourceType: "DocumentReference" | "DiagnosticReport"; status: string; revision?: string; omitClinicalDate?: boolean } = { resourceType: "DocumentReference", status: "current" }) {
+  const now = parent.revision ?? new Date().toISOString();
   const bytes = Buffer.from(SOURCE_TEXT);
   const sha256 = digest(bytes);
   const resource = {
-    resourceType: "DocumentReference", id: "synthetic-lab-document", status: "current",
+    resourceType: parent.resourceType, id: "synthetic-lab-document", status: parent.status,
     subject: { reference: "Patient/synthetic-patient" }, meta: { lastUpdated: now },
-    date: OCCURRED_AT, type: { text: "Synthetic lab report" },
-    content: [{ attachment: { contentType: "text/plain", url: "Binary/synthetic-lab-document" } }],
+    ...(!parent.omitClinicalDate ? { date: OCCURRED_AT } : {}), type: { text: "Synthetic lab report" },
+    ...(parent.resourceType === "DocumentReference"
+      ? { content: [{ attachment: { contentType: "text/plain", url: "Binary/synthetic-lab-document" } }] }
+      : { code: { text: "Synthetic lab report" }, ...(!parent.omitClinicalDate ? { effectiveDateTime: OCCURRED_AT } : {}), presentedForm: [{ contentType: "text/plain", url: "Binary/synthetic-lab-document" }] }),
   };
   const content = JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [{ resource }] });
   const imported = await importClinicalFhirSnapshot({
-    vaultRoot, connectionId: "synthetic-connection", retrievalJobId: "synthetic-retrieval",
+    vaultRoot, connectionId: "synthetic-connection", retrievalJobId: `synthetic-retrieval-${digest(now).slice(0, 12)}`,
     retrievalProtocol: "query-slices-v2", sourceSystem: "epic-fhir", fetchedAt: now,
     fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
     patientIdHash: hashClinicalFhirPatientId("synthetic-patient"),
-    requestedScopes: ["patient/DocumentReference.read"], grantedScopes: ["patient/DocumentReference.read"],
-    retrievalSlices: [{ queryScopeId: "documentreference", sliceId: "whole", resourceType: "DocumentReference", coverage: "whole-family", queryFingerprint: "a".repeat(64) }],
+    requestedScopes: [`patient/${parent.resourceType}.read`], grantedScopes: [`patient/${parent.resourceType}.read`],
+    retrievalSlices: [{ queryScopeId: "documentreference", sliceId: "whole", resourceType: parent.resourceType, coverage: "whole-family", queryFingerprint: "a".repeat(64) }],
     completedRetrievalSlices: [{ queryScopeId: "documentreference", sliceId: "whole" }],
-    pages: [{ queryScopeId: "documentreference", sliceId: "whole", resourceType: "DocumentReference", content }],
-    documentAttachments: [{ parentPageSha256: digest(content), resourceType: "DocumentReference", resourceId: resource.id, attachmentIndex: 0, status: "downloaded", relativePath: `attachments/${sha256}.bin`, sha256, byteLength: bytes.length, mediaType: "text/plain" }],
+    pages: [{ queryScopeId: "documentreference", sliceId: "whole", resourceType: parent.resourceType, content }],
+    documentAttachments: [{ parentPageSha256: digest(content), resourceType: parent.resourceType, resourceId: resource.id, attachmentIndex: 0, status: "downloaded", relativePath: `attachments/${sha256}.bin`, sha256, byteLength: bytes.length, mediaType: "text/plain" }],
     attachments: [{ relativePath: `attachments/${sha256}.bin`, contentBase64: bytes.toString("base64") }],
   });
   const job = await enqueueClinicalEnrichment({ vaultRoot, manifestPath: imported.manifestPath, manifestSha256: imported.manifestSha256 });
   await admitHostedClinicalEnrichmentWake({ vaultRoot, jobId: job.jobId, userId: "synthetic-member", occurredAt: now });
-  return { ...job, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
+  const parentExternalRef = externalRefForFhir({ fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
+    patientIdHash: hashClinicalFhirPatientId("synthetic-patient"), sourceSystem: "epic-fhir",
+    resourceType: parent.resourceType, resourceId: resource.id, version: now });
+  return { ...job, parentExternalRef, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
 }
 
 describe("clinical enrichment import-to-query flow", () => {
+  it.each([
+    { applyBeforeWithdrawal: false, nextStatus: "entered-in-error" },
+    { applyBeforeWithdrawal: true, nextStatus: "entered-in-error" },
+    { applyBeforeWithdrawal: false, nextStatus: "current" },
+    { applyBeforeWithdrawal: true, nextStatus: "current" },
+    { applyBeforeWithdrawal: true, nextStatus: "current", omitClinicalDate: true },
+  ])("retires prior source facts for $nextStatus and prevents stale re-publication (applied=$applyBeforeWithdrawal)", async ({ applyBeforeWithdrawal, nextStatus, omitClinicalDate }) => {
+    const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-revision-");
+    const { vaultRoot } = workspace;
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC", createdAt: OCCURRED_AT });
+      const old = await importSource(vaultRoot, { resourceType: "DocumentReference", status: "current", revision: "2020-03-12T12:00:00.000Z", omitClinicalDate });
+      const prepare = async (job: Awaited<ReturnType<typeof importSource>>) => {
+        expect(await readNextClinicalEnrichment({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "extract" });
+        await persistClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId, sourceSha256: job.sha256, page: 1, totalPages: 1,
+          outputs: { measurements: empty, history: empty, labs: { status: "complete", records: [{ payload: {
+            kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null,
+            testName: "Glucose", specimenType: "serum", resultStatus: "normal", results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
+          } }] } },
+        });
+      };
+      await prepare(old);
+      if (applyBeforeWithdrawal) {
+        await applyClinicalEnrichmentProposals({ vaultRoot, jobId: old.jobId });
+        expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value)).toEqual([90]);
+      }
+      await importSource(vaultRoot, { resourceType: "DocumentReference", status: nextStatus, revision: "2020-03-13T12:00:00.000Z", omitClinicalDate });
+      expect(await listMetricPoints(vaultRoot, { limit: 10 })).toEqual([]);
+      if (!applyBeforeWithdrawal) {
+        expect((await applyClinicalEnrichmentProposals({ vaultRoot, jobId: old.jobId })).counts).toMatchObject({ created: 0, held: 1 });
+        await readNextClinicalEnrichment({ vaultRoot, jobId: old.jobId });
+        expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: old.jobId })).toMatchObject({ status: "blocked" });
+      }
+      const restored = await importSource(vaultRoot, { resourceType: "DocumentReference", status: "current", revision: "2020-03-14T12:00:00.000Z", omitClinicalDate });
+      await prepare(restored);
+      await applyClinicalEnrichmentProposals({ vaultRoot, jobId: restored.jobId });
+      expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value)).toEqual([90]);
+      expect(digest(await readFile(path.join(vaultRoot, old.rawRef)))).toBe(old.sha256);
+    } finally { await workspace.cleanup(); }
+  });
+
+  it.each([
+    { resourceType: "DocumentReference" as const, status: "entered-in-error" },
+    { resourceType: "DiagnosticReport" as const, status: "cancelled" },
+  ])("retains withdrawn $resourceType evidence without extracting active facts", async (parent) => {
+    const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-withdrawn-");
+    const { vaultRoot } = workspace;
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC", createdAt: new Date().toISOString() });
+      const job = await importSource(vaultRoot, parent);
+      const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async () => empty);
+      const input: HostedClinicalEnrichmentInput = {
+        abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
+        memberId: "synthetic-member", resolveProviderAuthority: async () => "current",
+        onStateMutation() {}, async onWorkUpdated() {}, executeExtraction,
+      };
+      await runOneHostedClinicalEnrichment(input);
+      await runOneHostedClinicalEnrichment(input);
+      expect(executeExtraction).not.toHaveBeenCalled();
+      expect(await listMetricPoints(vaultRoot, { limit: 10 })).toEqual([]);
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "blocked" });
+      expect(digest(await readFile(path.join(vaultRoot, job.rawRef)))).toBe(job.sha256);
+    } finally { await workspace.cleanup(); }
+  });
+
   it("retains raw evidence, yields for foreground work, resumes frozen proposals and publishes source-backed lab results", async () => {
     const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-flow-");
     const { vaultRoot } = workspace;
@@ -122,13 +192,13 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(tests).toHaveLength(1);
       expect(tests[0]?.attributes).toMatchObject({
         source: "import", rawRefs: [job.rawRef], specimenType: "serum",
-        externalRef: { system: "clinical-document-extraction" },
+        externalRef: { ...job.parentExternalRef, facet: expect.stringMatching(/^document-extraction-/u) },
         evidence: [{ rawRef: job.rawRef, page: 1, excerpt: "Serum glucose 90 mg/dL." }],
       });
       const points = await listMetricPoints(vaultRoot, { limit: 10 });
       expect(points).toEqual(expect.arrayContaining([expect.objectContaining({
         metricKey: "glucose", biomarkerKey: "biomarker:blood-glucose", value: 90, unit: "mg/dL",
-        provenance: expect.objectContaining({ provider: "clinical-document-extraction", rawRefs: [job.rawRef] }),
+        provenance: expect.objectContaining({ provider: job.parentExternalRef.system, rawRefs: [job.rawRef] }),
       })]));
       expect(digest(await readFile(path.join(vaultRoot, job.rawRef)))).toBe(job.sha256);
 

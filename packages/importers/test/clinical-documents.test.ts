@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { initializeVault, importEventBatch } from "@murphai/core";
+import { initializeVault, importEventBatch, findEventByExternalRef } from "@murphai/core";
 import { describe, expect, it } from "vitest";
 import { hashClinicalFhirBaseUrl, hashClinicalFhirPatientId, type ClinicalDocumentAttachment } from "@murphai/clinical-records";
 import { buildClinicalImportPlanFromSnapshot, clinicalPlanToEventImportDecisions } from "../src/clinical-records/index.ts";
@@ -40,6 +40,76 @@ function snapshot(resource: object, documents: Array<{ bytes: Buffer; mediaType:
 }
 
 describe("clinical document bodies", () => {
+  it.each(["DocumentReference", "DiagnosticReport"])("records a scanned %s revision, retires older extraction, and materializes same-revision text", async (resourceType) => {
+    const resource = resourceType === "DocumentReference"
+      ? { ...baseResource, content: [{ attachment: { contentType: "application/pdf", url: "Binary/scanned" } }] }
+      : { ...baseResource, resourceType, status: "final", issued: baseResource.date, code: { text: "Hospital diagnostic report" }, presentedForm: [{ contentType: "application/pdf", url: "Binary/scanned" }] };
+    const bytes = Buffer.from("%PDF-synthetic-scanned-document");
+    const document = { attachmentIndex: 0, bytes, mediaType: "application/pdf" };
+    const prior = buildClinicalImportPlanFromSnapshot(snapshot(resource, [{ ...document, extractedText: "Earlier provider narrative." }]));
+    const newer = { ...resource, meta: { lastUpdated: "2026-07-01T12:01:00Z" } };
+    const receipt = buildClinicalImportPlanFromSnapshot(snapshot(newer, [document]));
+    const first = prior.decisions[0];
+    const next = receipt.decisions[0];
+    if (first?.action !== "upsert" || next?.action !== "upsert") throw new Error("Expected canonical source document decisions.");
+    expect(next.payload).toMatchObject({ kind: "note", noteType: "clinical-document-receipt", occurredAt: "2026-07-01T12:00:00.000Z",
+      externalRef: { version: newer.meta.lastUpdated }, evidence: [{ rawRef: expect.stringContaining(`${resourceType}/page.json`) }] });
+    expect(next.payload.note).toContain(`FHIR ${resourceType} source document.`);
+    expect(next.payload.note).not.toMatch(/Earlier provider narrative|awaiting|pending|unreadable/iu);
+    const child = { action: "upsert" as const, sourceParent: first.payload.externalRef, payload: {
+      kind: "measurement", occurredAt: baseResource.date, title: "Synthetic earlier extracted pulse", source: "import",
+      measurements: [{ metric: "heart-rate", value: 72, unit: "bpm" }],
+      externalRef: { ...first.payload.externalRef, facet: "document-extraction-measurements-synthetic" },
+    } };
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-document-receipt-"));
+    try {
+      await initializeVault({ vaultRoot, createdAt: baseResource.date, timezone: "UTC" });
+      await importEventBatch({ vaultRoot, apply: true, decisions: [...clinicalPlanToEventImportDecisions(prior), child] });
+      expect((await importEventBatch({ vaultRoot, apply: true, decisions: clinicalPlanToEventImportDecisions(receipt) })).retractedCount).toBe(1);
+      expect(await findEventByExternalRef({ vaultRoot, ...child.payload.externalRef })).toBeNull();
+      await expect(importEventBatch({ vaultRoot, apply: true, decisions: [child] })).rejects.toMatchObject({ code: "EVENT_SOURCE_PARENT_STALE" });
+      const full = buildClinicalImportPlanFromSnapshot(snapshot(newer, [{ ...document, extractedText: "Full source narrative from the same PDF bytes." }]));
+      expect((await importEventBatch({ vaultRoot, apply: true, decisions: clinicalPlanToEventImportDecisions(full) })).supersededCount).toBe(1);
+      expect((await importEventBatch({ vaultRoot, apply: true, decisions: clinicalPlanToEventImportDecisions(receipt) })).skippedExistingCount).toBe(1);
+      expect(await findEventByExternalRef({ vaultRoot, ...next.payload.externalRef })).toMatchObject({
+        noteType: resourceType === "DocumentReference" ? "fhir_document_reference" : "fhir_diagnostic_report",
+        note: "Full source narrative from the same PDF bytes.",
+      });
+    } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    { meta: { lastUpdated: undefined } },
+    { modifierExtension: [{ url: "https://example.test/unknown-modifier", valueBoolean: true }] },
+  ])("keeps unsafe raw-only document metadata on review", (invalid) => {
+    const resource = { ...baseResource, ...invalid, content: [{ attachment: { contentType: "application/pdf", url: "Binary/scanned" } }] };
+    expect(buildClinicalImportPlanFromSnapshot(snapshot(resource)).decisions[0]).toMatchObject({ action: "review" });
+  });
+
+  it.each(["DocumentReference", "DiagnosticReport"])("uses a %s source-update receipt when clinical dates are absent or date-only", (resourceType) => {
+    for (const clinicalDate of [undefined, "2026-07-01"]) {
+      for (const extractedText of [undefined, "Provider text with its own clinical dates."]) {
+        const resource = resourceType === "DocumentReference"
+          ? { ...baseResource, date: clinicalDate, content: [{ attachment: { contentType: "application/pdf", url: "Binary/scanned" } }] }
+          : { ...baseResource, resourceType, date: undefined, issued: clinicalDate, status: "final", presentedForm: [{ contentType: "application/pdf", url: "Binary/scanned" }] };
+        const input = snapshot(resource, [{ attachmentIndex: 0, bytes: Buffer.from("%PDF-synthetic"), mediaType: "application/pdf", extractedText }]);
+        const decision = buildClinicalImportPlanFromSnapshot(input).decisions[0];
+        expect(decision).toMatchObject({ action: "upsert", payload: {
+          kind: "note", noteType: "clinical-document-receipt", occurredAt: "2026-07-01T12:00:00.000Z",
+          note: expect.stringContaining("Record timestamp describes source-update metadata"),
+        } });
+        if (decision?.action === "upsert") expect(decision.payload.note).not.toContain("Provider text with its own clinical dates");
+      }
+    }
+  });
+
+  it.each(["DocumentReference", "DiagnosticReport"])("opts %s withdrawals into only document-extraction facets", (resourceType) => {
+    const resource = { ...baseResource, resourceType, status: resourceType === "DocumentReference" ? "entered-in-error" : "cancelled" };
+    const decisions = clinicalPlanToEventImportDecisions(buildClinicalImportPlanFromSnapshot(snapshot(resource)));
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({ action: "retract", retractFacetPrefixes: ["document-extraction"] });
+  });
+
   it("combines linked and embedded attachments without changing the raw parent", () => {
     const resource = { ...baseResource, content: [
       { attachment: { contentType: "text/plain", data: Buffer.from("First page").toString("base64") } },
@@ -58,8 +128,7 @@ describe("clinical document bodies", () => {
       { attachment: { contentType: "text/plain", url: "Binary/body-2" } },
     ] };
     const partial = buildClinicalImportPlanFromSnapshot(snapshot(resource));
-    expect(partial.decisions).toEqual([expect.objectContaining({ action: "review", disposition: "incomplete" })]);
-    expect(clinicalPlanToEventImportDecisions(partial)).toEqual([]);
+    expect(partial.decisions).toEqual([expect.objectContaining({ action: "upsert", payload: expect.objectContaining({ noteType: "clinical-document-receipt" }) })]);
     const complete = buildClinicalImportPlanFromSnapshot(snapshot(resource, [{ attachmentIndex: 1, bytes: Buffer.from("Remaining body"), mediaType: "text/plain" }]));
     expect(complete.decisions[0]).toMatchObject({ action: "upsert" });
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-document-recovery-"));
@@ -111,7 +180,7 @@ describe("clinical document bodies", () => {
     input.manifest.documentAttachments.push({ parentPageSha256: hash(input.pages[0]!.content), resourceType: "DocumentReference", resourceId: malformed.id, attachmentIndex: 0, status: "unavailable", errorCode: "missing_attachment_content" });
     const plan = buildClinicalImportPlanFromSnapshot(input);
     expect(plan.decisions).toEqual([
-      expect.objectContaining({ action: "review", disposition: "incomplete", resourceId: malformed.id }),
+      expect.objectContaining({ action: "upsert", payload: expect.objectContaining({ noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: malformed.id }) }) }),
       expect.objectContaining({ action: "upsert", payload: expect.objectContaining({ kind: "note", note: "Useful sibling record" }) }),
     ]);
   });
@@ -131,7 +200,7 @@ describe("clinical document bodies", () => {
     const input = snapshot(resource, [{ attachmentIndex: 0, bytes: Buffer.from("synthetic-image"), mediaType: "image/png" }]);
     expect(buildClinicalImportPlanFromSnapshot(input).decisions[0]).toMatchObject({ action: "upsert", payload: { kind: "test", summary: resource.conclusion } });
     const imageOnly = snapshot({ ...resource, conclusion: undefined }, [{ attachmentIndex: 0, bytes: Buffer.from("synthetic-image"), mediaType: "image/png" }]);
-    expect(buildClinicalImportPlanFromSnapshot(imageOnly).decisions[0]).toMatchObject({ action: "review", disposition: "incomplete" });
+    expect(buildClinicalImportPlanFromSnapshot(imageOnly).decisions[0]).toMatchObject({ action: "upsert", payload: { noteType: "clinical-document-receipt" } });
   });
 
   it("honors declared text encoding and refuses contradictory or unknown charset", () => {

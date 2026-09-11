@@ -2196,12 +2196,15 @@ type PreparedEventImportDecision =
       allowsKindReplacement: boolean;
       entry: PreparedJsonlEntry<EventRecord>;
       expectedLatest?: EventImportUpsertDecision["expectedLatest"];
+      sourceParent?: EventImportUpsertDecision["sourceParent"];
+      invalidateFacetPrefixes?: EventImportUpsertDecision["invalidateFacetPrefixes"];
     }
   | {
       action: "retract";
       externalRef: EventImportRetractionDecision["externalRef"];
       evidence?: EventRecord["evidence"];
       reason: EventImportRetractionDecision["reason"];
+      retractFacetPrefixes?: EventImportRetractionDecision["retractFacetPrefixes"];
       markerEntry: PreparedJsonlEntry<EventRecord>;
     };
 
@@ -5326,6 +5329,128 @@ async function reconcileDeviceEventEntriesByExternalRef(
   };
 }
 
+function isClinicalDocumentReceiptTransition(receipt: EventRecord, materialized: EventRecord): boolean {
+  return !isDeletedEventSpineRecord(receipt) && !isDeletedEventSpineRecord(materialized)
+    && receipt.kind === "note" && receipt.noteType === "clinical-document-receipt"
+    && materialized.kind === "note"
+    && (materialized.noteType === "fhir_document_reference" || materialized.noteType === "fhir_diagnostic_report");
+}
+
+function replaysEqualEventImportDecision(latest: EventRecord, incoming: EventRecord, allowsKindReplacement: boolean): boolean {
+  if (isClinicalDocumentReceiptTransition(incoming, latest)) return true;
+  if (isClinicalDocumentReceiptTransition(latest, incoming)) return false;
+  const existingKey = allowsKindReplacement ? eventImportSourceSemanticContentKey(latest) : eventImportVersionedReplayContentKey(latest);
+  const incomingKey = allowsKindReplacement ? eventImportSourceSemanticContentKey(incoming) : eventImportVersionedReplayContentKey(incoming);
+  if (existingKey === incomingKey) return true;
+  const ref = incoming.externalRef!;
+  throw new VaultError("EVENT_SOURCE_REVISION_CONFLICT",
+    `Event externalRef "${ref.system}/${ref.resourceType}/${ref.resourceId}` +
+    `${ref.facet ? `#${ref.facet}` : ""}" has conflicting content for source revision "${ref.version}"; nothing was imported.`);
+}
+
+function validateEventImportSourceOptions(decision: EventImportDecision): void {
+  if (decision.action === "retract") {
+    if (decision.retractFacetPrefixes && decision.externalRef.facet !== undefined) {
+      throw new Error("Facet retraction authority requires a facet-free source parent.");
+    }
+    return;
+  }
+  if (decision.invalidateFacetPrefixes && (!decision.payload.externalRef || decision.payload.externalRef.facet !== undefined
+    || !decision.payload.externalRef.version || !isWritableIsoDateTime(decision.payload.externalRef.version))) {
+    throw new Error("Facet invalidation authority requires a versioned facet-free source parent.");
+  }
+  if (!decision.sourceParent) return;
+  const ref = decision.payload.externalRef;
+  if (!ref?.facet || decision.sourceParent.facet !== undefined
+    || eventExternalRefKey({ ...ref, facet: undefined }) !== eventExternalRefKey(decision.sourceParent)
+    || ref.version !== decision.sourceParent.version) {
+    throw new Error("Derived event source parent must match its source identity and revision.");
+  }
+}
+
+// Source-parent admission and facet withdrawal share the import's existing ledger index.
+// They add no persisted index and perform no additional ledger reads.
+function assertEventImportSourceParents(decisions: readonly PreparedEventImportDecision[], index: EventExternalRefIndex): void {
+  const incomingParents = new Map<string, PreparedEventImportDecision[]>();
+  for (const decision of decisions) {
+    const ref = preparedEventImportDecisionExternalRef(decision);
+    if (!ref || ref.facet !== undefined) continue;
+    const key = eventExternalRefKey(ref);
+    incomingParents.set(key, [...(incomingParents.get(key) ?? []), decision]);
+  }
+  for (const decision of decisions) {
+    if (decision.action !== "upsert" || !decision.sourceParent) continue;
+    const parent = decision.sourceParent;
+    const key = eventExternalRefKey(parent);
+    const latest = index.latestByRefKey.get(key);
+    if (latest) assertEventImportParentRevision(parent, latest.indexedExternalRef, isDeletedEventSpineRecord(latest.record));
+    for (const candidate of incomingParents.get(key) ?? []) {
+      assertEventImportParentRevision(parent, preparedEventImportDecisionExternalRef(candidate)!, candidate.action === "retract");
+    }
+  }
+}
+
+function assertEventImportParentRevision(parent: ExternalRef, current: ExternalRef, deleted: boolean): void {
+  const comparison = compareIncomingExternalRefVersion(current, parent);
+  if (comparison === null || comparison < 0 || (comparison === 0 && deleted)) {
+    throw new VaultError(deleted ? "EVENT_SOURCE_PARENT_WITHDRAWN" : "EVENT_SOURCE_PARENT_STALE",
+      "The derived event source parent is withdrawn or has a newer canonical revision; nothing was imported.");
+  }
+}
+
+function expandEventImportFacetRetractions(decisions: readonly PreparedEventImportDecision[], index: EventExternalRefIndex): PreparedEventImportDecision[] {
+  const withdrawals = new Map<string, Extract<PreparedEventImportDecision, { action: "retract" }>[]>();
+  for (const decision of decisions) {
+    if (decision.action !== "retract" || !decision.retractFacetPrefixes) continue;
+    const key = eventExternalRefKey(decision.externalRef);
+    withdrawals.set(key, [...(withdrawals.get(key) ?? []), decision]);
+  }
+  if (withdrawals.size === 0) return [...decisions];
+  const expanded = [...decisions];
+  for (const match of index.latestByRefKey.values()) {
+    const ref = match.indexedExternalRef;
+    if (!ref.facet) continue;
+    const candidates = withdrawals.get(eventExternalRefKey({ ...ref, facet: undefined })) ?? [];
+    for (const withdrawal of candidates) {
+      if (!withdrawal.retractFacetPrefixes?.some((prefix) => ref.facet === prefix || ref.facet?.startsWith(`${prefix}-`))) continue;
+      expanded.push({ ...withdrawal, retractFacetPrefixes: undefined,
+        externalRef: { ...withdrawal.externalRef, facet: ref.facet } });
+    }
+  }
+  return expanded;
+}
+
+function invalidateOlderEventImportFacets(decisions: readonly PreparedEventImportDecision[], index: EventExternalRefIndex): PreparedJsonlEntry<EventRecord>[] {
+  const scopes = new Map<string, Extract<PreparedEventImportDecision, { action: "upsert" }>>();
+  for (const decision of decisions) {
+    if (decision.action !== "upsert" || !decision.invalidateFacetPrefixes) continue;
+    const ref = decision.entry.record.externalRef!;
+    const key = eventExternalRefKey(ref);
+    const latest = index.latestByRefKey.get(key);
+    if (latest && !isDeletedEventSpineRecord(latest.record) && compareIncomingExternalRefVersion(latest.indexedExternalRef, ref) === 0) scopes.set(key, decision);
+  }
+  if (scopes.size === 0) return [];
+  const entries: PreparedJsonlEntry<EventRecord>[] = [];
+  for (const [key, match] of index.latestByRefKey) {
+    const ref = match.indexedExternalRef;
+    if (!ref.facet || isDeletedEventSpineRecord(match.record)) continue;
+    const scope = scopes.get(eventExternalRefKey({ ...ref, facet: undefined }));
+    if (!scope || !scope.invalidateFacetPrefixes?.some((prefix) => ref.facet === prefix || ref.facet?.startsWith(`${prefix}-`))) continue;
+    const comparison = compareIncomingExternalRefVersion(ref, scope.entry.record.externalRef!);
+    if (comparison === null) throw new VaultError("EVENT_SOURCE_REVISION_UNORDERED", "Derived source facets require comparable revisions; nothing was imported.");
+    if (comparison <= 0) continue;
+    const revision = Math.max(eventSpineRevision(match.record), index.maxRevisionById.get(match.record.id) ?? 0) + 1;
+    // Keep the old child source revision: the new parent owns rejection of old
+    // proposals, while an eligible same-content facet can materialize at its new revision.
+    const record = { ...match.record, recordedAt: scope.entry.record.recordedAt, lifecycle: buildEventSpineLifecycle(revision, "deleted") };
+    const relativePath = match.relativePath || toEventLedgerFile(record.occurredAt);
+    index.latestByRefKey.set(key, toIndexedExternalRefMatch(record, ref, relativePath));
+    index.maxRevisionById.set(record.id, revision);
+    entries.push({ relativePath, record });
+  }
+  return entries;
+}
+
 // Public bulk import reconciles externalRef identity vault-wide, not per
 // monthly shard: a re-import whose corrected occurredAt moves the row to a
 // different month must still find and supersede the original event instead of
@@ -5372,7 +5497,8 @@ async function reconcileEventImportDecisionsByExternalRef(
   const eventIds: string[] = [];
   const retractedEventIds: string[] = [];
   const eventShardPaths = new Set<string>();
-  const orderedDecisions = orderEventImportDecisionsBySourceVersion(decisions);
+  assertEventImportSourceParents(decisions, index);
+  const orderedDecisions = orderEventImportDecisionsBySourceVersion(expandEventImportFacetRetractions(decisions, index));
   let createdCount = 0;
   let skippedExistingCount = 0;
   let supersededCount = 0;
@@ -5484,23 +5610,9 @@ async function reconcileEventImportDecisionsByExternalRef(
         skippedExistingCount += 1;
         continue;
       }
-      if (sourceVersionComparison === 0) {
-        const existingContentKey = decision.allowsKindReplacement
-          ? eventImportSourceSemanticContentKey(latest)
-          : eventImportVersionedReplayContentKey(latest);
-        const incomingContentKey = decision.allowsKindReplacement
-          ? eventImportSourceSemanticContentKey(entry.record)
-          : eventImportVersionedReplayContentKey(entry.record);
-        if (existingContentKey === incomingContentKey) {
-          skippedExistingCount += 1;
-          continue;
-        }
-        throw new VaultError(
-          "EVENT_SOURCE_REVISION_CONFLICT",
-          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-            `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
-            `"${externalRef.version}"; nothing was imported.`,
-        );
+      if (sourceVersionComparison === 0 && replaysEqualEventImportDecision(latest, entry.record, decision.allowsKindReplacement)) {
+        skippedExistingCount += 1;
+        continue;
       }
     } else {
       // Preserve the legacy public-import contract for unversioned or
@@ -5578,6 +5690,14 @@ async function reconcileEventImportDecisionsByExternalRef(
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
     eventIds.push(superseding.id);
     supersededCount += 1;
+  }
+
+  for (const entry of invalidateOlderEventImportFacets(decisions, index)) {
+    appendEntries.push(entry);
+    forceAppendIds.add(entry.record.id);
+    retractedEventIds.push(entry.record.id);
+    eventShardPaths.add(entry.relativePath);
+    retractedCount++;
   }
 
   return {
@@ -8234,6 +8354,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         throw new Error(parsed.errors.join("; "));
       }
       const decision: EventImportDecision = parsed.data;
+      validateEventImportSourceOptions(decision);
 
       if (decision.action === "retract") {
         const markerRecord = buildPublicEventImportRecord({
@@ -8252,6 +8373,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
           externalRef: decision.externalRef,
           evidence: decision.evidence,
           reason: decision.reason,
+          retractFacetPrefixes: decision.retractFacetPrefixes,
           markerEntry: {
             relativePath: toEventLedgerFile(markerRecord.occurredAt),
             record: markerRecord,
@@ -8272,6 +8394,8 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         allowsKindReplacement: true,
         entry: { relativePath: toEventLedgerFile(record.occurredAt), record },
         ...(decision.expectedLatest ? { expectedLatest: decision.expectedLatest } : {}),
+        sourceParent: decision.sourceParent,
+        invalidateFacetPrefixes: decision.invalidateFacetPrefixes,
       });
     } catch (error) {
       failures.push({
