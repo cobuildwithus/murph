@@ -52,8 +52,10 @@ const reminderInstructions =
 const reminderText = "Time for your short break.";
 const dirtyResourceCount = 113;
 const firstRuntimeAdmissionWindowMs = 30_000;
-const deviceSyncReminderOverlapLeadMs = 60_000;
-const scheduledReminderLeadMs = 180_000;
+// Budget two 30-second log flushes, up to 120 seconds of progress backoff,
+// and useful processing before holding a positive pass across the due reminder.
+const deviceSyncReminderOverlapLeadMs = 240_000;
+const scheduledReminderLeadMs = 360_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
 const barrierTimeoutMs = 180_000;
 const observationTimeoutMs = 240_000;
@@ -96,7 +98,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
           ]),
         ].join(","),
         JUNCTION_WEBHOOK_SECRET: junctionWebhookSecret,
-        LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
+        LINQ_API_BASE_URL: requireLinqStub().baseUrl,
         LINQ_API_TOKEN: linqApiToken,
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
@@ -275,7 +277,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       ).resolves.toEqual({ cleared: true, ok: true });
       devicePassStagingObservationArmed = false;
 
-      const [firstWindowAdmissionCount] = await Promise.all([
+      const [admissionObservation, checkpointObservation] = await Promise.allSettled([
         countHostedLocalRuntimeAdmissionWindow({
           acceptedWake,
           beforeAt: schedule.dueAtIso,
@@ -287,11 +289,17 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
           wakeAcceptedAt,
           windowMs: firstRuntimeAdmissionWindowMs,
         }),
-        waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso),
+        holdPositiveDeviceSyncPassCheckpoint({
+          dueAtIso: schedule.dueAtIso,
+          fromAt: runtimeLogsFrom,
+        }),
       ]);
-      const firstPass = await waitForPositiveDeviceSyncPassFinished({
-        fromAt: runtimeLogsFrom,
-      });
+      // Both observers must settle before cleanup can release the final barrier;
+      // the checkpoint observer may still be rearming it after a zero-job yield.
+      if (admissionObservation.status === "rejected") throw admissionObservation.reason;
+      if (checkpointObservation.status === "rejected") throw checkpointObservation.reason;
+      const firstWindowAdmissionCount = admissionObservation.value;
+      const firstPass = checkpointObservation.value;
       expect(firstPass.redactedJson).toMatchObject({
         outcome: "yielded",
         workerJobLimitReached: false,
@@ -619,16 +627,43 @@ async function waitForDevicePassPreDrainCheckpointBarrier(
   ]));
 }
 
-async function waitForPositiveDeviceSyncPassFinished(input: {
+async function holdPositiveDeviceSyncPassCheckpoint(input: {
+  dueAtIso: string;
   fromAt: Date;
 }): Promise<HostedRuntimeLogForTestRow> {
-  const deadline = Date.now() + observationTimeoutMs;
+  let fromAt = input.fromAt;
+  while (true) {
+    await waitForShutdownCheckpointPublicationBarrier(input.dueAtIso);
+    const pass = await waitForDeviceSyncPassFinished({ ...input, fromAt });
+    if ((readFiniteNumber(pass.redactedJson, "processedJobs") ?? 0) > 0) {
+      return pass;
+    }
+    expect(pass.redactedJson).toMatchObject({
+      outcome: "yielded",
+      processedJobs: 0,
+    });
+    // A cooperative yield after the retry fence can precede all job progress.
+    // Publish that checkpoint so its scheduled retry can establish the backlog
+    // boundary this test needs; retaining the barrier here would deadlock it.
+    await expect(requireScenario().harness
+      .releaseShutdownCheckpointPublicationBarrierForTest(userId))
+      .resolves.toEqual({ ok: true, released: true });
+    fromAt = new Date(Date.parse(pass.at) + 1);
+    await requireScenario().harness
+      .armShutdownCheckpointPublicationBarrierForTest(userId);
+  }
+}
+
+async function waitForDeviceSyncPassFinished(input: {
+  dueAtIso: string;
+  fromAt: Date;
+}): Promise<HostedRuntimeLogForTestRow> {
+  const deadline = Math.min(Date.now() + observationTimeoutMs, Date.parse(input.dueAtIso));
   let lastLogs: HostedRuntimeLogForTestRow[] = [];
   while (Date.now() < deadline) {
     lastLogs = await listDeviceSyncLogs(input.fromAt);
     const matching = lastLogs.find((row) =>
       row.eventCode === "device-sync.pass_finished"
-      && (readFiniteNumber(row.redactedJson, "processedJobs") ?? 0) > 0
     );
     if (matching) {
       return matching;

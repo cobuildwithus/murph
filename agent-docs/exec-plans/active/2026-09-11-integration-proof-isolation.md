@@ -59,4 +59,18 @@ Use synthetic evidence and closed diagnostic fields. Preserve unrelated work. Do
 6. `apps/cloudflare/test/hosted-local-stale-deferred-replay-e2e.test.ts` is absent from the scenario registry. Its cold restore with a stale invocation is distinct from the registered case that warms the runtime first. Ordinary node tests exclude E2E files.
 7. The Web PostgreSQL pool does not enforce the UTC session semantics assumed by the installed Prisma adapter. A read-only adapter probe under a non-UTC database default returned timestamps offset from UTC; the UTC session did not. This is a connection-owner precondition hidden by UTC CI databases. It does not by itself prove the cause of a particular delivery timeout.
 
+8. Non-Linux hosted-local provider forwarding retains `host.docker.internal` as a host-native Worker upstream. On a host without that Docker-only DNS alias, authorized delivery fails before reaching the synthetic stub. Linux selects an explicit bridge address through a different branch. An explicit private host-alias attempt was rejected by MinIO isolation. The affected fixtures now use the existing host-side stub URL for Worker provider configuration; shared DNS settings are unchanged.
+
 These findings are review evidence, not claims of completed fixes. The first three have broader required CI coverage; the inventory omissions affect automatic coverage itself.
+
+## Candidate progress
+
+- Junction's real device-activity key builder produces a 272-character provider key for synthetic fixture-shaped metadata; Linq accepts at most 255. The stub correctly rejects this send, while the E2E incorrectly counts the observed request as delivery. Preserve the full internal authority key and compact only oversized wire keys at the Linq adapter.
+- Product patch outcome: restore authorized activity nudges that fail provider key validation. Reaches: existing-chat text, new-chat text, rich-link siblings, and app-card sends through the shared adapter. Proof: boundary-sized keys, stable retries, distinct sibling keys, and accepted Junction delivery with the original exact model-request count. Model instructions and decisions are unchanged; this is a deterministic transport contract.
+- The full ordering process passed all four cases with host-side provider URLs and UTC connections.
+
+- Moved two Environment recovery cases to the existing 10-second ordering process; retained their semantic assertions.
+- The first moved case passed locally. The preemption case exposed a missed optional stub parameter in the move; that call is corrected and the full ordering process is rerunning.
+- Harness suite tests passed (32/32); Cloudflare typecheck passed before the one-argument correction.
+- Local Linq delivery errors originate in host-native Worker fetch before the stub; UTC corrected database clock offsets but did not resolve this separate network boundary.
+- Draft PR #3281 preserves the candidate while focused integration proof remains incomplete. Draft checks intentionally do not run broad verification until readiness.
