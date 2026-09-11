@@ -70,7 +70,11 @@ export function buildHostedWebVitestArgs(
     : [...callerArgs];
   // Vitest's parser prints help/version output itself; leave those invocations
   // to the child, which will not execute any tests.
-  const informational = normalizedCallerArgs.some((arg) =>
+  const delimiter = normalizedCallerArgs.indexOf("--");
+  const optionArgs = delimiter === -1
+    ? normalizedCallerArgs
+    : normalizedCallerArgs.slice(0, delimiter);
+  const informational = optionArgs.some((arg) =>
     ["--help", "-h", "--version", "-v"].includes(arg)
   );
   const databaseFile = !informational

@@ -128,6 +128,8 @@ describe("hosted Web Vitest entrypoint", () => {
     ["test/action-approvals.db.test.ts", webTestFile],
     ["--", webTestFile, "test/action-approvals.db.test.ts"],
     ["--passWithNoTests", "test/action-approvals.db.test.ts"],
+    [webTestFile, "test/action-approvals.db.test.ts", "--", "--help"],
+    [webTestFile, "test/action-approvals.db.test.ts", "--", "--version"],
     ["-t", "renders", "test/action-approvals.db.test.ts"],
     ["--project", "hosted-web-store-config", "test/action-approvals.db.test.ts"],
   ])("rejects excluded database file requests: %j", (...callerArgs) => {
