@@ -100,7 +100,7 @@ import {
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { upsertKnowledgePage } from '../src/knowledge/service.ts'
 import {
   markAssistantContextSnapshotDirty,
@@ -211,6 +211,7 @@ import type {
   AssistantHostedDeviceConnectProvider,
   AssistantHostedDeviceToolRequest,
   AssistantHostedGroupSharedReadResponse,
+  AssistantUsageRecorder,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
@@ -229,6 +230,8 @@ import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
   buildAssistantCronExecutionInstructions,
+  claimResolvedAssistantCronJob,
+  executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
 import {
   findCanonicalAssistantCronRecordInList,
@@ -16248,6 +16251,83 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
 })
 
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
+  it.each([true, false])('sends one scheduled Telegram cue with live route audience %s', async (threadIsDirect) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-telegram-audience-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const created = await upsertAutomation({
+        continuityPolicy: 'fresh',
+        instructions: 'Send a concise reminder to take a two-minute stretch break now. Do not ask a question or claim the break is completed.',
+        now: new Date(),
+        route: {
+          channel: 'telegram', deliveryTarget: 'synthetic-telegram-destination',
+          identityId: null, participantId: null, threadId: 'opaque-conversation',
+        },
+        schedule: { kind: 'dailyLocal', localTime: '19:00' },
+        slug: 'synthetic-telegram-stretch', status: 'active', supportKind: 'reminder',
+        tags: [], title: 'Stretch reminder', vaultRoot: workingDirectory,
+      })
+      const source = findCanonicalAssistantCronRecordInList(
+        await listCanonicalAssistantCronRecords(workingDirectory), created.record.automationId,
+      )
+      if (!source) throw new Error('Expected saved automation.')
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+        jobId: resolveCanonicalAssistantCronJobId(source), now: new Date().toISOString(),
+      })
+      const paths = resolveAssistantStatePaths(workingDirectory)
+      const claimed = await claimResolvedAssistantCronJob({
+        job: { kind: 'canonical', source, runtimeState, job: projectCanonicalAssistantCronJob({ source, runtimeState }) },
+        paths,
+      })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const authority = {
+        channel: 'telegram' as const, containerMemberId: 'synthetic-member', threadId: 'synthetic-telegram-destination',
+      }
+      const resolveScheduledExternalThreadRoute = vi.fn(async () => ({ ...authority, threadIsDirect }))
+      const recordUsage = vi.fn<AssistantUsageRecorder['recordUsage']>(async (record) => {
+        recordRealCodexProviderUsage({ ...record, providerMetadataJson: null })
+      })
+      const providerEvents: unknown[] = []
+      const result = await executeClaimedAssistantCronJob({
+        deliveryDispatchMode: 'queue-only',
+        executionContext: { hosted: {
+          defaultTarget: modelTarget, memberId: 'synthetic-member', resolveScheduledExternalThreadRoute, userEnvKeys: [],
+          usageRecorder: { recordUsage },
+        } },
+        job: claimed, paths, trigger: 'scheduled', vault: workingDirectory,
+        onTraceEvent: (event) => providerEvents.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+      })
+      expect(result.runErrorCode, result.run.error ?? undefined).toBeNull()
+      expect(recordUsage).toHaveBeenCalledOnce()
+      expect(readCapabilityRoutingActions(providerEvents)).toEqual([])
+      expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledOnce()
+      expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledWith({
+        channel: 'telegram', signal: expect.any(AbortSignal), target: authority.threadId,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({
+        channel: 'telegram', threadIsDirect, externalThreadRouteAuthority: authority,
+        explicitTarget: authority.threadId, status: 'pending', operation: null,
+      })
+      const reply = intents[0]!.message
+      process.stdout.write(`[real-codex scheduled Telegram audience] ${JSON.stringify({ threadIsDirect, reply, intents: intents.length })}\n`)
+      expect(reply).toMatch(/stretch/iu)
+      expect(reply).toMatch(/(?:two|2)[ -]minute/iu)
+      expect(reply).not.toMatch(/\?|verified|audience|binding|completed|already (?:sent|done)/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it.each([
     {
       context: [
