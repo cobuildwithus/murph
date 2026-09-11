@@ -238,6 +238,11 @@ export async function runCanonicalReminderJourney(config: CanonicalLiveConfig): 
     })
     assert.ok(delivered)
     await reconcileAssistantCronDeliveryIntent({ intent: delivered, vault: fixture.vault })
+    const recurring = await getAssistantCronJob(fixture.vault, reminder.automationId)
+    assert.equal(recurring.enabled, true, 'The delivered recurring reminder must remain active before cancellation.')
+    assert.ok(recurring.state.nextRunAt)
+    assert.ok(Date.parse(recurring.state.nextRunAt) > Date.parse(job.state.nextRunAt), 'Reconciliation must schedule the next occurrence.')
+    assert.equal((await getAssistantCronStatus(fixture.vault)).enabledJobs, 1)
     await stopWarmCodexAppServer('canonical-reminder-before-cancel')
     await fixture.message('Cancel the recurring stretch reminder. I do not want any more stretch reminders.', {
       sessionId: created.session.sessionId,

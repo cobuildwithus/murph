@@ -41,6 +41,7 @@ Updated: 2026-09-10
 
 - The first gate proves the production assistant service and canonical state, not managed Cloudflare or external delivery. Existing hosted E2E owners cover those deterministic boundaries separately.
 - Use production Linq route resolution with synthetic external route metadata and acknowledgement for the reminder. Preserve the model-created canonical automation unchanged; do not patch its target to make it execute.
+- Require the delivered recurring reminder to remain enabled with an advanced next occurrence before cancellation, so a one-time reminder cannot satisfy the lifecycle proof.
 - Isolate the operator HOME and CLI PATH, reuse the chosen authentication home without copying auth, and pass production named permission definitions to the actual pinned Codex binary. A credential-free native configuration probe validates those definitions before live proof.
 
 ## Verification
@@ -51,10 +52,11 @@ Updated: 2026-09-10
 ## Evidence and handoff
 
 - Frozen install, generated catalogs and `pnpm build:test-runtime` passed.
+- Reconciled against main `d8b6cfcdbb2ce02f8646085146ebdfab2ac425b6`, preserving upstream reminder behavior and the local-daemon retirement. Reran the build, focused contracts, typechecks, actionlint and complexity guard successfully.
 - Three focused deterministic fixture/configuration cases passed, including native permission configuration, actual CLI readback, and unknown-command rejection.
 - `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/run-assistant-real-model-gate.test.ts scripts/run-assistant-real-codex-e2e.test.ts --maxWorkers=1` passed 41 tests. This includes real Vitest skipped-report rejection and checked-in workflow shell admission/result cases.
 - Assistant Engine typecheck and repository tools typecheck passed. Actionlint passed. Complexity guard passed for the new runner, maximum 16 and no function above 20.
-- Each focused live case uses `pnpm test:assistant:live -- --codex-home <AUTHENTICATED_SUBSCRIPTION_HOME> --test <EXACT_CASE_NAME>`, with `gpt-5.6-terra`. Meal save plus fresh-conversation restored-vault readback passed with two actual model turns. Reminder create/fire/cancel passed with three actual model turns, one delivered outbox record and no enabled reminder after cancel. Group privacy/quiet passed with two actual model turns and no unauthorized canonical/outbox effects. Synthetic replies reviewed: Ready; concise, truthful and matched actual effects.
+- After main reconciliation, each focused live case passed using `pnpm test:assistant:live -- --codex-home <AUTHENTICATED_SUBSCRIPTION_HOME> --test <EXACT_CASE_NAME>`, with `gpt-5.6-terra`. Meal save plus fresh-conversation restored-vault readback passed with two actual model turns. Reminder create/fire/cancel passed with three actual model turns, one delivered outbox record, a still-enabled next occurrence before cancel and no enabled reminder after cancel. Group privacy/quiet passed with two actual model turns and no unauthorized canonical/outbox effects. Synthetic replies reviewed: Ready; concise, truthful and matched actual effects.
 - Earlier pre-model authentication attempts failed on unavailable local homes; one authenticated alternate passed and was retained for the behavioral proof. Fixture development also exposed missing audience and named-permission setup, resolved at the fixture/configuration boundary. The cron defaults issue is recorded in the task's Frog entry.
 - Protected provider execution remains an external setup step: configure the main-only `assistant-real-model-sandbox` Environment and its dedicated test-project provider key. Local subscription proof does not certify the configured provider transport or private Worker egress.
-- The original completion owner owns candidate review, current-base reconciliation, exact-head CI, ReviewGPT, readiness and final plan closure. No production deployment or real member delivery was performed.
+- The original completion owner owns candidate review, exact-head CI, ReviewGPT, readiness and final plan closure. No production deployment or real member delivery was performed.
