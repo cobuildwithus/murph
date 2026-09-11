@@ -34,6 +34,7 @@ const notReady = { ready: false, totalGoalCount: 0, matchingGoalCount: 0, matchi
 describe("production canary canonical outcome observer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt));
     mocks.memberId.mockResolvedValue(memberId);
     mocks.authority.mockResolvedValue(undefined);
     mocks.pending.mockResolvedValue(null);
@@ -77,6 +78,13 @@ describe("production canary canonical outcome observer", () => {
   it("refuses a stale replica even when it already contains the expected goal", async () => {
     const workspace = await installEncryptedReplica([goal()]);
     mocks.workspace.mockResolvedValue({ ...workspace, snapshotRef: snapshotRef("b".repeat(64)) });
+    expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replica older than 24 hours even when its source is current", async () => {
+    await installEncryptedReplica([goal()]);
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt) + 24 * 60 * 60 * 1_000 + 1);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
     expect(mocks.session).not.toHaveBeenCalled();
   });

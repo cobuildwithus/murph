@@ -450,6 +450,14 @@ login state: old tabs can point at retired hosted-local servers, and CDP
 attachment waits for every existing target to initialize. A failed attachment
 also runs a constant-return probe through Kernel's server-side transport and
 reports only responsive/unavailable before the existing owned cleanup.
+Tunnel readiness navigates that remote browser page to the existing same-origin
+`/api/internal/health` endpoint and requires HTTP 200 at that exact URL within the
+unchanged 60-second cap and five-second probe attempts. The connect page then
+gets one navigation with its normal configured browser timeout, so a slow page
+cannot be mistaken for failed transport. These two failure stages omit URLs and
+raw navigation errors. The existing headed Chromium smoke lane proves this with
+a real HTTP server, including a connect response slower than five seconds,
+non-200 health, an exited tunnel child, and a bounded connect failure.
 Headed Chromium is the narrow
 mitigation that cleared the provider challenge observed in headless automation;
 only a successful protected-main run proves the complete result. On Garmin's
