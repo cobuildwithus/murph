@@ -1639,7 +1639,7 @@
                         },
                         "compact": {
                           "default": false,
-                          "description": "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+                          "description": "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
                           "type": "boolean"
                         },
                         "limit": {
