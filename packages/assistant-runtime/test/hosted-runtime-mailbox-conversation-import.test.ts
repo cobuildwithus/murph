@@ -1854,6 +1854,106 @@ describe("hosted mailbox conversation import adapter", () => {
     });
   });
 
+  test.each(["active", "stopped", "aborted", "unrelated", "failed"])(
+    "inherits Telegram typing only from a live matching session: %s",
+    async (scenario) => {
+      const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-telegram-followup-"));
+      tempRoots.push(parentRoot);
+      const vaultRoot = path.join(parentRoot, "vault");
+      const requests: HostedRuntimeLatencyTraceRequest[] = [];
+      const record = vi.fn(async (request: HostedRuntimeLatencyTraceRequest) => {
+        requests.push(request);
+        return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+      });
+      const runtime = createRuntime({ platform: { latencyTracePort: { record } } });
+      const importMessage = async (messageId: string, threadId = "12345") => {
+        const wake = createConversationWake({
+          eventId: `evt_telegram_${messageId}`,
+          message: {
+            channel: "telegram",
+            telegramMessage: {
+              messageId,
+              schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+              text: "Synthetic follow-up",
+              threadId,
+            },
+          },
+        });
+        const outcome = await importHostedConversationMailboxItem({
+          decodePayload: createDecodedPayloadDecoder(wake),
+          async importConversationWake() {
+            return { captureId: null, metrics: { nextWakeAt: null, parserProcessed: 0 } };
+          },
+          async prepareWakeContext() {},
+          item: createResolvedConversationMailboxItem({ dedupeKey: wake.eventId, id: `mailbox_${messageId}` }),
+          runtime,
+          runtimeAttemptId: "attempt_telegram_followup",
+          vaultRoot,
+        });
+        expect(outcome.status).toBe("imported");
+        const staged = requests.map(({ event }) => event).find((event) =>
+          event.type === "assistant_input_staged" && event.mailboxItemId === `mailbox_${messageId}`
+        );
+        if (staged?.type !== "assistant_input_staged") throw new Error("Expected staged input");
+        return staged.assistantInputId;
+      };
+      const initialInputId = await importMessage("1");
+      const initialEvent = await readAssistantInputEvent({ vault: vaultRoot, inputId: initialInputId });
+      if (!initialEvent?.conversation) throw new Error("Expected initial conversation input");
+      const conversationKey = resolveAssistantConversationLookupKey({
+        conversation: conversationRefFromAssistantInputConversation(initialEvent.conversation),
+      });
+      if (!conversationKey) throw new Error("Expected Telegram conversation key");
+      const admissionHook = vi.fn(async () => ({ kind: "no-new-input" as const }));
+      const controller = createAssistantActiveTurnInputController({
+        admissionHook,
+        conversationKeys: [conversationKey],
+        sessionId: "session_telegram_followup",
+        turnId: "turn_telegram_followup",
+        vault: vaultRoot,
+      });
+      const signalController = new AbortController();
+      const providerFetch = vi.fn<typeof fetch>(async () => new Response(
+        JSON.stringify(scenario === "failed" ? { ok: false, description: "Synthetic failure" } : { ok: true, result: true }),
+        { status: scenario === "failed" ? 400 : 200, headers: { "content-type": "application/json" } },
+      ));
+      const typing = channelActivity.createHostedAssistantChannelTypingDependencies({
+        forwardedEnv: {}, userEnv: {},
+        platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
+        providerFetch,
+        signal: signalController.signal,
+        latencyTraceContext: {
+          assistantInputIds: [initialInputId], latencyTracePort: { record },
+          runtimeAttemptId: "attempt_telegram_followup", source: "linq",
+        },
+      });
+      const start = typing.startTelegramTyping!({ target: "12345" });
+      const handle = scenario === "failed"
+        ? await start.then(() => { throw new Error("Expected failed start"); }, () => undefined)
+        : await start;
+      try {
+        if (scenario === "stopped") await handle?.stop();
+        if (scenario === "aborted") signalController.abort();
+        const followupInputId = await importMessage("2", scenario === "unrelated" ? "67890" : "12345");
+        await Promise.resolve();
+        const acceptances = requests.map(({ event }) => event).filter((event) =>
+          event.type === "assistant_milestone" && event.milestone === "telegram_typing_accepted"
+        );
+        expect(acceptances).toHaveLength(scenario === "active" ? 2 : scenario === "failed" ? 0 : 1);
+        if (scenario === "active") {
+          expect(acceptances[1]).toEqual({
+            ...acceptances[0], assistantInputIds: [followupInputId], source: "telegram",
+          });
+          expect(admissionHook).toHaveBeenCalled();
+        }
+        expect(providerFetch).toHaveBeenCalledOnce();
+      } finally {
+        controller.close();
+        await handle?.stop();
+      }
+    },
+  );
+
   test("records Telegram staged trace callbacks with Telegram source", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-latency-"));
     tempRoots.push(parentRoot);

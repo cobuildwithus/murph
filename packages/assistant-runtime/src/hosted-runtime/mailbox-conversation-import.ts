@@ -59,7 +59,10 @@ import {
   inferDirectEmailThreadFromParticipants,
 } from "@murphai/inboxd/connectors/email/directness";
 
-import { readHostedActiveLinqTypingAcceptedAt } from "./channel-activity.ts";
+import {
+  readHostedActiveLinqTypingAcceptedAt,
+  readHostedActiveTelegramTypingAcceptedAt,
+} from "./channel-activity.ts";
 import type {
   HostedMailboxConversationImportTiming,
   HostedMailboxItemImportOutcome,
@@ -650,7 +653,9 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
 
   const activeTypingAcceptedAt = input.wake.message.channel === "linq"
     ? readHostedActiveLinqTypingAcceptedAt(input.wake.message.linqMessage.chatId ?? "")
-    : null;
+    : input.wake.message.channel === "telegram"
+      ? readHostedActiveTelegramTypingAcceptedAt(input.wake.message.telegramMessage.threadId)
+      : null;
   try {
     void latencyTracePort.record({
       event: {
@@ -686,7 +691,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
           },
           milestones: [{
             at: new Date(activeTypingAcceptedAt).toISOString(),
-            milestone: "linq_typing_accepted",
+            milestone: source === "telegram" ? "telegram_typing_accepted" : "linq_typing_accepted",
           }],
         });
       }

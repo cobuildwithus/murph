@@ -21,7 +21,7 @@ by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
 reason in hosted failure events; Junction's progress keys remain provider-owned.
 
 Runtime progress diagnostics (aggregate alerts, per-message warm/cold typing
-alerts, and code-only first-pending evidence) are specified in
+alerts with active Telegram follow-up evidence, and code-only first-pending evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 
 This is a directory, not a second copy of the system contracts. Start with

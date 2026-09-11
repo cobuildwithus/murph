@@ -45,6 +45,8 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "legacy-no-receipt", { elapsed: 50_000, receivedAt: null });
       await insertTrace(tx, "telegram-slow", { source: "telegram", elapsed: 3001 });
       await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 3000 });
+      await insertTrace(tx, "telegram-active-followup", { source: "telegram", elapsed: -1000 });
+      await insertTrace(tx, "telegram-missing", { source: "telegram", elapsed: null });
       await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 10_000 });
       await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 10_001 });
       await insertTrace(tx, "telemetry-in-flight", { elapsed: null, receivedAt: new Date(now.getTime() - 5000) });
@@ -53,7 +55,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       );
       expect(rows.map((row) => row.id).sort()).toEqual([
         "cold-slow", "missing-cold", "missing-warm", "retained-after-cold", "rollout-slow",
-        "telegram-slow", "telegram-cold-slow", "unconfirmed", "warm-slow",
+        "telegram-slow", "telegram-cold-slow", "telegram-missing", "unconfirmed", "warm-slow",
       ].map((id) => `runtime-typing/${id}`).sort());
       expect(rows.find((row) => row.id.endsWith("retained-after-cold"))?.workspaceState).toBe("warm");
       // Acceptance happens two seconds after webhook receipt; those seconds count.

@@ -2139,8 +2139,10 @@ Last verified: 2026-09-04
   originally started cold. Missing warmth evidence uses the 10-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
-  Linq and Telegram acceptance milestones stay asynchronous. Linq's existing
-  active indicator carries its original acceptance into later messages; signup's
+  Linq and Telegram acceptance milestones stay asynchronous. Their existing
+  active indicators carry their original acceptance into later
+  messages for the exact target. Telegram observations retire when their handle
+  stops or its turn aborts; an older handle cannot clear a newer observation. Signup's
   early Web typing hint is also retained, so neither produces a missing-typing
   false positive. Callback arrival order cannot replace an earlier acceptance.
   No acceptance observation after 30 seconds is eligible as missing evidence;
