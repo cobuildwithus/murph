@@ -2874,9 +2874,14 @@ one encrypted table: member-bound users, accounts and sessions; independently
 encrypted pre-member verifications and rate limits. Blind selectors route reads,
 then the full authenticated record guards authority, including partial/count,
 transaction and bulk operations. Canonical member/contact writers compose with
-OTP consumption and session creation in one database-only transaction. Wrong
-codes commit their attempt budget; failures after proof roll back all writes.
-External delivery, provider reconciliation and crypto preparation precede locks.
+OTP consumption and session creation in one database-only transaction. Email
+codes commit wrong-attempt budgets; failures after proof roll back consumption
+and canonical/session writes. SMS uses Twilio Verify outside locks, reserving
+three checks in the existing encrypted challenge before provider work. A bound
+approval digest survives a later canonical rollback; final completion rechecks
+its exact generation and expiry before atomic consumption. Resends replace the
+generation before sending. Delivery, provider reconciliation and crypto work
+stay outside database transactions.
 
 The auth-user row is the one-way writer handoff. Legacy completions cannot
 change handed-off credentials or issue old browser sessions. Existing valid v2

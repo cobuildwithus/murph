@@ -4,6 +4,19 @@ Last verified: 2026-09-05
 
 ## Current Repo Checks
 
+Better Auth SMS provider contracts are covered by `better-auth-twilio-verify.test.ts`.
+Run the real PostgreSQL `better-auth-adapter-postgres-concurrency.test.ts`,
+`better-auth-member-postgres-concurrency.test.ts`, and
+`better-auth-sms-postgres-concurrency.test.ts` with
+`MURPH_TEST_POSTGRES_CONCURRENCY=1` through
+`pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/<file>`.
+These opt-in suites require migrated loopback `murph_dev_better_auth_login` or
+`murph_dev_twilio_verify`; ordinary Web runs skip their database cases. They
+exercise encrypted challenge state, concurrent budgets, resend/expiry fences,
+provider-approval recovery and atomic browser/native canonical login/session
+creation. Only provider/KMS boundaries use synthetic ports. Live Verify receipt,
+provider configuration and real-device qualification remain rollout gates.
+
 `apps/cloudflare/test/helpers/hosted-local-workspace-snapshot.test.ts` proves the
 shared hosted-local v2 snapshot seed with actual signed runtime-envelope
 verification, wrapped data keys, tar/zstd/AES-GCM construction, and the current
