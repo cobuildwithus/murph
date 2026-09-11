@@ -31,22 +31,25 @@ const HOSTED_LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000;
 const HOSTED_LINQ_TYPING_REFRESH_MS = 45_000;
 const HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS = 10 * 60_000;
 
+type HostedTypingAcceptance = number | Promise<number | null> | null;
+
 type HostedLinqTypingTargetState = {
-  acceptedAtMs: number | null;
+  acceptedAtMs: HostedTypingAcceptance;
+  signal?: AbortSignal;
   activeUntilMs: number;
   cooldownUntilMs: number;
 };
 
 const hostedLinqTypingTargets = new Map<string, HostedLinqTypingTargetState>();
-const hostedTelegramTypingTargets = new Map<string, { acceptedAtMs: number }>();
+const hostedTelegramTypingTargets = new Map<string, { acceptedAtMs: HostedTypingAcceptance }>();
 
-export function readHostedActiveTelegramTypingAcceptedAt(target: string): number | null {
+export function readHostedActiveTelegramTypingAcceptedAt(target: string): HostedTypingAcceptance {
   return hostedTelegramTypingTargets.get(target.trim())?.acceptedAtMs ?? null;
 }
 
-export function readHostedActiveLinqTypingAcceptedAt(target: string): number | null {
+export function readHostedActiveLinqTypingAcceptedAt(target: string): HostedTypingAcceptance {
   const state = hostedLinqTypingTargets.get(target.trim());
-  return state && state.activeUntilMs > Date.now() ? state.acceptedAtMs : null;
+  return state && !state.signal?.aborted && state.activeUntilMs > Date.now() ? state.acceptedAtMs : null;
 }
 
 export function buildHostedLinqChannelEnv(input: {
@@ -133,12 +136,15 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       }
       const activeTypingAcceptedAt = readHostedActiveLinqTypingAcceptedAt(target);
       if (activeTypingAcceptedAt !== null) {
-        recordHostedAssistantMilestonesBestEffort({
-          context: input.latencyTraceContext,
-          milestones: [{
-            at: new Date(activeTypingAcceptedAt).toISOString(),
-            milestone: "linq_typing_accepted",
-          }],
+        void Promise.resolve(activeTypingAcceptedAt).then((acceptedAt) => {
+          if (acceptedAt === null) return;
+          recordHostedAssistantMilestonesBestEffort({
+            context: input.latencyTraceContext,
+            milestones: [{
+              at: new Date(acceptedAt).toISOString(),
+              milestone: "linq_typing_accepted",
+            }],
+          });
         });
       }
       const typingTarget = claimHostedLinqTypingTarget(target);
@@ -146,6 +152,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         return undefined;
       }
 
+      typingTarget.state.signal = input.signal;
       const dependencies = requireHostedProviderFetchDependencies({
         env: buildHostedLinqChannelEnv({
           forwardedEnv: input.forwardedEnv,
@@ -156,15 +163,20 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       }, "Hosted Linq typing indicator");
       const typingRequestStartedAt = new Date().toISOString();
       try {
-        const handle = await startLinqTypingIndicator({
+        const handleReady = startLinqTypingIndicator({
           target,
         }, {
           ...dependencies,
           maxSessionMs: HOSTED_LINQ_TYPING_MAX_SESSION_MS,
           refreshMs: HOSTED_LINQ_TYPING_REFRESH_MS,
         });
-        const typingAcceptedAt = new Date();
-        typingTarget.state.acceptedAtMs = handle ? typingAcceptedAt.getTime() : null;
+        typingTarget.state.acceptedAtMs = handleReady.then(
+          (handle) => handle && !input.signal?.aborted ? Date.now() : null,
+          () => null,
+        );
+        const handle = await handleReady;
+        const acceptedAtMs = await typingTarget.state.acceptedAtMs;
+        typingTarget.state.acceptedAtMs = acceptedAtMs;
         recordHostedAssistantMilestonesBestEffort({
           context: input.latencyTraceContext,
           milestones: [
@@ -172,9 +184,9 @@ export function createHostedAssistantChannelTypingDependencies(input: {
               at: typingRequestStartedAt,
               milestone: "linq_typing_request_started",
             },
-            ...(handle
+            ...(acceptedAtMs !== null
               ? [{
-                  at: typingAcceptedAt.toISOString(),
+                  at: new Date(acceptedAtMs).toISOString(),
                   milestone: "linq_typing_accepted" as const,
                 }]
               : []),
@@ -213,19 +225,31 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         fetchImplementation: input.providerFetch,
         signal: input.signal,
       }, "Hosted Telegram typing indicator");
-      const handle = await startTelegramTypingIndicator(request, dependencies);
-      if (handle) {
-        const target = request.target.trim();
-        const state = { acceptedAtMs: Date.now() };
-        const release = () => {
-          if (hostedTelegramTypingTargets.get(target) === state) {
-            hostedTelegramTypingTargets.delete(target);
-          }
-          input.signal?.removeEventListener("abort", release);
-        };
-        if (!input.signal?.aborted) {
-          hostedTelegramTypingTargets.set(target, state);
-          input.signal?.addEventListener("abort", release, { once: true });
+      const target = request.target.trim();
+      const handleReady = startTelegramTypingIndicator(request, dependencies);
+      const state: { acceptedAtMs: HostedTypingAcceptance } = {
+        acceptedAtMs: handleReady.then(
+          (handle) => handle && !input.signal?.aborted ? Date.now() : null,
+          () => null,
+        ),
+      };
+      const release = () => {
+        if (hostedTelegramTypingTargets.get(target) === state) {
+          hostedTelegramTypingTargets.delete(target);
+        }
+        input.signal?.removeEventListener("abort", release);
+      };
+      if (!input.signal?.aborted) {
+        hostedTelegramTypingTargets.set(target, state);
+        input.signal?.addEventListener("abort", release, { once: true });
+      }
+      try {
+        const handle = await handleReady;
+        const acceptedAtMs = await state.acceptedAtMs;
+        state.acceptedAtMs = acceptedAtMs;
+        if (!handle || acceptedAtMs === null) {
+          release();
+          return handle;
         }
         recordHostedAssistantMilestonesBestEffort({
           context: input.latencyTraceContext ? {
@@ -233,7 +257,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
             source: "telegram",
           } : null,
           milestones: [{
-            at: new Date(state.acceptedAtMs).toISOString(),
+            at: new Date(acceptedAtMs).toISOString(),
             milestone: "telegram_typing_accepted",
           }],
         });
@@ -244,8 +268,10 @@ export function createHostedAssistantChannelTypingDependencies(input: {
             await handle.stop(options);
           },
         };
+      } catch (error) {
+        release();
+        throw error;
       }
-      return handle;
     },
   };
 }

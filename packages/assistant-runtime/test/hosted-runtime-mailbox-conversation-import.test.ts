@@ -1854,9 +1854,11 @@ describe("hosted mailbox conversation import adapter", () => {
     });
   });
 
-  test.each(["active", "stopped", "aborted", "unrelated", "failed"])(
-    "inherits Telegram typing only from a live matching session: %s",
-    async (scenario) => {
+  test.each((["telegram", "linq"] as const).flatMap((channel) =>
+    ["active", "stopped", "aborted", "unrelated", "failed", "pending", "pending-failed", "pending-aborted", "pending-unrelated", "pending-slow"].map((scenario) => ({ channel, scenario }))
+  ))(
+    "inherits $channel typing only from a live matching session: $scenario",
+    async ({ channel, scenario }) => {
       const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-telegram-followup-"));
       tempRoots.push(parentRoot);
       const vaultRoot = path.join(parentRoot, "vault");
@@ -1869,7 +1871,14 @@ describe("hosted mailbox conversation import adapter", () => {
       const importMessage = async (messageId: string, threadId = "12345") => {
         const wake = createConversationWake({
           eventId: `evt_telegram_${messageId}`,
-          message: {
+          message: channel === "linq" ? {
+            channel: "linq",
+            phoneLookupKey: "synthetic-contact",
+            linqMessage: {
+              chatId: threadId, messageId, from: "synthetic-contact", isFromMe: false,
+              parts: [{ type: "text", value: "Synthetic follow-up" }],
+            },
+          } : {
             channel: "telegram",
             telegramMessage: {
               messageId,
@@ -1913,12 +1922,24 @@ describe("hosted mailbox conversation import adapter", () => {
         vault: vaultRoot,
       });
       const signalController = new AbortController();
-      const providerFetch = vi.fn<typeof fetch>(async () => new Response(
-        JSON.stringify(scenario === "failed" ? { ok: false, description: "Synthetic failure" } : { ok: true, result: true }),
-        { status: scenario === "failed" ? 400 : 200, headers: { "content-type": "application/json" } },
-      ));
+      const pending = scenario.startsWith("pending");
+      const failed = scenario.endsWith("failed");
+      let releaseProvider!: () => void;
+      const providerReady = new Promise<void>((resolve) => { releaseProvider = resolve; });
+      const providerFetch = vi.fn<typeof fetch>(async () => {
+        if (pending) await providerReady;
+        return new Response(
+          JSON.stringify(failed ? { ok: false, description: "Synthetic failure" } : { ok: true, result: true }),
+          { status: failed ? 400 : 200, headers: { "content-type": "application/json" } },
+        );
+      });
       const typing = channelActivity.createHostedAssistantChannelTypingDependencies({
-        forwardedEnv: {}, userEnv: {},
+        forwardedEnv: { LINQ_API_TOKEN: "synthetic-token" }, userEnv: {},
+        linqDeliveryContexts: [{
+          target: "12345", directRecipientPhoneNumber: "synthetic-contact",
+          fromPhoneNumber: null, replyToMessageId: "1", routeAuthority: null,
+          service: null, threadIsDirect: true,
+        }],
         platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
         providerFetch,
         signal: signalController.signal,
@@ -1927,29 +1948,50 @@ describe("hosted mailbox conversation import adapter", () => {
           runtimeAttemptId: "attempt_telegram_followup", source: "linq",
         },
       });
-      const start = typing.startTelegramTyping!({ target: "12345" });
-      const handle = scenario === "failed"
-        ? await start.then(() => { throw new Error("Expected failed start"); }, () => undefined)
-        : await start;
+      const start = (channel === "telegram" ? typing.startTelegramTyping! : typing.startLinqTyping!)({ target: "12345" });
+      const settledStart = start.catch(() => undefined);
+      let handle = pending ? undefined : await settledStart;
+      let restoreAcceptanceClock = () => {};
       try {
         if (scenario === "stopped") await handle?.stop();
         if (scenario === "aborted") signalController.abort();
-        const followupInputId = await importMessage("2", scenario === "unrelated" ? "67890" : "12345");
+        const followupReceivedAt = Date.now();
+        const followupInputId = await importMessage("2", scenario.endsWith("unrelated") ? "67890" : "12345");
+        if (pending) {
+          // Import and live admission must finish while the sole provider call is pending.
+          expect(providerFetch).toHaveBeenCalledOnce();
+          if (!scenario.endsWith("unrelated")) expect(admissionHook).toHaveBeenCalled();
+          if (scenario === "pending-aborted") signalController.abort();
+          const acceptanceClock = vi.spyOn(Date, "now").mockReturnValue(
+            followupReceivedAt + (scenario === "pending-slow" ? 3001 : 1000),
+          );
+          restoreAcceptanceClock = () => { acceptanceClock.mockRestore(); };
+          releaseProvider();
+          handle = await settledStart;
+        }
         await Promise.resolve();
         const acceptances = requests.map(({ event }) => event).filter((event) =>
-          event.type === "assistant_milestone" && event.milestone === "telegram_typing_accepted"
+          event.type === "assistant_milestone" && event.milestone === `${channel}_typing_accepted`
         );
-        expect(acceptances).toHaveLength(scenario === "active" ? 2 : scenario === "failed" ? 0 : 1);
-        if (scenario === "active") {
-          expect(acceptances[1]).toEqual({
-            ...acceptances[0], assistantInputIds: [followupInputId], source: "telegram",
-          });
+        const inherited = scenario === "active" || scenario === "pending" || scenario === "pending-slow";
+        expect(acceptances).toHaveLength(inherited ? 2 : failed || scenario === "pending-aborted" ? 0 : 1);
+        if (inherited) {
+          expect(acceptances).toEqual(expect.arrayContaining([
+            { ...acceptances[0], assistantInputIds: [initialInputId], source: channel },
+            { ...acceptances[0], assistantInputIds: [followupInputId], source: channel },
+          ]));
           expect(admissionHook).toHaveBeenCalled();
+          if (pending) expect(acceptances[0]?.at).toBe(new Date(
+            followupReceivedAt + (scenario === "pending-slow" ? 3001 : 1000),
+          ).toISOString());
         }
-        expect(providerFetch).toHaveBeenCalledOnce();
+        expect(providerFetch).toHaveBeenCalledTimes(channel === "linq" && scenario === "stopped" ? 2 : 1);
       } finally {
         controller.close();
+        releaseProvider();
+        handle = await settledStart;
         await handle?.stop();
+        restoreAcceptanceClock();
       }
     },
   );

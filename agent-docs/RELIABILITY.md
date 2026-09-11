@@ -2140,9 +2140,13 @@ Last verified: 2026-09-04
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
   Linq and Telegram acceptance milestones stay asynchronous. Their existing
-  active indicators carry their original acceptance into later
-  messages for the exact target. Telegram observations retire when their handle
-  stops or its turn aborts; an older handle cannot clear a newer observation. Signup's
+  active indicators carry their original acceptance into later messages for the
+  exact target. An import during a pending typing start observes that same
+  request's eventual acceptance after staging, without awaiting it on the reply
+  path; failed or aborted starts supply no acceptance. Telegram observations
+  retire when their handle stops or its turn aborts; an older handle cannot clear
+  a newer observation. Linq observations exclude aborted sessions while retaining
+  the existing provider cooldown. Signup's
   early Web typing hint is also retained, so neither produces a missing-typing
   false positive. Callback arrival order cannot replace an earlier acceptance.
   No acceptance observation after 30 seconds is eligible as missing evidence;

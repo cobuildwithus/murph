@@ -678,10 +678,11 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
           ? {}
           : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
-    }).then(() => {
-      // A message steered into an active turn may never start a new typing
-      // session. Preserve the actual indicator already present at import.
-      if (activeTypingAcceptedAt !== null && input.runtimeAttemptId) {
+    }).then(async () => {
+      // Live-admitted input shares the existing session, including a provider
+      // start still in flight. Observe it only after staging, off the reply path.
+      const acceptedAt = await activeTypingAcceptedAt;
+      if (acceptedAt !== null && input.runtimeAttemptId) {
         recordHostedAssistantMilestonesBestEffort({
           context: {
             assistantInputIds: [input.inputId],
@@ -690,7 +691,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
             source,
           },
           milestones: [{
-            at: new Date(activeTypingAcceptedAt).toISOString(),
+            at: new Date(acceptedAt).toISOString(),
             milestone: source === "telegram" ? "telegram_typing_accepted" : "linq_typing_accepted",
           }],
         });

@@ -44,4 +44,23 @@ No schema, provider policy, prompt, or delivery behavior changes are needed.
   further issue; provider calls and telemetry scheduling remain unchanged.
 - Internal-only change: no changelog or live model journey applies because no
   prompt, tool, reply, or provider-input behavior changed.
-- Round 3 and exact-head CI remain pending on the next pushed candidate.
+- Round 3 on `6c59c0a0549f6dffca07db0ac649751d59237e0d` confirmed the
+  pending-start ordering remains uncovered. User resumed the correction and
+  explicitly authorized a fourth review on 2026-09-11.
+- Retrospective: sampling only resolved timestamps missed an in-flight transition.
+  The existing handoff now exposes the pending acceptance promise; staged imports
+  observe its result asynchronously. The identical Linq omission was reproduced
+  and corrected at the same existing owner. No queue, durable owner or retry loop.
+- Both real-provider pending-start regressions failed against the previous head
+  (only initial input acceptance), and pass with the correction.
+- Final focused proof: 208 runtime tests and 4 PostgreSQL alert tests pass.
+  Runtime typecheck, complexity, docs drift and diff checks pass. Pending starts
+  resolve at simulated 1,000 ms or 3,001 ms with the original timestamp retained;
+  failed/aborted starts and unrelated targets supply no inherited acceptance.
+  Pending predecessor completion and stop cannot erase a newer Telegram session.
+- Parent candidate review confirms no extra provider call, foreground wait on
+  telemetry, persistent owner, queue or retry. Existing Linq cooldown is preserved.
+- Previous-head CI failures were unrelated: the canary fixture freshness fix
+  landed on main in #3264; private compatibility failed installing Temporal CLI
+  with ECONNRESET before any reader proof. New exact-head CI must prove both.
+- Round 4 and exact-head CI remain pending on the next pushed candidate.

@@ -229,11 +229,11 @@ test("hosted Linq typing records exact request and acceptance milestones without
   assistantInputIds[0] = "input_typing_trace_2";
   await typing.startLinqTyping?.({ target: "chat_typing_trace_1" });
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
-  expect(latencyTraceRecord).toHaveBeenLastCalledWith({ event: expect.objectContaining({
+  await vi.waitFor(() => expect(latencyTraceRecord).toHaveBeenLastCalledWith({ event: expect.objectContaining({
     assistantInputIds: ["input_typing_trace_2"],
     at: acceptedAt,
     milestone: "linq_typing_accepted",
-  }) });
+  }) }));
   await handle?.stop();
 });
 
@@ -1167,14 +1167,19 @@ test("Telegram typing records acceptance only after the provider starts the indi
   expect(record).not.toHaveBeenCalled();
 });
 
-test("Telegram typing evidence follows its handle without awaiting telemetry", async () => {
+test.each([false, true])("Telegram typing evidence follows its handle without awaiting telemetry (pending predecessor: %s)", async (pendingPredecessor) => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-09-11T00:00:00.000Z"));
   const signalController = new AbortController();
   const firstStop = vi.fn(async () => { throw new Error("synthetic stop failure"); });
   const secondStop = vi.fn(async () => undefined);
+  let releaseFirst!: () => void;
+  const firstReady = new Promise<void>((resolve) => { releaseFirst = resolve; });
   mocks.startTelegramTypingIndicator
-    .mockResolvedValueOnce({ stop: firstStop })
+    .mockImplementationOnce(async () => {
+      if (pendingPredecessor) await firstReady;
+      return { stop: firstStop };
+    })
     .mockResolvedValueOnce({ stop: secondStop });
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {}, userEnv: {},
@@ -1188,18 +1193,26 @@ test("Telegram typing evidence follows its handle without awaiting telemetry", a
     },
   });
   try {
-    const first = await typing.startTelegramTyping?.({ target: "synthetic-lifetime" });
-    expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBe(Date.now());
+    const firstStart = typing.startTelegramTyping?.({ target: "synthetic-lifetime" });
+    if (!pendingPredecessor) {
+      await firstStart;
+      expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBe(Date.now());
+    }
     vi.advanceTimersByTime(1000);
     const second = await typing.startTelegramTyping?.({ target: "synthetic-lifetime" });
+    const secondAcceptedAt = Date.now();
+    vi.advanceTimersByTime(1000);
+    releaseFirst();
+    const first = await firstStart;
     await expect(first?.stop()).rejects.toThrow("synthetic stop failure");
-    expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBe(Date.now());
+    expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBe(secondAcceptedAt);
     signalController.abort();
     expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBeNull();
     await second?.stop({ providerStop: false });
     expect(secondStop).toHaveBeenCalledWith({ providerStop: false });
     expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledTimes(2);
   } finally {
+    releaseFirst();
     signalController.abort();
     vi.useRealTimers();
   }
