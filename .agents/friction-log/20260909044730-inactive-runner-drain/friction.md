@@ -1,6 +1,7 @@
 ---
 title: 'Inactive runner drain guard hides pagination rejection reason'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3098'
 ---
 
 ## Expected Behavior

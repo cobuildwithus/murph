@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local E2E seeds emit legacy snapshots after v2-only restore'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3232'
 ---
 
 ## Expected Behavior

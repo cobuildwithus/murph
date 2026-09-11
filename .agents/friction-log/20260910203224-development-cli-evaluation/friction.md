@@ -1,6 +1,7 @@
 ---
 title: 'Development CLI evaluation forwards the argument separator to Wrangler'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3238'
 ---
 
 ## Expected Behavior

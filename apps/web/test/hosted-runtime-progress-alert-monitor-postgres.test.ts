@@ -4,7 +4,7 @@ import {
   HostedBillingStatus,
   Prisma,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { HOSTED_MAILBOX_RETENTION_MS } from "@/src/lib/hosted-mailbox/store";
 import {
@@ -28,7 +28,7 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime progress alert PostgreSQL boundary",
   () => {
-    it("filters exact runtime authority and usage pauses before the eligible cap", async () => {
+    it("filters exact runtime authority and usage pauses", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback runtime progress PostgreSQL proof.");
       const prefix = `progress-proof-${randomUUID()}`;
@@ -299,60 +299,6 @@ describe.skipIf(!runPostgresProof)(
             invalidRowCount: 2,
           });
 
-          await seedExcludedCapRows({
-            now,
-            prefix,
-            tx,
-          });
-          const afterExcludedCap = await readHostedRuntimeProgressHealth({
-            now,
-            prisma: tx,
-          });
-          expect(afterExcludedCap).toMatchObject({
-            excludedInactiveLaneCount: 20_000,
-            scanTruncated: true,
-            stalledLaneCount: 0,
-            stalledRuntimeCount: 0,
-          });
-
-          await tx.$executeRaw(Prisma.sql`
-            UPDATE hosted_member
-            SET billing_status = 'active', updated_at = ${now}
-            WHERE id LIKE ${`${prefix}-cap-inactive-%`}
-          `);
-          const suffixLookupPlan = await tx.$queryRaw<
-            Array<{ "QUERY PLAN": string }>
-          >(Prisma.sql`
-            EXPLAIN (COSTS OFF)
-            SELECT mailbox_item.created_at
-            FROM hosted_mailbox_item AS mailbox_item
-            WHERE mailbox_item.user_id = ${`${prefix}-cap-inactive-1`}
-              AND mailbox_item.lane = 'system'
-              AND mailbox_item.lane_seq > 1
-              AND mailbox_item.created_at
-                > ${new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS)}
-              AND (
-                mailbox_item.expires_at IS NULL
-                OR mailbox_item.expires_at > ${now}
-              )
-            ORDER BY mailbox_item.lane_seq ASC
-            LIMIT 1
-          `);
-          expect(
-            suffixLookupPlan.map((row) => row["QUERY PLAN"]).join("\n"),
-          ).toMatch(
-            /hosted_mailbox_item_user_id_lane_lane_seq_(?:idx|key)/,
-          );
-          await expect(readHostedRuntimeProgressHealth({
-            now,
-            prisma: tx,
-          })).resolves.toMatchObject({
-            anomalous: true,
-            scanTruncated: true,
-            stalledLaneCount: 20_000,
-            stalledRuntimeCount: 20_000,
-          });
-
           proofCompleted = true;
           throw rollback;
         }, {
@@ -368,6 +314,88 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     }, 240_000);
+
+    describe.each(["inactive", "active"] as const)("candidate cap with %s members", (access) => {
+      const prefix = `progress-cap-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00.000Z");
+      let prisma: ReturnType<typeof createPrismaClient> | null = null;
+
+      beforeAll(async () => {
+        prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+        // Commit fixture setup separately so one complete production scan owns
+        // its transaction budget, independently of bulk seeding and other cases.
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT set_config('statement_timeout', '180s', true)
+          `);
+          await seedExcludedCapRows({ now, prefix, tx });
+          if (access === "active") {
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE hosted_member
+              SET billing_status = 'active', updated_at = ${now}
+              WHERE id LIKE ${`${prefix}-cap-inactive-%`}
+            `);
+          }
+          await tx.$executeRaw(Prisma.sql`
+            ANALYZE hosted_member, hosted_mailbox_lane_counter,
+              hosted_workspace, hosted_mailbox_item
+          `);
+        }, { maxWait: 10_000, timeout: 210_000 });
+      }, 240_000);
+
+      afterAll(async () => {
+        if (!prisma) return;
+        try {
+          await prisma.hostedMember.deleteMany({
+            where: { id: { startsWith: prefix } },
+          });
+        } finally {
+          await prisma.$disconnect();
+        }
+      }, 240_000);
+
+      it("keeps the full candidate cap and exact runtime authority", async () => {
+        if (!prisma) throw new Error("Expected the isolated cap fixture database.");
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT set_config('statement_timeout', '180s', true)
+          `);
+          if (access === "active") {
+            const suffixLookupPlan = await tx.$queryRaw<
+              Array<{ "QUERY PLAN": string }>
+            >(Prisma.sql`
+              EXPLAIN (COSTS OFF)
+              SELECT mailbox_item.created_at
+              FROM hosted_mailbox_item AS mailbox_item
+              WHERE mailbox_item.user_id = ${`${prefix}-cap-inactive-1`}
+                AND mailbox_item.lane = 'system'
+                AND mailbox_item.lane_seq > 1
+                AND mailbox_item.created_at
+                  > ${new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS)}
+                AND (
+                  mailbox_item.expires_at IS NULL
+                  OR mailbox_item.expires_at > ${now}
+                )
+              ORDER BY mailbox_item.lane_seq ASC
+              LIMIT 1
+            `);
+            expect(
+              suffixLookupPlan.map((row) => row["QUERY PLAN"]).join("\n"),
+            ).toMatch(
+              /hosted_mailbox_item_user_id_lane_lane_seq_(?:idx|key)/,
+            );
+          }
+          const health = await readHostedRuntimeProgressHealth({ now, prisma: tx });
+          expect(health).toMatchObject({
+            excludedInactiveLaneCount: access === "inactive" ? 20_000 : 0,
+            scanTruncated: true,
+            stalledLaneCount: access === "active" ? 20_000 : 0,
+            stalledRuntimeCount: access === "active" ? 20_000 : 0,
+          });
+          if (access === "active") expect(health.anomalous).toBe(true);
+        }, { maxWait: 10_000, timeout: 210_000 });
+      }, 240_000);
+    });
 
     it("selects the true unstamped conversation head and leaves system semantics unchanged", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -1165,6 +1193,9 @@ async function seedExcludedCapRows(input: {
       ${createdAt}
     FROM generate_series(1, 20001) AS ordinal
   `);
+  // Bulk parent rows are uncommitted, so autovacuum cannot refresh their
+  // statistics before the child inserts perform 20,001 foreign-key checks.
+  await input.tx.$executeRaw(Prisma.sql`ANALYZE hosted_member`);
   await input.tx.$executeRaw(Prisma.sql`
     INSERT INTO hosted_mailbox_lane_counter (
       user_id,

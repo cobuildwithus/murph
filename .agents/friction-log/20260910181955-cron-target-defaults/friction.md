@@ -1,6 +1,7 @@
 ---
 title: 'Cron target defaults discard explicit audience directness'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3239'
 ---
 
 ## Expected Behavior

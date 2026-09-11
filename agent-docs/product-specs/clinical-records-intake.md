@@ -169,11 +169,12 @@ Epic's official R4 sandbox. It uses only
 `epic-policy.ts` authors one ordered literal query catalog: stable ids,
 resource family, operation, fingerprint template, fixed search parameters,
 optional executed window, and registration API keys. Scopes, family order and
-frozen plans derive from that catalog. All 28 queries across 17 families remain
-active; each granted family expands into all of its variants. The 41 API
-registration entries also cover supporting reads, but runtime performs no
-reference traversal or backfill. Unused capability and traversal metadata is
-absent; directory presence is not a capability guarantee.
+frozen plans derive from that catalog. All 40 queries across 17 primary families
+remain active; each granted family expands into all of its variants. The 70 API
+registration entries also cover supporting reads. Runtime performs only the
+explicitly bounded Media-to-Binary diagnostic-image hop and no general reference
+traversal or backfill. Unused capability metadata is absent; directory presence
+is not a capability guarantee.
 
 ### Additional patient-facing Epic variants
 
@@ -214,14 +215,15 @@ retryable failure because it is deterministic and non-mutating. The turn shares 
 in-flight or successful launcher request and clears only an exact rejected request so
 a later explicit invocation can retry. Message-authorized link creation does not use
 automatic transport replay because it creates the live single-use claim.
-Once an import is queued, the retrieval runtime uses three signed POST operations:
+Once an import is queued, the retrieval runtime uses four signed POST operations:
 
 - `/api/internal/clinical-records/runtime/read-run`
 - `/api/internal/clinical-records/runtime/fetch-page`
+- `/api/internal/clinical-records/runtime/fetch-document`
 - `/api/internal/clinical-records/runtime/record-outcome`
 
 The web control plane fetches only the exact configured FHIR origin and exact
-resource-family path. Patient uses a direct patient read; the other 23 primary
+resource-family path. Patient uses a direct patient read; the other 39 primary
 queries use their policy-owned patient search template and fixed category where
 required. All new queries use a whole-family slice without a client-supplied lower
 or upper date cutoff. Clinical notes are no longer limited to 90 days, and
@@ -240,10 +242,14 @@ and logical-page identity; URL parsing is used only for network policy and
 fetching, and randomized cursor ciphertext never defines page identity. Cursors
 remain valid only while their member-bound run and generation remain active.
 
-Limits are 5 MiB per page, 500 provider fetch attempts, 32 MiB of charged
-provider egress per run, 500 Bundle entries per page, and 17 Epic primary
-resource families. The shared FHIR schema admits those families plus the legacy
-MedicationStatement family, for 18 total.
+Limits are 5 MiB per FHIR page, 20 MiB per decoded document, 2,000 document
+descriptors and 64 MiB of document bytes while a page is being processed. Each
+page and document request is streamed and claimed independently; the old
+500-request and 32 MiB cumulative run cutoffs are removed. A final database
+integer-capacity guard and bounded replay count remain, and provider, token,
+authorization, page-resource and parser limits can still produce explicit
+incomplete coverage. The shared FHIR schema admits the 17 primary families plus
+the legacy MedicationStatement family, for 18 total.
 New runs freeze an adapter-owned retrieval plan with stable query-scope ids and
 deterministic slice ids. That plan can represent multiple queries for one FHIR
 resource type and ordered, non-overlapping bounded windows without treating
@@ -252,7 +258,7 @@ single retrieval representation; completed-slice references own completion.
 Families and counts are derived. Every page request, opaque cursor,
 server-derived request fingerprint, durable request claim, and terminal outcome
 is checked against the frozen query-scope and slice identity before provider
-egress or outcome mutation. New OAuth requests deduplicate the 28 queries into
+egress or outcome mutation. New OAuth requests deduplicate the 40 queries into
 17 resource permissions, and each granted family expands back into every active
 query variant in the frozen run plan. A partial grant still requires Patient plus
 at least one clinical family and executes all active queries for each granted
@@ -288,13 +294,13 @@ ranges hold the containing observation for review instead of being dropped.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final
-outcomes are idempotent under JSON key reordering. Runtime checkpoints use v3;
+outcomes are idempotent under JSON key reordering. Runtime checkpoints use v4;
 only the external snapshot importer retains local v2/v3 manifest compatibility.
 The hosted writer emits v3 manifests and derives outgoing pagination edges
 from raw Bundles, preserving root/reachability/cycle/family/base validation.
 
-Completed slices survive an unrelated later byte/page/resource bound. The
-unfinished slice is discarded without refunding historical charges. Meaningful
+Completed slices and prior page batches survive an unrelated later byte/page/resource bound. The
+unfinished work remains checkpointed for retry without refunding historical charges. Meaningful
 OperationOutcome warnings/errors mark coverage incomplete; empty uncertain
 searches never establish allergy absence. SMART `.s` grants authorize search.
 SUBSETTED resources and unorderable same-identity siblings remain raw evidence
@@ -308,10 +314,10 @@ retry loop; transient failures retain it.
 ### Bounded repeat import
 
 The existing member/provider unique source admits at most eight immutable
-retrieval snapshots and a member has at most twenty sources. A snapshot remains
-bounded to 32 MiB plus its 1 MiB manifest, so retained raw snapshot content is
-at most 264 MiB per source. Generations consume that allowance even when a run
-fails. No raw evidence is pruned, so canonical raw references remain valid.
+retrieval snapshots and a member has at most twenty sources. Each page batch has
+its own bounded manifest and raw evidence; prior batches remain immutable and
+available to prove continuation. Generations consume that allowance even when a
+run fails. No raw evidence is pruned, so canonical raw references remain valid.
 This bounds snapshots without a garbage collector, new service or state owner.
 Repeated unchanged facts use existing canonical idempotency; newer comparable
 corrections use existing revision handling. A fresh authorization increments
@@ -365,7 +371,7 @@ Register an incoming OAuth 2.0 app for the patient consumer with a
 non-confidential client and S256 PKCE in
 [Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, use the
 Murph product name without adding `Epic` to the app name, set Automatic
-Client Distribution to `None`, and register the following exact 41 names from
+Client Distribution to `None`, and register the following exact 70 names from
 Epic's current
 [FHIR catalog](https://open.epic.com/Interface/FHIR):
 
@@ -401,8 +407,8 @@ Patient.Read (Demographics) (R4)
 Practitioner.Read (Organizational Directory) (R4)
 PractitionerRole.Read (Organizational Directory) (R4)
 Procedure.Search (Orders) (R4)
-Procedure.Search (Patient-Reported Surgical History) (R4)
 Procedure.Search (Surgeries) (R4)
+Procedure.Search (Patient-Reported Surgical History) (R4)
 Provenance.Read (R4)
 ServiceRequest.Read (Orders) (R4)
 ServiceRequest.Search (Orders) (R4)
@@ -411,11 +417,43 @@ DocumentReference.Search (Radiology Results) (R4)
 DocumentReference.Search (External CCDA) (R4)
 DocumentReference.Search (Outside Record - Clinical Notes) (R4)
 Observation.Search (Outside Record Vital Signs) (R4)
+Binary.Read (External CCDA) (R4)
+Binary.Read (Outside Record - Clinical Notes) (R4)
+Binary.Read (Radiology Results) (R4)
+Binary.Read (Labs) (R4)
+Binary.Read (Generated CDAs) (R4)
+Binary.Read (Patient-Entered Questionnaires) (R4)
+Binary.Read (Correspondences) (R4)
+Binary.Read (Handoff) (R4)
+Binary.Read (Minimum Data Set) (R4)
+DocumentReference.Search (Labs) (R4)
+DocumentReference.Search (Generated CDAs) (R4)
+DocumentReference.Search (Patient-Entered Questionnaires) (R4)
+DocumentReference.Search (Correspondences) (R4)
+DocumentReference.Search (Handoff) (R4)
+DocumentReference.Search (Minimum Data Set) (R4)
+Binary.Read (Document Information) (R4)
+DocumentReference.Search (Document Information) (R4)
+Binary.Read (Clinical References) (R4)
+DocumentReference.Search (Clinical References) (R4)
+Binary.Read (HIS) (R4)
+DocumentReference.Search (HIS) (R4)
+Binary.Read (OASIS) (R4)
+DocumentReference.Search (OASIS) (R4)
+Binary.Read (IRF-PAI) (R4)
+DocumentReference.Search (IRF-PAI) (R4)
+Binary.Read (Advance Directive) (R4)
+DocumentReference.Search (Advance Directive) (R4)
+Media.Read (Study) (R4)
+Binary.Read (Study) (R4)
 ```
 
-Registration covers both the 28 active primary queries and supporting dependency
-reads. Runtime requests only the 17 unique primary resource permissions and does
-not execute dependency traversal. Resource families without a canonical mapper
+Registration covers the 40 active primary queries and supporting dependency
+reads. Runtime requests 17 unique primary resource permissions plus a separate
+patient Binary read permission when document or diagnostic-report access is
+requested. Binary remains a supporting body download, never a primary search
+family. A useful partial grant without Binary access preserves primary records
+and reports linked document bodies as unavailable. Resource families without a canonical mapper
 are retained as patient-bound raw evidence with an explicit review decision; no
 family is silently dropped. The exact full-coverage registration cannot use
 USCDI-v3 automatic distribution: `FamilyMemberHistory.Search (R4)`,
@@ -427,6 +465,52 @@ so the registration contract omits it instead of substituting unrelated
 because they expose different data surfaces. Each target Epic customer must
 instead download/request this client ID. Do not request refresh tokens or
 `offline_access`.
+[Media.Read (Study)](https://fhir.epic.com/Specifications?api=10989) and
+[Binary.Read (Study)](https://fhir.epic.com/Specifications?api=11002) support
+the key diagnostic images linked from DiagnosticReport, including cardiology
+and endoscopy JPEG/PNG images. Media read permission is requested when
+DiagnosticReport is requested; it remains separate from primary-family access.
+The document catalog requests lifetime clinical notes, lab narratives and
+pathology reports through the shared `clinical-note` search; imaging reports,
+external CCDAs, outside notes, generated `summary-document` CCDAs, submitted
+`questionnaire-response` PDFs, correspondence and handoff reports have their
+own category searches. Explicit category searches also request native stored documents and scans,
+clinical reference materials, advance directives, and MDS, HIS, OASIS and
+IRF-PAI assessments. Each subtype must be
+registered even where Epic shares a request URL. These search and body contracts
+are documented in Epic's [clinical notes](https://fhir.epic.com/Specifications?api=1048),
+[lab documents](https://fhir.epic.com/Specifications?api=10133),
+[generated CDAs](https://fhir.epic.com/Specifications?api=10506),
+[questionnaires](https://fhir.epic.com/Specifications?api=10436),
+[correspondence](https://fhir.epic.com/Specifications?api=10244),
+[handoff](https://fhir.epic.com/Specifications?api=10131) and
+[MDS](https://fhir.epic.com/specifications?api=10284),
+[native documents](https://fhir.epic.com/Specifications?api=10310),
+[clinical references](https://fhir.epic.com/Specifications?api=10318),
+[advance directives](https://fhir.epic.com/Specifications?api=40299),
+[HIS](https://fhir.epic.com/Specifications?api=10129),
+[OASIS](https://fhir.epic.com/Specifications?api=10127) and
+[IRF-PAI](https://fhir.epic.com/Specifications?api=10287) specifications.
+Epic's IRF-PAI request-parameter table names category `IRFPAI`, while its sample
+request names `IRF-PAI`. Both documented spellings have separate lifetime
+queries sharing one API registration; an unsupported spelling remains an
+explicit incomplete slice for that provider.
+The unfiltered DocumentReference search only includes subtypes whose required
+parameters are valid; it cannot substitute for these category searches.
+Native-document metadata can describe documents stored in an external system,
+but Epic does not return their binaries. Outside clinical notes can similarly
+omit embedded media.
+Generated CDA searches are limited by Epic to 80 per patient per day. They
+produce summaries from current clinical content, not an archive of every past
+CDA version. Binary search APIs are for Bulk FHIR clients; this patient app uses
+[Binary reads](https://fhir.epic.com/Specifications?api=1044). Non-patient scanning
+workflows, provider photos and administrative documents are not queried.
+[Prior-auth supporting binaries](https://fhir.epic.com/Specifications?api=11398)
+are explicitly unavailable to patient-facing applications.
+Patient-facing security, unavailable provider subtypes and explicit incomplete
+outcomes still limit coverage; the catalog does not assert that every record in
+the hospital is exposed.
+
 Epic recommends a separate localhost-only
 test app that is never activated. Register the callback with the actual local
 port, for example

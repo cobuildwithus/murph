@@ -7,6 +7,8 @@ import {
   selectSmartRequestedScopes,
 } from "@/src/lib/clinical-records/smart";
 
+import { epicBinaryReadIsGranted, epicMediaReadIsGranted } from "@/src/lib/clinical-records/epic-policy";
+
 const baseScopes = ["openid", "fhirUser", "launch/patient"];
 const resourceTypes = ["Patient", "Observation", "DiagnosticReport"];
 
@@ -37,6 +39,8 @@ describe("Clinical Records SMART negotiation", () => {
       "patient/Patient.r",
       "patient/Observation.s",
       "patient/DiagnosticReport.s",
+      "patient/Binary.r",
+      "patient/Media.r",
     ]);
     expect(configuration.requestedResourceTypes).toEqual(resourceTypes);
   });
@@ -51,6 +55,8 @@ describe("Clinical Records SMART negotiation", () => {
       "patient/Patient.read",
       "patient/Observation.read",
       "patient/DiagnosticReport.read",
+      "patient/Binary.read",
+      "patient/Media.read",
     ]);
 
     expect(() => selectSmartRequestedScopes({
@@ -100,6 +106,34 @@ describe("Clinical Records SMART negotiation", () => {
       ],
       resourceTypes,
     )).toEqual(["DiagnosticReport"]);
+  });
+
+  it("retains primary document access when the provider withholds Binary read permission", async () => {
+    const selection = selectSmartRequestedScopes({
+      capabilities: ["permission-v2", "context-standalone-patient"],
+      requestedBaseScopes: baseScopes,
+      resourceTypes: ["Patient", "DocumentReference"],
+    });
+    expect(selection.scopes).toContain("patient/Binary.r");
+    const token = await exchangeSmartAuthorizationCode({
+      clientId: "client-id", code: "authorization-code", verifier: "verifier",
+      redirectUri: "https://app.example.test/api/clinical-records/oauth/callback",
+      tokenEndpoint: "https://fhir.example.test/oauth2/token",
+      requestedScopes: selection.scopes,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        access_token: "access-token", expires_in: 3600, patient: "patient-1", token_type: "Bearer",
+        scope: [...baseScopes, "patient/Patient.r", "patient/DocumentReference.s"].join(" "),
+      })),
+    });
+    expect(readGrantedSmartResourceTypes(token.grantedScopes, selection.resourceTypes))
+      .toEqual(["Patient", "DocumentReference"]);
+    expect(epicBinaryReadIsGranted(token.grantedScopes)).toBe(false);
+    expect(epicMediaReadIsGranted(token.grantedScopes)).toBe(false);
+    expect(selection.scopes).not.toContain("patient/Media.r");
+    expect(selectSmartRequestedScopes({
+      capabilities: ["permission-v2", "context-standalone-patient"],
+      requestedBaseScopes: baseScopes, resourceTypes: ["Patient", "Observation"],
+    }).scopes).not.toContain("patient/Binary.r");
   });
 
   it("normalizes a FHIR Patient reference and rejects invalid patient launch context", async () => {
