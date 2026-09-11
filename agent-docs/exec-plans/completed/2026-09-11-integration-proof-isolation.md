@@ -1,6 +1,6 @@
 # Restore Linq delivery and integration proof
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -43,7 +43,7 @@ Use synthetic evidence and closed diagnostic fields. Preserve unrelated work. Do
 - Reaches: Already-due and newly-due reminders, ordinary conversations, blocked assistant execution, empty wake hints, and receipt-capacity recovery.
 - Architecture: Extend the existing foreground admission check to canonical due assistant work and wake its existing completion wait at the projected deadline. Retain import claims, canonical write serialization, receipt bounds and snapshot ownership. Add no persisted state, queue, service or processing mode.
 - Proof: Hold a synthetic download open, observe one reminder delivery, release and verify one import and exact acknowledgment; preserve blocked-policy and conversation concurrency regressions.
-- Done when: Focused composed proof and affected CI pass; no reminder or import duplication and no authorization bypass. Product walkthrough remains Hold until verified.
+- Done when: Focused composed proof and affected CI pass; no reminder or import duplication and no authorization bypass. Product walkthrough is Ready: focused held-download proof and final full-stack fairness E2E passed.
 
 ## Decisions
 
@@ -59,7 +59,7 @@ Use synthetic evidence and closed diagnostic fields. Preserve unrelated work. Do
 - UTC local Junction reproduction passed all eight cases after the wire-key correction, including exact model-request count and one accepted nudge.
 - Operator-config adapter tests passed 81 cases, both affected package typechecks passed, and changelog rendering passed 10 cases.
 - Current public main was reconciled without conflicts. Its shared host-upstream correction replaces the temporary per-fixture host URL workaround.
-- Fairness proof is rerunning with a budget for real log visibility and scheduler backoff; no admission or delivery assertion was relaxed.
+- Fairness proof uses a budget for real log visibility and scheduler backoff; no admission or delivery assertion was relaxed.
 - That rerun exposed a production callback replacement: system-mode device work supplied a reminder-only yield predicate, discarding the receipt-capacity predicate after admission. A focused regression failed on the old owner when capacity became exhausted during the pass. Full local fairness E2E passed after restoring that guard, including positive receipt-bounded progress, one accepted reminder and final backlog drain.
 - The subsequent reminder-concurrency change removes the override parameter entirely: receipt capacity stays with independent work, and the projected deadline wakes assistant admission. The held-download concurrency suite passed all ten cases; the system-preemption fixture callbacks were then updated to supply their required checkpoint reasons.
 
@@ -88,4 +88,14 @@ Findings 1–7 remain audit findings, not completed fixes. The first three have 
 - Harness suite tests passed (32/32); Cloudflare typecheck passed after the scenario corrections.
 - Local Linq delivery errors originated in host-native Worker fetch before the stub; UTC corrected database clock offsets but did not resolve this separate network boundary. The shared main fix now owns host reachability.
 - The old fairness overlap spent up to 30 seconds observing a zero-job pass and then required at least 30 seconds of progress backoff. The test now budgets two log flushes, the 120-second backoff level, and processing time before its reminder, while keeping the first 30-second admission window unchanged.
-- Draft PR #3281 preserves the candidate while focused integration proof remains incomplete. Draft checks intentionally do not run broad verification until readiness.
+- PR #3281 is ready for required CI. Draft checks intentionally do not run broad verification until readiness.
+
+## Final candidate review and verification
+
+- The final reminder-concurrency bundle passed the full local fairness E2E with one accepted reminder, receipt-bounded positive progress and complete backlog drain. Junction passed eight cases and the ordering process passed four cases.
+- Final ReviewGPT on `40bac0c47bb34c430d4a31d62653c79ed40bd549` returned PASS, with no qualifying findings. Parent review confirmed the shared admission helper, receipt guard, deadline cancellation, provider key identity and product success paths.
+- Required CI on that head passed compatibility, builds/typechecks and all coverage shards except platform-a. Its 18 failures came from two convergence spies retaining the old diagnostic request suffix and two dirty-ack scenarios retaining the old no-assistant expectation.
+- Isolated proof corrections retain all convergence assertions and exercise actual default-owned preparation once in the original invocation. They preserve consumed-reminder wake removal, pending-input handoff, future default wakes, checkpoint and shared-projection before acknowledgment, final Browser Vault publication, and the device deadline across restore. Browser-before-ack remains required in dedicated system completion; promoted work uses the existing foreground publication order.
+- All 84 tests in the three affected files passed. Runtime typechecking and documentation drift checks passed after the proof correction. Production source remains identical to the reviewed head; isolated test and explanatory evidence changes use the existing review-loop exception.
+- Implementation and local product proof are complete. Exact-head public CI and current-base mergeability remain merge gates; after the public merge, the original completion owner must start a new private full-integration run against that public main before merging scheduler PR #132. No separate deployment was performed.
+Completed: 2026-09-11
