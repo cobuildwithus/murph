@@ -311,11 +311,17 @@ export function extractMetricTargetsFromCanonicalEntities(
     );
 }
 
-function normalizeMetricPointLimit(value: number): number {
+export function normalizeMetricPointLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {
     return 1_000;
   }
   return Math.min(value, 10_000);
+}
+
+/** Preserve the same evidence projection for direct and SQLite-backed readers. */
+export function projectMetricPointForQuery(point: MetricPoint): MetricPoint {
+  const payload = readStoredMetricPointPayload(stringifyStoredMetricPointPayload(point), point.source.kind);
+  return { ...point, context: payload.context, provenance: payload.provenance };
 }
 
 function stringifyStoredMetricPointPayload(point: MetricPoint): string {

@@ -6,7 +6,7 @@ Updated: 2026-09-11
 
 ## Goal
 
-- Align public full-stack scheduler proofs with the merged runtime's foreground admission and bounded background retries so private scheduler integration can be evaluated accurately.
+- Align public full-stack scheduler proofs with bounded background retries and seeded progress despite subsequently appended work, so private scheduler integration can be evaluated accurately.
 
 ## Success criteria
 
@@ -28,21 +28,21 @@ Updated: 2026-09-11
 
 1. Longer waiting could conceal a stalled queue.
    Mitigation: retain the zero-backlog and multiple-positive-pass assertions; bound the terminal wait by the actual retry schedule and retain shorter intermediate deadlines.
-2. Accepting an existing system owner could weaken foreground proof.
-   Mitigation: retain active-fence identity checks, checkpoint ordering, response latency, and system progress measured after provider start.
+2. Ignoring total lane lag could conceal missing seeded work.
+   Mitigation: retain both seeded import frontiers, no retryable blocks, attributed successful post-provider processing, exact provider-start fence, and checkpoint/reply checks.
 
 ## Tasks
 
 1. Confirm Linux integration failures against the unchanged private candidate. Done: twelve scenario lanes passed; foreground ownership and terminal drain expectations failed.
 2. Correct the terminal drain allowance and enclosing test budget.
-3. Update foreground proof to cover admission by the current fenced owner and replacement admission.
+3. Preserve the merged foreground ownership proof and remove only the recovery requirement that subsequently generated work has already drained.
 4. Run focused E2Es and typecheck; review the full candidate and privacy.
 5. Complete the public PR and rerun private full integration against merged public main.
 
 ## Decisions
 
-- The merged runtime explicitly supports admitting foreground work through the existing system invocation after acknowledgment; replacement is not mandatory.
-- Successful processing can append follow-up wakes. The recovery proof requires both imported frontiers to cover the seeded sequence and subsequent successful processing, rather than requiring the entire evolving mailbox to be empty.
+- PRs #3300 and #3305 merged ownership and monotonic-frontier corrections during verification. Reuse those changes and preserve their exact foreground fence assertion.
+- Successful processing can append follow-up wakes. The remaining correction removes total lane lag as a prerequisite for observing imported seeded work and subsequent successful processing.
 - The terminal drain may span 30-second, two-minute, and ten-minute no-progress retries plus a bounded device pass. Allow fifteen minutes for that stage in addition to the existing setup/intermediate budget.
 - Public changes are test-only; no member-visible changelog entry or new runtime review is needed.
 
@@ -54,3 +54,5 @@ Updated: 2026-09-11
 - Cloudflare typecheck and `pnpm complexity:diff` pass; exact-head CI remains required.
 - Initial unmodified local fairness run passed. A subsequent run hit the original enclosing fifteen-minute test timeout; the enclosing budget must include the terminal allowance before repeating proof.
 - Initial updated foreground run: six cases passed; the changed case passed reply and acknowledgment assertions, then failed recovery's exact lane snapshot because a follow-up wake was appended. Corrected that proved test assumption and retained actual post-provider processing evidence.
+- Reminder/device-sync E2E passed with the private scheduler candidate and corrected enclosing budget: one test, 704.63 seconds, one reminder during positive receipt-bounded progress followed by full drain.
+- Nine actual-observer probes reproduced the baseline follow-up-lag failure, accepted proved seeded progress, and rejected seven invalid recovery states.

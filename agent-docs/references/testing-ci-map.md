@@ -1180,6 +1180,14 @@ limits, and local proof distinctions are owned by
   `EXISTS` query shape without a private usage-row join. The separate
   `hosted-ai-usage-overshoot-alert-monitor-postgres.test.ts` proof executes that
   query against zero-cap and positive-cap current blocked periods.
+- `apps/cloudflare/test/hosted-runner-container-identity.test.ts` keeps a real
+  standby-claim timeout and single-invocation fallback proof. Its late-result
+  fixture sets the wall clock past the captured deadline before settlement,
+  so timer scheduling cannot change the intended deadline-expired case.
+- `apps/web/test/hosted-runtime-latency-postgres-concurrency.test.ts` exercises
+  real PostgreSQL milestone overlap. Concurrent writes assert the store's
+  explicit contention receipts and replay only a contended milestone after
+  both writers finish, before checking the complete atomic JSON merge.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
   opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
   latency monitor. It runs the production query against 50,000 stale rows per
