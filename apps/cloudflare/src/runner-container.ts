@@ -547,6 +547,27 @@ function createActiveRuntimeUserFence(
   };
 }
 
+// Internal RPC metadata, not an acknowledgement or a new processing authority.
+export interface RunnerRuntimeWakeDiagnostics {
+  wakeStage: "admission" | "dispatch" | "drain" | "acknowledgement" | "legacy_health" | "exiting_owner";
+  wakeEnteredAtEpochMs: number;
+  wakeFinishedAtEpochMs?: number;
+  wakeDispatchAtEpochMs?: number;
+  wakeResponseAtEpochMs?: number;
+  wakeDrainFinishedAtEpochMs?: number;
+  wakeHandlerReceivedAtEpochMs?: number;
+  wakeHandlerAcceptedAtEpochMs?: number;
+  wakeStatus?: number;
+  wakeAccepted?: boolean;
+  wakePending?: boolean;
+  wakeIdentityChecked?: boolean;
+  wakeAbsent?: boolean;
+  wakeMismatch?: boolean;
+  wakeSignalAborted?: boolean;
+  wakeActivePointerPresent?: boolean;
+  wakeLifecyclePendingCount?: number;
+}
+
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
   leaseGeneration: string;
@@ -556,7 +577,7 @@ export interface RunnerRuntimeWakeInput {
   userId: string;
 }
 
-export type RunnerRuntimeWakeResult =
+export type RunnerRuntimeWakeResult = (
   | { action: "already_running" | "woken"; kind: "accepted" }
   | {
       kind: "not-wakeable";
@@ -570,7 +591,8 @@ export type RunnerRuntimeWakeResult =
         | "container-rpc-timeout"
         | "missing-container-binding"
         | "missing-wake-method";
-    };
+    }
+) & { wakeDiagnostics?: RunnerRuntimeWakeDiagnostics };
 
 export interface RunnerContainerEnsureProcessingInput {
   activeRuntime?: RunnerRuntimeWakeInput | null;
@@ -586,7 +608,7 @@ export interface RunnerContainerProcessingFailure {
   status: number | null;
 }
 
-export type RunnerContainerEnsureProcessingResult =
+export type RunnerContainerEnsureProcessingResult = (
   | {
       action: "already_running" | "restarted" | "started" | "woken";
       kind: "accepted";
@@ -603,7 +625,8 @@ export type RunnerContainerEnsureProcessingResult =
   | {
       kind: "wake-unconfirmed";
       reason: Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"];
-    };
+    }
+) & { wakeDiagnostics?: RunnerRuntimeWakeDiagnostics };
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
@@ -1408,6 +1431,7 @@ export class RunnerContainer extends Container {
       const wake = await this.wakeRuntime(input.activeRuntime);
       if (wake.kind === "accepted") {
         return {
+          wakeDiagnostics: wake.wakeDiagnostics,
           action: wake.action,
           kind: "accepted",
         };
@@ -1415,6 +1439,7 @@ export class RunnerContainer extends Container {
 
       if (wake.kind === "unknown") {
         return {
+          wakeDiagnostics: wake.wakeDiagnostics,
           kind: "wake-unconfirmed",
           reason: wake.reason,
         };
@@ -1422,6 +1447,7 @@ export class RunnerContainer extends Container {
 
       if (!input.invoke) {
         return {
+          wakeDiagnostics: wake.wakeDiagnostics,
           kind: "start-required",
           reason: "no-active-child",
         };
@@ -1460,7 +1486,20 @@ export class RunnerContainer extends Container {
     }
   }
 
-  async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
+  async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<
+    RunnerRuntimeWakeResult & { wakeDiagnostics: RunnerRuntimeWakeDiagnostics }
+  > {
+    const diagnostics: RunnerRuntimeWakeDiagnostics = {
+      wakeEnteredAtEpochMs: Date.now(), wakeStage: "admission",
+    };
+    const result = await this.wakeRuntimeObserved(input, diagnostics);
+    return { ...result, wakeDiagnostics: { ...diagnostics, wakeFinishedAtEpochMs: Date.now() } };
+  }
+
+  private async wakeRuntimeObserved(
+    input: RunnerRuntimeWakeInput,
+    diagnostics: RunnerRuntimeWakeDiagnostics,
+  ): Promise<RunnerRuntimeWakeResult> {
     this.authorizeBoundUser(input.userId);
     this.noteContainerInteraction();
     const destroyRequestAtWakeStart = this.lastDestroyRequest;
@@ -1469,6 +1508,8 @@ export class RunnerContainer extends Container {
       return { kind: "unknown", reason: "active-child-rejected" };
     }
     const active = this.readWorkspaceInvocationOperation();
+    diagnostics.wakeActivePointerPresent = active !== null;
+    diagnostics.wakeLifecyclePendingCount = this.lifecycleLockPendingCount;
     if (
       active
       && (
@@ -1555,8 +1596,10 @@ export class RunnerContainer extends Container {
     }
 
     this.noteRunnerActivity("runtime-wake");
+    const runtimeWakeSignal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
     try {
-      const runtimeWakeSignal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
+      diagnostics.wakeStage = "dispatch";
+      diagnostics.wakeDispatchAtEpochMs = Date.now();
       const response = await this.containerFetch(
         RUNNER_RUNTIME_WAKE_URL,
         {
@@ -1568,6 +1611,9 @@ export class RunnerContainer extends Container {
           signal: runtimeWakeSignal,
         },
       );
+      diagnostics.wakeResponseAtEpochMs = Date.now();
+      diagnostics.wakeStatus = response.status;
+      copyRuntimeWakeHandlerTiming(response.headers, diagnostics);
       const acceptedHeader = response.headers.get("x-runtime-wake-accepted");
       const accepted = acceptedHeader === "1";
       const explicitlyRejected = acceptedHeader === "0";
@@ -1576,9 +1622,17 @@ export class RunnerContainer extends Container {
         response.headers.get("x-runtime-wake-identity-checked") === "1";
       const mismatch = response.headers.get("x-runtime-wake-mismatch") === "1";
       const pending = response.headers.get("x-runtime-wake-pending") === "1";
+      diagnostics.wakeStage = "drain";
+      diagnostics.wakeAccepted = accepted;
+      diagnostics.wakePending = pending;
+      diagnostics.wakeIdentityChecked = identityChecked;
+      diagnostics.wakeAbsent = absent;
+      diagnostics.wakeMismatch = mismatch;
       await drainRunnerContainerMetadataResponseBody(response, {
         signal: runtimeWakeSignal,
       });
+      diagnostics.wakeDrainFinishedAtEpochMs = Date.now();
+      diagnostics.wakeStage = "acknowledgement";
       const acceptedWithoutIdentityProof =
         response.ok && accepted && !active && !identityChecked;
       let legacyNoActiveChild = false;
@@ -1592,6 +1646,7 @@ export class RunnerContainer extends Container {
         && !mismatch
       ) {
         try {
+          diagnostics.wakeStage = "legacy_health";
           legacyNoActiveChild = !(await this.readWorkspaceInvocationActiveFromHealth());
         } catch {
           legacyNoActiveChild = false;
@@ -1658,6 +1713,7 @@ export class RunnerContainer extends Container {
         && !mismatch
         && active.result
       ) {
+        diagnostics.wakeStage = "exiting_owner";
         await active.result.catch(() => undefined);
         if (
           this.pointerlessWakeBlockingLifecycleCount > 0
@@ -1687,6 +1743,8 @@ export class RunnerContainer extends Container {
         return { kind: "unknown", reason: "container-rpc-timeout" };
       }
       return { kind: "unknown", reason: "container-rpc-error" };
+    } finally {
+      diagnostics.wakeSignalAborted = runtimeWakeSignal.aborted;
     }
   }
 
@@ -5365,4 +5423,17 @@ function readRunnerDurableObjectName(state: unknown): string | null {
   const id = state.id;
   return typeof id === "object" && id !== null && "name" in id && typeof id.name === "string"
     ? id.name : null;
+}
+
+function copyRuntimeWakeHandlerTiming(
+  headers: Headers,
+  diagnostics: RunnerRuntimeWakeDiagnostics,
+): void {
+  for (const [header, key] of [
+    ["x-runtime-wake-received-at-ms", "wakeHandlerReceivedAtEpochMs"],
+    ["x-runtime-wake-accepted-at-ms", "wakeHandlerAcceptedAtEpochMs"],
+  ] as const) {
+    const value = Number(headers.get(header));
+    if (Number.isSafeInteger(value) && value > 0) diagnostics[key] = value;
+  }
 }

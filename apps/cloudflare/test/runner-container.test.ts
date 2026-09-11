@@ -381,7 +381,7 @@ describe("RunnerContainer", () => {
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_050,
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -488,7 +488,7 @@ describe("RunnerContainer", () => {
       attemptId: activeRequest.attemptId,
       leaseGeneration: activeRequest.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -575,7 +575,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -634,7 +634,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -693,7 +693,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -778,7 +778,7 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(invocation).resolves.toEqual(createRunnerResult());
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -868,7 +868,7 @@ describe("RunnerContainer", () => {
     await lifecycleDestroyStarted.promise;
 
     await invocationFailure;
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -960,7 +960,7 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(activeInvocation).resolves.toEqual(createRunnerResult());
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1030,7 +1030,7 @@ describe("RunnerContainer", () => {
     runnerResponse.reject(new Error("Network connection lost"));
 
     await invocationFailure;
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1063,7 +1063,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1128,7 +1128,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1145,6 +1145,60 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
+  it.each([false, true])("relays bounded transport metadata without conflating pending notification: %s", async (pending) => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running", platformRunning: true,
+      containerFetch: vi.fn(async () => new Response(null, {
+        status: 204,
+        headers: {
+          "x-runtime-wake-accepted": "1",
+          "x-runtime-wake-identity-checked": "1",
+          "x-runtime-wake-pending": pending ? "1" : "0",
+          "x-runtime-wake-received-at-ms": "1777010000000",
+          "x-runtime-wake-accepted-at-ms": "1777010000001",
+        },
+      })),
+    });
+    await expect(container.ensureProcessing({
+      activeRuntime: { attemptId: "attempt_diagnostic", leaseGeneration: "12", userId: "member_123" },
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      kind: "accepted", action: pending ? "already_running" : "woken",
+      wakeDiagnostics: {
+        wakeStage: "acknowledgement", wakeStatus: 204,
+        wakeAccepted: true, wakePending: pending, wakeIdentityChecked: true,
+        wakeEnteredAtEpochMs: expect.any(Number), wakeDispatchAtEpochMs: expect.any(Number),
+        wakeResponseAtEpochMs: expect.any(Number), wakeDrainFinishedAtEpochMs: expect.any(Number),
+        wakeHandlerReceivedAtEpochMs: 1777010000000, wakeHandlerAcceptedAtEpochMs: 1777010000001,
+        wakeActivePointerPresent: false, wakeSignalAborted: false,
+      },
+    });
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("does not turn accepted response headers into success when metadata drain fails", async () => {
+    const { container } = createContainerDouble({
+      initialStatus: "running", platformRunning: true,
+      containerFetch: vi.fn(async () => new Response(new ReadableStream({
+        start(controller) { controller.error(new Error("private drain failure fixture")); },
+      }), {
+        status: 200,
+        headers: { "x-runtime-wake-accepted": "1", "x-runtime-wake-identity-checked": "1",
+          "x-runtime-wake-received-at-ms": "not-an-epoch" },
+      })),
+    });
+    const result = await container.ensureProcessing({
+      activeRuntime: { attemptId: "attempt_diagnostic_drain", leaseGeneration: "12", userId: "member_123" },
+      userId: "member_123",
+    });
+    expect(result).toMatchObject({ kind: "wake-unconfirmed", reason: "container-rpc-error",
+      wakeDiagnostics: { wakeStage: "drain", wakeStatus: 200, wakeAccepted: true } });
+    expect(result.wakeDiagnostics?.wakeDrainFinishedAtEpochMs).toBeUndefined();
+    expect(result.wakeDiagnostics?.wakeHandlerReceivedAtEpochMs).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("private drain failure fixture");
+  });
+
   it("short-circuits a wake probe when platform truth says a pointerless shell is stopped", async () => {
     const { container, containerFetch, getState, startAndWaitForPorts } =
       createContainerDouble({
@@ -1159,7 +1213,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer_stopped_shell",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1193,7 +1247,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer_running_shell",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1236,7 +1290,7 @@ describe("RunnerContainer", () => {
     const wakes = [container.ensureProcessing(input), container.ensureProcessing(input)];
     await requestsStarted.promise;
     releaseResponses.resolve(undefined);
-    expect(await Promise.all(wakes)).toEqual([
+    expect(await Promise.all(wakes)).toMatchObject([
       { action: "woken", kind: "accepted" },
       { action: "woken", kind: "accepted" },
     ]);
@@ -1282,7 +1336,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1318,7 +1372,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_pointerless_during_destroy",
       leaseGeneration: "1",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1377,7 +1431,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1417,7 +1471,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_stale",
       leaseGeneration: "10",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1455,7 +1509,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "container-rpc-error",
     });
@@ -1492,7 +1546,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1528,7 +1582,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1567,7 +1621,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1596,7 +1650,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1634,7 +1688,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1668,7 +1722,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1705,7 +1759,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1742,7 +1796,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1793,7 +1847,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1859,7 +1913,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "already_running",
       kind: "accepted",
     });
@@ -4106,7 +4160,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_stale",
       leaseGeneration: "10",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -4168,7 +4222,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -4227,7 +4281,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -4241,6 +4295,35 @@ describe("RunnerContainer", () => {
     }));
 
     await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("preserves the wake timeout when the SDK converts an aborted fetch into HTTP 500", async () => {
+    const wakeDeadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(wakeDeadline.signal);
+    const sdkResponse = new Response("Synthetic transport timeout", { status: 500 });
+    const { container } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+      containerFetch: vi.fn(async (url: string) => {
+        expect(url).toContain("/internal/runtime-wake");
+        // The actual SDK's exception-to-response behavior is covered by the
+        // Containers helper suite; exercise Murph's response drain here.
+        wakeDeadline.abort(new DOMException("Synthetic wake deadline", "TimeoutError"));
+        return sdkResponse;
+      }),
+    });
+    try {
+      await expect(container.wakeRuntime({
+        attemptId: "attempt_sdk_timeout",
+        leaseGeneration: "1",
+        userId: "member_123",
+      })).resolves.toMatchObject({ kind: "unknown", reason: "container-rpc-timeout",
+        wakeDiagnostics: { wakeSignalAborted: true, wakeStatus: 500, wakeStage: "drain" },
+      });
+      expect(sdkResponse.bodyUsed).toBe(true);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it("rejects runtime wakes when metadata response draining times out", async () => {
@@ -4296,7 +4379,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       });
       await vi.advanceTimersByTimeAsync(5_000);
-      await expect(wake).resolves.toEqual({
+      await expect(wake).resolves.toMatchObject({
         kind: "unknown",
         reason: "container-rpc-timeout",
       });
@@ -6460,7 +6543,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -6573,7 +6656,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6657,7 +6740,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6856,7 +6939,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -7002,7 +7085,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -7445,7 +7528,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7504,7 +7587,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7638,7 +7721,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: request.leaseGeneration,
       processingMode: "system_mailbox",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7861,7 +7944,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: replacementRequest.leaseGeneration,
       userId: "member_123",
     });
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7952,7 +8035,7 @@ describe("RunnerContainer", () => {
     await abortRequestStarted.promise;
     releasePreservedStatus.resolve(undefined);
 
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -8007,7 +8090,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -8240,7 +8323,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });

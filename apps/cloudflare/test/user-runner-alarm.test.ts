@@ -16,6 +16,7 @@ import type {
 } from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 import {
   buildHostedExecutionWorkingSnapshotRef,
+  parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRuntimeWebStatusResponse,
@@ -339,6 +340,428 @@ describe("HostedUserRunner execution coordination", () => {
     expect(emitted).not.toContain(oversizedDetail);
   });
 
+  it.each(["woken", "already_running"] as const)(
+    "persists one bounded active-wake summary through the ingestion parser: %s",
+    async (action) => {
+      const at = Date.now();
+      const { runner, sql, invoke, flushWaitUntil } = createRunnerHarness({
+        ensureProcessing: async () => ({
+          action,
+          kind: "accepted",
+          wakeDiagnostics: {
+            wakeEnteredAtEpochMs: at,
+            wakeDispatchAtEpochMs: at,
+            wakeResponseAtEpochMs: at + 2,
+            wakeDrainFinishedAtEpochMs: at + 3,
+            wakeHandlerReceivedAtEpochMs: at + 1,
+            wakeHandlerAcceptedAtEpochMs: at + 1,
+            wakeFinishedAtEpochMs: at + 3,
+            wakeStage: "acknowledgement",
+            wakeStatus: 204,
+            wakeAccepted: true,
+            wakePending: action === "already_running",
+            wakeIdentityChecked: true,
+            wakeActivePointerPresent: false,
+            // Unexpected RPC metadata must not be copied into the log request.
+            rawBody: "private diagnostic fixture",
+          },
+        }),
+      });
+      await runner.bindUser(TEST_USER_ID);
+      const token = writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+      await expect(runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId: `summary-wake-${TEST_USER_ID}`,
+        orchestration: {
+          cloudflareRouteReceivedAtEpochMs: at,
+          userRunnerRpcStartedAtEpochMs: at,
+          temporalActivityStartedAtEpochMs: at,
+        },
+      })).resolves.toMatchObject({ kind: "runtime_processing_accepted", action });
+      await flushWaitUntil();
+      const entries = readProcessingSummaryEntries();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        attemptId: token.attemptId,
+        leaseGeneration: String(token.generation),
+        eventCode: "runner.processing_finished",
+        redactedJson: {
+          orchestrationAttemptFingerprint: processingAttemptFingerprint(`summary-wake-${TEST_USER_ID}`),
+          cloudflareRouteReceivedAtEpochMs: at,
+          userRunnerRpcStartedAtEpochMs: at,
+          temporalActivityStartedAtEpochMs: at,
+          wakeAttemptId: token.attemptId,
+          wakeLeaseGeneration: String(token.generation),
+          userRunnerEnteredAtEpochMs: expect.any(Number),
+          runtimeConsentLockAcquiredAtEpochMs: expect.any(Number),
+          runnerStateBindFinishedAtEpochMs: expect.any(Number),
+          activeWakeStartedAtEpochMs: expect.any(Number),
+          activeWakeFinishedAtEpochMs: expect.any(Number),
+          runtimeProcessingOutcome: "runtime_processing_accepted",
+          runtimeProcessingAction: action,
+          wakeStatus: 204,
+          wakePending: action === "already_running",
+          wakeHandlerReceivedAtEpochMs: at + 1,
+          wakeHandlerAcceptedAtEpochMs: at + 1,
+          wakeResponseAtEpochMs: at + 2,
+          wakeDrainFinishedAtEpochMs: at + 3,
+        },
+      });
+      expect(JSON.stringify(entries)).not.toContain(TEST_USER_ID);
+      expect(JSON.stringify(entries)).not.toContain("private diagnostic fixture");
+      expect(invoke).not.toHaveBeenCalled();
+      expect(readRunnerMeta(sql).active_attempt_id).toBe(token.attemptId);
+    },
+  );
+
+  it("does not attach an earlier owner's transport timings to a converged wake without metadata", async () => {
+    let wakeCount = 0;
+    const { runner, sql, flushWaitUntil } = createRunnerHarness({
+      ensureProcessing: async () => {
+        if (++wakeCount === 1) {
+          writeRuntimeFenceForTest(sql, { attemptId: "attempt_converged_owner", generation: 3, runnerContainerName: TEST_USER_ID });
+          return {
+            kind: "start-required", reason: "no-active-child",
+            wakeDiagnostics: { wakeEnteredAtEpochMs: Date.now(), wakeStage: "acknowledgement", wakeStatus: 204, wakeAbsent: true },
+          };
+        }
+        return { kind: "accepted", action: "woken" };
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+    await expect(runner.ensureRuntimeProcessingForUser({ userId: TEST_USER_ID, orchestrationAttemptId: "summary-owner-convergence" }))
+      .resolves.toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt_converged_owner" });
+    await flushWaitUntil();
+    expect(wakeCount).toBe(2);
+    const [entry] = readProcessingSummaryEntries();
+    expect(entry?.attemptId).toBe("attempt_converged_owner");
+    expect(entry?.redactedJson?.wakeAttemptId).toBe("attempt_converged_owner");
+    expect(entry?.redactedJson?.wakeStage).toBeUndefined();
+    expect(entry?.redactedJson?.wakeStatus).toBeUndefined();
+    expect(entry?.redactedJson?.wakeAbsent).toBeUndefined();
+  });
+
+  it.each(["denied", "unavailable"] as const)(
+    "logs admission outcome without admitting work or masking failure: %s",
+    async (admission) => {
+      const failure = new Error("private admission failure fixture");
+      const { runner, invoke, flushWaitUntil, sql } = createRunnerHarness({
+        readHealthDataConsentState: () => {
+          if (admission === "unavailable") throw failure;
+          return "revoked";
+        },
+      });
+      const response = runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId: "summary-admission",
+      });
+      if (admission === "unavailable") await expect(response).rejects.toBe(failure);
+      else await expect(response).resolves.toMatchObject({ kind: "retry_later" });
+      await flushWaitUntil();
+      const entries = readProcessingSummaryEntries();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.redactedJson).toMatchObject({
+        runtimeProcessingStage: "admission",
+        runtimeProcessingOutcome: admission === "denied" ? "retry_later" : "threw",
+        ...(admission === "denied" ? { runtimeProcessingRetryReason: "admission_denied" } : {}),
+      });
+      expect(JSON.stringify(entries)).not.toContain(failure.message);
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+      expect(invoke).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves an uncertain exact fence and records both retry attribution and liveness", async () => {
+    const { runner, sql, invoke, flushWaitUntil } = createRunnerHarness({
+      ensureProcessing: async () => ({ kind: "wake-unconfirmed", reason: "container-rpc-timeout" }),
+      readActiveRuntimeUserFence: async () => { throw new Error("private liveness failure fixture"); },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+    const result = await runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "summary-uncertain",
+    });
+    expect(result.kind).toBe("retry_later");
+    if (result.kind !== "retry_later") throw new Error("Expected retry result.");
+    await flushWaitUntil();
+    expect(readProcessingSummaryEntries()[0]?.redactedJson).toMatchObject({
+      runtimeProcessingStage: "liveness",
+      activeWakeRpcOutcome: "returned",
+      activeWakeRpcDispatchedAtEpochMs: expect.any(Number),
+      runtimeProcessingRetryAtEpochMs: Date.parse(result.retryAt),
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeLivenessOutcome: "indeterminate",
+      runtimeLivenessReason: "error",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBe(token.attemptId);
+  });
+
+  it.each(["pending", "reject", "throw", "schedule-throw", "cancel-pending", "ingestion-rejected"] as const)(
+    "does not await or propagate telemetry failure: %s",
+    async (logging) => {
+      const logResult = createDeferred<Response>();
+      const logStarted = createDeferred<void>();
+      const cancel = vi.fn(() => new Promise<void>(() => undefined));
+      const { runner, sql, state, flushWaitUntil } = createRunnerHarness({
+        ensureProcessing: async () => ({ kind: "accepted", action: "woken" }),
+        runtimeLogResponse: () => {
+          logStarted.resolve(undefined);
+          if (logging === "throw") throw new Error("private logger failure fixture");
+          if (logging === "reject") return Promise.reject(new Error("private logger failure fixture"));
+          if (logging === "cancel-pending") return new Response(new ReadableStream({ cancel }));
+          if (logging === "ingestion-rejected") return new Response(null, { status: 400 });
+          return logResult.promise;
+        },
+      });
+      await runner.bindUser(TEST_USER_ID);
+      writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+      if (logging === "schedule-throw") vi.spyOn(state, "waitUntil").mockImplementation(() => {
+        throw new Error("telemetry scheduling unavailable");
+      });
+      // Await control before allowing log transport to return any headers.
+      await expect(runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId: "summary-telemetry-isolation",
+      })).resolves.toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+      await logStarted.promise;
+      expect(readProcessingSummaryEntries()).toHaveLength(1);
+      logResult.resolve(jsonResponse({ loggedCount: 1 }));
+      await flushWaitUntil();
+      if (logging === "cancel-pending") expect(cancel).toHaveBeenCalledOnce();
+      if (logging === "ingestion-rejected") {
+        expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+          details: {
+            runtimeLogWriteStatus: 400,
+          },
+          message: "Hosted runner processing summary log write rejected.",
+        }));
+      }
+    },
+  );
+
+  it("keeps concurrent attempts and their consent queue timing separate", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const started = createDeferred<void>();
+    const release = createDeferred<void>();
+    let wakes = 0;
+    const { runner, sql, flushWaitUntil } = createRunnerHarness({
+      ensureProcessing: async () => {
+        if (++wakes === 1) { started.resolve(undefined); await release.promise; }
+        return { kind: "accepted", action: "woken" };
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+    const first = runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "summary-concurrent-one",
+    });
+    await started.promise;
+    const second = runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "summary-concurrent-two",
+    });
+    await vi.advanceTimersByTimeAsync(25);
+    expect(wakes).toBe(1);
+    release.resolve(undefined);
+    await Promise.all([first, second]);
+    await flushWaitUntil();
+    const entries = readProcessingSummaryEntries();
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.redactedJson?.orchestrationAttemptFingerprint).sort()).toEqual([
+      processingAttemptFingerprint("summary-concurrent-one"),
+      processingAttemptFingerprint("summary-concurrent-two"),
+    ].sort());
+    for (const entry of entries) expect(entry.attemptId).toBe(token.attemptId);
+    expect(entries.find((entry) => entry.redactedJson?.orchestrationAttemptFingerprint
+      === processingAttemptFingerprint("summary-concurrent-two"))?.redactedJson).toMatchObject({
+      userRunnerEnteredAtEpochMs: new Date(FIXED_NOW).getTime(),
+      runtimeConsentLockAcquiredAtEpochMs: new Date(FIXED_NOW).getTime() + 25,
+    });
+  });
+
+  it("snapshots a timed-out RPC once without claiming that missing transport diagnostics mean no dispatch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const started = createDeferred<void>();
+    const release = createDeferred<void>();
+    const { runner, sql, flushWaitUntil } = createRunnerHarness({
+      ensureProcessing: async () => {
+        started.resolve(undefined);
+        await release.promise;
+        return { kind: "accepted", action: "woken" };
+      },
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+    const response = runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "summary-budget",
+      commandTimeoutMs: 5_000,
+    });
+    await started.promise;
+    await vi.advanceTimersByTimeAsync(4_000);
+    await expect(response).resolves.toMatchObject({ kind: "retry_later" });
+    await flushWaitUntil();
+    const beforeLateResult = readProcessingSummaryEntries();
+    expect(beforeLateResult[0]?.redactedJson).toMatchObject({
+      activeWakeRpcOutcome: "caller_timeout",
+      activeWakeRpcDispatchedAtEpochMs: expect.any(Number),
+      runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeLivenessOutcome: "indeterminate",
+      runtimeLivenessReason: "timeout",
+    });
+    expect(beforeLateResult[0]?.redactedJson?.wakeStage).toBeUndefined();
+    release.resolve(undefined);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(readProcessingSummaryEntries()).toEqual(beforeLateResult);
+    expect(readRunnerMeta(sql).active_attempt_id).toBe(token.attemptId);
+  });
+
+  it("finishes detached log telemetry even when response cancellation stays pending", async () => {
+    const cancelled = createDeferred<void>();
+    const releaseCancellation = createDeferred<void>();
+    const { runner, sql, flushWaitUntil } = createRunnerHarness({
+      ensureProcessing: async () => ({ kind: "accepted", action: "woken" }),
+      runtimeLogResponse: () => new Response(new ReadableStream({
+        cancel() {
+          cancelled.resolve(undefined);
+          return releaseCancellation.promise;
+        },
+      })),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+    await expect(runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "summary-cancellation",
+    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    await cancelled.promise;
+    let finished = false;
+    const telemetry = flushWaitUntil().then(() => { finished = true; });
+    try {
+      await vi.waitFor(() => expect(finished).toBe(true), { timeout: 100 });
+    } finally {
+      releaseCancellation.reject(new Error("private cancellation fixture"));
+      await telemetry;
+    }
+  });
+
+  it("reports a rejected log write using only HTTP status and no response content", async () => {
+    const { runner, sql, flushWaitUntil } = createRunnerHarness({
+      ensureProcessing: async () => ({ kind: "accepted", action: "woken" }),
+      runtimeLogResponse: () => new Response("private rejected log response", { status: 503 }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+    await expect(runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "summary-rejected-write",
+    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    await flushWaitUntil();
+    const rejected = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .filter((entry) => entry.message === "Hosted runner processing summary log write rejected.");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.details).toEqual({ runtimeLogWriteStatus: 503 });
+    expect(JSON.stringify(rejected)).not.toContain("private rejected log response");
+  });
+
+  it.each([TEST_USER_ID, "11111111-1111-4111-8111-111111111111"])(
+    "fingerprints all caller-selected attempt ids before actual log ingestion: %s",
+    async (orchestrationAttemptId) => {
+      const { runner, sql, flushWaitUntil } = createRunnerHarness({
+        ensureProcessing: async () => ({ kind: "accepted", action: "woken" }),
+      });
+      await runner.bindUser(TEST_USER_ID);
+      const token = writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+      // Even a structurally wider in-process input must not select observations.
+      const input = {
+        userId: TEST_USER_ID, orchestrationAttemptId,
+        diagnostics: { stage: "liveness", details: { rawBody: "untrusted observation fixture" } },
+      };
+      await expect(runner.ensureRuntimeProcessingForUser(input)).resolves.toEqual({
+        action: "woken", kind: "runtime_processing_accepted",
+        runtimeAttemptId: token.attemptId, recommendedRecheckAt: expect.any(String),
+      });
+      await flushWaitUntil();
+      const entries = readProcessingSummaryEntries();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.redactedJson?.orchestrationAttemptFingerprint)
+        .toBe(processingAttemptFingerprint(orchestrationAttemptId));
+      expect(entries[0]?.redactedJson?.orchestrationAttemptId).toBeUndefined();
+      expect(JSON.stringify(entries)).not.toContain(orchestrationAttemptId);
+      expect(JSON.stringify(entries)).not.toContain("untrusted observation fixture");
+    },
+  );
+
+  it.each(["pending", "rejected"] as const)(
+    "never waits for a fingerprint or logs its original value on failure: %s",
+    async (hashing) => {
+      const digest = createDeferred<ArrayBuffer>();
+      const { runner, sql, flushWaitUntil } = createRunnerHarness({
+        ensureProcessing: async () => ({ kind: "accepted", action: "woken" }),
+      });
+      await runner.bindUser(TEST_USER_ID);
+      writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+      const hash = vi.spyOn(crypto.subtle, "digest").mockImplementationOnce(() => digest.promise);
+      await expect(runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId: TEST_USER_ID,
+      })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+      expect(hash).toHaveBeenCalledOnce();
+      expect(readProcessingSummaryEntries()).toHaveLength(0);
+      if (hashing === "pending") digest.resolve(new ArrayBuffer(32));
+      else digest.reject(new Error("private hash fixture"));
+      await flushWaitUntil();
+      const entries = readProcessingSummaryEntries();
+      expect(entries).toHaveLength(1);
+      if (hashing === "rejected") {
+        expect(entries[0]?.redactedJson?.orchestrationAttemptFingerprint).toBeUndefined();
+      }
+      expect(JSON.stringify(entries)).not.toContain(TEST_USER_ID);
+      expect(JSON.stringify(entries)).not.toContain("private hash fixture");
+    },
+  );
+
+  it.each([false, true])("drops superseded observations on fence convergence (same attempt: %s)", async (sameAttempt) => {
+    let calls = 0;
+    let switchFence = () => {};
+    const { runner, sql, invoke, flushWaitUntil } = createRunnerHarness({
+      ensureProcessing: async () => {
+        if (++calls === 1) {
+          switchFence();
+          return { kind: "wake-unconfirmed", reason: "container-rpc-error",
+            wakeDiagnostics: { wakeStage: "drain", wakeEnteredAtEpochMs: Date.now(),
+              wakeStatus: 500, wakeAccepted: false } };
+        }
+        // Older Worker response: no wakeDiagnostics to overwrite stale fields.
+        return { kind: "accepted", action: "woken" };
+      },
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, {
+      runnerContainerName: TEST_USER_ID, startedAt: new Date(Date.now() - 90_000).toISOString(),
+    });
+    let winner: ReturnType<typeof writeRuntimeFenceForTest> | undefined;
+    switchFence = () => {
+      winner = writeRuntimeFenceForTest(sql, {
+        attemptId: sameAttempt ? "attempt_runtime_active" : "attempt_runtime_winner",
+        generation: 3, runnerContainerName: TEST_USER_ID,
+      });
+    };
+    const result = await runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "summary-converged-fence",
+    });
+    expect(result).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: winner?.attemptId });
+    await flushWaitUntil();
+    const entry = readProcessingSummaryEntries()[0];
+    expect(entry).toMatchObject({ attemptId: winner?.attemptId, leaseGeneration: String(winner?.generation) });
+    expect(entry?.redactedJson).toMatchObject({ wakeAttemptId: winner?.attemptId, activeWakeRpcOutcome: "returned" });
+    for (const key of ["wakeStage", "wakeStatus", "wakeAccepted", "runtimeLivenessOutcome", "runtimeLivenessReason"]) {
+      expect(entry?.redactedJson?.[key]).toBeUndefined();
+    }
+    expect(calls).toBe(2);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBe(winner?.attemptId);
+  });
+
   it("checks admission once for startup and never for subsequent active wakes", async () => {
     const completion = createDeferred<HostedWorkspaceInvocationResult>();
     const readAdmission = vi.fn(() => "granted" as const);
@@ -363,7 +786,9 @@ describe("HostedUserRunner execution coordination", () => {
       })).resolves.toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
     }
     expect(readAdmission).toHaveBeenCalledOnce();
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([request]) => request.path !== HOSTED_RUNTIME_LOG_PATH,
+    )).toHaveLength(0);
     expect(invoke).toHaveBeenCalledOnce();
     completion.resolve({ nextWakeAt: null, status: "idle" });
     await flushWaitUntil();
@@ -1892,7 +2317,7 @@ describe("HostedUserRunner execution coordination", () => {
     await vi.waitFor(() =>
       expect(
         mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
-          (call) => call[0].path === HOSTED_RUNTIME_LOG_PATH,
+          (call) => isRuntimeLogEventCall(call[0], "runner.accepted_attempt_failed"),
         ),
       ).toHaveLength(1)
     );
@@ -1905,7 +2330,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(runtimeLogSawAlarmCleanup).toBe(false);
     const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
-      .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
+      .filter((call) => isRuntimeLogEventCall(call[0], "runner.accepted_attempt_failed"));
     expect(runtimeLogCalls).toHaveLength(1);
     const runtimeLogBody = JSON.parse(runtimeLogCalls[0]?.[0].body ?? "{}") as {
       entries?: Array<Record<string, unknown>>;
@@ -1995,7 +2420,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect((await runner.runnerStatus()).lastErrorCode ?? null).toBeNull();
     const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
-      .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
+      .filter((call) => isRuntimeLogEventCall(call[0], "runner.accepted_attempt_failed"));
     expect(runtimeLogCalls).toHaveLength(0);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2101,7 +2526,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
 
     const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
-      .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
+      .filter((call) => isRuntimeLogEventCall(call[0], "runner.accepted_attempt_failed"));
     expect(runtimeLogCalls).toHaveLength(0);
   });
 
@@ -9258,6 +9683,7 @@ function createRunnerHarness(input: {
     runner,
     runnerContainerNames,
     sql: durable.sql,
+    state: durable.state,
     storageValues: durable.storageValues,
   };
 }
@@ -9847,4 +10273,23 @@ function createDeferred<T>() {
     reject,
     resolve,
   };
+}
+
+function isRuntimeLogEventCall(request: { path: string; body?: string }, eventCode: string): boolean {
+  if (request.path !== HOSTED_RUNTIME_LOG_PATH) return false;
+  return parseHostedRuntimeLogRequest(JSON.parse(request.body ?? "{}")).entries
+    .some((entry) => entry.eventCode === eventCode);
+}
+
+function readProcessingSummaryEntries() {
+  return mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.flatMap(([request]) =>
+    request.path === HOSTED_RUNTIME_LOG_PATH
+      ? parseHostedRuntimeLogRequest(JSON.parse(request.body ?? "{}")).entries
+        .filter((entry) => entry.eventCode === "runner.processing_finished")
+      : [],
+  );
+}
+
+function processingAttemptFingerprint(value: string): string {
+  return createHash("sha256").update(`murph.runtime-processing-attempt.v1\0${value}`).digest("hex");
 }
