@@ -1,6 +1,6 @@
 # Let production candidates finish while main advances
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -55,4 +55,13 @@ ordering remains a platform-owned integration proof, not a local mock guarantee.
 - Implemented public ancestry and pinned private build selection; focused public
   controller/policy tests (78), billing workflow tests (29), private admission/source
   tests (63), tooling typecheck and complexity check pass.
-- Private full verification is running. Final reviews and exact-head CI remain required.
+- Private full `pnpm verify` and CI verification pass, including typechecks,
+  deployment policy, built smoke and runtime tests.
+- Final ReviewGPT passes on public acdb8da2f6f9 and private 962f95185923;
+  neither reports a finding. Public required CI is green on its reviewed head.
+- Implementation is complete in public PR #3297 and private PR #137. Final-head
+  CI and the private preliminary review are tracked on those PRs; land private
+  first after its gates pass. No merge or production mutation was performed.
+- Rollout proof remains: observe a candidate reach production while later main
+  checks run, then confirm a delayed older check cannot replace a newer release.
+Completed: 2026-09-11
