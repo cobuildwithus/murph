@@ -19,6 +19,7 @@ const handleHostedOnboardingTelegramWebhookWithVisibleOutcomes =
   );
 
 export const POST = withJsonError(async (request: Request) => {
+  const routeStartedAtMs = Date.now();
   const secretToken = request.headers.get("x-telegram-bot-api-secret-token");
   assertHostedTelegramWebhookSecret(secretToken);
   const rawBody = await readHostedOnboardingRawBodyText(request, {
@@ -35,6 +36,7 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(
     reactionResponse ?? await handleHostedOnboardingTelegramWebhookWithVisibleOutcomes({
       rawBody,
+      webhookReceivedAt: new Date(routeStartedAtMs),
       scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       secretToken,
       signal: request.signal,
