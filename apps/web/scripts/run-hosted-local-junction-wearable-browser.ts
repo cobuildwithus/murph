@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -24,6 +26,7 @@ import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-c
 type WearableSource = "garmin" | "oura" | "whoop";
 
 interface BrowserConfig {
+  awaitCanonicalData: boolean;
   browserChannel: "chrome" | undefined;
   browserTransport: "kernel" | "local";
   disclosureSourceName: "Garmin" | "Oura" | "Whoop";
@@ -107,6 +110,7 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "MURPH_E2E_GARMIN_PASSWORD",
   "MURPH_E2E_HOSTED_SESSION_COOKIE",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_JUNCTION_WEARABLE_DATA",
   "MURPH_E2E_KERNEL_CLI_PATH",
   "MURPH_E2E_PROVIDER_EMAIL",
   "MURPH_E2E_PROVIDER_BROWSER",
@@ -152,7 +156,6 @@ async function main(): Promise<void> {
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(config.timeoutMs);
 
-    stage = "murph_connect_intent";
     await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
     stage = "murph_vital_disclosure";
@@ -189,6 +192,15 @@ async function main(): Promise<void> {
     await page.reload({ waitUntil: "domcontentloaded" });
     await assertWearableConnectionState(page, config, "connected");
 
+    if (config.awaitCanonicalData) {
+      stage = "garmin_canonical_data";
+      await waitForCanonicalDataCheck({
+        input: process.stdin,
+        onReady: () => process.stdout.write("MURPH_E2E_GARMIN_CONNECTED=1\n"),
+        timeoutMs: config.timeoutMs + 30_000,
+      });
+    }
+
     stage = "junction_cleanup";
     await disconnectJunctionAccount(page, config);
 
@@ -219,6 +231,33 @@ async function main(): Promise<void> {
     provider: "junction",
     source: config.source,
   }));
+}
+
+// Keep the established browser/provider session alive while the parent observes
+// callback-owned ingestion. Only a constant control message crosses this pipe.
+async function waitForCanonicalDataCheck(input: {
+  input: Readable;
+  onReady: () => void;
+  timeoutMs: number;
+}): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const reader = createInterface({ input: input.input });
+    const timer = setTimeout(() => finish(new Error("Garmin canonical data check timed out.")), input.timeoutMs);
+    function finish(error?: Error): void {
+      clearTimeout(timer);
+      reader.removeAllListeners();
+      reader.close();
+      input.input.pause();
+      if (error) reject(error);
+      else resolve();
+    }
+    reader.once("line", (line) => finish(line === "MURPH_E2E_GARMIN_DATA_CHECK_COMPLETE=1"
+      ? undefined
+      : new Error("Garmin canonical data control message was invalid.")));
+    reader.once("close", () => finish(new Error("Garmin canonical data check ended before completion.")));
+    reader.once("error", () => finish(new Error("Garmin canonical data control pipe failed.")));
+    input.onReady();
+  });
 }
 
 async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession> {
@@ -421,11 +460,28 @@ async function navigateToHostedLocalStart(
   config: BrowserConfig,
   tunnel: OwnedKernelTunnel | null,
 ): Promise<void> {
-  if (!tunnel) {
-    await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
-    return;
+  if (tunnel) {
+    stage = "kernel_tunnel_ready";
+    await waitForKernelTunnelReady(page, config, tunnel);
   }
 
+  stage = "murph_connect_intent";
+  try {
+    await page.goto(config.startUrl, {
+      timeout: config.timeoutMs,
+      waitUntil: "domcontentloaded",
+    });
+  } catch {
+    throw new Error("Hosted-local connect navigation did not complete.");
+  }
+}
+
+async function waitForKernelTunnelReady(
+  page: Page,
+  config: BrowserConfig,
+  tunnel: OwnedKernelTunnel,
+): Promise<void> {
+  const healthUrl = new URL("/api/internal/health", config.webBaseUrl).toString();
   const deadline = Date.now() + Math.min(
     config.timeoutMs,
     KERNEL_TUNNEL_SETUP_TIMEOUT_MS,
@@ -440,14 +496,15 @@ async function navigateToHostedLocalStart(
     }
     const remainingMs = deadline - Date.now();
     try {
-      await page.goto(config.startUrl, {
+      const response = await page.goto(healthUrl, {
         timeout: Math.min(5_000, remainingMs),
         waitUntil: "domcontentloaded",
       });
-      return;
+      if (response?.status() === 200 && response.url() === healthUrl) return;
     } catch {
-      await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
+      // Navigation errors can contain URLs. Keep readiness diagnostics fixed.
     }
+    await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
   }
   throw new Error("Kernel reverse tunnel did not reach hosted-local Web in time.");
 }
@@ -1107,8 +1164,17 @@ async function disconnectJunctionAccount(
   await assertWearableConnectionState(page, config, "idle");
 }
 
+function readCanonicalDataMode(environment: NodeJS.ProcessEnv, source: WearableSource): boolean {
+  const enabled = environment.MURPH_E2E_JUNCTION_WEARABLE_DATA === "1";
+  if (enabled && source !== "garmin") {
+    throw new Error("Canonical wearable data proof requires Garmin.");
+  }
+  return enabled;
+}
+
 function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
+  const awaitCanonicalData = readCanonicalDataMode(environment, source);
   const label = source === "garmin"
     ? "Garmin"
     : source === "oura"
@@ -1188,6 +1254,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   }
 
   return {
+    awaitCanonicalData,
     browserChannel: browserTransport === "local"
         && !headless
         && !manualAuthorizationAllowed
@@ -1238,10 +1305,12 @@ export {
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
   disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
+  navigateToHostedLocalStart as navigateToHostedLocalJunctionStartForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
   stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
+  waitForCanonicalDataCheck as waitForHostedLocalJunctionCanonicalDataCheckForTest,
 };
 
 function assertTrustedAuthorizationUrl(
@@ -1335,8 +1404,12 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main().catch((error: unknown) => {
+    const location = stage.startsWith("kernel_tunnel_ready")
+        || stage.startsWith("murph_connect_intent")
+      ? ""
+      : ` (${safePageLocation(activePage)})`;
     process.stderr.write(
-      `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
+      `Junction wearable browser E2E failed at ${stage}${location}: ${
         sanitizeFailure(error, activeConfig)
       }\n`,
     );

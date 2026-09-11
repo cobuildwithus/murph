@@ -4099,7 +4099,7 @@ describe("hosted mailbox conversation import adapter", () => {
     );
   });
 
-  test("keeps email conversation metadata hashed while replyTarget uses private thread authority", async () => {
+  test.each([true, false, null, undefined] as const)("preserves explicit email audience %s without guessing from headers", async (threadIsDirect) => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-email-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -4112,7 +4112,10 @@ describe("hosted mailbox conversation import adapter", () => {
         rawMessageKey: "raw_email_thread_authority",
         selfAddress: "assistant@example.test",
         threadKey: "email_thread_root_synthetic",
-        threadIsDirect: true,
+        threadIsDirect,
+        from: "sender@example.test",
+        to: ["assistant@example.test"],
+        cc: [],
         threadTarget: serializeHostedEmailThreadTarget({
           lastMessageId: "email_message_synthetic_001",
           references: ["email_thread_root_synthetic"],
@@ -4149,7 +4152,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(listed.events.length, 1);
     const event = listed.events[0]!;
     assert.equal(event.conversation?.source, "email");
-    assert.equal(event.conversation?.threadIsDirect, true);
+    assert.equal(event.conversation?.threadIsDirect, threadIsDirect ?? null);
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
     const replyTarget = event.replyTarget;
@@ -4159,7 +4162,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.ok(replyTarget.threadId?.startsWith("hostedmail:"));
     assert.equal(JSON.stringify(event).includes("raw_email_thread_authority"), false);
     assert.equal(JSON.stringify(event).includes("hosted_email_identity_synthetic"), false);
-    assert.equal(JSON.stringify(event).includes("assistant@example.test"), false);
+    assert.equal(JSON.stringify(event.conversation).includes("assistant@example.test"), false);
   });
 
   test("decodes conversation.message through the injected seam and imports it through the local inbox path", async () => {
@@ -5034,6 +5037,7 @@ describe("hosted mailbox conversation import adapter", () => {
         subject: "Question about sauna",
         textPreview:
           "Can you compare my sauna notes from this week and include teammate@example.test? From: Sender <sender@example.test>",
+        threadIsDirect: true,
         threadTarget: "hostedmail:opaque-thread-target",
         to: ["assistant@example.test"],
       },
@@ -5082,7 +5086,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(JSON.stringify(event).includes("labs.pdf"), true);
     assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
-    assert.equal(event.conversation?.threadIsDirect, false);
+    assert.equal(event.conversation?.threadIsDirect, true);
   });
 
   test("renders group-routed hosted email input without resurfacing address fields", async () => {
@@ -5116,6 +5120,7 @@ describe("hosted mailbox conversation import adapter", () => {
           "> Reply-To: member-two@example.test",
           "> Inline note from inline-address@example.test should be hidden.",
         ].join("\n"),
+        threadIsDirect: true,
         threadTarget: groupThreadTarget,
         to: ["assistant+g2-secret@mail.example.test", "Member Three <member-three@example.test>"],
       },

@@ -735,6 +735,10 @@
     {
       "issue": "cobuildwithus/murph#3012",
       "path": ".agents/friction-log/20260906154117-design-catalog-date/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3051",
+      "path": ".agents/friction-log/20260907011950-voice-activity-orb/friction.md"
     }
   ],
   "version": 1

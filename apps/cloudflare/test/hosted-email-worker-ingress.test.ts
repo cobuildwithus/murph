@@ -792,7 +792,7 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
-  it("keeps signed member email body addresses unredacted while classifying extra recipients as non-direct", async () => {
+  it.each(["To", "Cc", "Bcc"])("keeps personal alias email private with an extra %s recipient", async (header) => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
       .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
@@ -819,10 +819,10 @@ describe("hosted email worker ingress", () => {
       from: "owner@example.com",
       raw: buildRawEmail({
         body: "Please compare this note from teammate@example.test and keep From: Owner <owner@example.com> intact.",
-        extraHeaders: ["Cc: Teammate <teammate@example.test>"],
+        extraHeaders: header === "To" ? [] : [`${header}: Teammate <teammate@example.test>`],
         from: "Owner <owner@example.com>",
         subject: "Question from owner@example.com",
-        to: replyAliasAddress,
+        to: header === "To" ? `${replyAliasAddress}, teammate@example.test` : replyAliasAddress,
       }),
       to: replyAliasAddress,
     }, createWorkerEnv(bucket));
@@ -832,7 +832,8 @@ describe("hosted email worker ingress", () => {
     expect(appendInput?.body?.subject).toBe("Question from owner@example.com");
     expect(appendInput?.body?.textPreview).toContain("teammate@example.test");
     expect(appendInput?.body?.textPreview).toContain("owner@example.com");
-    expect(appendInput?.body?.threadIsDirect).toBe(false);
+    expect(appendInput?.body?.threadIsDirect).toBe(true);
+    expect(appendInput?.body?.assistantStyleSettingsAuthorized).toBe(false);
   });
 
   it("preserves long hosted email thread targets without truncation", async () => {

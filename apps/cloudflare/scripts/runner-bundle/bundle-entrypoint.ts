@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { access, rm } from "node:fs/promises";
+import { access, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -360,8 +360,10 @@ const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(
-  bundleDir: string,
+  stagedBundleDir: string,
 ): Promise<void> {
+  // Keep esbuild metadata and native probes on the same root through symlinks.
+  const bundleDir = await realpath(stagedBundleDir);
   const entryPath = path.join(bundleDir, "dist", "container-entrypoint.js");
   await access(entryPath);
 
@@ -372,6 +374,8 @@ export async function bundleRunnerContainerEntrypoint(
   await rm(bundleOutDir, { force: true, recursive: true });
 
   const buildResult = await build({
+    // Keep source comments and measured startup bytes independent of staging paths.
+    absWorkingDir: bundleDir,
     banner: {
       js: "import { createRequire as __runnerEntrypointCreateRequire } from 'node:module'; const require = __runnerEntrypointCreateRequire(import.meta.url);",
     },
@@ -597,7 +601,7 @@ function assertRunnerEntrypointBundleBoots(input: {
     "container-entrypoint.js",
   );
   const lazyChunks = input.lazyChunkOutputPaths.map((outputPath) => {
-    const filePath = path.resolve(outputPath.split("/").join(path.sep));
+    const filePath = path.resolve(input.bundleDir, outputPath.split("/").join(path.sep));
     const relativePath = path.relative(input.bundleOutDir, filePath);
     return {
       path: relativePath.startsWith("..") || path.isAbsolute(relativePath)

@@ -255,6 +255,24 @@ function installGlobals(
   window: Window & typeof globalThis,
   document: Document,
 ) {
+  // React uses its legacy input-event fallback because LinkeDOM does not
+  // advertise native input-event support. Preserve listener registration and
+  // removal so focused controls still exercise React's real change handling.
+  Object.defineProperties(window.HTMLElement.prototype, {
+    attachEvent: {
+      configurable: true,
+      value(this: HTMLElement, eventName: string, listener: EventListener) {
+        this.addEventListener(eventName.replace(/^on/u, ""), listener);
+      },
+    },
+    detachEvent: {
+      configurable: true,
+      value(this: HTMLElement, eventName: string, listener: EventListener) {
+        this.removeEventListener(eventName.replace(/^on/u, ""), listener);
+      },
+    },
+  });
+
   class ResizeObserverMock {
     observe() {}
     unobserve() {}

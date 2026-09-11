@@ -14,6 +14,7 @@ import {
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
   expectAdvertisedMurphDynamicTools,
+  hostedLocalAssistantProviderLatestUserInputContains,
   HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS,
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
   isLocalTemporalTcpPortCandidateUsable,
@@ -64,6 +65,58 @@ describe("readHostedLocalAssistantProviderToolOutputs", () => {
 
     expect(outputs).toEqual(["Process exited with code 1", "durable-success"]);
     expect(outputs.join("\n")).not.toContain(marker);
+  });
+});
+
+describe("hostedLocalAssistantProviderLatestUserInputContains", () => {
+  const marker = "synthetic-current-automation-instruction";
+
+  it.each([
+    {
+      input: [
+        { content: marker, role: "user" },
+        { content: "a later unrelated instruction", role: "user" },
+      ],
+      label: "historical user content",
+      matches: false,
+    },
+    {
+      input: [
+        { content: "unrelated current instruction", role: "user" },
+        {
+          arguments: JSON.stringify({ instruction: marker }),
+          name: "synthetic_tool",
+          type: "function_call",
+        },
+        { input: marker, name: "synthetic_tool", type: "custom_tool_call" },
+      ],
+      label: "tool-call arguments",
+      matches: false,
+    },
+    {
+      input: [{ content: marker, role: "user" }],
+      label: "current user text",
+      matches: true,
+    },
+    {
+      input: [{ content: [{ text: marker, type: "input_text" }], role: "user" }],
+      label: "current user input-text content",
+      matches: true,
+    },
+  ])("classifies $label", ({ input, matches }) => {
+    expect(hostedLocalAssistantProviderLatestUserInputContains({
+      body: JSON.stringify({ input }),
+      method: "POST",
+      url: "/v1/responses",
+    }, marker)).toBe(matches);
+  });
+
+  it("rejects malformed request JSON", () => {
+    expect(hostedLocalAssistantProviderLatestUserInputContains({
+      body: "not-json",
+      method: "POST",
+      url: "/v1/responses",
+    }, marker)).toBe(false);
   });
 });
 
@@ -126,12 +179,19 @@ describe("startAssistantProviderStubServer", () => {
         `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
         {
           body: JSON.stringify({
+            client_metadata: {
+              "x-codex-turn-metadata": JSON.stringify({
+                request_kind: "turn",
+                private_fixture_marker: "metadata-must-not-be-copied",
+              }),
+            },
             input: [],
             model: "gpt-5.6-terra",
             stream: true,
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
+            "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }),
           },
           method: "POST",
         },
@@ -147,12 +207,25 @@ describe("startAssistantProviderStubServer", () => {
       expect(JSON.parse(requests[0]!.body)).toMatchObject({
         stream: true,
       });
+      const { body: recordedBody, ...diagnostics } = requests[0]!;
+      expect(recordedBody).toContain("metadata-must-not-be-copied");
+      expect(diagnostics).toEqual({
+        fixtureMatch: "unscoped",
+        method: "POST",
+        observedAtEpochMs: expect.any(Number),
+        queuedResponseCount: 1,
+        requestKind: "turn",
+        responseStatus: 200,
+        url: "/v1/responses",
+      });
+      expect(JSON.stringify(diagnostics)).not.toContain("metadata-must-not-be-copied");
     } finally {
       await stopHttpStubServer(server);
     }
   });
 
   it("starts held Responses API streams before releasing their content", async () => {
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
     let release = (): void => {};
     let markStarted = (): void => {};
     const releasePromise = new Promise<void>((resolve) => {
@@ -162,6 +235,9 @@ describe("startAssistantProviderStubServer", () => {
       markStarted = resolve;
     });
     const server = await startAssistantProviderStubServer({
+      onRequest: (request) => {
+        requests.push(request);
+      },
       responseState: {
         queuedResponses: [{
           beforeResponse: () => releasePromise,
@@ -190,13 +266,167 @@ describe("startAssistantProviderStubServer", () => {
       await started;
       const response = await responsePromise;
       expect(response.status).toBe(200);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        fixtureMatch: "unscoped",
+        queuedResponseCount: 1,
+        requestKind: "unknown",
+        responseStatus: null,
+      });
       release();
       const body = await response.text();
       expect(body).toContain("response.created");
       expect(body).toContain("response.completed");
       expect(body).toContain("held streamed reply");
+      expect(requests[0]?.responseStatus).toBe(200);
     } finally {
       release();
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it.each([
+    { label: "prewarm", metadata: JSON.stringify({ request_kind: "prewarm" }), requestKind: "prewarm" },
+    { label: "memory", metadata: JSON.stringify({ request_kind: "memory" }), requestKind: "memory" },
+    { label: "unsupported", metadata: JSON.stringify({ request_kind: "unexpected-kind" }), requestKind: "unknown" },
+    { label: "malformed JSON", metadata: "not-json", requestKind: "unknown" },
+    { label: "unserialized object", metadata: { request_kind: "turn" }, requestKind: "unknown" },
+    { label: "serialized null", metadata: "null", requestKind: "unknown" },
+  ])("records only the bounded request kind for $label metadata", async ({ metadata, requestKind }) => {
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
+    const server = await startAssistantProviderStubServer({
+      onRequest: (request) => {
+        requests.push(request);
+      },
+      responseState: { queuedResponses: ["metadata test reply"] },
+    });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            client_metadata: { "x-codex-turn-metadata": metadata },
+            input: [],
+            model: "gpt-5.6-terra",
+          }),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        },
+      );
+      await response.text();
+
+      expect(response.status).toBe(200);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        fixtureMatch: "unscoped",
+        queuedResponseCount: 1,
+        requestKind,
+        responseStatus: 200,
+      });
+      expect(requests[0]).not.toHaveProperty("client_metadata");
+      expect(requests[0]).not.toHaveProperty("x-codex-turn-metadata");
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it.each([
+    {
+      input: [{ type: "context_compaction" }],
+      metadataInHeader: false,
+      outputType: "context_compaction",
+      url: "/v1/responses",
+    },
+    {
+      input: [],
+      metadataInHeader: true,
+      outputType: "compaction_summary",
+      url: "/v1/responses/compact",
+    },
+  ])("records compaction without consuming queued replies on $url", async ({ input, metadataInHeader, outputType, url }) => {
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
+    const responseState = {
+      queuedResponses: [{ matchInputContains: "target message", response: "target reply" }],
+    };
+    const server = await startAssistantProviderStubServer({
+      onRequest: (request) => {
+        requests.push(request);
+      },
+      responseState,
+    });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}${url}`,
+        {
+          body: JSON.stringify({
+            ...(metadataInHeader ? {} : {
+              client_metadata: {
+                "x-codex-turn-metadata": JSON.stringify({ request_kind: "compaction" }),
+              },
+            }),
+            input,
+            model: "gpt-5.6-terra",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            ...(metadataInHeader ? {
+              "x-codex-turn-metadata": JSON.stringify({
+                request_kind: "compaction",
+                private_fixture_marker: "header-metadata-must-not-be-copied",
+              }),
+            } : {}),
+          },
+          method: "POST",
+        },
+      );
+      await expect(response.json()).resolves.toMatchObject({
+        output: [{ type: outputType }],
+      });
+
+      expect(response.status).toBe(200);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        fixtureMatch: "compaction",
+        queuedResponseCount: 1,
+        requestKind: "compaction",
+        responseStatus: 200,
+        url,
+      });
+      expect(responseState.queuedResponses).toHaveLength(1);
+      expect(JSON.stringify(requests[0])).not.toContain("header-metadata-must-not-be-copied");
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("records model discovery without consuming a response fixture", async () => {
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
+    const responseState = { queuedResponses: ["reserved reply"] };
+    const server = await startAssistantProviderStubServer({
+      onRequest: (request) => {
+        requests.push(request);
+      },
+      responseState,
+    });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/models`,
+      );
+      await response.text();
+
+      expect(response.status).toBe(200);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        fixtureMatch: "not_applicable",
+        queuedResponseCount: 1,
+        requestKind: "unknown",
+        responseStatus: 200,
+      });
+      expect(responseState.queuedResponses).toHaveLength(1);
+    } finally {
       await stopHttpStubServer(server);
     }
   });
@@ -297,6 +527,7 @@ describe("startAssistantProviderStubServer", () => {
   });
 
   it("does not pop scoped Responses API fixtures for unmatched fallback requests", async () => {
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
     const responseState = {
       queuedResponses: [
         {
@@ -307,6 +538,9 @@ describe("startAssistantProviderStubServer", () => {
     };
     const server = await startAssistantProviderStubServer({
       fallbackResponseText: "fallback reply",
+      onRequest: (request) => {
+        requests.push(request);
+      },
       responseState,
     });
 
@@ -328,6 +562,12 @@ describe("startAssistantProviderStubServer", () => {
       expect(backgroundResponse.status).toBe(200);
       expect(backgroundBody).toContain("fallback reply");
       expect(responseState.queuedResponses).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        fixtureMatch: "none",
+        queuedResponseCount: 1,
+        requestKind: "unknown",
+        responseStatus: 200,
+      });
 
       const targetResponse = await fetch(baseUrl, {
         body: JSON.stringify({
@@ -344,12 +584,20 @@ describe("startAssistantProviderStubServer", () => {
       expect(targetResponse.status).toBe(200);
       expect(targetBody).toContain("target reply");
       expect(responseState.queuedResponses).toHaveLength(0);
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toMatchObject({
+        fixtureMatch: "scoped",
+        queuedResponseCount: 1,
+        requestKind: "unknown",
+        responseStatus: 200,
+      });
     } finally {
       await stopHttpStubServer(server);
     }
   });
 
-  it("keeps unmatched scoped Responses API fixtures queued when fallback is disabled", async () => {
+  it("records every repeated unmatched request as 500 without consuming scoped fixtures", async () => {
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
     const responseState = {
       queuedResponses: [
         {
@@ -358,28 +606,45 @@ describe("startAssistantProviderStubServer", () => {
         },
       ],
     };
-    const server = await startAssistantProviderStubServer({ responseState });
+    const server = await startAssistantProviderStubServer({
+      onRequest: (request) => {
+        requests.push(request);
+      },
+      responseState,
+    });
 
     try {
-      const response = await fetch(
-        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
-        {
-          body: JSON.stringify({
-            input: [{ content: "background wake", role: "user" }],
-            model: "gpt-5.6-terra",
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-      );
-
-      expect(response.status).toBe(500);
-      await expect(response.json()).resolves.toMatchObject({
-        error: "Assistant provider stub received a responses request without a queued response.",
+      const body = JSON.stringify({
+        input: [{ content: "background wake", role: "user" }],
+        model: "gpt-5.6-terra",
       });
-      expect(responseState.queuedResponses).toHaveLength(1);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response = await fetch(
+          `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+          {
+            body,
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          },
+        );
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toMatchObject({
+          error: "Assistant provider stub received a responses request without a queued response.",
+        });
+        expect(responseState.queuedResponses).toHaveLength(1);
+        expect(requests).toHaveLength(attempt + 1);
+        expect(requests[attempt]).toMatchObject({
+          body,
+          fixtureMatch: "none",
+          queuedResponseCount: 1,
+          requestKind: "unknown",
+          responseStatus: 500,
+        });
+      }
+      expect(requests[0]).not.toBe(requests[1]);
     } finally {
       await stopHttpStubServer(server);
     }

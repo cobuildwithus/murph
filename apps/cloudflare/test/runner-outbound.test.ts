@@ -63,6 +63,7 @@ import {
   isHostedComputerWebControlRequest,
 } from "@murphai/hosted-execution/computer-use";
 import {
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -269,6 +270,11 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "clinical records fetch page",
     path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+  },
+  {
+    body: { generation: 1, runId: "clinical_run_1", ticket: "opaque-ticket" },
+    name: "clinical records fetch document",
+    path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   },
   {
     body: {

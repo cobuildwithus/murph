@@ -24,15 +24,14 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_OWNER_RELEASED_PATH,
 } from "@murphai/hosted-execution/routes";
-import {
-  isHostedRuntimeFutureMailboxContinuation,
-  type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeLogRequest,
-  type HostedRuntimeWebStatusResponse,
-  type HostedWorkspaceInvocationProcessingMode,
-  type HostedWorkspaceInvocationResult,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceState,
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+  HostedRuntimeLogRequest,
+  HostedRuntimeWebStatusResponse,
+  HostedWorkspaceInvocationProcessingMode,
+  HostedWorkspaceInvocationResult,
+  HostedWorkspaceReadResponse,
+  HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
@@ -125,24 +124,6 @@ const HOSTED_CUSTOM_INFERENCE_PROVIDER = "hosted-custom-inference";
 const HOSTED_CUSTOM_INFERENCE_API_KEY_ENV = "MURPH_CUSTOM_INFERENCE_API_KEY";
 const HOSTED_CUSTOM_INFERENCE_CONTEXT_WINDOW_ENV =
   "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS";
-
-function shouldDeferHostedRuntimeOwnerReleaseCallback(
-  result: HostedWorkspaceInvocationResult,
-): boolean {
-  if (result.immediateRecheckRequested === true) {
-    return false;
-  }
-
-  try {
-    return isHostedRuntimeFutureMailboxContinuation({
-      nextWakeAt: result.nextWakeAt,
-      nextWakeReason: result.nextWakeReason,
-      redactedStatus: result.redactedStatus,
-    });
-  } catch {
-    return true;
-  }
-}
 
 type HostedRunnerNativeProviderCredentialEnvName =
   keyof typeof HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV;
@@ -794,9 +775,7 @@ export class RuntimeInvocationService {
     this.input.waitUntil(
       this.notifyRunnerContainerCompletionRecordedBestEffort(input),
     );
-    if (!shouldDeferHostedRuntimeOwnerReleaseCallback(input.result)) {
-      await this.notifyRuntimeOwnerReleasedBestEffort(input);
-    }
+    await this.notifyRuntimeOwnerReleasedBestEffort(input);
     return { completed: true };
   }
 

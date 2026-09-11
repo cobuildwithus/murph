@@ -677,6 +677,7 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
   );
 
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
     harness: requireScenario().harness,
     operatorHomeRoot,
     userId: ownerMemberId,

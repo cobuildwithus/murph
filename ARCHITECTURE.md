@@ -17,6 +17,12 @@ retaining provider content.
 `agent-docs/RELIABILITY.md` specifies the supported content, ordering, limits,
 and conservative behavior after an ambiguous retry.
 
+The existing `@murphai/hosted-execution/routes` contract owns parsing the
+complete Linq delivery route at Web, Worker, and runtime boundaries. It binds
+target, directness, and nullable sender/recipient coordinates together; consumers
+use the normalized route without re-parsing. Live route revalidation and the
+provider dispatch claim remain separate Web-owned checks.
+
 Exact-message replies and reactions share one accepted-message targeting
 primitive. The model sees only an existing `AssistantInputEvent.inputId` as a
 `Message ref` beside eligible accepted Linq iMessage input or Telegram input
@@ -947,40 +953,47 @@ The behavior and deploy contract live in
 
 ## Hosted Clinical Records
 
-`apps/web` is the Clinical Records credential and provider-egress control plane.
-It owns the versioned Epic directory, short-lived connect intent, single-use
-SMART state/PKCE session, encrypted patient/token authority, retrieval
-generation, and operational status. `/records/connect` keeps the member-bound
-claim in the URL fragment, removes it from the visible URL before interaction,
-and sends it only in the fixed provider-start body; `/records` projects the
-safe connection and latest-run status and owns disconnect UX. A private
-current-user assistant turn can create the same short-lived first-party link
-through the existing Clinical Records runtime port and signed Web control
-boundary. That tool accepts no member, provider, patient, recipient, URL, or
-scope argument, so provider selection and SMART consent remain browser-owned.
-Each unique member/provider connection admits at most eight immutable snapshots
-across fresh authorizations, bounded to twenty sources per member. Reconnect
-keeps the same encrypted patient/base binding and increments the existing
-credential epoch and run generation. The ordered Epic catalog contains 24
-queries across 17 resource families, with no offline-access scope. Each retrieval run also freezes the exact
-adapter-owned query plan in additive operational JSON. Stable `queryScopeId`
-and deterministic `sliceId` values distinguish repeated resource-type queries
-and bounded history windows, but they are acquisition identity only and never
-participate in canonical FHIR identity. The hosted runner receives only a
-credential-free descriptor and bounded raw FHIR pages through the three signed
-retrieval operations; Cloudflare proves and forwards the active attempt, lease
-generation, and workspace version before web revalidates the fence shape and
-bound member. Postgres stores no raw FHIR body. Raw-first page integrity and
-FHIR import decisions remain with `packages/clinical-records` and
-`packages/importers`, canonical writes remain with `packages/core`, and the
-active hosted runtime reaches that composition through `packages/vault-usecases`.
-Accepted pages are atomically staged by that vault owner in one bounded,
-private, portable `.runtime/operations/clinical-records/**` checkpoint so
-foreground preemption resumes without replaying completed provider pages. The
-checkpoint is non-canonical and is removed when import or terminal rejection
-is captured; final raw paths remain absent until full semantic validation.
-The full behavior and rollout contract lives in
-`agent-docs/product-specs/clinical-records-intake.md`.
+`apps/web` owns the Epic directory, browser connection, SMART authorization,
+encrypted patient/token binding, retrieval generation, provider egress and
+operational status. The existing records launcher still asks the member to
+choose and authorize a hospital once. Every catalog query requests all available
+history, subject to the hospital's actual grant and exposed data. Supporting
+Binary read scope does not become another primary patient resource family.
+The feature remains unlaunched; no preexisting import migration is required.
+
+The credential-free runtime port uses signed read-run, fetch-page,
+fetch-document and record-outcome callbacks. Cloudflare proves the active
+member/attempt/lease fence. Web issues encrypted attachment tickets only from
+patient-bound DocumentReference or DiagnosticReport pages; a ticket binds the
+run/generation, exact parent revision and page digest, attachment position,
+frozen query and same-base Binary URL (or a bounded DiagnosticReport
+Media-to-Binary bridge). Provider credentials stay in Web and
+redirects remain disabled. Postgres contains operational counters and encrypted
+authority, never document bodies.
+
+The hosted runtime retrieves and imports one FHIR page with its attachments at
+a time. Private portable clinical checkpoints retain the pending ticket,
+accepted bytes, next cursor, predecessor manifest and cumulative saved counts.
+Immutable batch manifests prove pagination against the previous saved raw
+manifest and its actual outgoing page link. A batch never establishes
+whole-family absence. Explicit versioned source retractions retain their normal
+meaning. Earlier batches survive a later provider failure or authorization end.
+The old one-run 32 MiB/5,000-resource snapshot cutoff is removed; each request,
+page batch and parser remains bounded, and exhausted authorization or a safety
+bound produces explicit incomplete coverage.
+
+`packages/clinical-records` and `packages/importers` own attachment integrity,
+parent binding and source-note mapping. `packages/vault-usecases` persists
+untouched FHIR pages and original attachment bytes through canonical raw writes,
+then applies validated clinical decisions. Text, HTML and clinical XML retain
+source meaning; PDFs reuse the public Poppler parser. Unreadable files remain
+raw evidence. A parent with unresolved body parts remains incomplete, allowing
+later same-revision recovery without a conflicting partial canonical note.
+Web current-run authority is checked immediately before both raw persistence
+and canonical mutation. Repeated authorization uses the same source/patient
+binding and a new generation, with eight authorizations per source and twenty
+sources per member. The detailed limits, official API registrations and launch
+requirements are owned by `agent-docs/product-specs/clinical-records-intake.md`.
 
 Member-scoped hosted runner operations validate the existing active runtime write fence at the Cloudflare route that owns the read or effect. The fence binds the claimed member, attempt, and lease generation before private-content decryption, artifact access, signed web callbacks, or durable mutation. Runtime clients attach the current lease through their existing transport boundary; member-scoped identity and authority are never derived from Cloudflare container ids. The pre-binding container-fatal sink is the sole log-only exception.
 
@@ -1208,13 +1221,16 @@ launch key, so a warm process cannot retain an earlier catalog after access chan
 Those entries force mixed Code Mode so the code executor and native
 `tool_search` remain available together; individual dynamic-tool
 `deferLoading` values still decide which schemas stay out of the initial
-model-visible surface. Code-only `ALL_TOOLS` still contains generated input
-declarations, but Codex
-0.151.0 renders the automation schema's action branches without combining their
-shared sibling properties, exposing fields such as `contextReferences` as
-`unknown`. Mixed mode provides native JSON-schema discovery around that lossy
-conversion; it does not repair the converter. Keep the structured schema and
-runtime validation authoritative rather than duplicating them in prompts.
+model-visible surface. Code-only `ALL_TOOLS` contains generated input declarations. Automation uses
+its complete canonical runtime schema directly, with self-contained action
+branches, so native discovery and generated declarations retain required fields
+such as `expectedUpdatedAt`. Codex may still shorten large nested types; the
+complete JSON supplement remains necessary. Do not factor branch
+properties into sibling definitions: Codex's converter does not recombine them.
+The existing canonical-schema supplement preserves descriptions and constraints
+that generated TypeScript cannot express. Missing edit versions return the normal
+validation details plus an inspect-and-copy repair instruction; runtime version
+checks remain authoritative.
 The runtime may request an update only from eligible user input in the active
 bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
@@ -1322,7 +1338,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/health-metrics`: workspace-private neutral MetricPoint contract owner for health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports
 - `packages/vault-usecases`: workspace-private CLI/headless vault usecase orchestration owner over `packages/core`, `packages/importers`, and `packages/query`. It owns command-shaped service interfaces, shared CLI-style input normalization, lazy runtime loaders, assistant-safe vault path helpers, the narrow manifest-receipt/removal seam for derived export packs, and the neutral `@murphai/vault-usecases/vault-services` factory used by CLI, assistant, daemon, setup, hosted runtime, and inbox-service callers that need one composed vault service surface without importing owner internals. For workout CSVs it composes the importer plan with bounded source-independent raw-manifest verification and one attached-event lookup, reconciles provider-neutral session overlap across refreshed snapshots, preserves authoritative external references, and patches correction-owned fields onto the latest canonical events instead of rebuilding them from CSV. It runs one core batch preview, reuses exact raw evidence, stores immutable raw data only for a new valid snapshot, and applies one canonical batch; it does not parse source rows or write events itself. It composes the compact Health Commons desired-direction lookup into experiment progress-card snapshots without making query depend on the filesystem-backed Health Commons runtime. It must stay a thin composition layer: canonical record schemas and static lookup-ID family classification stay in `packages/contracts`, canonical writes stay in `packages/core`, imports stay in `packages/importers`, query projections and event display identity stay in `packages/query`, device runtime and control-plane composition stay in `packages/device-syncd`/`packages/cli`, inbox daemon behavior stays in `packages/inboxd` and `packages/inbox-services`, and assistant/session state stays in the assistant runtime packages.
 - `packages/health-commons`: workspace-private public Health Commons owner for protocol pages, biomarker pages, source pages, source-backed health guidance and symptom-safety decisions, exact protocol revisions, generated catalogs, a read-only generated SQLite FTS claim projection that resolves a full health question to one authored topic before retrieving sourced claims, typed-target source findings, and matching safety within that owner, and future aggregate outcome summaries consumed across local and hosted surfaces. Assistant skills must not become a second owner for topic-specific public health knowledge; they remain for tool procedures and stateful product workflows.
-- `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, attachment prompt-bundle audit support, and active-outbox reconciliation for assistant-owned one-time delivery staging under the exact flat assistant-runtime generated-delivery directory. Broad low-frequency native tools keep their argument contracts and set Codex `deferLoading` at `thread/start`, leaving direct-model `tool_search` and code-mode `ALL_TOOLS` discovery to the pinned App Server rather than adding a Murph-owned discovery protocol. The automation tool keeps its full generated schema as the sole runtime-validation and diagnostic contract, while its deferred model advertisement mechanically derives one inline property catalog plus strict per-action allowed/required-field contracts and action-specific value refinements from that exact schema. Top-level field prose remains in the tool description instead of being lifted from one action into a misleading global description; unsupported generated shapes fail visibly by advertising the full schema instead of dropping capability. Because the complete dynamic-tool catalog participates in the native-thread contract fingerprint, deploying the compact descriptor intentionally starts one fresh provider thread for an existing resumable automation-enabled session. That transition reuses the bounded committed-transcript replay, removes a leading orphaned assistant reply when an omitted prefix precedes retained member/assistant exchanges, and marks omitted older context as incomplete with an instruction to inspect authoritative state or clarify rather than invent prior intent. If no member message survives, replay drops ordinary dependent assistant output but retains transcript entries marked as standalone assistant context by the existing transcript owner. Scheduled notifications, Assistant Ask continuations, and imported private completions share that semantic fact; durable outbox provenance remains only as compatibility for private completions persisted before the additive field. After the successful turn persists the compact contract fingerprint, later turns resume the new thread normally. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
+- `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, attachment prompt-bundle audit support, and active-outbox reconciliation for assistant-owned one-time delivery staging under the exact flat assistant-runtime generated-delivery directory. Broad low-frequency native tools keep their argument contracts and set Codex `deferLoading` at `thread/start`, leaving direct-model `tool_search` and code-mode `ALL_TOOLS` discovery to the pinned App Server rather than adding a Murph-owned discovery protocol. Automation advertises its complete generated runtime schema with self-contained action branches. The canonical JSON supplement preserves nested constraints when the pinned Codex renderer still shortens large nested types. The full dynamic-tool catalog participates in the native-thread contract fingerprint, so a descriptor change starts one fresh provider thread for an incompatible resumable session. That transition reuses the bounded committed-transcript replay, removes a leading orphaned assistant reply when an omitted prefix precedes retained member/assistant exchanges, and marks omitted older context as incomplete with an instruction to inspect authoritative state or clarify rather than invent prior intent. If no member message survives, replay drops ordinary dependent assistant output but retains transcript entries marked as standalone assistant context by the existing transcript owner. Scheduled notifications, Assistant Ask continuations, and imported private completions share that semantic fact; durable outbox provenance remains only as compatibility for private completions persisted before the additive field. After the successful turn persists the current contract fingerprint, later turns resume the new thread normally. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
 - `packages/operator-config`: workspace-private operator and setup configuration surface that owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider-preset/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and CLI/shared command contracts
 - `packages/assistant-cli`: workspace-private CLI-only assistant surface that owns the direct local assistant wrappers, assistant command registration, and foreground terminal logging; the optional assistant HTTP daemon and Ink chat UI are retired
 - `packages/setup-cli`: workspace-private CLI-only onboarding and host-setup surface that owns the setup wizard, host provisioning helpers, and assistant/channel/wearable onboarding flows
@@ -2022,13 +2038,13 @@ preserving every canonical raw reference without another retention service.
 `packages/assistant-runtime` performs finite preemptible background iteration,
 resuming from the vault-owned operational checkpoint after preemption. The
 runtime contract carries only the frozen query slices and completed-slice
-references. The v3 checkpoint and v3 manifest preserve that same grouping.
+references. The v4 checkpoint and v3 manifest preserve that same grouping.
 Only the external importer reads legacy v2 manifests; hosted legacy descriptors,
 cursors, duplicate completion lists and outgoing next-link metadata are gone.
 Query-aware page
 requests, opaque cursors, durable request claims, and terminal outcomes bind
 the frozen query-scope and slice identities so they cannot be swapped across
-the same resource type. Epic's active policy expands 24 primary query scopes
+the same resource type. Epic's active policy expands 40 primary query scopes
 from 17 unique granted FHIR resource permissions. Fifteen scopes use one
 whole-family slice and nine freeze one newest-first 90- or 365-day initial
 window at run creation. Supporting dependency reads remain registration-only;
@@ -2216,6 +2232,12 @@ validators and effect owners remain authoritative. Deferred tools retain deferre
 exposure. Full documents cost bytes when registered and when actually exposed;
 the testing owner records complete first-request measurements rather than an
 assumed token or zero-cost claim.
+Named nutrition-card metrics retain their complete object schemas instead of
+factoring their types into sibling pattern constraints. Personalization keeps
+its update properties together, using a minimum property count and paired-field
+dependencies for sparse edits. Required-only alternatives must not replace the
+field-bearing object in Codex's generated declaration.
+
 
 `buildAssistantCodexContractFingerprint` hashes the same supplemented declarations
 sent at `thread/start`. Since `thread/resume` cannot replace tools, persisted
@@ -2874,9 +2896,14 @@ one encrypted table: member-bound users, accounts and sessions; independently
 encrypted pre-member verifications and rate limits. Blind selectors route reads,
 then the full authenticated record guards authority, including partial/count,
 transaction and bulk operations. Canonical member/contact writers compose with
-OTP consumption and session creation in one database-only transaction. Wrong
-codes commit their attempt budget; failures after proof roll back all writes.
-External delivery, provider reconciliation and crypto preparation precede locks.
+OTP consumption and session creation in one database-only transaction. Email
+codes commit wrong-attempt budgets; failures after proof roll back consumption
+and canonical/session writes. SMS uses Twilio Verify outside locks, reserving
+three checks in the existing encrypted challenge before provider work. A bound
+approval digest survives a later canonical rollback; final completion rechecks
+its exact generation and expiry before atomic consumption. Resends replace the
+generation before sending. Delivery, provider reconciliation and crypto work
+stay outside database transactions.
 
 The auth-user row is the one-way writer handoff. Legacy completions cannot
 change handed-off credentials or issue old browser sessions. Existing valid v2
@@ -3984,6 +4011,12 @@ and subagent prompt record is
 `agent-docs/exec-plans/completed/TEMPORAL.md`.
 
 ## CLI Framework Notes
+
+Automation compact inventory retains the record's current `updatedAt` alongside
+its id and schedule. Use filtered compact inventory for discovery and complete
+readback for instruction edits. The operator CLI continues to read the current
+record before sparse edits; hosted model edits use the authenticated automation
+tool and its mandatory inspected-version fence.
 
 - `packages/cli` is built on incur. Model nested verbs with real mounted sub-CLIs such as `search -> query` and `query -> projection -> status|rebuild`; do not simulate nested commands with argv rewrites or positional action enums.
 - Treat `murph` and `vault-cli` as different UX layers over the same command graph: `murph` is the single-active-vault product entrypoint, while `vault-cli` remains the raw explicit-vault contract for development, automation, and assistant/runtime integration.

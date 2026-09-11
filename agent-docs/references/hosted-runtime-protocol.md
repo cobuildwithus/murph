@@ -2271,12 +2271,12 @@ strings enter the new fields, and no diagnostic drives wake selection.
 Separately, after an exact successful completion clears the matching write
 fence, Cloudflare makes at most one signed `POST` to
 `/api/internal/hosted-runtime/owner-released`. The request has no body, uses a
-timeout capped at two seconds, and is not retried. A known strictly future
-mailbox retry continuation skips the callback unless the invocation carries the
-positive `immediateRecheckRequested` edge. The signed query carries the bounded
-opaque `runtimeAttemptId` whose exact write fence was cleared and may also carry
-`immediateRecheckRequested=1`. That transient edge means this invocation
-produced a default or retention schedule which it committed but did not service;
+timeout capped at two seconds, and is not retried. A strictly future mailbox
+retry continuation still sends the callback after exact fence clear; the retry
+time does not establish whether Web has actionable work. The signed query
+carries the bounded opaque `runtimeAttemptId` whose exact write fence was cleared
+and may also carry `immediateRecheckRequested=1`. That transient edge means this
+invocation produced a default or retention schedule which it committed but did not service;
 inherited and already-attempted wakes do not emit it on the ordinary result path.
 Transport-loss recovery is the narrow exception:
 after explicit inactive-container proof and durable workspace-version advance,
@@ -2284,9 +2284,11 @@ Cloudflare has lost attempt-local provenance and may conservatively emit the
 edge for a recovered due default wake, causing one facts re-read. It does not do
 so for a future wake. Web binds the user through the signed request. Without the
 edge, it re-derives runnable mailbox lag and never treats a persisted due wake
-as level-triggered signal authority. For actionable work it emits the
-pointer-only `runtime_owner_released` signal. Temporal releases an accepted
-owner horizon only when its runtime attempt matches, then immediately re-reads
+as level-triggered signal authority. A live system mailbox item beyond the
+handled-through frontier also remains actionable, including a recording item
+with a future retry. For actionable work it emits the pointer-only
+`runtime_owner_released` signal. Temporal releases an accepted owner horizon only
+when its runtime attempt matches, then immediately re-reads
 durable facts and either runs due work or owns the exact future timer. A stale
 release cannot affect a newer owner. Legacy callbacks without an attempt pointer
 remain facts-only `runtime_recheck_requested` signals during rollout. Future
@@ -3029,13 +3031,13 @@ system-mailbox path, not a separate Temporal workflow. Web transactionally
 creates the retrieval run and appends one `clinical-records.sync-requested`
 item whose payload is exactly `{runId, generation}`, then sends the ordinary
 pointer-only `mailbox_appended` signal. The assistant runtime reads the run and
-fetches pages only through the three signed web-control callbacks exported by
+fetches pages and linked documents only through the four signed web-control callbacks exported by
 `@murphai/hosted-execution/clinical-records`; Cloudflare supplies the typed
 transport adapter and owns no tokens or provider URLs. Web owns encrypted OAuth
 credentials, same-base pagination, opaque cursor/request replay, terminal
 reauthorization, and run state. Runtime owns finite background iteration and
-the raw-first vault import, enforcing raw-manifest page and aggregate resource
-caps before calling the importer. Foreground preemption records a nonterminal
+the raw-first vault import, enforcing per-page and per-batch resource and
+attachment caps before calling the importer. Foreground preemption records a nonterminal
 hint and throws before the mailbox cursor advances, so the same generation can
 resume; web must preserve its request/page progress. Raw FHIR, tokens, patient
 ids, and URLs must never enter the mailbox, Temporal state, logs, or model
@@ -3927,11 +3929,33 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
+
+After a default-mode checkpoint, foreground checks, vault-share delivery, and
+required durable-effect follow-up checkpoints precede the Browser Vault offer.
+An idle foreground pass retains its current owner while pending or ready durable
+checkpoint effects remain. A due mailbox wake alone cannot request an owner
+handoff that would skip projection and recording for that owned completion.
+Fresh foreground input and shutdown keep their existing interruption behavior;
+ordinary owner handoff resumes once the completion effects have drained.
+The runtime offers that committed projection before ordinary due-assistant work or
+deferred device maintenance can dirty state again. Browser-only wake retry and
+acknowledgement stay within that offer. A runtime-wake interruption or timeout
+returns through the existing invocation continuation owner, preserving immediate
+foreground admission or the bounded requested-refresh retry and earlier pending
+assistant wakes. Ordinary due work without a fresh runtime wake can wait for
+the existing 30-second Browser refresh budget and a successor invocation;
+fresh conversations and the exact due-assistant durability barrier retain
+priority ahead of that offer.
+
 In production, the configured idle checkpoint delay is at least 180 seconds,
-and every dirty foreground pass restarts that hard lower bound. The exact
-assistant wake projected directly by the current foreground assistant phase may
-run once per dirty checkpoint generation before that boundary against the warm
-projected state, without entering maintenance or publishing a snapshot. A
+and every dirty foreground pass that progresses work restarts that hard lower
+bound. A no-progress phase that requests only a runtime-projection checkpoint
+preserves any active quiet window. If the preceding checkpoint has completed,
+that metadata correction does not start a second 180-second window; it still
+publishes the corrected typed wake through the ordinary checkpoint owner. The
+exact assistant wake projected directly by the current foreground assistant
+phase may run once per dirty checkpoint generation before that boundary against
+the warm projected state, without entering maintenance or publishing a snapshot. A
 no-progress hot attempt preserves its exact wake without replaying it again in
 the same invocation; a dirty progressed attempt restarts the full idle window.
 Mailbox budget exhaustion, pending durable checkpoint effects, staged durable

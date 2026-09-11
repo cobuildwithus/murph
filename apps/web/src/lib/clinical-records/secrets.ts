@@ -234,3 +234,34 @@ export async function openClinicalConnectionSecret(input: {
 export function toClinicalJsonArray(values: readonly string[]): Prisma.InputJsonValue {
   return [...values];
 }
+
+
+type ClinicalDocumentTicketIdentity = { generation: number; memberId: string; runId: string; value: string };
+
+function clinicalDocumentTicketBox(input: ClinicalDocumentTicketIdentity) {
+  return {
+    aad: {
+      field: "documentTicket",
+      purpose: "clinical-records-fhir-document",
+      rowId: input.runId,
+      sequence: input.generation,
+      table: "clinical_record_retrieval_run",
+    },
+    lane: "clinical-records-page-cursor" as const,
+    scope: `clinical-records:${input.runId}:documentTicket`,
+    userId: input.memberId,
+    value: input.value,
+  };
+}
+
+export async function sealClinicalDocumentTicket(input: ClinicalDocumentTicketIdentity): Promise<string> {
+  const sealed = await sealHostedUserSecureBoxString(clinicalDocumentTicketBox(input));
+  if (!sealed) throw new TypeError("Clinical Records document ticket encryption failed.");
+  return sealed;
+}
+
+export async function openClinicalDocumentTicket(input: ClinicalDocumentTicketIdentity): Promise<string> {
+  const opened = await openHostedUserSecureBoxString(clinicalDocumentTicketBox(input));
+  if (!opened) throw new TypeError("Clinical Records document ticket decryption failed.");
+  return opened;
+}

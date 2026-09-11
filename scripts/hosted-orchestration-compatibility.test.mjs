@@ -10,6 +10,7 @@ import {
   HOSTED_RELEASE_ADMISSION_MODE,
   HOSTED_RELEASE_SCOPE_FOREGROUND,
   HOSTED_RELEASE_SCOPE_NONE,
+  HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
   TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
   TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
@@ -175,6 +176,30 @@ function proofJobs({
       run_id: RUN_ID,
       status: "completed",
     });
+  }
+  if (releaseScope === HOSTED_RELEASE_SCOPE_PRODUCTION_CORE) {
+    const digest = hostedReleaseProofDigest({
+      expectedTemporalTargetDigest,
+      privateSha: PRIVATE_SHA,
+      publicSha: PUBLIC_SHA,
+      releaseScope,
+    });
+    for (const lane of [
+      "linq-delivery",
+      "linq-scheduled-reminder",
+      "hosted-web-browser-smoke",
+      "foreground-reply-priority",
+      "foreground-checkpoint-ordering",
+    ]) {
+      jobs.push({
+        conclusion: "success",
+        head_sha: PRIVATE_SHA,
+        id: jobs.length + 1,
+        name: `Hosted production core proof / ${lane} / ${digest}`,
+        run_id: RUN_ID,
+        status: "completed",
+      });
+    }
   }
   return jobs;
 }
@@ -586,6 +611,76 @@ test("hosted release attestation binds scope, exact revisions, and the expected 
   ), /does not bind the requested proof/u);
 });
 
+test("production core admission requires every composed journey on the accepted revision", () => {
+  const options = proofInspectionArgs({
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+    releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
+  });
+  const jobs = proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE });
+  assert.equal(inspectAttestationJobs(jobs, options).releaseScope, "production_core");
+  for (const proof of jobs.filter((job) => job.name.startsWith("Hosted production core"))) {
+    for (const conclusion of ["skipped", "failure", "cancelled"]) {
+      assert.throws(() => inspectAttestationJobs(
+        jobs.map((job) => job.id === proof.id ? { ...job, conclusion } : job),
+        options,
+      ), /omitted a required lane|did not complete successfully/u);
+    }
+    assert.throws(() => inspectAttestationJobs(
+      jobs.filter((job) => job.id !== proof.id),
+      options,
+    ), /omitted a required lane/u);
+    assert.throws(() => inspectAttestationJobs(
+      jobs.map((job) => job.id === proof.id ? { ...job, head_sha: PUBLIC_SHA } : job),
+      options,
+    ), /not bound to the accepted run/u);
+  }
+});
+
+test("production core proof rejects duplicate, unknown, malformed, and stale journey receipts", () => {
+  const options = proofInspectionArgs({
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+    releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
+  });
+  const jobs = proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE });
+  const last = jobs.at(-1);
+  for (const name of [
+    jobs.at(-2).name,
+    last.name.replace("foreground-checkpoint-ordering", "unrelated-scenario"),
+    last.name.replace(/ [0-9a-f]{64}$/u, ` ${"0".repeat(64)}`),
+    "Hosted production core proof / foreground-checkpoint-ordering / invalid",
+  ]) {
+    assert.throws(() => inspectAttestationJobs([
+      ...jobs.slice(0, -1),
+      { ...last, name },
+    ], options), /duplicate, unknown, or mismatched lane|malformed proof job/u);
+  }
+  assert.throws(() => inspectAttestationJobs([
+    ...proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    ...jobs.slice(5),
+  ], { ...options, releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }), /Unexpected hosted production core/u);
+});
+
+test("production core dispatch stays protected-release-only and cannot downgrade to foreground evidence", () => {
+  const args = {
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+    mode: HOSTED_RELEASE_ADMISSION_MODE,
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
+    requestId: REQUEST_ID,
+  };
+  assert.equal(buildDispatchInputs(args).release_scope, "production_core");
+  assert.throws(() => buildDispatchInputs({ ...args, mode: "temporal_compatibility" }), /do not match/u);
+  assert.throws(() => inspectAttestationJobs(
+    proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    proofInspectionArgs({
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+      releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
+    }),
+  ), /does not bind the requested proof/u);
+});
+
 test("attestation ignores completed skipped jobs from inactive proof lanes", () => {
   const skippedJobs = [
     {
@@ -819,66 +914,68 @@ test("controller finalizes a last-admitted success before the private token safe
   );
 });
 
-test("deployment controller dispatches the hosted release lane and binds both rereads to exact public main", async () => {
-  let privateMainReads = 0;
-  let publicMainReads = 0;
-  await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
-    if (
-      url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/`)
-      && url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)
-    ) {
-      privateMainReads += 1;
-      return jsonResponse(privateMainRef());
-    }
-    if (url.endsWith("/repos/cobuildwithus/murph/git/ref/heads/main")) {
-      publicMainReads += 1;
-      return jsonResponse(publicMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/dispatches")) {
-      assert.deepEqual(JSON.parse(init.body), {
-        inputs: buildDispatchInputs({
-          expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
-          releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
-          mode: HOSTED_RELEASE_ADMISSION_MODE,
-          producerDigest: PRODUCER_DIGEST,
-          producerFixtures: PRODUCER_FIXTURES,
-          publicSha: PUBLIC_SHA,
-          requestId: REQUEST_ID,
-        }),
-        ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
-        return_run_details: true,
-      });
-      return jsonResponse({ workflow_run_id: RUN_ID });
-    }
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
-    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-      return jsonResponse({
-        jobs: proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
-        total_count: 5,
-      });
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    const proof = await runTemporalCompatibility(compatibilityArgs({
-      dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
-      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
-      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
-      prNumber: null,
-      sleepFn: async () => undefined,
+for (const releaseScope of [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE]) {
+  test(`deployment controller binds ${releaseScope} and both rereads to exact public main`, async () => {
+    let privateMainReads = 0;
+    let publicMainReads = 0;
+    await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
+      if (
+        url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/`)
+        && url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)
+      ) {
+        privateMainReads += 1;
+        return jsonResponse(privateMainRef());
+      }
+      if (url.endsWith("/repos/cobuildwithus/murph/git/ref/heads/main")) {
+        publicMainReads += 1;
+        return jsonResponse(publicMainRef());
+      }
+      if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+        return jsonResponse({
+          id: WORKFLOW_ID,
+          name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+          path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+          state: "active",
+        });
+      }
+      if (url.endsWith("/dispatches")) {
+        assert.deepEqual(JSON.parse(init.body), {
+          inputs: buildDispatchInputs({
+            expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+            releaseScope,
+            mode: HOSTED_RELEASE_ADMISSION_MODE,
+            producerDigest: PRODUCER_DIGEST,
+            producerFixtures: PRODUCER_FIXTURES,
+            publicSha: PUBLIC_SHA,
+            requestId: REQUEST_ID,
+          }),
+          ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
+          return_run_details: true,
+        });
+        return jsonResponse({ workflow_run_id: RUN_ID });
+      }
+      if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
+      if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+        return jsonResponse({
+          jobs: proofJobs({ releaseScope }),
+          total_count: releaseScope === HOSTED_RELEASE_SCOPE_PRODUCTION_CORE ? 10 : 5,
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }, async () => {
+      const proof = await runTemporalCompatibility(compatibilityArgs({
+        dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
+        expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+        releaseScope,
+        prNumber: null,
+        sleepFn: async () => undefined,
+      }));
+      assert.equal(proof.readerCount, 3);
+      assert.equal(publicMainReads, 2);
+      assert.equal(privateMainReads, 2);
     }));
-    assert.equal(proof.readerCount, 3);
-    assert.equal(publicMainReads, 2);
-    assert.equal(privateMainReads, 2);
-  }));
-});
+  });
+}
 
 test("controller rejects a dispatch race that runs a different private main head", async () => {
   const controls = [];

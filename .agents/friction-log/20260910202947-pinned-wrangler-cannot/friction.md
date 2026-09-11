@@ -1,6 +1,7 @@
 ---
 title: 'Pinned Wrangler cannot parse the namespace bootstrap rollout flag'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3231'
 ---
 
 ## Expected Behavior

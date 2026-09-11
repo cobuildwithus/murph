@@ -206,6 +206,12 @@ export function buildHostedRunnerContainerEnv(
       if (HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS.has(key)) {
         return HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
       }
+      if (key === "LINQ_API_BASE_URL") {
+        // Container outbound interception only handles ports 80/443. Keep
+        // custom/local upstreams behind the Worker so they cannot bypass
+        // credential substitution on an arbitrary provider-stub port.
+        return "https://api.linqapp.com/api/partner/v3";
+      }
       return rewriteHostedRunnerLoopbackUrlForContainer(key, value, source);
     },
   });
