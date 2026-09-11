@@ -2074,6 +2074,45 @@ export class RunnerContainer extends Container {
       || this.containerInteractionGeneration !== input.expectedInteractionGeneration
     ) {
       renewActivityTimeout("cleanup-retained");
+      return;
+    }
+    this.retireStoppedMemberSlot();
+  }
+
+  private retireStoppedMemberSlot(): void {
+    const binding = this.readRunnerSlotBindingOptional();
+    if (binding?.state !== "bound") return;
+    // The caller holds the lifecycle lock and has proved native destruction
+    // without a newer interaction. Fence late admissions before notifying the
+    // user owner; this immutable target can never be restarted or rebound.
+    const store = this.requireRunnerSlotStore();
+    store.beginRetirement({ claimId: binding.claimId });
+    store.finishRetirement();
+    // Never await the user owner's consent lock from the slot lifecycle lock:
+    // an arriving ensure may already hold it while reading this exact slot.
+    this.ctx.waitUntil(this.notifyMemberSlotRetired(binding));
+  }
+
+  private async notifyMemberSlotRetired(
+    binding: Extract<HostedStandbySlotBinding, { state: "bound" }>,
+  ): Promise<void> {
+    try {
+      const namespace = readRunnerContainerMetadataRecordProperty(this.environment.USER_RUNNER);
+      if (typeof namespace.getByName !== "function") return;
+      const runner = readRunnerContainerMetadataRecordProperty(namespace.getByName(binding.userId));
+      if (typeof runner.recordRunnerContainerRetired !== "function") return;
+      await runner.recordRunnerContainerRetired({
+        runnerContainerName: binding.slotName,
+        userId: binding.userId,
+      });
+    } catch {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        level: "warn",
+        message: "Hosted runner retirement notification failed; preserving admission reconciliation fallback.",
+        phase: "container.ready",
+        userId: binding.userId,
+      });
     }
   }
 

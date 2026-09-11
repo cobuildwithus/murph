@@ -133,6 +133,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.revokeActiveRuntimePlatformAiUsage(input);
   }
 
+  async recordRunnerContainerRetired(
+    input: Parameters<HostedUserRunner["recordRunnerContainerRetired"]>[0],
+  ): ReturnType<HostedUserRunner["recordRunnerContainerRetired"]> {
+    return this.runner.recordRunnerContainerRetired(input);
+  }
+
   async recordRuntimeCompletionFromContainer(
     input: Parameters<HostedUserRunner["recordRuntimeCompletionFromContainer"]>[0],
   ): ReturnType<HostedUserRunner["recordRuntimeCompletionFromContainer"]> {
