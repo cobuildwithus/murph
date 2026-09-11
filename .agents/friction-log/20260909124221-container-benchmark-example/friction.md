@@ -1,6 +1,7 @@
 ---
 title: 'Container benchmark example pins a stale runner base'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3130'
 ---
 
 ## Expected Behavior

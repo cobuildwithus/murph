@@ -1,6 +1,7 @@
 ---
 title: 'Delayed PR draft reset can erase a newer Ready decision for the same head'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3211'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Experiment outcome mocks split canonical lock ownership after module reset'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3135'
 ---
 
 ## Expected Behavior

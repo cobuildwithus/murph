@@ -1,6 +1,7 @@
 ---
 title: 'Linq audio retry fixture expires against pending-input retention'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3115'
 ---
 
 ## Expected Behavior

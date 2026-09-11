@@ -1,6 +1,7 @@
 ---
 title: 'Provider-request guard falls back to filenames for fixed-host URL templates'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3240'
 ---
 
 ## Expected Behavior
