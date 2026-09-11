@@ -1,6 +1,7 @@
 ---
 title: 'Dormant PostgreSQL fixtures drift from current production contracts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3253'
 ---
 
 ## Expected Behavior

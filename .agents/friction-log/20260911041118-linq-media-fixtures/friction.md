@@ -1,6 +1,7 @@
 ---
 title: 'Linq media fixtures advertise a CDN origin rejected by the runner'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3275'
 ---
 
 ## Expected Behavior
