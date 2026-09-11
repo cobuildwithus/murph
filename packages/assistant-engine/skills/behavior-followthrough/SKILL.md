@@ -406,7 +406,11 @@ later conversation while the immediately prior confirmed output remains inside
 the existing evidence horizon. A longer cadence or unusual delay sends normally
 when that evidence has expired instead of guessing silence. Do not copy that
 execution policy into every automation. The linked habit regimen remains the
-source of truth for the repeated-action plan.
+source of truth for the repeated-action plan. Save its exact regimen reference in
+`contextReferences`; reminders derive changing targets from that current owner
+and the occurrence local date rather than storing copied progression rules or
+rotation anchors. Keep reminder titles neutral when the target varies. Preserve
+explicit date-scoped exceptions without inferring a permanent plan reset.
 
 Every automation owned by a non-experiment repeated-action plan, including a training plan, must set `supportSeriesId: "habit:<regimenId>"` and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, or `"review"` when the automation is saved or patched, where `<regimenId>` is its canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. Never pass a raw `system:support-series:*` tag; `tags` are only for ordinary descriptive values. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
 

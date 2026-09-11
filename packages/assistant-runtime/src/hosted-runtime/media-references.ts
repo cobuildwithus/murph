@@ -218,7 +218,6 @@ async function prepareHostedWorkspaceMediaReferences(input: {
 }
 
 export async function materializeHostedWorkspaceMediaReferences(input: {
-  materializedArtifactPaths: Set<string>;
   mediaStore?: HostedRuntimeMediaStore | null;
   relativePaths: readonly string[];
   signal?: AbortSignal | null;
@@ -257,7 +256,6 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
     if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {
       const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
       await rm(resolved.absolutePath, { force: true });
-      input.materializedArtifactPaths.delete(key);
       missingArtifactPaths.add(key);
       continue;
     }
@@ -266,7 +264,6 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       signal: input.signal,
       vaultRoot: input.vaultRoot,
     })) {
-      input.materializedArtifactPaths.add(key);
       materializedArtifactPaths.add(key);
       continue;
     }
@@ -298,7 +295,6 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       entry,
       vaultRoot: input.vaultRoot,
     });
-    input.materializedArtifactPaths.add(key);
     materializedArtifactPaths.add(key);
   }
 

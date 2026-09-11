@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import {
   isDeviceSyncDisconnectInProgress,
@@ -12,9 +12,6 @@ import {
 import type {
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
-import type {
-  SerializableConfiguredDeviceSyncProviderConfigs,
-} from "@murphai/device-syncd/config";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
@@ -92,11 +89,6 @@ import {
   normalizeHostedDeviceSyncLifecycleStatus,
 } from "./prisma-store/connection-records";
 import { toPrismaJsonObject } from "./prisma-store/prisma-json";
-import {
-  isDeviceProviderApplicationError,
-  isMemberOwnedDeviceProviderApplicationProvider,
-  resolveDeviceProviderApplication,
-} from "./provider-applications";
 import { normalizeNullableString } from "./shared";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
@@ -235,20 +227,12 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     );
   });
 
-  const providerApplicationRuntime = await resolveHostedRuntimeProviderApplications({
-    includeCredentialMaterial: parsed.includeCredentialMaterial,
-    prisma: controlPlane.store.prisma,
-    records,
-    userId: input.trustedUserId,
-  });
-
   const tokenConnectionIds = new Set<string>();
   if (parsed.includeCredentialMaterial) {
     for (const record of records as HostedConnectionRecord[]) {
       if (
         record.credentialKind === "oauth_tokens"
         && record.status === "active"
-        && !providerApplicationRuntime.blockedConnectionIds.has(record.id)
         && !hasHostedRuntimeRefreshLeaseForTokenVersion(record, record.tokenVersion)
       ) {
         tokenConnectionIds.add(record.id);
@@ -296,8 +280,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
       material?.tokenBundle ?? null,
       visibleSources.map(toHostedRuntimeConnectionSourceSnapshot),
       {
-        forceReauthorizationRequired:
-          providerApplicationRuntime.blockedConnectionIds.has(record.id),
         includeCredentialMaterial: parsed.includeCredentialMaterial,
       },
     ));
@@ -315,9 +297,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
           id: pageRecords.at(-1)!.id,
         }
       : null,
-    ...(Object.keys(providerApplicationRuntime.providerConfigs).length > 0
-      ? { providerConfigs: providerApplicationRuntime.providerConfigs }
-      : {}),
     userId: input.trustedUserId,
   };
 }
@@ -418,12 +397,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           : null;
         const preparedSecretAuthorityMismatch = !secretAuthorityCurrent;
         const sources = await controlPlane.store.listConnectionSources(record.id, tx);
-        const providerApplicationBindingCurrent =
-          await isHostedProviderApplicationBindingCurrent({
-            record,
-            tx,
-            userId: input.trustedUserId,
-          });
         const preparedTokenRootCurrent = secretAuthorityCurrent
           && preparedConnection.tokenWrite?.rootKeyId
           ? await lockAndReadActiveHostedDomainRootKeyIdTx({
@@ -438,8 +411,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           durableExternalAccountId,
           sources.map(toHostedRuntimeConnectionSourceSnapshot),
           {
-            forceReauthorizationRequired:
-              !providerApplicationBindingCurrent,
             includeCredentialMaterial: secretAuthorityCurrent,
           },
         );
@@ -516,7 +487,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           (connectionWriteRequested && preparedSecretAuthorityMismatch)
           || !preparedTokenRootCurrent
           || preparedTokenWriteMissing
-          || !providerApplicationBindingCurrent
           || disconnectInProgress
           || preparedConnectionEpochMismatch
           || connectionEpochMismatch
@@ -703,8 +673,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               durableExternalAccountId,
               [],
               {
-                forceReauthorizationRequired:
-                  !providerApplicationBindingCurrent,
                 includeCredentialMaterial: false,
               },
             ).connection,
@@ -1094,156 +1062,6 @@ async function hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks(input: {
   return pending.items.length > 0 || pending.hasMore;
 }
 
-async function isHostedProviderApplicationBindingCurrent(input: {
-  record: HostedRuntimeConnectionRecord;
-  tx: HostedPrismaTransactionClient | PrismaClient;
-  userId: string;
-}): Promise<boolean> {
-  const applicationId = normalizeNullableString(
-    input.record.providerApplicationId,
-  );
-  const revision = input.record.providerApplicationRevision ?? null;
-  if (!applicationId && revision === null) {
-    return true;
-  }
-  if (
-    !applicationId
-    || revision === null
-    || !isMemberOwnedDeviceProviderApplicationProvider(input.record.provider)
-  ) {
-    return false;
-  }
-
-  const application = await input.tx.deviceProviderApplication.findFirst({
-    select: { id: true },
-    where: {
-      id: applicationId,
-      memberId: input.userId,
-      provider: input.record.provider,
-      revision,
-    },
-  });
-  return application !== null;
-}
-
-interface HostedRuntimeProviderApplicationResolution {
-  blockedConnectionIds: Set<string>;
-  providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
-}
-
-async function resolveHostedRuntimeProviderApplications(input: {
-  includeCredentialMaterial: boolean;
-  prisma: PrismaClient;
-  records: readonly HostedRuntimeConnectionRecord[];
-  userId: string;
-}): Promise<HostedRuntimeProviderApplicationResolution> {
-  const blockedConnectionIds = new Set<string>();
-  const providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs = {};
-  const providerIdentity = new Map<
-    string,
-    { connectionIds: string[]; identity: string | null }
-  >();
-  const redactedBindingCurrent = new Map<string, boolean>();
-  const resolvedApplications = new Map<
-    string,
-    Awaited<ReturnType<typeof resolveDeviceProviderApplication>> | null
-  >();
-
-  // Resolve distinct bindings sequentially to avoid turning one runtime
-  // snapshot into a burst of secure-box/KMS and database reads. Connections
-  // that share the same exact binding reuse its authority decision. No secret
-  // or decryption error is logged.
-  for (const record of input.records) {
-    if (record.status !== "active") {
-      continue;
-    }
-    const applicationId = normalizeNullableString(
-      record.providerApplicationId,
-    );
-    const revision = record.providerApplicationRevision ?? null;
-    if (!applicationId && revision === null) {
-      continue;
-    }
-    if (!applicationId || revision === null) {
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-    const bindingKey = `${record.provider}\n${applicationId}\n${revision}`;
-
-    if (!input.includeCredentialMaterial) {
-      let isCurrent = redactedBindingCurrent.get(bindingKey);
-      if (isCurrent === undefined) {
-        isCurrent = await isHostedProviderApplicationBindingCurrent({
-          record,
-          tx: input.prisma,
-          userId: input.userId,
-        });
-        redactedBindingCurrent.set(bindingKey, isCurrent);
-      }
-      if (!isCurrent) {
-        blockedConnectionIds.add(record.id);
-      }
-      continue;
-    }
-
-    let application = resolvedApplications.get(bindingKey);
-    if (application === undefined) {
-      try {
-        application = await resolveDeviceProviderApplication({
-          applicationId,
-          expectedRevision: revision,
-          memberId: input.userId,
-          prisma: input.prisma,
-          provider: record.provider,
-        });
-      } catch (error) {
-        if (!isDeviceProviderApplicationError(error)) {
-          throw error;
-        }
-        application = null;
-      }
-      resolvedApplications.set(bindingKey, application);
-    }
-    if (!application) {
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-
-    const config = application.providerConfigs[application.provider];
-    if (!config) {
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-
-    const identity = `${application.applicationId}:r${application.revision}`;
-    const existing = providerIdentity.get(application.provider);
-    if (existing?.identity === null) {
-      existing.connectionIds.push(record.id);
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-    if (existing && existing.identity !== identity) {
-      for (const connectionId of existing.connectionIds) {
-        blockedConnectionIds.add(connectionId);
-      }
-      providerIdentity.set(application.provider, {
-        connectionIds: [...existing.connectionIds, record.id],
-        identity: null,
-      });
-      delete providerConfigs[application.provider];
-      continue;
-    }
-
-    providerIdentity.set(application.provider, {
-      connectionIds: [...(existing?.connectionIds ?? []), record.id],
-      identity,
-    });
-    providerConfigs[application.provider] = config as never;
-  }
-
-  return { blockedConnectionIds, providerConfigs };
-}
-
 function mapHostedDeviceSyncDirtyStateResponse(
   dirty: HostedDeviceSyncDirtyConnectionRecord,
   trustedUserId: string,
@@ -1270,7 +1088,6 @@ function buildHostedRuntimeConnectionSnapshot(
   fallbackExternalAccountId: string | null = null,
   sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[] = [],
   options: {
-    forceReauthorizationRequired?: boolean;
     includeCredentialMaterial: boolean;
   } = {
     includeCredentialMaterial: false,
@@ -1303,7 +1120,6 @@ function buildHostedRuntimeProjectedConnectionSnapshot(
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
   sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[],
   options: {
-    forceReauthorizationRequired?: boolean;
     includeCredentialMaterial: boolean;
   },
 ): HostedRuntimeConnectionSnapshot {
@@ -1325,13 +1141,11 @@ function buildHostedRuntimeConnectionSnapshotFromMaterial(
   storedTokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
   sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[],
   options: {
-    forceReauthorizationRequired?: boolean;
     includeCredentialMaterial: boolean;
   },
 ): HostedRuntimeConnectionSnapshot {
   const withholdRuntimeTokenMaterial =
-    options.forceReauthorizationRequired === true
-    || (
+    (
       mappedRecord.credentialKind === "oauth_tokens"
       && (
         !storedTokenBundle
@@ -1361,9 +1175,7 @@ function buildHostedRuntimeConnectionSnapshotFromMaterial(
       scopes: [...publicConnection.scopes],
       setupExpiresAt: publicConnection.setupExpiresAt ?? null,
       setupPhase: publicConnection.setupPhase ?? null,
-      status: options.forceReauthorizationRequired
-        ? "reauthorization_required"
-        : publicConnection.status,
+      status: publicConnection.status,
       updatedAt: publicConnection.updatedAt,
     },
     localState: {

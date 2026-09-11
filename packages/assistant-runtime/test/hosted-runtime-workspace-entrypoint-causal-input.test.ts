@@ -2,7 +2,7 @@ import {
   REAL_SET_TIMEOUT,
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createConsentedMemberAssistantAskRequestedWake,
   createDeferred,
   createDeviceSyncSystemWakeForMailboxItem,
@@ -220,9 +220,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
           assert.equal(snapshotInput.runtimeWakePendingAtCheckpoint, true);
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: "e".repeat(64),
-              key: "users/bundles/member-synthetic/phase-checkpoint-queued-wake.bundle.json",
               size: 512,
             }),
           };
@@ -423,9 +422,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
           assert.equal(snapshotInput.runtimeWakePendingAtCheckpoint, true);
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: "f".repeat(64),
-              key: `users/bundles/member-synthetic/external-wake-${slug}.bundle.json`,
               size: 512,
             }),
           };
@@ -568,9 +566,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/causal-pending-effects.bundle.json",
                 size: 512,
               }),
             };
@@ -747,13 +744,10 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               async createCheckpointSnapshot(snapshotInput) {
                 events.push(`snapshot:${snapshotInput.reason}`);
                 return {
-                  snapshotRef: createBundleRef({
+                  snapshotRef: createSnapshotFixtureRef({
                     hash: actionKind === "workout.live.apply"
                       ? "1".repeat(64)
                       : "2".repeat(64),
-                    key:
-                      "users/bundles/member-synthetic/"
-                      + `${actionKind.replaceAll(".", "-")}.bundle.json`,
                     size: 512,
                   }),
                 };
@@ -1120,9 +1114,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/maximum-safe-prefix.bundle.json",
                 size: 512,
               }),
             };
@@ -1380,11 +1373,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "f".repeat(64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "external-completion-dirty-wake.bundle.json",
                   size: 512,
                 }),
               };
@@ -1716,14 +1706,11 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash:
                     snapshotInput.reason === "idle_shutdown"
                       ? "e".repeat(64)
                       : "d".repeat(64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `${completion.label.replaceAll(" ", "-")}-${transport.channel}-real-path.bundle.json`,
                   size: 512,
                 }),
               };
@@ -2304,11 +2291,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "c".repeat(64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "private-completion-mixed-system-prefix.bundle.json",
                   size: 512,
                 }),
               };
@@ -2404,11 +2388,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + "assistant-ask-completion-dirty-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -2684,9 +2665,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                 ]);
               }
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "7".repeat(64),
-                  key: "users/bundles/member-synthetic/late-imported-approval.bundle.json",
                   size: 512,
                 }),
               };
@@ -2828,9 +2808,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/assistant-ask-dirty-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -3007,9 +2986,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "d".repeat(64),
-                  key: "users/bundles/member-synthetic/consented-checkpoint.bundle.json",
                   size: 512,
                 }),
               };
@@ -3111,9 +3089,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/mixed-pending-effects-canonical.bundle.json",
                 size: 512,
               }),
             };
@@ -3390,9 +3367,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             checkpointRequests: [],
             events: [],
             workspace: createWorkspaceState({
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: hiddenSnapshotHash,
-                key: "users/bundles/member-synthetic/restore-phase-failure.bundle.json",
                 size: 512,
               }),
               version: "0",
@@ -3402,7 +3378,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         vaultRoot,
       }).catch((error: unknown) => error);
       expect(restoreFailure).toMatchObject({
-        message: "Hosted workspace runtime job snapshot restore failed.",
+        message: "Workspace snapshot fixture is unavailable.",
       });
       expect(readHostedRuntimeFailurePhaseCode(restoreFailure)).toBe(
         "runtime_phase:workspace.restore",

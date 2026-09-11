@@ -2230,7 +2230,6 @@ function createPrismaStub() {
           }
         }
         return [{
-          activeMemberLimit: null,
           assignmentWeight: 1,
           maxNewConversationsPerDay: null,
           phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

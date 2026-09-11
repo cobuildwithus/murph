@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepareSmallRunnerNamespaceBootstrap, stageHostedRunnerRelease } from "../scripts/stage-runner-release.ts";
+import { runnerApplicationSpecification } from "../scripts/runner-release-application.ts";
 
 const oldImage = `registry.example.test/runner@sha256:${"a".repeat(64)}`;
 const newImage = `registry.example.test/runner@sha256:${"b".repeat(64)}`;
@@ -81,6 +82,24 @@ describe("small runner protected deployment", () => {
       currentVersionId: "worker-live", listApplications: listApplications() };
     await expect(prepareSmallRunnerNamespaceBootstrap(input)).rejects.toThrow("CF_BOOTSTRAP_SMALL_RUNNER=true");
     await expect(prepareSmallRunnerNamespaceBootstrap({ ...input, currentVersion: version(true) })).resolves.toBeNull();
+  });
+
+  it("preserves a native image tag during namespace-only provisioning without admitting tagged releases", async () => {
+    const image = "registry.example.test/runner:retained-release";
+    const output = await prepareSmallRunnerNamespaceBootstrap({ allowed: true, configPath,
+      currentVersion: version(false), currentVersionId: "worker-live",
+      listApplications: async name => (await listApplications()(name)).map(entry => ({ ...entry,
+        configuration: { ...entry.configuration, image } })),
+    });
+    const bootstrap = JSON.parse(await readFile(output!, "utf8"));
+    expect(bootstrap.containers.map((entry: { image: string }) => entry.image)).toEqual([image, image]);
+    expect(bootstrap.vars.HOSTED_EXECUTION_SMALL_RUNNER_ENABLED).toBe("false");
+    expect(() => runnerApplicationSpecification({ ...config.containers[0], image }, true))
+      .toThrow("outside the supported deployment contract");
+    expect(() => runnerApplicationSpecification({ ...config.containers[0], image }, true, `${image}-different`))
+      .toThrow("outside the supported deployment contract");
+    expect(() => runnerApplicationSpecification({ ...config.containers[0], image, max_instances: -1 }, true, image))
+      .toThrow("outside the supported deployment contract");
   });
 
   it("refuses provisioning during an incomplete image transition", async () => {

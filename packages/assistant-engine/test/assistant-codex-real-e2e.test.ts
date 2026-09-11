@@ -1,3 +1,5 @@
+import { importClinicalFhirSnapshot } from '@murphai/vault-usecases/clinical-records'
+import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
@@ -52,6 +54,7 @@ import {
   upsertGoal,
   upsertHabitatAspect,
   upsertMemory,
+  upsertRegimen,
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
@@ -13249,7 +13252,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () => {
+describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2e', () => {
   it.each([false, true])('sends a clear bounded digest with a full link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -13346,6 +13349,10 @@ describeRealCodex('real Codex Personal Patterns plain-language digest e2e', () =
         expect(await readFile(vocabularyCapturePath, 'utf8')).toContain('yard-work')
       }
       expect(await readFile(ledgerCapturePath, 'utf8')).toContain('yard-work')
+      const savedLedger = parsePersonalPatternNotificationLedger(await readFile(ledgerCapturePath, 'utf8'))
+      expect(savedLedger).toMatchObject({ version: 1, initialDigestSent: true, reviewedFactorIds: ['yard-work'] })
+      expect(savedLedger?.results).toHaveLength(4)
+      expect(savedLedger?.results.every((entry) => entry.factorId === 'yard-work')).toBe(true)
       expect(finishCalls).toHaveLength(0)
       expect(message).toMatch(/yard work/iu)
       expect(message).not.toMatch(/\bgrade\b|\b[A-E][- ](?:grade|association)\b|evidence days|classification|ledger/iu)
@@ -16333,6 +16340,107 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         workingDirectory,
         ...config.temporaryPaths,
       ])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex canonical plan reminder targets e2e', () => {
+  it('keeps canonical rotation across adjacent dates, copied anchors, exceptions and pauses', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-canonical-target-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const plan = await upsertRegimen({
+        vaultRoot: workingDirectory, kind: 'habit', status: 'active',
+        title: 'Synthetic alternating movement plan', startedOn: '2026-04-10',
+        schedule: 'Daily at 09:00 local time',
+        note: 'Alternate local calendar days from 2026-04-10: seated row, calf raise, repeat. All cues on a date use that date’s exercise. On 2026-04-17 only, repeat seated rows; the rotation anchor remains 2026-04-10.',
+      })
+      const canonical = await readFile(path.join(workingDirectory, plan.record.document.relativePath), 'utf8')
+      const contextReferences = [{ entityKind: 'regimen', entityId: plan.record.entity.regimenId }]
+      const scenarios = [
+        { label: 'repeat exception', date: '2026-04-17', anchor: '2026-04-16', target: /rows?/iu, forbidden: /calf/iu },
+        { label: 'day after repeat', date: '2026-04-18', anchor: '2026-04-13', target: /rows?/iu, forbidden: /calf/iu },
+        { label: 'following day with stale anchor', date: '2026-04-19', anchor: '2026-04-13', target: /calf/iu, forbidden: /rows?/iu },
+        { label: 'same day with aligned anchor', date: '2026-04-19', anchor: '2026-04-16', target: /calf/iu, forbidden: /rows?/iu },
+        { label: 'one-day pause', date: '2026-04-20', anchor: '2026-04-13', target: null, forbidden: null },
+        { label: 'resume after pause', date: '2026-04-21', anchor: '2026-04-13', target: /calf/iu, forbidden: /rows?/iu },
+        { label: 'missing owner', date: '2026-04-19', anchor: '2026-04-13', target: null, forbidden: null },
+        { label: 'fixed cue without a plan', date: '2026-04-19', anchor: '2026-04-13', target: /herb|water/iu, forbidden: /rows?|calf/iu },
+      ]
+      for (const [index, scenario] of scenarios.entries()) {
+        const occurrenceAt = `${scenario.date}T13:00:00.000Z`
+        const fixedCue = scenario.label === 'fixed cue without a plan'
+        const saved = await upsertAutomation({
+          vaultRoot: workingDirectory, title: 'Synthetic seated row cue',
+          slug: `synthetic-target-${index}`, status: 'active', continuityPolicy: 'fresh',
+          supportKind: fixedCue ? null : 'reminder',
+          contextReferences: fixedCue ? [] : contextReferences,
+          tags: fixedCue ? [] : [`system:support-series:habit:${plan.record.entity.regimenId}`],
+          now: new Date('2026-04-16T12:00:00.000Z'),
+          schedule: { kind: 'dailyLocal', localTime: '09:00' },
+          route: { channel: 'linq', deliveryTarget: 'synthetic-target', threadId: 'synthetic-target', threadIsDirect: true, identityId: null, participantId: null },
+          instructions: fixedCue ? 'Remind me to water the herb pots.' : `Send a brief cue for the linked plan. Rotation anchor: ${scenario.anchor} = seated row; even local-day offsets mean seated row, odd mean calf raise. Read the plan for context. Skip on 2026-04-20 only.`,
+        })
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(workingDirectory), saved.record.automationId,
+        )
+        if (!source || source.kind !== 'automation') throw new Error('Expected canonical automation.')
+        const automationPath = path.join(workingDirectory, source.relativePath)
+        const automationDocument = await readFile(automationPath, 'utf8')
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+          jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt,
+        })
+        const instructions = buildAssistantCronExecutionInstructions({
+          source, runtimeState, kind: 'canonical',
+          job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+        }, { automationId: null, contextReferences: [] })
+        const prepared = await prepareAssistantCronNotificationInput({
+          instructions, vault: workingDirectory, workingDirectory,
+          outboxAutomationAuthority: { automationId: source.automationId, expectedUpdatedAt: source.updatedAt },
+          recurringReminderConversation: true,
+          scheduledAutomationScheduleKind: source.schedule.kind,
+          scheduledInvocationAuthority: { automationId: source.automationId, occurrenceAt },
+          turnTrigger: 'automation-cron',
+        }, { sessionId: `session-synthetic-target-${index}` })
+        const developerInstructions = buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantHostedGroupToolSurface: 'none', assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: scenario.date,
+          currentTimeZone: 'America/New_York', hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, developerInstructions, dynamicTools: [],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+          model: config.model, modelProvider: config.modelProvider,
+          reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+          prompt: [prepared.instructions,
+            scenario.label === 'missing owner' || fixedCue
+              ? 'Canonical read result for the exact referenced owner: unavailable. No canonical plan data is available for this occurrence.'
+              : `Full current canonical read result for the exact referenced owner:\n${canonical}`,
+          ].join('\n\n'),
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        process.stdout.write(`[real-codex canonical target ${scenario.label}] ${decision.kind === 'send_message' ? decision.text.replaceAll(/\s+/gu, ' ').trim() : 'skip'}\n`)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+        expect(await readFile(automationPath, 'utf8')).toBe(automationDocument)
+        expect(decision.kind, decision.privateSummary).toBe(scenario.target ? 'send_message' : 'skip')
+        if (decision.kind === 'send_message' && scenario.target && scenario.forbidden) {
+          expect(decision.text).toMatch(scenario.target)
+          expect(decision.text).not.toMatch(scenario.forbidden)
+          expect(decision.text).not.toMatch(/logged|completed|fixed|repaired|anchor|automation|regimen|exp_|reg_/iu)
+          expect(decision.text).not.toContain('?')
+        }
+      }
+      expect(await readFile(path.join(workingDirectory, plan.record.document.relativePath), 'utf8')).toBe(canonical)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 360_000)
 })
@@ -34798,7 +34906,14 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *"knowledge upsert --slug personal-pattern-notifications"*)',
-      `    printf '%s\\n' "$*" > ${JSON.stringify(input.ledgerCapturePath)}`,
+      '    while [ "$#" -gt 0 ]; do',
+      '      if [ "$1" = "--body" ]; then',
+      '        shift',
+      `        printf '%s\\n' "$1" > ${quoteNutritionShellLiteral(input.ledgerCapturePath)}`,
+      '        break',
+      '      fi',
+      '      shift',
+      '    done',
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *)',
@@ -38363,6 +38478,71 @@ describeRealCodex('real Codex reminder execution inspection e2e', () => {
       expect(result.finalMessage).not.toMatch(/(?:was|has been|successfully) delivered|I.ve (?:created|rescheduled)|will (?:retry|automatically send)|no reminder was sent/iu)
     } finally {
       await rm(workingDirectory, { force: true, recursive: true })
+    }
+  }, 720_000)
+})
+
+
+describeRealCodex('real Codex imported hospital history e2e', () => {
+  it('reads dated hospital source notes without treating an old prescription as current intake', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hospital-history-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const families = ['MedicationRequest', 'AllergyIntolerance'] as const
+      const resources = [
+        { resourceType: 'MedicationRequest', id: 'historic-antibiotic', subject: { reference: 'Patient/synthetic-patient' }, meta: { lastUpdated: '2026-09-01T12:00:00Z' }, status: 'stopped', intent: 'order', authoredOn: '2004-03-12', medicationCodeableConcept: { text: 'Amoxicillin' }, dosageInstruction: [{ text: '500 mg three times daily for 7 days' }] },
+        { resourceType: 'AllergyIntolerance', id: 'historic-allergy', patient: { reference: 'Patient/synthetic-patient' }, meta: { lastUpdated: '2026-09-01T12:00:00Z' }, recordedDate: '2020-05-10', code: { text: 'Penicillin' }, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] }, verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification', code: 'confirmed' }] }, reaction: [{ manifestation: [{ text: 'Hives' }] }] },
+      ]
+      await importClinicalFhirSnapshot({
+        vaultRoot: workingDirectory, connectionId: 'synthetic-hospital', retrievalJobId: 'synthetic-history',
+        fetchedAt: '2026-09-01T12:00:00Z', fhirBaseUrlHash: createHash('sha256').update('https://hospital.example.test/fhir').digest('hex'),
+        patientIdHash: createHash('sha256').update('synthetic-patient').digest('hex'), sourceSystem: 'epic-fhir', retrievalProtocol: 'query-slices-v2',
+        requestedScopes: families.map((family) => `patient/${family}.read`), grantedScopes: families.map((family) => `patient/${family}.read`),
+        retrievalSlices: families.map((resourceType) => ({ resourceType, queryScopeId: resourceType.toLowerCase(), sliceId: 'whole', coverage: 'whole-family', queryFingerprint: 'a'.repeat(64) })),
+        completedRetrievalSlices: families.map((resourceType) => ({ queryScopeId: resourceType.toLowerCase(), sliceId: 'whole' })),
+        pages: families.map((resourceType) => ({ resourceType, queryScopeId: resourceType.toLowerCase(), sliceId: 'whole', content: JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: resources.filter((resource) => resource.resourceType === resourceType).map((resource) => ({ resource })) }) })),
+      })
+      const before = await readVaultRawTolerant(workingDirectory)
+      expect(before.events.filter((event) => event.kind === 'note')).toHaveLength(2)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-09-10T16:00:00Z', currentLocalDate: '2026-09-10', currentTimeZone: 'America/New_York',
+          modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        }),
+        dynamicTools: [], env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        prompt: 'Please check my connected hospital records. What did the old amoxicillin prescription say, and what reaction was recorded for penicillin? Does that old prescription establish that I take amoxicillin now? Just summarize the records; do not change anything.',
+      })
+      process.stdout.write(`[hospital-history-readback] ${JSON.stringify({ reply: result.finalMessage })}\n`)
+      expect(result.finalMessage).toMatch(/amoxicillin/iu)
+      expect(result.finalMessage).toMatch(/500\s*(?:mg|milligrams)/iu)
+      expect(result.finalMessage).toMatch(/(?:three|3) times|(?:three|3)[ -]times|TID/iu)
+      expect(result.finalMessage).toMatch(/hives/iu)
+      expect(result.finalMessage).toMatch(/2004/iu)
+      expect(result.finalMessage).toMatch(/stopped|historical|old prescription/iu)
+      expect(result.finalMessage).toMatch(/does(?:n.t| not)|can(?:n.t|not)|does not establish|not (?:evidence|proof|confirm)/iu)
+      // A denial such as "does not establish that you currently take" is correct.
+      // Reject affirmative intake claims and dosing instructions, while the
+      // preceding assertion requires explicit uncertainty about current intake.
+      expect(result.finalMessage).not.toMatch(/(?:^|[.!?\n]\s*)(?:yes[,\s]+)?you (?:currently take|are taking) amoxicillin/iu)
+      expect(result.finalMessage).not.toMatch(/you (?:should take|must take) amoxicillin/iu)
+      const after = await readVaultRawTolerant(workingDirectory)
+      expect(after.events).toEqual(before.events)
+      expect(after.entities).toEqual(before.entities)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 720_000)
 })

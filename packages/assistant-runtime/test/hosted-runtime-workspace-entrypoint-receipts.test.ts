@@ -2,7 +2,7 @@ import {
   TEST_NOW,
   createResolvedDeviceSyncSystemMailboxItem,
   createDeviceSyncSystemWakeForMailboxItem,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createCanonicalReceiptLogArtifacts,
   createDeferred,
   createMailboxItem,
@@ -157,9 +157,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: snapshotInput.reason === "import" ? "1".repeat(64) : "2".repeat(64),
-              key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
               size: 512,
             }),
           };
@@ -233,9 +232,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: snapshotInput.reason === "import" ? "3".repeat(64) : "4".repeat(64),
-                key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
                 size: 512,
               }),
             };
@@ -447,9 +445,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: "5".repeat(64),
-              key: "users/bundles/member-synthetic/receipt-recovery-failed.bundle.json",
               size: 512,
             }),
           };
@@ -1179,16 +1176,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}`);
           assert.equal(snapshotInput.reason, "idle_shutdown");
-          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
-          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-          artifactLabelsByHash.set(hotHash, "canonical-hot-state");
-          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+          artifactLabelsByHash.set(snapshot.hash, "canonical-workspace");
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return {
-            snapshotRef: createBundleRef({
-              hash: hotHash,
-              key: "users/bundles/member-synthetic/canonical-hot.bundle.json",
-              size: hotSnapshot.bundle.byteLength,
-            }),
+            snapshotRef: snapshot.snapshotRef,
           };
         },
         async importItem() {
@@ -1476,8 +1468,6 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
             async createCheckpointSnapshot() {
               snapshotCalls += 1;
               const snapshot = await createVaultSnapshotBundle({
-                key:
-                  `users/bundles/member-synthetic/receipt-capacity-${snapshotCalls}.bundle.json`,
                 vaultRoot,
               });
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -1976,17 +1966,10 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`restore-snapshot:${snapshotInput.reason}`);
           assert.equal(snapshotInput.reason, "idle_shutdown");
-          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
-            vaultRoot: restoredVaultRoot,
-          });
-          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          const snapshot = await createVaultSnapshotBundle({ vaultRoot: restoredVaultRoot });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return {
-            snapshotRef: createBundleRef({
-              hash: hotHash,
-              key: "users/bundles/member-synthetic/canonical-crash-restore-hot.bundle.json",
-              size: hotSnapshot.bundle.byteLength,
-            }),
+            snapshotRef: snapshot.snapshotRef,
           };
         },
         async importItem() {
@@ -2290,22 +2273,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       });
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
-      const baseRef = createBundleRef({
+      const baseRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: "users/bundles/member-synthetic/canonical-pre-checkpoint-base.bundle.json",
         size: baseBundle.byteLength,
       });
       artifactBytesByHash.set(baseHash, baseBundle);
-      const initialHotSnapshot = await snapshotHostedAssistantRuntimeHotState({
-        vaultRoot: sourceVaultRoot,
-      });
-      const initialHotHash = sha256HostedBundleHex(initialHotSnapshot.bundle);
-      const initialHotRef = createBundleRef({
-        hash: initialHotHash,
-        key: "users/bundles/member-synthetic/canonical-pre-checkpoint-initial-hot.bundle.json",
-        size: initialHotSnapshot.bundle.byteLength,
-      });
-      artifactBytesByHash.set(initialHotHash, initialHotSnapshot.bundle);
       const platform = createPlatform({
         artifactBytesByHash,
         events,
@@ -2317,10 +2289,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
           checkpointRequests,
           events,
           workspace: createWorkspaceState({
-            snapshotRef: buildHostedExecutionLayeredSnapshotRef({
-              base: baseRef,
-              hot: initialHotRef,
-            }),
+            snapshotRef: baseRef,
             version: "0",
           }),
         }),
@@ -2334,15 +2303,10 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}`);
           assert.equal(snapshotInput.reason, "idle_shutdown");
-          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
-          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return {
-            snapshotRef: createBundleRef({
-              hash: hotHash,
-              key: "users/bundles/member-synthetic/canonical-pre-checkpoint-hot.bundle.json",
-              size: hotSnapshot.bundle.byteLength,
-            }),
+            snapshotRef: snapshot.snapshotRef,
           };
         },
         async importItem(item) {

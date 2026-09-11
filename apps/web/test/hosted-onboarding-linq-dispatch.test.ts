@@ -114,7 +114,6 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqInstantStartPhonePrefixes: ["+44"] as readonly string[],
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
-      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -165,7 +164,9 @@ const mocks = vi.hoisted(() => {
     shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
     }),
-    signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+    signalHostedMailboxAppendRuntime: vi.fn<
+      typeof import("../src/lib/hosted-orchestration/signal-runtime").signalHostedMailboxAppendRuntime
+    >(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
@@ -7967,8 +7968,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input) => {
       callOrder.push("conversation-signal");
+      input.onSignalStarted?.();
       return {
         signalAccepted: true,
         workflowId: `hosted-user-runtime:${memberId}`,
@@ -8095,6 +8097,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         userId: memberId,
       },
       mailboxItemId: "mailbox_instant_first_turn_outbound",
+      onSignalStarted: expect.any(Function),
     });
 
     typingResult.resolve({ ok: false, status: 503 });
@@ -14521,7 +14524,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const prisma = asPrismaTransactionClient({
       hostedLinqLine: buildHostedLinqLineFixture({
-        activeMemberLimit: 1,
         maxNewConversationsPerDay: 1,
         phoneNumber: homeLinePhone,
       }),
@@ -15303,7 +15305,6 @@ function buildManagedInboundHostedLinqLineFixture(
         )
       )
         ? [{
-            activeMemberLimit: null,
             assignmentWeight: 1,
             configuredAt: new Date("2026-03-26T00:00:00.000Z"),
             egressPolicy: "enabled",
@@ -15325,7 +15326,6 @@ function buildManagedInboundHostedLinqLineFixture(
 }
 
 function buildHostedLinqLineFixture(input: {
-  activeMemberLimit?: number | null;
   maxNewConversationsPerDay?: number | null;
   phoneNumber: string;
 }): HostedLinqLineFixture {
@@ -15339,7 +15339,6 @@ function buildHostedLinqLineFixture(input: {
         )
       )
         ? [{
-            activeMemberLimit: input.activeMemberLimit ?? null,
             assignmentWeight: 1,
             maxNewConversationsPerDay: input.maxNewConversationsPerDay ?? null,
             phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(input.phoneNumber),
@@ -15361,7 +15360,6 @@ function buildHostedLinqLineFixture(input: {
 
 function buildHostedLinqLinePoolFixture(input: {
   lines: Array<{
-    activeMemberLimit?: number | null;
     maxNewConversationsPerDay?: number | null;
     phoneNumber: string;
     proactiveConversationCount?: number | null;
@@ -15369,7 +15367,6 @@ function buildHostedLinqLinePoolFixture(input: {
   }>;
 }): HostedLinqLineFixture {
   const rows = input.lines.map((line) => ({
-    activeMemberLimit: line.activeMemberLimit ?? null,
     assignmentWeight: 1,
     configuredAt: new Date("2026-03-26T00:00:00.000Z"),
     egressPolicy: "enabled",
@@ -15397,7 +15394,6 @@ function buildHostedLinqLinePoolFixture(input: {
         : rows;
 
       return matchingRows.map((row) => ({
-        activeMemberLimit: row.activeMemberLimit,
         assignmentWeight: row.assignmentWeight,
         configuredAt: row.configuredAt,
         egressPolicy: row.egressPolicy,
@@ -15515,7 +15511,6 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
               )
             )
               ? [{
-                  activeMemberLimit: null,
                   assignmentWeight: 1,
                   maxNewConversationsPerDay: null,
                   phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

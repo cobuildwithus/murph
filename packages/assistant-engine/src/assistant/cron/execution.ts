@@ -71,6 +71,7 @@ import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
 import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
+import { canSkipManagedPersonalPatterns } from '../personal-patterns-eligibility.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
 } from '../linq-delivery-posture.js'
@@ -728,6 +729,9 @@ export async function executeClaimedAssistantCronJob(
         }
       }
       lifecycleSkipReason = await runAssistantCronAutomationPreconditions({
+        trigger: input.trigger,
+        consecutiveFailures: claimedJob.state.consecutiveFailures,
+        nowIso: startedAt,
         source: input.job.source,
         occurrenceAt,
         vault: input.vault,
@@ -1876,6 +1880,9 @@ function buildAssistantCronAutomationContextInstructions(
       ? '- contextReferences: none supplied; do not guess a canonical record'
       : `- contextReferences: ${JSON.stringify(context.contextReferences)}`,
     '- Inspect each exact reference through the ordinary canonical read surface before relying on it, and use only the ordinary domain mutation tools for any write.',
+    '- For a cue whose action depends on a linked plan, read the full current canonical owner before composing it. The canonical plan owns the target; copied anchors, rotation rules, or target names in automation titles/instructions, earlier cues, and conversation summaries cannot override it.',
+    '- Resolve a changing target from the scheduled occurrence’s local calendar date in the canonical timezone and the plan’s saved anchor and rotation, not the retry/delivery date or the automation schedule anchor. Apply explicit date-scoped target exceptions from the plan and honor saved pause/skip conditions; do not reset the rotation because of a one-day repeat, correction, or missed cue. A permanent change requires an explicitly authorized canonical plan update.',
+    '- If that target-dependent cue lacks a readable canonical owner or its current plan cannot resolve one target, skip the cue; do not guess a target or silently repair state. Fixed cues that do not depend on a plan keep their ordinary reminder and skip rules.',
   ].join('\n')
 }
 
@@ -1987,6 +1994,9 @@ function assistantCronTimestampIsLater(
 }
 
 async function runAssistantCronAutomationPreconditions(input: {
+  trigger: AssistantCronTrigger
+  consecutiveFailures: number
+  nowIso: string
   source: CanonicalAutomationAssistantCronJobRecord
   occurrenceAt: string
   vault: string
@@ -2027,6 +2037,18 @@ async function runAssistantCronAutomationPreconditions(input: {
     })
   ) {
     lifecycleSkipReason = 'Journal connected context has no connected accounts or existing ledger.'
+  }
+  if (lifecycleSkipReason === null
+    && input.trigger === 'scheduled' && input.consecutiveFailures === 0
+    && await canSkipManagedPersonalPatterns({
+      automationId: input.source.automationId,
+      instructions: input.source.instructions,
+      nowIso: input.nowIso,
+      signal: input.signal,
+      timeZone: input.source.timeZone,
+      vaultRoot: input.vault,
+    })) {
+    lifecycleSkipReason = 'Personal Patterns factors, results, and grades are already reviewed.'
   }
   return lifecycleSkipReason
 }

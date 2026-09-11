@@ -52,7 +52,9 @@ first protected full deployment. That deployment alone requires
 `CF_BOOTSTRAP_SMALL_RUNNER=true`: migration `v9` creates the SQLite namespace
 using a full Worker deploy with selection off and every existing application
 pinned to its live image, resources and capacity. Native before/after receipts
-must remain unchanged. This is the bounded namespace-bootstrap exception to
+must remain unchanged. Existing native image tags are preserved exactly in this
+namespace-only step; newly admitted release images still require immutable
+digests. This is the bounded namespace-bootstrap exception to
 the ordinary version-only release flow; no application image rollout belongs
 in that bootstrap. Missing live authority, a pending candidate or an active
 native rollout stops provisioning. Clear the bootstrap control after success.
@@ -532,18 +534,17 @@ of an existing Durable Object row: after write authority is cleared,
 is confirmed destroyed. Withdrawal and account deletion both consume this
 pending-stop pointer before acknowledging their respective cleanup boundary.
 
-The first-contact shell hint now writes that same exact target before the
-container acknowledges registration of its platform-start operation. Deploy
-this Worker with `container_rollout=immediate`: an older Worker can have started
-a versioned shell without recording its name, so a gradual container drain
-cannot prove withdrawal or deletion will find every old hint. Deploy Web first,
-then deploy this Worker immediately. The response shape is unchanged, but Web
-can now deny an absent or suspended member while reporting a non-revoked
-consent state. An older Worker rejects that combination and fails closed; the
-new Worker accepts both legacy and fail-closed responses. Do not deploy the new
-Worker before Web because the old Web admission owner cannot deny a hint queued
-behind account deletion. After the first shell-hint target is reserved, this
-Worker is part of the existing hard rollback floor described below.
+The retired first-contact shell hint also reserved that exact target before the
+container acknowledged registration of its platform-start operation. Its rollout
+required Web first, then an immediate Worker rollout: an older Worker could
+have started a versioned shell without recording its name, and older Web
+admission could not deny a hint queued behind account deletion. The unchanged
+response shape allowed Web to deny an absent or suspended member while reporting
+a non-revoked consent state; the preceding Worker rejected that combination,
+while the compatible Worker accepted both legacy and fail-closed responses.
+After the first shell-hint target was reserved, that Worker became part of the
+existing hard rollback floor described below. Retiring the optional hint
+transport does not remove the exact-target cleanup requirement.
 
 After the first such pending-stop row is written, this Worker is a hard
 Cloudflare rollback floor. An older Worker treats the absent active attempt as
@@ -2593,15 +2594,26 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Retiring member shell-prewarm producers
+## Retired member shell-prewarm transport
 
-Current Web removes the optional typing, message-routing, and instant-start
-shell-prewarm calls. The new Worker accepts the old authenticated receiver
-contract as a no-op. Either deployment order preserves authoritative mailbox
-signaling and the post-Temporal direct ensure; an older Worker may simply receive
-fewer optional hints. Historical latency fields remain readable, while current
-Web stops producing their per-hint correlation metadata. Container identity and
-state rollback constraints remain those of the unified fleet migration above.
+The supported rollout starts from the unified fleet cutover: Web has retired
+typing, message-routing, and instant-start shell hints, and Worker and container
+receivers already treat them as no-ops. Confirm deployed source ancestry and
+the existing unified fleet rollback floor through the normal release evidence;
+this source contract does not establish current deployment or rollback eligibility.
+
+The member-specific HTTP endpoint now returns 404, and the control client plus
+UserRunner and RunnerContainer prewarm RPC methods are removed. A delayed older
+Web request may fail, but its best-effort helper catches that optional failure
+without rejecting durable mailbox signaling or the post-Temporal direct ensure.
+No queued hint is replayed or converted into runtime work. Memberless standby
+preparation and normal admitted ensure-processing remain unchanged.
+
+Historical latency fields remain readable, and exact legacy stop targets retain
+their recovery and deletion paths. This deletion writes no new persistent format
+and introduces no additional persisted-state rollback floor. Container identity,
+namespace recovery, and rollback constraints remain those of the unified fleet
+migration above.
 
 ## Container Operator Access
 
@@ -2629,3 +2641,26 @@ namespaces, and removing the flag would change process topology and widen
 Use bounded structured runtime logs, Durable Object status, Container
 application and instance inventory, and the managed deploy smoke for production
 diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.
+
+## Retiring pre-v2 live workspace restore
+
+Deploy the runner removal only after the canonical workspace pointer inventory
+contains no pre-v2 refs and all current snapshot writers produce v2. These gates
+were checked before the removal; repeat them if the deployment baseline changes
+to a legacy writer. No migration, backfill, or object deletion accompanies this
+release. Current and older v2 writers can coexist during a gradual rollout; Web
+and Worker require no ordering change. A null pointer remains bootstrap state.
+
+This cleanup requires a v2-capable reader and v2-only writer at the rollback
+floor; all stricter existing fleet and receipt-format rollback floors still
+apply. This release does not permit a pre-v2 writer rollback or direct restoration of a
+pre-v2 backup pointer. Such a recovery requires a separately reviewed conversion
+path before publishing the pointer. Reverting this code removal alone adds the
+old reader without changing stored data.
+
+Keep legacy ref decoding, Durable Object orphan candidates, legacy object and
+artifact cleanup, canonical write receipt recovery, and the omitted
+`replacedSnapshotRef` fallback for older v2 snapshot-session producers. Canonical
+pointer drain does not prove those independent stores empty. After rollout,
+confirm normal managed-container smoke and supported v2 cold restore/checkpoint
+behavior; an unsupported-ref rejection means the pointer/writer gate failed.

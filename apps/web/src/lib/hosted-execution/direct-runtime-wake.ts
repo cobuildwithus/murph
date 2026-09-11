@@ -22,7 +22,8 @@ const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
 
 /**
  * Starts the payloadless Cloudflare latency hint and always settles. Temporal
- * must accept the durable mailbox signal before a caller invokes this helper.
+ * must own the durable mailbox signal. A caller may overlap its acknowledgement
+ * only after the signal owner has validated access and started the request.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (

@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -164,9 +164,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot() {
             checkpointSnapshotCreated = true;
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                key: `users/bundles/member-synthetic/post-checkpoint-consumed-replay-${checkpointRequests.length}.bundle.json`,
                 size: 640,
               }),
             };
@@ -251,9 +250,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-foreground-pending-${checkpointRequests.length}.bundle.json`,
                 size: 640,
               }),
             };
@@ -371,11 +369,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               + `${snapshotInput.expectedWorkspaceVersion ?? "unknown"}`,
             );
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
-                key:
-                  `users/bundles/member-synthetic/forced-checkpoint-foreground-pending-`
-                  + `${checkpointRequests.length}.bundle.json`,
                 size: 640,
               }),
             };
@@ -661,9 +656,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               throw new HostedRuntimeCheckpointInterruptedByWakeError();
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-snapshot-wake-${snapshotAttempt}.bundle.json`,
                 size: 640,
               }),
             };
@@ -1036,11 +1030,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               });
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + `runtime-idle-checkpoint-wake-window-${snapshotAttempt}.bundle.json`,
                 size: 640,
               }),
             };
@@ -1157,11 +1148,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               });
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + `runtime-safe-system-rearm-${snapshotAttempt}.bundle.json`,
                 size: 640,
               }),
             };
@@ -1279,11 +1267,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
             snapshotAttempt += 1;
             events.push(`snapshot:${snapshotAttempt}:${snapshotInput.idleCheckpointTrigger}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + `runtime-checkpoint-conversation-hint-${snapshotAttempt}.bundle.json`,
                 size: 640,
               }),
             };
@@ -1431,11 +1416,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               });
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + `runtime-snapshot-wake-shutdown-${snapshotAttempt}.bundle.json`,
                 size: 640,
               }),
             };
@@ -1528,11 +1510,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
                 `snapshot:${snapshotAttempt}:${snapshotInput.idleCheckpointTrigger}`,
               );
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `shutdown-foreground-pending-${snapshotAttempt}.bundle.json`,
                   size: 640,
                 }),
               };
@@ -1950,11 +1929,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + "runtime-checkpoint-publication-non-assistant.bundle.json",
                 size: 640,
               }),
             };
@@ -2048,11 +2024,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "6".repeat(64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + "runtime-post-checkpoint-mailbox-system-failure.bundle.json",
                 size: 640,
               }),
             };
@@ -2187,9 +2160,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               );
             }
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-stale-${snapshotAttempt}.bundle.json`,
                 size: 640,
               }),
             };
@@ -2284,9 +2256,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-pending-timer.bundle.json",
                 size: 640,
               }),
             };
@@ -2400,9 +2371,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-accumulated.bundle.json",
                 size: 640,
               }),
             };
@@ -2493,9 +2463,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-no-progress-hint.bundle.json",
                 size: 640,
               }),
             };
@@ -2584,9 +2553,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-checkpoint-wake-no-progress-hint.bundle.json",
                 size: 640,
               }),
             };
@@ -2685,9 +2653,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-clear-${checkpointRequests.length}.bundle.json`,
                 size: 640,
               }),
             };
@@ -2793,9 +2760,8 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-idle-timer-clear.bundle.json",
                 size: 640,
               }),
             };
