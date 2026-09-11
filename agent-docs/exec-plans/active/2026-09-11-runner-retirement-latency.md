@@ -67,4 +67,13 @@ interpretation or reply behavior; this change targets pre-execution allocation.
 
 - Isolated task checkout created; no other task checkout is being reused.
 - Existing production timing and exact deployed source inspected read-only.
-- Frozen workspace dependency installation running.
+- Frozen workspace dependencies installed.
+- Implemented post-stop durable retirement and verified background assignment clear.
+- Remote verification stays outside the consent/admission lock; only the local
+  conditional clear is serialized with new admission.
+- Six focused suites passed (584 tests); ten retirement-focused tests also pass,
+  including a message admitted while old-slot proof is delayed.
+- Cloudflare typecheck and complexity guard pass. Existing complexity debt is
+  unchanged; no modified function exceeds the threshold.
+- PR #3338 opened as a draft. Changelog entry added; final ReviewGPT and CI pending.
+- Production optimization is not deployed or benchmarked yet.
