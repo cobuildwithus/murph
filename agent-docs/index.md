@@ -146,7 +146,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-04 |
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, and protected sandbox browser authentication. | Verification policy | High | 2026-09-10 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, and protected sandbox browser authentication with bounded Chromium installation. | Verification policy | High | 2026-09-10 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Completion workflow. | Completion workflow | High | 2026-09-02 |

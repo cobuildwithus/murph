@@ -49,9 +49,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install and qualify browser tools without provider authority
+      - name: Install Playwright Chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
+      - name: Qualify browser tools without provider authority
         run: |
-          scripts/install-playwright-chromium.sh
           openssl version
           echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
           pnpm exec codex --version

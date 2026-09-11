@@ -347,6 +347,10 @@ The workflow runs on main pushes, every six hours, and main-only manual
 dispatch. Fixed non-canceling concurrency serializes its test identity. It
 does not expose credentials to pull-request execution, installation or
 generic build/runner processes; missing inputs fail rather than skip.
+Chromium installation uses the shared `Install Playwright Chromium` step with
+its 14-minute ceiling. `scripts/install-playwright-chromium.test.ts` includes
+this workflow in its caller inventory and verifies that bound; subsequent
+tool qualification also runs without provider credentials.
 No screenshots, traces, storage state, provider payloads or raw browser errors
 are uploaded. Failure output is a fixed stage, never identity or credential
 content. Test OTPs exercise real Privy APIs and token issuance but do not prove
