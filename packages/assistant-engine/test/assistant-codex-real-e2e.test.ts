@@ -38546,3 +38546,76 @@ describeRealCodex('real Codex imported hospital history e2e', () => {
     }
   }, 720_000)
 })
+
+
+describeRealCodex('real Codex downloaded hospital documents e2e', () => {
+  it('reads linked hospital document facts and dates without turning a historical recommendation into current medication', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-linked-document-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const documentBytes = Buffer.from([
+        'Orthopedic follow-up report. Visit date: March 5, 2011.',
+        'The MRI report recorded no ligament tear.',
+        'The clinician recommended outpatient physical therapy.',
+        'The report also recommended naproxen 250 mg twice daily for five days at that time.',
+      ].join('\n'))
+      const documentSha256 = createHash('sha256').update(documentBytes).digest('hex')
+      const content = JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: {
+        resourceType: 'DocumentReference', id: 'synthetic-orthopedic-report', status: 'current', docStatus: 'final',
+        subject: { reference: 'Patient/synthetic-patient' }, meta: { lastUpdated: '2026-09-01T12:00:00Z' },
+        date: '2011-03-05T12:00:00Z', description: 'Orthopedic follow-up report from March 5, 2011',
+        content: [{ attachment: { contentType: 'text/plain; charset=utf-8', url: 'Binary/synthetic-orthopedic-body' } }],
+      } }] })
+      await importClinicalFhirSnapshot({
+        vaultRoot: workingDirectory, connectionId: 'synthetic-hospital', retrievalJobId: 'synthetic-linked-document',
+        fetchedAt: '2026-09-01T12:00:00Z', fhirBaseUrlHash: createHash('sha256').update('https://hospital.example.test/fhir').digest('hex'),
+        patientIdHash: createHash('sha256').update('synthetic-patient').digest('hex'), sourceSystem: 'epic-fhir', retrievalProtocol: 'query-slices-v2',
+        requestedScopes: ['patient/DocumentReference.read'], grantedScopes: ['patient/DocumentReference.read'],
+        retrievalSlices: [{ resourceType: 'DocumentReference', queryScopeId: 'documentreference', sliceId: 'whole', coverage: 'whole-family', queryFingerprint: 'a'.repeat(64) }],
+        completedRetrievalSlices: [{ queryScopeId: 'documentreference', sliceId: 'whole' }],
+        pages: [{ resourceType: 'DocumentReference', queryScopeId: 'documentreference', sliceId: 'whole', content }],
+        documentAttachments: [{
+          parentPageSha256: createHash('sha256').update(content).digest('hex'), resourceType: 'DocumentReference', resourceId: 'synthetic-orthopedic-report', attachmentIndex: 0,
+          status: 'downloaded', relativePath: `attachments/${documentSha256}.bin`, sha256: documentSha256, byteLength: documentBytes.length, mediaType: 'text/plain; charset=utf-8',
+        }],
+        attachments: [{ relativePath: `attachments/${documentSha256}.bin`, contentBase64: documentBytes.toString('base64') }],
+      })
+      const before = await readVaultRawTolerant(workingDirectory)
+      expect(before.events.filter((event) => event.kind === 'note')).toHaveLength(1)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath: path.join(workingDirectory, 'commands.log'), vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-09-10T16:00:00Z', currentLocalDate: '2026-09-10', currentTimeZone: 'America/New_York',
+          modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        }),
+        dynamicTools: [], env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        prompt: 'Please read my connected hospital orthopedic report. What was the visit date, what did the MRI show, and what follow-up was recommended? Does the naproxen recommendation mean I take it now? Summarize the source document only; do not change anything.',
+      })
+      process.stdout.write(`[linked-document-readback] ${JSON.stringify({ reply: result.finalMessage })}\n`)
+      expect(result.finalMessage).toMatch(/2011/iu)
+      expect(result.finalMessage).toMatch(/march\s+5|5\s+march|2011-03-05|3\/5\/2011/iu)
+      expect(result.finalMessage).toMatch(/no ligament tear|(?:didn.t|did not|without).*ligament tear/iu)
+      expect(result.finalMessage).toMatch(/physical therapy/iu)
+      expect(result.finalMessage).toMatch(/naproxen/iu)
+      expect(result.finalMessage).toMatch(/does(?:n.t| not)|can(?:n.t|not)|not (?:evidence|proof|confirm)|does not establish/iu)
+      expect(result.finalMessage).not.toMatch(/(?:^|[.!?\n]\s*)(?:yes[,\s]+)?you (?:currently take|are taking) naproxen/iu)
+      expect(result.finalMessage).not.toMatch(/you (?:should take|must take) naproxen/iu)
+      const after = await readVaultRawTolerant(workingDirectory)
+      expect(after.events).toEqual(before.events)
+      expect(after.entities).toEqual(before.entities)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})

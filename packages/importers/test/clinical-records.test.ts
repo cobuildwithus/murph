@@ -1101,12 +1101,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
                 data: Buffer.from("Follow up in two weeks.").toString("base64"),
               },
             },
-            {
-              attachment: {
-                contentType: "application/pdf",
-                url: "https://example.invalid/discharge-instructions.pdf",
-              },
-            },
           ],
         },
         "AllergyIntolerance/page-1.json": [
@@ -1459,7 +1453,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     }
   });
 
-  it("fails closed on ambiguous or malformed DocumentReference inline text data", async () => {
+  it("imports all inline document parts and keeps malformed documents incomplete", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -1568,29 +1562,25 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toHaveLength(5);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", note: "Attachment 1\n\nDischarge summary.\n\nAttachment 2\n\nAddendum: stop medication." })]);
+    expect(reviews(plan)).toHaveLength(4);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "document-malformed-base64",
-          reason: "document reference text is not available in raw FHIR page",
+          reason: "document reference attachment content is incomplete",
         }),
         expect.objectContaining({
           resourceId: "document-invalid-utf8",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "document-multiple-text",
-          reason: "document reference has multiple inline text attachments",
+          reason: "document reference attachment content is incomplete",
         }),
         expect.objectContaining({
           resourceId: "document-valid-then-malformed",
-          reason: "document reference has multiple inline text attachments",
+          reason: "document reference attachment content is incomplete",
         }),
         expect.objectContaining({
           resourceId: "document-numeric-data",
-          reason: "document reference text is not available in raw FHIR page",
+          reason: "document reference attachment content is incomplete",
         }),
       ]),
     );
@@ -1839,7 +1829,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", sections: [{ heading: "Provider record — part 1", kind: "other", text: "x".repeat(4001) }] })]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", note: "x".repeat(1001) }), expect.objectContaining({ kind: "note", sections: [{ heading: "Provider record — part 1", kind: "other", text: "x".repeat(4001) }] })]);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1849,10 +1839,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         expect.objectContaining({
           resourceId: "lab-oversize-text-value",
           reason: "laboratory observation result is not importable",
-        }),
-        expect.objectContaining({
-          resourceId: "report-oversize-summary",
-          reason: "diagnostic report summary exceeds supported import bounds",
         }),
       ]),
     );
@@ -2918,7 +2904,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         }),
         expect.objectContaining({
           resourceId: "document-metadata-only",
-          reason: "document reference text is not available in raw FHIR page",
+          reason: "document reference attachment content is incomplete",
         }),
         expect.objectContaining({
           resourceId: "allergy-missing-status",

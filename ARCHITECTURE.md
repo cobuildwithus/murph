@@ -947,40 +947,47 @@ The behavior and deploy contract live in
 
 ## Hosted Clinical Records
 
-`apps/web` is the Clinical Records credential and provider-egress control plane.
-It owns the versioned Epic directory, short-lived connect intent, single-use
-SMART state/PKCE session, encrypted patient/token authority, retrieval
-generation, and operational status. `/records/connect` keeps the member-bound
-claim in the URL fragment, removes it from the visible URL before interaction,
-and sends it only in the fixed provider-start body; `/records` projects the
-safe connection and latest-run status and owns disconnect UX. A private
-current-user assistant turn can create the same short-lived first-party link
-through the existing Clinical Records runtime port and signed Web control
-boundary. That tool accepts no member, provider, patient, recipient, URL, or
-scope argument, so provider selection and SMART consent remain browser-owned.
-Each unique member/provider connection admits at most eight immutable snapshots
-across fresh authorizations, bounded to twenty sources per member. Reconnect
-keeps the same encrypted patient/base binding and increments the existing
-credential epoch and run generation. The ordered Epic catalog contains 24
-queries across 17 resource families, with no offline-access scope. Each retrieval run also freezes the exact
-adapter-owned query plan in additive operational JSON. Stable `queryScopeId`
-and deterministic `sliceId` values distinguish repeated resource-type queries
-and bounded history windows, but they are acquisition identity only and never
-participate in canonical FHIR identity. The hosted runner receives only a
-credential-free descriptor and bounded raw FHIR pages through the three signed
-retrieval operations; Cloudflare proves and forwards the active attempt, lease
-generation, and workspace version before web revalidates the fence shape and
-bound member. Postgres stores no raw FHIR body. Raw-first page integrity and
-FHIR import decisions remain with `packages/clinical-records` and
-`packages/importers`, canonical writes remain with `packages/core`, and the
-active hosted runtime reaches that composition through `packages/vault-usecases`.
-Accepted pages are atomically staged by that vault owner in one bounded,
-private, portable `.runtime/operations/clinical-records/**` checkpoint so
-foreground preemption resumes without replaying completed provider pages. The
-checkpoint is non-canonical and is removed when import or terminal rejection
-is captured; final raw paths remain absent until full semantic validation.
-The full behavior and rollout contract lives in
-`agent-docs/product-specs/clinical-records-intake.md`.
+`apps/web` owns the Epic directory, browser connection, SMART authorization,
+encrypted patient/token binding, retrieval generation, provider egress and
+operational status. The existing records launcher still asks the member to
+choose and authorize a hospital once. Every catalog query requests all available
+history, subject to the hospital's actual grant and exposed data. Supporting
+Binary read scope does not become another primary patient resource family.
+The feature remains unlaunched; no preexisting import migration is required.
+
+The credential-free runtime port uses signed read-run, fetch-page,
+fetch-document and record-outcome callbacks. Cloudflare proves the active
+member/attempt/lease fence. Web issues encrypted attachment tickets only from
+patient-bound DocumentReference or DiagnosticReport pages; a ticket binds the
+run/generation, exact parent revision and page digest, attachment position,
+frozen query and same-base Binary URL (or a bounded DiagnosticReport
+Media-to-Binary bridge). Provider credentials stay in Web and
+redirects remain disabled. Postgres contains operational counters and encrypted
+authority, never document bodies.
+
+The hosted runtime retrieves and imports one FHIR page with its attachments at
+a time. Private portable clinical checkpoints retain the pending ticket,
+accepted bytes, next cursor, predecessor manifest and cumulative saved counts.
+Immutable batch manifests prove pagination against the previous saved raw
+manifest and its actual outgoing page link. A batch never establishes
+whole-family absence. Explicit versioned source retractions retain their normal
+meaning. Earlier batches survive a later provider failure or authorization end.
+The old one-run 32 MiB/5,000-resource snapshot cutoff is removed; each request,
+page batch and parser remains bounded, and exhausted authorization or a safety
+bound produces explicit incomplete coverage.
+
+`packages/clinical-records` and `packages/importers` own attachment integrity,
+parent binding and source-note mapping. `packages/vault-usecases` persists
+untouched FHIR pages and original attachment bytes through canonical raw writes,
+then applies validated clinical decisions. Text, HTML and clinical XML retain
+source meaning; PDFs reuse the public Poppler parser. Unreadable files remain
+raw evidence. A parent with unresolved body parts remains incomplete, allowing
+later same-revision recovery without a conflicting partial canonical note.
+Web current-run authority is checked immediately before both raw persistence
+and canonical mutation. Repeated authorization uses the same source/patient
+binding and a new generation, with eight authorizations per source and twenty
+sources per member. The detailed limits, official API registrations and launch
+requirements are owned by `agent-docs/product-specs/clinical-records-intake.md`.
 
 Member-scoped hosted runner operations validate the existing active runtime write fence at the Cloudflare route that owns the read or effect. The fence binds the claimed member, attempt, and lease generation before private-content decryption, artifact access, signed web callbacks, or durable mutation. Runtime clients attach the current lease through their existing transport boundary; member-scoped identity and authority are never derived from Cloudflare container ids. The pre-binding container-fatal sink is the sole log-only exception.
 
@@ -2022,13 +2029,13 @@ preserving every canonical raw reference without another retention service.
 `packages/assistant-runtime` performs finite preemptible background iteration,
 resuming from the vault-owned operational checkpoint after preemption. The
 runtime contract carries only the frozen query slices and completed-slice
-references. The v3 checkpoint and v3 manifest preserve that same grouping.
+references. The v4 checkpoint and v3 manifest preserve that same grouping.
 Only the external importer reads legacy v2 manifests; hosted legacy descriptors,
 cursors, duplicate completion lists and outgoing next-link metadata are gone.
 Query-aware page
 requests, opaque cursors, durable request claims, and terminal outcomes bind
 the frozen query-scope and slice identities so they cannot be swapped across
-the same resource type. Epic's active policy expands 24 primary query scopes
+the same resource type. Epic's active policy expands 40 primary query scopes
 from 17 unique granted FHIR resource permissions. Fifteen scopes use one
 whole-family slice and nine freeze one newest-first 90- or 365-day initial
 window at run creation. Supporting dependency reads remain registration-only;

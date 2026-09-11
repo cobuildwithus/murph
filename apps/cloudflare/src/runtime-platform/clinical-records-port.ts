@@ -3,6 +3,7 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
+  HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
 } from "@murphai/hosted-execution/clinical-records-boundary";
 
@@ -60,6 +61,26 @@ export function createHostedWebClinicalRecordsPort(input: {
         );
       }
       return result;
+    },
+    async fetchDocument(request, options) {
+      const {
+        parseHostedClinicalRecordsFetchDocumentRequest,
+        parseHostedClinicalRecordsFetchDocumentResponse,
+      } = await import("@murphai/hosted-execution/clinical-records");
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: parseHostedClinicalRecordsFetchDocumentRequest(request),
+        boundUserId: input.boundUserId,
+        description: "Hosted clinical records fetch document",
+        fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.clinicalRecordsFetchDocument,
+        sensitiveResponseBody: {
+          maxBytes: HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
+        },
+        signal: options?.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      return parseHostedClinicalRecordsFetchDocumentResponse(payload);
     },
     async fetchPage(request, options) {
       const {
