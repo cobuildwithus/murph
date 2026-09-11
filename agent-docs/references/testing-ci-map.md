@@ -10,6 +10,16 @@ timestamp and restores it after each case. An explicit clock advance proves the 
 decryption and authority proof with
 `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-production-canary-outcome.test.ts`.
 
+A rejected live selector prints up to 20 exact matching names, an omitted count,
+and a read-only discovery command. Use a distinctive part of a rendered name
+as the `--test` regular-expression pattern, preserving parameterized values
+and escaping regex metacharacters when needed. Enumeration finishes before
+the runner checks login or starts a journey:
+
+```sh
+MURPH_RUN_REAL_CODEX_E2E=1 pnpm --dir packages/assistant-engine exec vitest list --config vitest.config.ts test/assistant-codex-real-e2e.test.ts --tagsFilter real-codex-live --json
+```
+
 The shared hosted-local Linq HTTP boundary requires its synthetic upstream bearer
 token and validates every supported message part. It preserves Linq's optional
 nested idempotency key: replay without one can duplicate acceptance, including
