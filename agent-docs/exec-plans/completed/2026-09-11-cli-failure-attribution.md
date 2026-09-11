@@ -1,6 +1,6 @@
 # CLI failure telemetry and subprocess proof
 
-Status: active — incremental revision; local parent owns remaining validation/Git/PR/archive
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 Base: `09a3cef815a995615d2872f3ade1ab5e796652f1`
@@ -129,3 +129,4 @@ New fields remain optional with the current issue/timing schema versions;
 deploy catalog-aware readers before writers where possible. Older readers
 reduce new codes to `unknown`, preserving outcome/count data. This revision
 changes none of those compatibility contracts.
+Completed: 2026-09-11
