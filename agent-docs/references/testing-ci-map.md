@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-09-10
+Last verified: 2026-09-11
 
 ## Current Repo Checks
 
@@ -21,6 +21,16 @@ because arbitrary local ports bypass Cloudflare outbound interception. The
 token, so a leaked runner sentinel can no longer count as successful delivery.
 This validates the locally supported protocol boundary; provider receipt delivery,
 media downloading/rendering, and live service behavior still require hosted proof.
+
+The shared Linq stub advertises attachment bytes through its fixed
+`host.docker.internal` CDN origin, independently of the proxied API Host.
+Webhook and audio fixtures use that same origin for the runner CDN override;
+Linux bridge rewriting must not turn it into a rejected numeric-host override.
+The helper suite checks the actual runner config, PDF/PNG/WAV metadata URLs,
+and credential-free byte routes. The assistant-runtime Linq event suite proves
+canonical authenticated metadata lookup followed by the allowed local byte
+download while rejecting the bridge-origin direct locator. Full Linux container
+reachability, image normalization, and final replies remain hosted E2E proof.
 
 `node scripts/run-postgres-tests.mjs --shard 1/4` runs the first of four
 required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
