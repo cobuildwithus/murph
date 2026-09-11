@@ -26,3 +26,13 @@ Arm the existing idle-checkpoint publication barrier directly for this scenario 
 ## Context
 
 This produced repeated false cross-repository rollout failures and obscured whether the owner-release regression was actually exercised.
+
+## Follow-up: independent Environment ownership
+
+The default-prefix fixture also expected its snapshot-start barrier to be entered
+by a default invocation. Current reconciliation deliberately selects independent
+model-free Environment work behind that earlier row, so the system-mailbox
+invocation enters the barrier while the fixture waits for the wrong mode until
+snapshot start times out. Expect the current system-mailbox owner and explicitly
+assert that the held handled-through sequence remains below the earlier row.
+Keep the unchanged replica and no-extra-provider-request assertions.
