@@ -194,6 +194,12 @@ identifiers, payload-like env values, and sensitive command args are redacted.
 
 ## Design rules
 
+On a child exit before readiness, port-collision classification strips terminal
+controls from the retained child output before producing the existing plain
+address-in-use marker. Diagnostic redaction and retention stay unchanged. The
+full-stack scenario helper consumes that marker through its existing three-attempt
+startup limit, with fresh port reservations and owned cleanup for each attempt.
+
 1. Root `pnpm hosted-local ...` is the canonical developer and CI entrypoint.
 2. `apps/*/package.json` may expose broad aliases, but not one-off hosted-local
    scenario scripts.
