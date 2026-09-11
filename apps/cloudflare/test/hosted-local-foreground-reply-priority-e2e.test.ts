@@ -2941,6 +2941,7 @@ async function seedActivatedWorkspaceCheckpointInScenario(
   });
 
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: targetScenario.runtimeEnv,
     harness: targetScenario.harness,
     operatorHomeRoot,
     userId,

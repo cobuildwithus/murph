@@ -736,6 +736,7 @@ async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
   });
 
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
     harness: requireScenario().harness,
     operatorHomeRoot,
     userId,

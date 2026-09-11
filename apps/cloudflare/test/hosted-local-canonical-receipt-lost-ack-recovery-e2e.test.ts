@@ -433,6 +433,7 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
   assertPreferenceFixtureDocuments(preferencesBytes, mutationsBytes);
 
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
     harness: requireScenario().harness,
     operatorHomeRoot,
     userId: preferenceRecoveryUserId,

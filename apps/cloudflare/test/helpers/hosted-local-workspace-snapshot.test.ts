@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initializeVault } from "@murphai/core";
 import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
@@ -34,10 +34,27 @@ import {
 } from "../hosted-execution-fixtures.ts";
 import { uploadHostedLocalWorkspaceSnapshot } from "./hosted-local-workspace-snapshot.ts";
 
+const testkit = vi.hoisted(() => ({
+  createDeps: vi.fn(),
+  disconnect: vi.fn(),
+  ensureWorkspace: vi.fn(),
+}));
+vi.mock("#hosted-web-testing", () => ({
+  createHostedWebTestkitDeps: testkit.createDeps,
+}));
+
 const userId = "member_snapshot_fixture";
 const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 const rootKeyId = "udrk:runtime:snapshot-fixture";
 const paths: string[] = [];
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  testkit.createDeps.mockResolvedValue({
+    hostedWorkspaceStore: { ensureHostedWorkspace: testkit.ensureWorkspace },
+    prisma: { $disconnect: testkit.disconnect },
+  });
+});
 
 afterEach(async () => {
   vi.unstubAllGlobals();
@@ -50,6 +67,12 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
     const fixture = await createFixture();
     const envelope = await createSignedRuntimeEnvelope();
     const calls: string[] = [];
+    let workspaceProvisioned = false;
+    testkit.ensureWorkspace.mockImplementation(async ({ userId: memberId }) => {
+      expect(memberId).toBe(userId);
+      calls.push("workspace");
+      workspaceProvisioned = true;
+    });
     let encryptedBytes = new Uint8Array();
     const request = vi.fn(async (pathname: string, init?: RequestInit) => {
       calls.push("locator");
@@ -65,6 +88,9 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
       const url = new URL(outgoing.url);
       if (url.pathname === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH) {
         calls.push("crypto");
+        if (!workspaceProvisioned) {
+          return Response.json({ error: "hosted_workspace_not_provisioned" }, { status: 403 });
+        }
         expect(outgoing.headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe(userId);
         expect(outgoing.headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBeTruthy();
         return Response.json({
@@ -92,7 +118,9 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
       harness: { request, workerRuntimeEnv: localEnvironment() },
       userId,
     });
-    expect(calls).toEqual(["crypto", "upload", "locator"]);
+    expect(calls).toEqual(["workspace", "crypto", "upload", "locator"]);
+    expect(testkit.createDeps).toHaveBeenCalledWith(fixture.environment);
+    expect(testkit.disconnect).toHaveBeenCalledOnce();
     expect(ref.encryption.aad.objectKey).toBe(ref.objectKey);
     expect(ref.archive.encryptedByteSize).toBe(encryptedBytes.byteLength);
     const dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
@@ -131,12 +159,31 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
     const fetchImpl = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchImpl);
     await expect(uploadHostedLocalWorkspaceSnapshot({
+      environment: {},
       harness: { request: vi.fn(), workerRuntimeEnv: localEnvironment(overrides) },
       operatorHomeRoot: "/unused/operator-home",
       userId,
       vaultRoot: "/unused/vault",
     })).rejects.toThrow();
     expect(fetchImpl).not.toHaveBeenCalled();
+    expect(testkit.createDeps).not.toHaveBeenCalled();
+  });
+
+  it("stops before reading keys or uploading if workspace provisioning fails", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const request = vi.fn();
+    vi.stubGlobal("fetch", fetchImpl);
+    testkit.ensureWorkspace.mockRejectedValueOnce(new Error("workspace provisioning failed"));
+    await expect(uploadHostedLocalWorkspaceSnapshot({
+      environment: {},
+      harness: { request, workerRuntimeEnv: localEnvironment() },
+      operatorHomeRoot: "/unused/operator-home",
+      userId,
+      vaultRoot: "/unused/vault",
+    })).rejects.toThrow("workspace provisioning failed");
+    expect(testkit.disconnect).toHaveBeenCalledOnce();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("does not publish a locator after an object upload failure", async () => {
@@ -181,7 +228,7 @@ async function createFixture() {
   await mkdir(operatorHomeRoot, { recursive: true });
   await initializeVault({ createdAt: "2026-09-01T00:00:00.000Z", vaultRoot });
   await writeFile(path.join(vaultRoot, "fixture-note.md"), "Synthetic canonical fixture note.\n");
-  return { operatorHomeRoot, root, vaultRoot };
+  return { environment: { NODE_ENV: "test" }, operatorHomeRoot, root, vaultRoot };
 }
 
 async function createSignedRuntimeEnvelope() {
