@@ -424,3 +424,44 @@ Both OTP and Telegram regression cases failed before the correction. The existin
 Web adoption CI's actual Next TypeScript 5 compiler inferred a nested Promise from the Web Locks callback, although the source TypeScript 7 check passed. Marking the existing cookie-write helper async fixes the compiler contract without changing the lock owner or session policy. The same correction already has focused test, both compiler and ReviewGPT PASS evidence in retirement candidate #3134 at 87786eda0b935ac32614fc843665e0aadefa971c.
 
 Round 3's first attempt at 4dd15d07dabb7d37e1ae3763e79693d01150a42c produced only an initial inspection note after more than 75 minutes. Exact-thread exports and refresh showed no active generation, final verdict, completion marker or completed-response model evidence. This incomplete attempt is invalid and does not count as a substantive round. Its capture metadata and diagnostics are retained locally. Only its proven five-process watcher group was stopped; the managed browser and conversation were preserved. The independently known CI correction is being applied before the corrected candidate's full round-3 audit. The immutable first-reviewed head remains 3bbff6a97ccb5c30bff6d997c849aba9c27a38d0 and previous valid head remains 82d5147a74b274e222ca1cf5f9c32a11c741aa9a. No earlier finding or review baseline is reset.
+
+
+### Twilio Verify account-settings integration
+
+Outcome: login and phone credential changes use the same provider-managed SMS
+proof while preserving exact action approval and canonical session rules.
+Reaches: phone additions/replacements, wrong-code budgets, concurrent completion,
+resends, canonical rollback and unchanged email/recovery paths.
+Proof: actual settings routes with real PostgreSQL and the single-use synthetic
+Verify boundary, plus focused provider/Telegram regressions and Web typecheck.
+
+The qualified backend is PR #3217. Its private phone plugin rejects verification
+unless the caller supplies the prepared generation-bound local approval; the
+older credential owner calls consumePhoneNumberOTP without that callback.
+Reuse prepareHostedAuthSmsOtp outside the credential transaction and
+verifyHostedAuthSmsOtpTx under the existing OTP/member locks. Preserve the
+credential owner's canonical commit, one-use action proof, rollback and session
+revocation policy. Remove obsolete SMS delivery stubs; no new state or dependency.
+
+The original adoption candidate passed three substantive ReviewGPT rounds.
+This later provider integration changes production behavior. Cap retrospective:
+the previous three rounds resolved the original adoption candidate; this is the
+new Verify integration, with no unresolved earlier findings or repeated repair
+mechanism. The renewed rollout instruction authorizes continuing this bounded
+change and its required review. Continue with a full fourth review, preserving
+the first-reviewed head and previous resolved head. Activation, native
+qualification and vendor retirement remain separate rollout gates.
+
+Reproduced the unintegrated phone path through the real settings route: a valid
+provider-generated challenge returned AUTH_CODE_INVALID before the canonical
+rollback test could reach its injected database failure. The correction uses
+external preparation and the transaction-bound callback, and passes request
+cancellation through both Verify operations. Added composed wrong-code/resend
+proof, asserted that canonical retry reuses one provider approval, and retained
+concurrent/replay and session-continuity assertions. Removed obsolete SMS
+delivery properties from credential and Telegram session owners. Focused lint
+and the full adoption complexity guard pass. Both PostgreSQL suites pass all
+66 cases; provider/admission/Telegram token tests pass 26 cases. Web typecheck
+passes. Parent review confirms no provider work under credential locks, exact
+generation/code binding, one-use action consumption and unchanged session rules.
+Current-head CI and the additional final review remain before merge readiness.

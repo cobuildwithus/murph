@@ -372,16 +372,39 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await verifyCredentialCode(f.request(path, { change, code, authorization }))).status).toBe(200);
   }));
 
-  it("commits wrong-code budgets without consuming credential approval", () => withCredentialMember(async (f) => {
-    const change: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: f.email, value: `budget-${randomUUID()}@example.test` };
+  it.each(["email", "phone"] as const)("commits %s wrong-code budgets without consuming credential approval", (method) => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method, operation: "set", expectedIdentity: method === "email" ? f.email : null,
+      value: method === "email" ? `budget-${randomUUID()}@example.test` : "+12025550182" };
     const code = await f.send(change);
     const authorization = await f.authorize(change);
     const wrong = code === "000000" ? "111111" : "000000";
     for (let i = 0; i < 3; i++) expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, authorization, code: wrong }))).status).toBe(400);
     expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, authorization, code }))).status).toBe(400);
     expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(f.email);
+    if (method === "phone") {
+      expect(sms.check).toHaveBeenCalledTimes(3);
+      expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+    }
     const resent = await f.send(change);
     expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, authorization, code: resent }))).status).toBe(200);
+  }));
+
+  it("rejects a phone approval superseded during the provider check and accepts the new generation", () => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550183" };
+    const code = await f.send(change);
+    const authorization = await f.authorize(change);
+    const check = sms.check.getMockImplementation()!;
+    let replacementCode = "";
+    sms.check.mockImplementationOnce(async (input) => {
+      const approved = await check(input);
+      replacementCode = await f.send(change);
+      return approved;
+    });
+    const path = "/api/settings/login-methods/otp/verify";
+    expect((await verifyCredentialCode(f.request(path, { change, authorization, code }))).status).toBe(400);
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.phone).toBeNull();
+    expect((await verifyCredentialCode(f.request(path, { change, authorization, code: replacementCode }))).status).toBe(200);
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.phone).toBe(change.value);
   }));
 
   it("refuses to remove the last sign-in and requires existing approval", () => withCredentialMember(async (f) => {
@@ -436,6 +459,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       await f.prisma.$executeRawUnsafe(`CREATE TRIGGER auth_test_reject_credential BEFORE UPDATE ON hosted_auth_record FOR EACH ROW WHEN (NEW.model = 'user') EXECUTE FUNCTION auth_test_reject_credential('${f.memberId}')`);
       const failed = await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }));
       expect(failed.status).toBe(500);
+      if (method === "phone") expect(sms.check).toHaveBeenCalledTimes(1);
       expect(await readHostedLoginMethods(f.prisma, f.memberId)).toEqual(before);
       expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
       expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(f.email);
@@ -445,6 +469,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       await f.prisma.$executeRawUnsafe("DROP FUNCTION auth_test_reject_credential()");
     }
     expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(200);
+    if (method === "phone") expect(sms.check).toHaveBeenCalledTimes(1);
   }));
 
   it("accepts one concurrent credential completion and rejects replay", () => withCredentialMember(async (f) => {
@@ -452,8 +477,10 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const code = await f.send(change);
     const authorization = await f.authorize(change);
     const results = await Promise.all([0, 1].map(() => verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))));
-    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+    expect(results.filter((r) => r.status === 400 || r.status === 409)).toHaveLength(1);
     expect((await readHostedLoginMethods(f.prisma, f.memberId)).methods.phone).toBe(change.value);
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(409);
   }));
 
   it("commits the active member's channel wake even when its best-effort runtime signal fails", () => withCredentialMember(async (f) => {

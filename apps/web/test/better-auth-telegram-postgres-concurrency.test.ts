@@ -104,7 +104,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     if (!contact) throw new Error("Invalid synthetic email");
     const login = async () => {
       let code = "";
-      await sendHostedAuthOtp({ baseURL, secret, prisma, contact, delivery: { email: async (delivery) => { code = delivery.code; }, sms: async () => { throw new Error("Unexpected SMS"); } } });
+      await sendHostedAuthOtp({ baseURL, secret, prisma, contact, delivery: { email: async (delivery) => { code = delivery.code; } } });
       const prepared = await prepareHostedAuthOtpMember({ contact, prisma });
       const issued = await commitHostedAuthOtp({ baseURL, secret, prisma, ...prepared, otp: { kind: "email", address: contact.value, code } });
       memberIds.add(issued.memberId);

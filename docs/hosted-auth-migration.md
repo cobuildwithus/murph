@@ -114,9 +114,11 @@ configuration, rejected provider authority and malformed responses fail closed.
 Keep issuance off while deploying this owner. Old raw SMS records and new Verify
 records are mutually incompatible; users would need a fresh code if switching
 formats during active issuance. Existing sessions and email codes retain their
-readers and formats. There is no database migration. Before the held client
-adoption release, update its phone credential-change owner to prepare Verify
-approval outside locks and revalidate it inside the credential transaction, then
+readers and formats. There is no SMS database migration. Phone credential changes
+prepare Verify approval through the same owner outside locks, then revalidate
+the exact generation and code inside the existing credential transaction. Contact
+proof, action approval, canonical writes and session revocation commit together;
+canonical rollback retains the bound approval for retry. Before client activation,
 qualify send/check, same-member login, credential changes and real-device receipt.
 A deployed backend alone is not activation approval. Once Verify issuance is
 active, recovery builds must include this challenge reader; pausing issuance
