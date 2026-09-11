@@ -82,6 +82,16 @@ export async function executeHostedMailboxEvent(input: {
     };
   }
 
+  if (input.wake.kind === "clinical-records.enrichment-requested") {
+    const { executeHostedClinicalEnrichmentWake } = await import("./events/clinical-enrichment.ts");
+    const outcome = await executeHostedClinicalEnrichmentWake({
+      wake: input.wake,
+      vaultRoot: input.vaultRoot,
+      signal: input.signal,
+      shouldYield: input.shouldYieldClinicalRecords,
+    });
+    return { bootstrapResult: null, ...outcome };
+  }
   const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,
     input.wake,
@@ -145,7 +155,7 @@ export async function executeHostedMailboxEvent(input: {
 }
 
 async function handleHostedMailboxEvent(input: {
-  wake: HostedExecutionWake;
+  wake: Exclude<HostedExecutionWake, { kind: "clinical-records.enrichment-requested" }>;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
@@ -194,7 +204,7 @@ async function handleHostedMailboxEvent(input: {
 }
 
 async function executeHostedSystemWake(input: {
-  wake: HostedExecutionSystemWake;
+  wake: Exclude<HostedExecutionSystemWake, { kind: "clinical-records.enrichment-requested" }>;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;

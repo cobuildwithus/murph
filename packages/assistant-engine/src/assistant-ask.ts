@@ -472,8 +472,8 @@ async function reviewConsentedReadOnlyAssistantAskAnswer(
   return parseConsentedReadOnlyAssistantAskReviewDecision(finalMessage)
 }
 
-async function executeConfinedReadOnlyAssistantAskTurn(
-  input: ReadOnlyAssistantAskChildInput,
+export async function executeConfinedReadOnlyAssistantAskTurn(
+  input: Omit<ReadOnlyAssistantAskInput, 'question' | 'requesterParticipantId' | 'workspaceRoot'>,
   turn: ConfinedReadOnlyAssistantAskTurn,
 ): Promise<string> {
   const workingDirectory = await mkdtemp(

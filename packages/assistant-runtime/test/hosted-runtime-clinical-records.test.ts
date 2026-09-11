@@ -8,7 +8,7 @@ import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
 } from "@murphai/clinical-records";
-import { initializeVault } from "@murphai/core";
+import { findEventByExternalRef, initializeVault } from "@murphai/core";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
   type HostedClinicalRecordsRunDescriptor,
@@ -20,6 +20,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runHostedClinicalRecordsSyncWakeLane } from "../src/hosted-runtime/clinical-records-maintenance.ts";
+import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
+import { readNextClinicalEnrichment } from "@murphai/vault-usecases/clinical-enrichment";
 import type { HostedRuntimeClinicalRecordsPort } from "../src/hosted-runtime/platform.ts";
 
 const HASH = "a".repeat(64);
@@ -271,7 +273,8 @@ describe("hosted clinical records maintenance", () => {
       fetchPage: async () => fixture.page,
       fetchDocument: async () => documentResponse("downloaded clinical document"),
     });
-    const importSnapshot = successfulImport();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     expect(await run(port, importSnapshot)).toMatchObject({ status: "completed" });
     expect(port.fetchDocument).toHaveBeenCalledOnce();
     expect(port.fetchDocument).toHaveBeenCalledWith({ generation: 1, runId: RUN.runId, ticket: "opaque-document-ticket" }, { signal: null });
@@ -297,6 +300,14 @@ describe("hosted clinical records maintenance", () => {
     const stored = await Promise.all(["inline clinical document", "downloaded clinical document"].map(async (content) =>
       readFile(path.join(directory, "attachments", `${hash(content)}.bin`), "utf8")));
     expect(stored).toEqual(["inline clinical document", "downloaded clinical document"]);
+    const state = await readHostedSystemMailboxState(vaultRoot);
+    expect(state.pending).toEqual([expect.objectContaining({
+      routeAction: "apply-clinical-enrichment",
+      wake: expect.objectContaining({ kind: "clinical-records.enrichment-requested", jobId: imported.manifestSha256 }),
+    })]);
+    expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({
+      status: "extract", jobId: imported.manifestSha256, page: 1,
+    });
   });
 
   it("retains an active staged page when authorization expires while downloading documents", async () => {
@@ -308,13 +319,40 @@ describe("hosted clinical records maintenance", () => {
       fetchPage: async () => ({ ...fixture.page, nextCursor: "next-page" }),
       fetchDocument: async () => ({ status: "unavailable", errorCode: "temporarily_unavailable", retryable: true }),
     });
-    const importSnapshot = successfulImport(async (snapshot) => { await snapshot.assertCurrent?.(); });
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     await expect(run(port, importSnapshot)).rejects.toMatchObject({ code: "CLINICAL_RECORDS_DOCUMENT_RETRYABLE" });
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(await checkpoint()).toMatchObject({ checkpoint: {
+      pages: [{ content: fixture.page.body }],
+      pendingDocuments: [{ ticket: "opaque-document-ticket" }],
+      attachments: [{ contentBase64: Buffer.from("inline clinical document").toString("base64") }],
+    } });
     authorized = false;
     const result = await run(port, importSnapshot);
-    expect(result).toMatchObject({ status: "partial", counts: { createdCount: 1 }, outcome: { errorCode: "authorization-required" } });
+    expect(result).toMatchObject({ status: "partial", counts: { createdCount: 1, labResultCount: 0, fetchedResourceFamilyCount: 0 }, outcome: { errorCode: "authorization-required" } });
+    expect(importSnapshot).toHaveBeenCalledOnce();
     expect(importSnapshot.mock.calls[0]?.[0].pages.map((page) => page.content)).toEqual([fixture.page.body]);
     expect(importSnapshot.mock.calls[0]?.[0].attachments).toHaveLength(1);
+    expect(importSnapshot.mock.calls[0]?.[0].documentAttachments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ resourceId: "document-1", attachmentIndex: 0, status: "downloaded" }),
+      expect.objectContaining({ resourceId: "document-1", attachmentIndex: 1, status: "unavailable" }),
+    ]));
+    const imported = await importSnapshot.mock.results[0]!.value;
+    const rawRoot = path.posix.dirname(imported.manifestPath);
+    const rawPage = `${rawRoot}/documents/whole/DocumentReference/page-0001.json`;
+    expect(await readFile(path.join(vaultRoot, rawPage), "utf8")).toBe(fixture.page.body);
+    expect(await readFile(path.join(vaultRoot, rawRoot, "attachments", `${hash("inline clinical document")}.bin`), "utf8")).toBe("inline clinical document");
+    // The canonical result is source metadata, not a prematurely complete document body.
+    expect(await findEventByExternalRef({
+      vaultRoot, system: `epic-fhir-${RUN.fhirBaseUrlHash}-${RUN.patientIdHash}`,
+      resourceType: "document-reference", resourceId: "document-1",
+    })).toMatchObject({
+      kind: "note", source: "import", noteType: "clinical-document-receipt",
+      note: "FHIR DocumentReference source document.\nSource status: current.\nAttachment count: 2.",
+      evidence: [{ rawRef: rawPage, sourceLabel: "DocumentReference/document-1" }],
+    });
+    expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ status: "extract" });
     expect(port.fetchPage).toHaveBeenCalledOnce();
     expect(port.fetchDocument).toHaveBeenCalledOnce();
     expect(await checkpoint()).toBeNull();
@@ -327,7 +365,8 @@ describe("hosted clinical records maintenance", () => {
         .mockResolvedValueOnce({ status: "unavailable", errorCode: "temporarily_unavailable", retryable: true })
         .mockResolvedValueOnce(documentResponse("downloaded clinical document")),
     });
-    const importSnapshot = successfulImport();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     await expect(run(port, importSnapshot)).rejects.toMatchObject({ code: "CLINICAL_RECORDS_DOCUMENT_RETRYABLE" });
     expect(importSnapshot).not.toHaveBeenCalled();
     expect(await checkpoint()).toMatchObject({ checkpoint: { pages: [{ content: fixture.page.body }], pendingDocuments: [{ ticket: "opaque-document-ticket" }], attachments: [{ contentBase64: Buffer.from("inline clinical document").toString("base64") }] } });
@@ -342,7 +381,8 @@ describe("hosted clinical records maintenance", () => {
     const port = createPort({ readRun: async () => ({ status: "ready", run: documentRun() }), fetchPage: async () => fixture.page,
       fetchDocument: async () => { shouldYield = true; return documentResponse("downloaded clinical document"); },
     });
-    const importSnapshot = successfulImport();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     await expect(run(port, importSnapshot, () => shouldYield)).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
     expect(await checkpoint()).toMatchObject({ checkpoint: { pendingDocuments: [], attachments: expect.any(Array) } });
     expect(importSnapshot).not.toHaveBeenCalled();
@@ -356,7 +396,8 @@ describe("hosted clinical records maintenance", () => {
     const port = createPort({ readRun: async () => ({ status: "ready", run: documentRun() }), fetchPage: async () => documentPage().page,
       fetchDocument: async () => ({ ...documentResponse("downloaded clinical document"), sha256: HASH }),
     });
-    const importSnapshot = successfulImport();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     await expect(run(port, importSnapshot)).rejects.toMatchObject({ code: "CLINICAL_RECORDS_DOCUMENT_INTEGRITY" });
     expect(importSnapshot).not.toHaveBeenCalled();
     expect((await checkpoint())?.checkpoint.pendingDocuments).toHaveLength(1);
@@ -364,7 +405,8 @@ describe("hosted clinical records maintenance", () => {
 
   it("preserves missing document tickets as unavailable evidence instead of silently omitting them", async () => {
     const fixture = documentPage();
-    const importSnapshot = successfulImport();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     const port = createPort({ readRun: async () => ({ status: "ready", run: documentRun() }), fetchPage: async () => ({ ...fixture.page, documents: [] }) });
     await run(port, importSnapshot);
     expect(port.fetchDocument).not.toHaveBeenCalled();

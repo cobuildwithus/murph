@@ -850,8 +850,8 @@ reply after its deadline.
 exact-notification policy. Device, clinical, and Environment attempts belong to
 the fenced workspace and use existing mailbox claims; the invocation's policy
 still decides which families are allowed. Device and Environment work can start
-without assistant preparation. A conversation can upgrade that invocation while
-the same import continues. The default assistant and ordered controls remain
+without assistant preparation. A conversation or canonically due assistant
+automation can upgrade that invocation while the same import continues. The default assistant and ordered controls remain
 single-writer; ordinary replies neither cancel nor join independent imports. The
 assistant phase has no inline device executor or turn-local dirty-ack buffer.
 Device hints, restored timers, imports, activity scheduling, and exact
@@ -900,24 +900,32 @@ remains available through `nextDefaultProcessingWakeAt` instead of replacing
 the device deadline. A cold pass with assistant execution blocked also retains
 the future device deadline when no mailbox item is runnable yet.
 Current conversation work and explicitly approved continuations retain
-foreground priority. A non-direct default request behind
-`system_mailbox` wakes the exact active child, preserves its fence, and retries
-while that child checkpoints and releases. Authenticated Web-direct foreground
-work may instead preempt that exact system child through the existing abort
-seam. A `system_mailbox` request behind an active default owner sends a normal
-wake to that exact child, preserving its default mode and fence. It sends no
+foreground priority. A default request behind `system_mailbox`, including
+an authenticated Web-direct request, wakes the exact active child with the
+requested default mode. An accepted wake retains that child's fence and lets
+its runtime qualify actual conversation input before serving foreground in
+place. If the exact child has already settled, the existing inactive-fence
+path may start a replacement. A `system_mailbox` request behind an active
+default owner sends a normal wake to that exact child, preserving its default
+mode and fence. It sends no
 requested mode handoff and never interrupts foreground work. Wake acceptance
 is not import completion: durable mailbox and import receipts remain the
 completion authority, including when an older warm child handles the wake.
 
-An active default invocation may prepare device work after its model provider
-starts. Its existing watcher admits conversation input first, then one bounded
+An active assistant invocation prepares independent device work alongside its
+assistant phase. Its existing watcher admits conversation input first, then one bounded
 system page, including when the conversation-input budget is full. The device
 pass uses the same restored workspace, fence, canonical write port, and receipt
 history. It retains the existing 100-job pass ceiling and provider-specific job
-bounds; it does not run retention or activity-automation maintenance alongside
+bounds. Every running system pass retains the canonical-write receipt capacity
+guard. A projected assistant deadline wakes the existing admission check;
+canonical due assistant work can enter the same foreground loop as conversation
+input while the import continues. The assistant execution policy still applies,
+and empty wake hints do not grant authority. Pending checkpoint effects do not
+block this admission. It does not run retention or activity-automation maintenance alongside
 the model. New conversation arrivals can proceed while provider I/O is pending.
-Reply preparation cancels device work and stops mailbox staging together.
+Ordinary replies do not cancel independent device work. Snapshot and workspace
+release boundaries stop admission and settle owned mutations.
 Canonical commits already underway finish persistence or rollback before the
 runner checkpoints or releases ownership; cancellation never detaches a mutator.
 
@@ -962,11 +970,12 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, and for
-authenticated Web-direct foreground/default work behind a `system_mailbox`
-fence, the existing workspace-invocation abort seam is the sole preemption
-authority. A non-direct default request behind system-mailbox work retains the
-exact-child wake-and-checkpoint handoff. A system-mailbox request may wake an
+For foreground/default work behind an `inbox_media_retention` fence, the
+existing workspace-invocation abort seam is the sole preemption authority.
+Foreground/default work behind `system_mailbox` instead wakes the exact child,
+including for authenticated Web-direct requests. An accepted wake preserves
+its ownership; assistant policy and actual conversation input remain the
+runtime's admission boundary. A system-mailbox request may wake an
 active default child but cannot preempt or downgrade it. A local exact-pointer abort enters the same inactive-fence
 replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
