@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "automation-edit-progress",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Smoother reminder edits, clearer progress",
+    "summary": "Murph handles changes to existing reminders more reliably and gives a brief update when a request grows into several steps.",
+    "details": "Quick changes stay concise. Longer work gets an earlier progress note, while checks still protect reminder changes made elsewhere.",
+    "relevanceTags": ["reminders", "assistant"],
+    "sourcePullRequests": []
+  }
+}

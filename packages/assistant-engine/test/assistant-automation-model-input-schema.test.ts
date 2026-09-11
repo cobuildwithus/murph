@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { automationDeviceActivitySourceValues } from '@murphai/contracts'
 
-import { deriveAutomationModelInputSchema } from '../src/assistant-codex/dynamic-tools/automation-model-input-schema.js'
 import {
   MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
   MURPH_AUTOMATION_TOOL,
@@ -27,66 +26,6 @@ function asStringArray(value: unknown): string[] {
   const result = value as unknown[]
   expect(result.every((item) => typeof item === 'string')).toBe(true)
   return result.filter((item): item is string => typeof item === 'string')
-}
-
-function canonicalShape(schema: JsonSchemaObject): {
-  actions: string[]
-  properties: string[]
-  allowedByAction: Map<string, string[]>
-  requiredByAction: Map<string, string[]>
-} {
-  const actions: string[] = []
-  const properties = new Set<string>()
-  const allowedByAction = new Map<string, string[]>()
-  const requiredByAction = new Map<string, string[]>()
-  for (const branch of asObjectArray(schema.oneOf)) {
-    const branchProperties = asObject(branch.properties)
-    for (const property of Object.keys(branchProperties)) {
-      properties.add(property)
-    }
-    const action = asObject(branchProperties.action).const
-    expect(action).toBeTypeOf('string')
-    if (typeof action !== 'string') {
-      throw new TypeError('Expected an action literal.')
-    }
-    actions.push(action)
-    allowedByAction.set(action, Object.keys(branchProperties).sort())
-    requiredByAction.set(action, asStringArray(branch.required))
-  }
-  return {
-    actions,
-    properties: [...properties].sort(),
-    allowedByAction,
-    requiredByAction,
-  }
-}
-
-function modelShape(schema: JsonSchemaObject): {
-  actions: string[]
-  properties: string[]
-  allowedByAction: Map<string, string[]>
-  requiredByAction: Map<string, string[]>
-} {
-  const properties = asObject(schema.properties)
-  const actions = asStringArray(asObject(properties.action).enum)
-  const allowedByAction = new Map<string, string[]>()
-  const requiredByAction = new Map<string, string[]>()
-  for (const branch of asObjectArray(schema.oneOf)) {
-    const branchProperties = asObject(branch.properties)
-    const action = asObject(branchProperties.action).const
-    expect(action).toBeTypeOf('string')
-    if (typeof action !== 'string') {
-      throw new TypeError('Expected an action literal.')
-    }
-    allowedByAction.set(action, Object.keys(branchProperties).sort())
-    requiredByAction.set(action, asStringArray(branch.required))
-  }
-  return {
-    actions,
-    properties: Object.keys(properties).sort(),
-    allowedByAction,
-    requiredByAction,
-  }
 }
 
 function actionContract(
@@ -247,30 +186,18 @@ describe('automation model input schema', () => {
     )
   })
 
-  it('derives a compact complete advertisement from the canonical runtime schema', () => {
-    const canonical = canonicalShape(MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA)
-    const model = modelShape(MURPH_AUTOMATION_TOOL.inputSchema)
-    const canonicalBytes = Buffer.byteLength(
-      JSON.stringify(MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA),
-    )
-    const modelBytes = Buffer.byteLength(
-      JSON.stringify(MURPH_AUTOMATION_TOOL.inputSchema),
-    )
-
-    expect(MURPH_AUTOMATION_TOOL.inputSchema).not.toBe(
-      MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
-    )
-    expect(MURPH_AUTOMATION_TOOL.inputSchema).toMatchObject({
-      type: 'object',
-      required: ['action'],
-      additionalProperties: false,
+  it('advertises the complete canonical runtime schema with self-contained action branches', () => {
+    const schema = MURPH_AUTOMATION_TOOL.inputSchema
+    expect(schema).toBe(MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA)
+    expect(asStringArray(actionContract(schema, 'patch').required)).toContain('expectedUpdatedAt')
+    expect(collectKeys(schema, '$ref')).toEqual([])
+    const patch = actionContract(schema, 'patch')
+    expect(asObject(patch.properties).expectedUpdatedAt).toMatchObject({
+      type: 'string',
+      description: expect.stringContaining('most recent readback'),
     })
-    expect(model.actions).toEqual(canonical.actions)
-    expect(model.properties).toEqual(canonical.properties)
-    expect(model.allowedByAction).toEqual(canonical.allowedByAction)
-    expect(model.requiredByAction).toEqual(canonical.requiredByAction)
-    expect(collectKeys(MURPH_AUTOMATION_TOOL.inputSchema, '$ref')).toEqual([])
-    expect(modelBytes).toBeLessThanOrEqual(Math.floor(canonicalBytes * 0.55))
+    expect(MURPH_AUTOMATION_TOOL.description).toMatch(/^To edit an existing automation: inspect it, then patch/u)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain('for a wording edit, include the new wording')
   })
 
   it('advertises strict action-specific root contracts', () => {
@@ -332,81 +259,12 @@ describe('automation model input schema', () => {
       resolvedLocalDate: '2026-08-21',
     })).toBe(true)
 
-    const rootLookup = asObject(asObject(schema.properties).lookup)
-    expect(rootLookup).not.toHaveProperty('description')
-    expect(asObject(asObject(actionContract(schema, 'inspect').properties).lookup))
-      .toEqual({})
-    expect(asObject(asObject(actionContract(schema, 'patch').properties).lookup))
-      .toEqual({})
-  })
-
-  it('returns the full schema instead of adding reference expansion machinery', () => {
-    const canonical = {
-      $defs: {
-        title: { type: 'string', minLength: 1 },
-      },
-      oneOf: [
-        {
-          type: 'object',
-          properties: {
-            action: { type: 'string', const: 'save' },
-            title: { $ref: '#/$defs/title' },
-          },
-          required: ['action', 'title'],
-          additionalProperties: false,
-        },
-        {
-          type: 'object',
-          properties: {
-            action: { type: 'string', const: 'patch' },
-            title: { $ref: '#/$defs/title' },
-          },
-          required: ['action'],
-          additionalProperties: false,
-        },
-      ],
+    for (const action of ['inspect', 'patch']) {
+      expect(asObject(asObject(actionContract(schema, action).properties).lookup))
+        .toMatchObject({ type: 'string', minLength: 1 })
     }
-
-    const model = deriveAutomationModelInputSchema(canonical)
-    expect(model).toBe(canonical)
-  })
-
-  it('retains action-specific value schemas when variants differ', () => {
-    const canonical = {
-      oneOf: [
-        {
-          type: 'object',
-          properties: {
-            action: { type: 'string', const: 'save' },
-            value: { type: 'string', minLength: 1 },
-          },
-          required: ['action', 'value'],
-          additionalProperties: false,
-        },
-        {
-          type: 'object',
-          properties: {
-            action: { type: 'string', const: 'patch' },
-            value: { type: 'number', minimum: 0 },
-          },
-          required: ['action', 'value'],
-          additionalProperties: false,
-        },
-      ],
-    }
-
-    const model = deriveAutomationModelInputSchema(canonical)
-    expect(asObject(asObject(actionContract(model, 'save').properties).value))
-      .toEqual({ type: 'string', minLength: 1 })
-    expect(asObject(asObject(actionContract(model, 'patch').properties).value))
-      .toEqual({ type: 'number', minimum: 0 })
-  })
-
-  it('returns the full schema when the expected union shape is unsupported', () => {
-    const unsupported = {
-      type: 'object',
-      properties: { action: { type: 'string' } },
-    }
-    expect(deriveAutomationModelInputSchema(unsupported)).toBe(unsupported)
+    expect(advertisesRootShape(schema, {
+      action: 'patch', lookup: 'automation_synthetic', instructions: 'Updated cue.',
+    })).toBe(false)
   })
 })

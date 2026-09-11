@@ -24200,6 +24200,117 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
   )
 })
 
+describeRealCodex('real Codex automation edit progress e2e', () => {
+  it.each([
+    { count: 1, label: 'quick single edit', progressCount: 0 },
+    { count: 4, label: 'several edits', progressCount: 1 },
+  ])('automation edit usability: $label uses inspected versions and appropriate progress', async ({ count, progressCount }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-edit-progress-e2e-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const progressUpdates: string[] = []
+    const effects: string[] = []
+    const records = Array.from({ length: count }, (_, index) => ({
+      automationId: `automation_stretch_${index + 1}`,
+      lookupId: `stretch-break-${index + 1}`,
+      title: `Stretch break ${index + 1}`,
+      instructions: 'Time for a short stretch break.',
+      contextReferences: [],
+      effectiveTimeZone: 'America/New_York',
+      occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: `2026-10-15T${14 + index}:00:00.000Z` },
+      schedule: { kind: 'dailyLocal' as const, localTime: `${10 + index}:00`, timeZone: 'America/New_York' },
+      status: 'active' as const,
+      updatedAt: `2026-10-14T09:0${index}:00.000Z`,
+    }))
+    const saved: string[] = []
+    const fixtures = records.map((current) => createVersionedAutomationPatchFixture({
+      current,
+      patch(request, record) {
+        expect(request.instructions).toMatch(/stand up and stretch/iu)
+        expect(request.schedule).toBeUndefined()
+        expect(request.status).toBeUndefined()
+        expect(request.retargetToCurrentConversation).toBeUndefined()
+        saved.push(record.automationId)
+        return { ...record, instructions: request.instructions!, updatedAt: '2026-10-14T16:01:00.000Z' }
+      },
+    }))
+    try {
+      await mkdir(binDirectory, { recursive: true })
+      const inventory = { ok: true, data: {
+        compact: true, count, totalCount: count, nextCursor: null,
+        items: records.map(({ automationId, title, schedule, status, updatedAt }) => ({ automationId, title, schedule, status, updatedAt })),
+      } }
+      const executable = path.join(binDirectory, 'vault-cli')
+      await writeFile(executable, [
+        '#!/bin/sh', 'set -eu',
+        'case "$*" in',
+        `  automation\\ list*) printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(inventory))} ;;`,
+        '  *) echo "Only read-only automation list is available in this synthetic fixture." >&2; exit 2 ;;',
+        'esac',
+      ].join('\n') + '\n')
+      await chmod(executable, 0o755)
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Read-only inventory: vault-cli automation list --compact --format json. Use the automation tool for hosted inspections and writes.',
+          assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: true,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-14',
+          currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        fixtureBinDirectory: binDirectory,
+        hostedToolContext: {
+          automationTool: { async request(request, options) {
+            if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Only existing-record edits are authorized.')
+            const index = records.findIndex((record) => record.automationId === request.lookup)
+            if (index < 0) throw new Error('Unknown synthetic automation.')
+            effects.push(request.action)
+            return fixtures[index]!.request(request, options)
+          } },
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        progressDelivery: { async send(text) { progressUpdates.push(text); effects.push('progress'); return { kind: 'sent', source: 'model' } } },
+        prompt: count === 1
+          ? 'Change the wording of my stretch-break reminder to "Time to stand up and stretch." Keep its current schedule.'
+          : 'Change the wording of all four of my stretch-break reminders to "Time to stand up and stretch." Keep each current schedule.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const automationCalls = actions.filter((action) => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)
+      const reply = result.finalMessage.trim()
+      process.stdout.write('[automation-edit-live] ' + JSON.stringify({ count, progressUpdates, reply, effects, automationCallCount: automationCalls.length }) + '\n')
+      expect(automationCalls).toHaveLength(count * 2)
+      expect(automationCalls.every((action) => action.kind === 'dynamic' && action.success)).toBe(true)
+      expect(readDynamicToolAttempts(result.jsonEvents).filter((attempt) => attempt.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(count * 2)
+      expect(saved.sort()).toEqual(records.map((record) => record.automationId).sort())
+      expect(progressUpdates).toHaveLength(progressCount)
+      if (progressCount > 0) {
+        expect(effects[0]).toBe('progress')
+        expect(progressUpdates[0]).toMatch(/updat|chang|reminder|stretch/iu)
+        expect(progressUpdates[0]).not.toMatch(/expectedUpdatedAt|schema|version|tool|error|failed/iu)
+      }
+      expect(reply).toMatch(/updated|changed|done|set|now say/iu)
+      expect(reply).toMatch(/stand up and stretch/iu)
+      expect(reply).not.toMatch(/expectedUpdatedAt|schema|version|unable|failed|couldn.t/iu)
+      expect(result.runtimeIssueInputs).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex proactive progress e2e', () => {
   it(
     'sends one early update before a multi-source recovery overview',

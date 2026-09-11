@@ -525,6 +525,26 @@ one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
 
+Automation editing has a focused real-App-Server regression in
+`assistant-codex-tool-input-contract.test.ts`: generated code-mode declarations
+must expose a required string `expectedUpdatedAt`, typed lookup/instructions,
+and the original canonical readback guidance. Schema tests retain the exact
+runtime document and reject a missing version before the automation port; the
+failure-boundary test proves the model receives an actionable inspect-and-copy
+repair. CLI automation coverage verifies compact inventory retains `updatedAt`
+without losing pagination or its payload reduction.
+
+Run each synthetic live journey independently through `pnpm test:assistant:live`
+with `-- --test 'quick single edit'` or
+`-- --test 'several edits.*uses inspected versions'`. They use production prompts,
+the automation tool, and versioned fixture ports; assert one inspect/patch pair
+per record, no invalid calls or duplicate writes, and zero versus one early
+progress update. `MURPH_MEASURE_AUTOMATION_INPUT=1` enables the focused
+`automation edit: complete first provider input` tests for identical direct/group
+fixtures through real mixed-mode Codex conversion. They report complete decoded
+request bytes with only `prompt_cache_key` excluded and explicitly mark missing
+exact-tokenizer evidence.
+
 `packages/assistant-engine/test/assistant-codex-tool-input-contract.test.ts` is a
 default-on, credential-free regression gate under the existing package
 `test/**/*.test.ts` inclusion and normal package/PR CI. It starts the REAL pinned

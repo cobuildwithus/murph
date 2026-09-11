@@ -1208,13 +1208,15 @@ launch key, so a warm process cannot retain an earlier catalog after access chan
 Those entries force mixed Code Mode so the code executor and native
 `tool_search` remain available together; individual dynamic-tool
 `deferLoading` values still decide which schemas stay out of the initial
-model-visible surface. Code-only `ALL_TOOLS` still contains generated input
-declarations, but Codex
-0.151.0 renders the automation schema's action branches without combining their
-shared sibling properties, exposing fields such as `contextReferences` as
-`unknown`. Mixed mode provides native JSON-schema discovery around that lossy
-conversion; it does not repair the converter. Keep the structured schema and
-runtime validation authoritative rather than duplicating them in prompts.
+model-visible surface. Code-only `ALL_TOOLS` contains generated input declarations. Automation uses
+its complete canonical runtime schema directly, with self-contained action
+branches, so native discovery and generated declarations retain required fields
+such as `expectedUpdatedAt` and concrete nested types. Do not factor branch
+properties into sibling definitions: Codex's converter does not recombine them.
+The existing canonical-schema supplement preserves descriptions and constraints
+that generated TypeScript cannot express. Missing edit versions return the normal
+validation details plus an inspect-and-copy repair instruction; runtime version
+checks remain authoritative.
 The runtime may request an update only from eligible user input in the active
 bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
@@ -3984,6 +3986,12 @@ and subagent prompt record is
 `agent-docs/exec-plans/completed/TEMPORAL.md`.
 
 ## CLI Framework Notes
+
+Automation compact inventory retains the record's current `updatedAt` alongside
+its id and schedule. Use filtered compact inventory for discovery and complete
+readback for instruction edits. The operator CLI continues to read the current
+record before sparse edits; hosted model edits use the authenticated automation
+tool and its mandatory inspected-version fence.
 
 - `packages/cli` is built on incur. Model nested verbs with real mounted sub-CLIs such as `search -> query` and `query -> projection -> status|rebuild`; do not simulate nested commands with argv rewrites or positional action enums.
 - Treat `murph` and `vault-cli` as different UX layers over the same command graph: `murph` is the single-active-vault product entrypoint, while `vault-cli` remains the raw explicit-vault contract for development, automation, and assistant/runtime integration.

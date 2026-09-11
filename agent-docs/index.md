@@ -24,6 +24,11 @@ Runtime progress diagnostics (aggregate alerts and code-only first-pending
 evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 
+Automation edit schema discovery and attended progress guidance are owned by
+`ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex declaration,
+versioned-edit, and quick-versus-long progress proof is indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
 owners relevant to the task. A row's date is its recorded verification date,
