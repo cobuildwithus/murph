@@ -17,6 +17,12 @@ retaining provider content.
 `agent-docs/RELIABILITY.md` specifies the supported content, ordering, limits,
 and conservative behavior after an ambiguous retry.
 
+The existing `@murphai/hosted-execution/routes` contract owns parsing the
+complete Linq delivery route at Web, Worker, and runtime boundaries. It binds
+target, directness, and nullable sender/recipient coordinates together; consumers
+use the normalized route without re-parsing. Live route revalidation and the
+provider dispatch claim remain separate Web-owned checks.
+
 Exact-message replies and reactions share one accepted-message targeting
 primitive. The model sees only an existing `AssistantInputEvent.inputId` as a
 `Message ref` beside eligible accepted Linq iMessage input or Telegram input

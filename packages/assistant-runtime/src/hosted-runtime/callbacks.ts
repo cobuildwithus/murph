@@ -1,3 +1,4 @@
+import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import { createHash } from "node:crypto";
 
 import type {
@@ -6263,7 +6264,7 @@ function normalizeHostedAssistantLinqEngagementResult(
   if (typeof result?.providerDispatchClaimed === "boolean") {
     normalized.providerDispatchClaimed = result.providerDispatchClaimed;
   }
-  const resolvedRoute = normalizeHostedAssistantLinqResolvedRoute(
+  const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(
     result?.resolvedRoute,
   );
   if (resolvedRoute) {
@@ -6275,9 +6276,7 @@ function normalizeHostedAssistantLinqEngagementResult(
 function requireHostedAssistantLinqResolvedRoute(
   result: HostedRuntimeLinqRecentInboundEngagementResult,
 ): HostedExecutionResolvedLinqDeliveryRoute {
-  const resolvedRoute = normalizeHostedAssistantLinqResolvedRoute(
-    result.resolvedRoute,
-  );
+  const resolvedRoute = result.resolvedRoute;
   if (!resolvedRoute) {
     throw new VaultCliError(
       "ASSISTANT_LINQ_RESOLVED_ROUTE_PROTOCOL_UNAVAILABLE",
@@ -6286,71 +6285,6 @@ function requireHostedAssistantLinqResolvedRoute(
     );
   }
   return resolvedRoute;
-}
-
-function normalizeHostedAssistantLinqResolvedRoute(
-  value: HostedExecutionResolvedLinqDeliveryRoute | null | undefined,
-): HostedExecutionResolvedLinqDeliveryRoute | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const target = value.target?.trim() ?? "";
-  const conversationThreadId = normalizeHostedLinqRouteNullableText(
-    value.conversationThreadId,
-  );
-  const directRecipientPhoneNumber = normalizeHostedLinqDirectRecipient(
-    value.directRecipientPhoneNumber,
-  );
-  const fromPhoneNumber = normalizeHostedLinqDirectRecipient(
-    value.fromPhoneNumber,
-  );
-  if (
-    !target
-    || !("conversationThreadId" in value)
-    || !("directRecipientPhoneNumber" in value)
-    || !("fromPhoneNumber" in value)
-    || (value.targetKind !== "participant" && value.targetKind !== "thread")
-    || typeof value.threadIsDirect !== "boolean"
-    || (
-      value.conversationThreadId !== null
-      && conversationThreadId === null
-    )
-    || (
-      value.directRecipientPhoneNumber !== null
-      && directRecipientPhoneNumber === null
-    )
-    || (value.fromPhoneNumber !== null && fromPhoneNumber === null)
-    || (
-      value.targetKind === "participant"
-      && (
-        value.threadIsDirect !== true
-        || directRecipientPhoneNumber === null
-        || directRecipientPhoneNumber !== target
-      )
-    )
-    || (
-      value.targetKind === "thread"
-      && value.threadIsDirect === false
-      && directRecipientPhoneNumber !== null
-    )
-  ) {
-    return null;
-  }
-  return {
-    conversationThreadId,
-    directRecipientPhoneNumber,
-    fromPhoneNumber,
-    target,
-    targetKind: value.targetKind,
-    threadIsDirect: value.threadIsDirect,
-  };
-}
-
-function normalizeHostedLinqRouteNullableText(
-  value: string | null | undefined,
-): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeHostedAssistantLinqTargetKind(

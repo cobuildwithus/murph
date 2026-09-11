@@ -7480,10 +7480,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("does not synthesize a Linq route from legacy response fields", async () => {
+  it.each([undefined, { target: "chat_legacy", targetKind: "thread", threadIsDirect: true }, { conversationThreadId: null, directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: null, target: "chat_group", targetKind: "thread", threadIsDirect: false }])("does not synthesize a Linq route from legacy or invalid response fields %#", async (resolvedRoute) => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         ok: true,
+        resolvedRoute,
         targetOverride: {
           conversationThreadId: "hid_legacy_chat",
           target: "chat_legacy",

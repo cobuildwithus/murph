@@ -9,6 +9,7 @@ import {
   parseHostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedExecutionResolvedLinqDeliveryRoute,
   HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
   HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
 } from "@murphai/hosted-execution/routes";
@@ -510,63 +511,9 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     result.providerDispatchClaimed = response.providerDispatchClaimed;
   }
 
-  const resolvedRoute = response.resolvedRoute;
-  if (
-    !resolvedRoute ||
-    typeof resolvedRoute !== "object" ||
-    Array.isArray(resolvedRoute)
-  ) {
-    return result;
-  }
-
-  const record = resolvedRoute as Record<string, unknown>;
-  const target = readOptionalStringField(record, "target");
-  const targetKind = readOptionalStringField(record, "targetKind");
-  const conversationThreadId = readHostedRuntimeNullableStringField(
-    record,
-    "conversationThreadId",
-  );
-  const directRecipientPhoneNumber = readHostedRuntimeNullableStringField(
-    record,
-    "directRecipientPhoneNumber",
-  );
-  const fromPhoneNumber = readHostedRuntimeNullableStringField(
-    record,
-    "fromPhoneNumber",
-  );
-  if (
-    target
-    && (targetKind === "participant" || targetKind === "thread")
-    && conversationThreadId !== undefined
-    && directRecipientPhoneNumber !== undefined
-    && fromPhoneNumber !== undefined
-    && typeof record.threadIsDirect === "boolean"
-  ) {
-    result.resolvedRoute = {
-      conversationThreadId,
-      directRecipientPhoneNumber,
-      fromPhoneNumber,
-      target,
-      targetKind,
-      threadIsDirect: record.threadIsDirect,
-    };
-  }
+  const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(response.resolvedRoute);
+  if (resolvedRoute) result.resolvedRoute = resolvedRoute;
   return result;
-}
-
-function readHostedRuntimeNullableStringField(
-  record: Record<string, unknown>,
-  field: string,
-): string | null | undefined {
-  const value = record[field];
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : undefined;
 }
 
 function readOptionalHostedEmailDeliverySummary(
