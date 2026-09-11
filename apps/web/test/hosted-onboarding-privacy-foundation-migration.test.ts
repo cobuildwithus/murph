@@ -1200,6 +1200,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260908190000_feedback_operator_tasks",
       "20260909210000_hosted_approval_credentials",
       "20260909220000_hosted_auth_records",
+      "20260910190000_message_typing_latency_alerts",
       "20260910210000_require_hosted_phone_call_encrypted_private_content",
       "20260911143000_checkpoint_runtime_recheck_receipt",
       "migration_lock.toml",

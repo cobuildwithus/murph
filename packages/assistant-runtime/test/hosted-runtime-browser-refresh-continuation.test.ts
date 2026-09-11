@@ -22,7 +22,7 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 
-test.each(["empty-hint", "foreground", "incomplete-prefix", "failed-classification", "owner-handoff"] as const)("preserves browser refresh and foreground authority: %s", async (wakeKind) => {
+test.each(["empty-hint", "foreground", "incomplete-prefix", "failed-classification", "owner-handoff", "late-foreground"] as const)("preserves browser refresh and foreground authority: %s", async (wakeKind) => {
   let vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-browser-refresh-continuation-"));
   const roots = [vaultRoot];
   const events: string[] = [];
@@ -35,6 +35,8 @@ test.each(["empty-hint", "foreground", "incomplete-prefix", "failed-classificati
   let firstPass = true;
   let foregroundImported = false;
   let foregroundServiced = false;
+  let observeHeldClassification: (() => void) | null = null;
+  const heldClassification = new Promise<void>((resolve) => { observeHeldClassification = resolve; });
   let pendingRun: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   const facts = () => JSON.stringify({ events, injected, foregroundImported, foregroundServiced, classifierFetchCount: classifierFetches.length });
   try {
@@ -49,10 +51,24 @@ test.each(["empty-hint", "foreground", "incomplete-prefix", "failed-classificati
       artifactBytesByHash: artifacts,
       mailboxPort: {
         ...mailboxPort,
-        async fetch(request) {
+        async fetch(request, context) {
           const classifier = request.requestId.includes(":browser-vault-wake-classify");
           if (classifier) {
             classifierFetches.push(request);
+            if (wakeKind === "late-foreground") {
+              assert.ok(context?.signal);
+              const signal = context.signal;
+              events.push("classifier.held");
+              observeHeldClassification?.();
+              await new Promise<void>((_resolve, reject) => {
+                const abort = () => {
+                  events.push("classifier.aborted");
+                  reject(signal.reason);
+                };
+                if (signal.aborted) abort();
+                else signal.addEventListener("abort", abort, { once: true });
+              });
+            }
             if (wakeKind === "failed-classification") throw new Error("Synthetic browser wake classification failure.");
           }
           const response = await mailboxPort.fetch(request);
@@ -76,9 +92,13 @@ test.each(["empty-hint", "foreground", "incomplete-prefix", "failed-classificati
           if (!injected) {
             injected = true;
             signal?.addEventListener("abort", () => events.push("replica.interrupted"), { once: true });
-            if (wakeKind === "foreground") items.push(createMailboxItem({ id: "mailbox_browser_refresh_foreground", laneSeq: "1" }));
+            if (wakeKind === "foreground" || wakeKind === "late-foreground") items.push(createMailboxItem({ id: "mailbox_browser_refresh_foreground", laneSeq: "1" }));
             runtimeWakeSignal.notify({ requestedProcessingMode: wakeKind === "owner-handoff" ? "system_mailbox" : "default" });
-            await delay(50);
+            if (wakeKind === "late-foreground") {
+              await withRealTimeout(heldClassification, 1_000, facts);
+            } else {
+              await delay(50);
+            }
             signal?.throwIfAborted();
           }
           if (wakeKind === "foreground") assert.ok(foregroundServiced, "Fresh foreground must precede replica publication.");
@@ -117,7 +137,19 @@ test.each(["empty-hint", "foreground", "incomplete-prefix", "failed-classificati
     pendingRun = run(1);
     const firstResult = await withRealTimeout(pendingRun, 10_000, facts);
     assert.ok(injected, facts());
-    assert.equal(classifierFetches.length, 1, "Each injected wake requires exactly one bounded classifier fetch.");
+    assert.equal(classifierFetches.length, wakeKind === "owner-handoff" ? 0 : 1,
+      "Owner handoff interrupts before reading; other wakes require one bounded classifier fetch.");
+    if (wakeKind === "late-foreground") {
+      assert.ok(events.includes("classifier.held"), facts());
+      assert.ok(events.indexOf("replica.publish") > events.indexOf("classifier.held"), facts());
+      assert.ok(events.indexOf("classifier.aborted") > events.indexOf("replica.publish"), facts());
+      const retainedWake = runtimeWakeSignal.consumePending();
+      assert.ok(retainedWake !== null || foregroundServiced || (
+        firstResult.status === "scheduled"
+        && Date.parse(firstResult.nextWakeAt ?? "") <= Date.now()
+      ), `Foreground arriving during unfinished classification retains its wake until service or immediate continuation. ${facts()}`);
+      return;
+    }
     if (wakeKind === "incomplete-prefix" || wakeKind === "failed-classification" || wakeKind === "owner-handoff") {
       assert.ok(events.includes("replica.interrupted"), facts());
       assert.equal(events.includes("replica.publish"), false, "Unknown foreground authority must preserve preemption.");

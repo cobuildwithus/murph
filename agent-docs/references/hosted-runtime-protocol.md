@@ -2039,8 +2039,14 @@ first, then Web/Vercel.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
-`assistant_milestone` events for Linq typing request start/acceptance and the
-first locally observed Codex output/text. An accepted ephemeral Linq progress
+`assistant_milestone` events for Linq typing request start, Linq/Telegram typing
+acceptance, and the first locally observed Codex output/text. The engine's turn
+handle reports typing acceptance for the initial accepted-input journal and each
+subsequent admitted input, including pre-provider probes and live steering.
+Admission observes the same provider readiness promise regardless of import
+ordering. The original acceptance timestamp is retained; inactive, stopped or
+aborted handles contribute no new evidence. Mailbox staging never infers typing
+from a process-global target map, and telemetry never delays admission. An accepted ephemeral Linq progress
 send emits `progress_update_accepted` at the provider-acceptance boundary; a
 failed or merely attempted send emits no progress milestone. Progress snapshots
 the active provider request's accepted input ids when Linq accepts the send; it
@@ -3946,6 +3952,13 @@ checkpoint effects remain. A due mailbox wake alone cannot request an owner
 handoff that would skip projection and recording for that owned completion.
 Fresh foreground input and shutdown keep their existing interruption behavior;
 ordinary owner handoff resumes once the completion effects have drained.
+During the Browser Vault offer, a bounded mailbox read qualifies runtime hints
+before cancellation. A fully caught-up empty prefix keeps the same refresh and
+deadline only while the requested mode is unchanged and no dirty state, image
+work, handoff, or shutdown requires attention. Those local conditions are checked
+again after the read. Real work, an incomplete prefix, or a failed read preserves
+the existing interruption path; harmless hints cannot abandon a saved report's
+publication after its recording item has completed.
 The runtime offers that committed projection before ordinary due-assistant work or
 deferred device maintenance can dirty state again. Browser-only wake retry and
 acknowledgement stay within that offer. A runtime-wake interruption or timeout

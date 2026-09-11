@@ -24,7 +24,9 @@ export function startAssistantChannelTypingIndicator(input: {
   precedence?: AssistantCurrentAudienceDeliveryPrecedence
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
-}): AssistantChannelActivityHandle | null {
+}): (AssistantChannelActivityHandle & {
+  recordAcceptedInputs: (acceptedInputIds: readonly string[]) => void
+}) | null {
   if (input.input.deliverResponse !== true) {
     return null
   }
@@ -35,13 +37,15 @@ export function startAssistantChannelTypingIndicator(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
-  const adapter = getAssistantChannelAdapter(deliveryFields.channel)
-  if (!adapter?.startTypingIndicator) {
+  const channel = deliveryFields.channel
+  const adapter = getAssistantChannelAdapter(channel)
+  if (!channel || !adapter?.startTypingIndicator) {
     return null
   }
   const startTypingIndicator = adapter.startTypingIndicator
 
   let activeIndicator: AssistantChannelActivityHandle | null = null
+  let acceptedAt: string | null = null
   let stopRequested = false
   let requestedStopOptions: AssistantChannelActivityStopOptions = {}
   const indicatorReady = Promise.resolve()
@@ -68,12 +72,31 @@ export function startAssistantChannelTypingIndicator(input: {
         return null
       }
 
+      acceptedAt = new Date().toISOString()
       activeIndicator = indicator
       return indicator
     })
     .catch(() => null)
 
   return {
+    recordAcceptedInputs(acceptedInputIds) {
+      if (!input.channelDependencies?.onTypingAccepted || acceptedInputIds.length === 0) {
+        return
+      }
+      // Admission and provider acceptance may happen in either order. Both belong
+      // to this turn's existing handle; diagnostic I/O never blocks admission.
+      void indicatorReady.then((indicator) => {
+        if (!indicator || !acceptedAt || stopRequested || input.input.abortSignal?.aborted
+          || indicator.isActive?.() === false) {
+          return
+        }
+        return input.channelDependencies?.onTypingAccepted?.({
+          acceptedInputIds,
+          at: acceptedAt,
+          channel,
+        })
+      }).catch(() => {})
+    },
     async refreshAfterMessage() {
       await refreshAssistantChannelTypingIndicator({
         activeIndicator,

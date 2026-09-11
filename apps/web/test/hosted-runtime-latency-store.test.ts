@@ -1076,7 +1076,7 @@ describe("hosted runtime latency dashboard store", () => {
         triggeredByWebDirect: true,
       },
     });
-    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO UPDATE");
   });
 
   it("merges direct ensure timing when a trace row already won creation", async () => {
@@ -1123,7 +1123,7 @@ describe("hosted runtime latency dashboard store", () => {
         directEnsureHandlerDurationMs: 42,
       },
     });
-    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+    expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO UPDATE");
   });
 
   it("stores retry_later as a bounded outcome without retry or error detail", async () => {
@@ -3048,6 +3048,8 @@ function createLatencyWritePrisma(input: {
         mailboxItemId,
         mailboxLane,
         mailboxLaneSeq,
+        _ingressTypingAcceptedAt,
+        _webhookReceivedAt,
         acceptedAt,
       ] = values;
       trace = createMutableLatencyTrace({

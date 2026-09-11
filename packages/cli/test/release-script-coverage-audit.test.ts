@@ -2716,24 +2716,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     }
   })
 
-  it('keeps Product UX decisions parent-owned without a specialist audit', () => {
-    const frontendReview = readFileSync(
-      path.join(repoRoot, 'agent-docs', 'prompts', 'frontend-review.md'),
-      'utf8',
-    )
-
-    expect(frontendReview).toMatch(
-      /do not duplicate subjective product-taste findings or\s+decide the copy, state selection, action count, or whether an element exists/u,
-    )
-    expect(frontendReview).toContain(
-      'visual treatment that obscures or conflicts with the declared hierarchy',
-    )
-    expect(frontendReview).not.toContain('unrelated rendered elements')
-    expect(frontendReview).toContain(
-      'Meaning-preserving tiny static-copy corrections',
-    )
-  })
-
   it('keeps delayed targets alive until discovery and closes only failed discoveries', async () => {
     const delayedTarget = loadReviewGptOpenTargetHarness(2)
 
@@ -4119,18 +4101,8 @@ printf 'ZIP: %s (%s bytes)\n' \
       writeHarnessFile(harnessRoot, 'package.json', '{"name":"review-harness"}\n')
       writeHarnessFile(
         harnessRoot,
-        'agent-docs/prompts/prompt-review.md',
-        'prompt lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/prompts/frontend-review.md',
-        'frontend lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/prompts/coverage-review.md',
-        'coverage lens\n',
+        'agent-docs/prompts/seam-audits/README.md',
+        'on-demand seam audit guidance\n',
       )
       writeHarnessFile(harnessRoot, 'agent-docs/FRONTEND.md', 'frontend workflow\n')
       writeHarnessFile(
@@ -4743,7 +4715,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
-      expect(leanEntries).not.toContain('agent-docs/prompts/coverage-review.md')
+      expect(leanEntries).not.toContain('agent-docs/prompts/seam-audits/README.md')
       expect(leanEntries).not.toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
       expect(leanEntries).not.toContain('docs/device-sync-hosted-control-plane.md')
@@ -4761,7 +4733,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
-      expect(fullEntries).toContain('agent-docs/prompts/coverage-review.md')
+      expect(fullEntries).toContain('agent-docs/prompts/seam-audits/README.md')
       expect(fullEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
       expect(fullEntries).toContain('PRODUCT.md')
       expect(fullEntries).toContain('DESIGN.md')

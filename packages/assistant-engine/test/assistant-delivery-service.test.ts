@@ -927,3 +927,66 @@ function createSharedPlan(input?: {
     requestedWorkingDirectory: '/tmp/assistant-delivery-service-test',
   }
 }
+
+test.each(['active', 'pending', 'failed', 'stopped', 'aborted', 'expired', 'isolated', 'observer-pending', 'observer-failed'])(
+  'typing evidence follows turn admission and handle lifetime: %s', async (scenario) => {
+    const signal = new AbortController()
+    let release!: () => void
+    const ready = new Promise<void>((resolve) => { release = resolve })
+    let active = true
+    const onTypingAccepted = vi.fn((_event: { acceptedInputIds: readonly string[]; at: string; channel: string }) => {
+      if (scenario === 'observer-pending') return new Promise<void>(() => {})
+      if (scenario === 'observer-failed') throw new Error('Synthetic observer failure')
+    })
+    const startTelegramTyping = vi.fn(async () => {
+      await ready
+      if (scenario === 'failed') throw new Error('Synthetic provider failure')
+      return { isActive: () => active, stop: async () => { active = false } }
+    })
+    const indicator = startAssistantChannelTypingIndicator({
+      channelDependencies: { startTelegramTyping, onTypingAccepted },
+      input: {
+        abortSignal: signal.signal, channel: 'telegram', deliverResponse: true,
+        bindingDeliveryTarget: '12345', prompt: 'Synthetic initial', vault: '/vaults/test',
+      },
+      session: createAssistantSession({ binding: {
+        actorId: null, channel: 'telegram', conversationKey: null, identityId: null,
+        delivery: { kind: 'thread', target: '12345' }, threadId: '12345', threadIsDirect: true,
+      } }),
+      sharedPlan: createSharedPlan({ audience: {
+        actorId: null, channel: 'telegram', threadId: '12345', threadIsDirect: true,
+      } }),
+    })
+    try {
+      indicator?.recordAcceptedInputs(['initial'])
+      if (scenario === 'pending' || scenario === 'failed') {
+        indicator?.recordAcceptedInputs(['followup'])
+        expect(onTypingAccepted).not.toHaveBeenCalled()
+      }
+      release()
+      if (scenario === 'failed') {
+        await indicator?.refreshNow?.()
+        expect(onTypingAccepted).not.toHaveBeenCalled()
+        return
+      }
+      await vi.waitFor(() => expect(onTypingAccepted).toHaveBeenCalled())
+      const at = onTypingAccepted.mock.calls[0]![0].at
+      if (scenario === 'stopped') await indicator?.stop()
+      if (scenario === 'aborted') signal.abort()
+      if (scenario === 'expired') active = false
+      if (scenario !== 'pending' && scenario !== 'isolated') indicator?.recordAcceptedInputs(['followup'])
+      // Flush the same resolved readiness promise without waiting on the observer.
+      await indicator?.refreshNow?.()
+      expect(onTypingAccepted.mock.calls.map(([event]) => event)).toEqual([
+        { acceptedInputIds: ['initial'], at, channel: 'telegram' },
+        ...(['active', 'pending', 'observer-pending', 'observer-failed'].includes(scenario)
+          ? [{ acceptedInputIds: ['followup'], at, channel: 'telegram' }]
+          : []),
+      ])
+      expect(startTelegramTyping).toHaveBeenCalledOnce()
+    } finally {
+      release()
+      await indicator?.stop()
+    }
+  },
+)

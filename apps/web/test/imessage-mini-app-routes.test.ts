@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import nativeWorkoutRequest from "./fixtures/imessage-workout-native-request.json";
+
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { isRecord } from "../src/lib/primitives";
 import { createBearerRequest } from "./route-test-helpers";
@@ -556,6 +558,71 @@ describe("iMessage mini-app routes", () => {
       duplicate: false,
       schemaVersion: 1,
     });
+  });
+
+  it("admits the native Swift payload and canonicalizes omitted/null retries identically", async () => {
+    const body = { ...nativeWorkoutRequest, requestedAt: new Date().toISOString() };
+    const first = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      body,
+    ));
+    expect(first.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
+    const admitted = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0].envelope;
+    expect(admitted.request).toMatchObject({
+      actionId: body.actionId,
+      requestedAt: body.requestedAt,
+      action: {
+        mutations: body.action.mutations,
+        presentation: {
+          subtitle: null,
+          footer: null,
+          workout: { exercises: [{ sets: [
+            { status: "completed", actual: "80 lb × 10", target: null },
+            { status: "pending", actual: null, target: null },
+          ] }] },
+        },
+      },
+    });
+    const retry = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      admitted.request,
+    ));
+    expect(retry.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[1]?.[0].envelope)
+      .toEqual(admitted);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledTimes(2);
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an incomplete completed result before mailbox preparation", async () => {
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      {
+        ...nativeWorkoutRequest,
+        requestedAt: new Date().toISOString(),
+        action: {
+          ...nativeWorkoutRequest.action,
+          presentation: {
+            ...nativeWorkoutRequest.action.presentation,
+            workout: {
+              ...nativeWorkoutRequest.action.presentation.workout,
+              exercises: [{ name: "Cable Row", sets: [{ status: "completed" }] }],
+            },
+          },
+        },
+      },
+    ));
+    expect(response.status).toBe(400);
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("admits a workout snapshot read and returns its typed card result", async () => {
