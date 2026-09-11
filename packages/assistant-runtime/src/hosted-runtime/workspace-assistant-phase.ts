@@ -4791,7 +4791,7 @@ async function resolveDisprovedDefaultWakeCheckpoint(input: {
   });
 }
 
-async function runSystemMailboxMaintenancePhase(input: {
+type HostedSystemMailboxMaintenanceInput = {
   backgroundRouteActions?: readonly HostedSystemMailboxRouteAction[];
   backgroundWakeKinds?: readonly HostedExecutionSystemWake["kind"][];
   exclusiveRouteActions?: readonly HostedSystemMailboxRouteAction[];
@@ -4802,23 +4802,13 @@ async function runSystemMailboxMaintenancePhase(input: {
   pendingAssistantInputBlocksMaintenance?: boolean;
   pendingAssistantInputWakeAt?: string | null;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
-}): Promise<{
-  backgroundMaintenanceYielded: boolean;
-  continueAssistantLane: boolean;
-  initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
-  pendingAssistantInputWakeAt: string | null;
-  result: HostedWorkspaceRunnerAssistantPhaseResult | null;
-}> {
+};
+
+async function prepareForegroundSystemMailboxSelection(
+  input: HostedSystemMailboxMaintenanceInput,
+  pendingAssistantInputWakeAt: string | null,
+) {
   const phaseInput = input.input;
-  const hasPendingAssistantInputWakeOverride = Object.hasOwn(
-    input,
-    "pendingAssistantInputWakeAt",
-  );
-  let pendingAssistantInputWakeAt = hasPendingAssistantInputWakeOverride
-    ? input.pendingAssistantInputWakeAt ?? null
-    : await resolvePendingAssistantInputWakeAt(phaseInput, {
-        inspectOnly: input.hasFreshConversationInput,
-      });
   const assistantAskCompletionOccurredBefore = pendingAssistantInputWakeAt === null
     ? undefined
     : input.hasFreshConversationInput
@@ -4833,8 +4823,6 @@ async function runSystemMailboxMaintenancePhase(input: {
       });
   const hasExclusiveSelection = input.exclusiveRouteActions !== undefined
     || input.exclusiveWakeKinds !== undefined;
-  const hasBackgroundSelection = input.backgroundRouteActions !== undefined
-    || input.backgroundWakeKinds !== undefined;
   const prepareForegroundMailboxItem = (
     selection: Pick<
       Parameters<typeof prepareHostedSystemMailboxItemForCheckpoint>[0],
@@ -4876,14 +4864,8 @@ async function runSystemMailboxMaintenancePhase(input: {
             : { assistantAskCompletionOccurredBefore }),
         })
       : null;
-  if (hasExclusiveSelection && foregroundCausalPreparation === null) {
-    return {
-      backgroundMaintenanceYielded: false,
-      continueAssistantLane: false,
-      initialProviderCleanupCheckpoint: null,
-      pendingAssistantInputWakeAt,
-      result: null,
-    };
+  if (hasExclusiveSelection) {
+    return { foregroundCausalPreparation, pendingAssistantInputWakeAt };
   }
   if (
     phaseInput.foregroundCausalOnly === true
@@ -4928,6 +4910,181 @@ async function runSystemMailboxMaintenancePhase(input: {
         allowedWakeKinds:
           HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS,
       });
+  }
+  return { foregroundCausalPreparation, pendingAssistantInputWakeAt };
+}
+
+async function runIdleSystemMailboxMaintenance(input: {
+  backgroundMaintenanceYielded: boolean;
+  pendingAssistantInputWakeAt: string | null;
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
+  staleDefaultProjectionDisproved: boolean;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  const {
+    backgroundMaintenanceYielded,
+    pendingAssistantInputWakeAt,
+    phaseInput,
+    readAssistantCronWakeState,
+    staleDefaultProjectionDisproved,
+  } = input;
+  const queuedMessageVolumeReceipts =
+    phaseInput.foregroundCausalOnly !== true
+    && !backgroundMaintenanceYielded
+      ? await queueHostedAssistantPendingMessageVolumeReceiptsForVault({
+          effectsPort: phaseInput.runtime.platform.effectsPort,
+          now: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)),
+          vaultRoot: phaseInput.restored.vaultRoot,
+        })
+      : 0;
+  const contextSnapshotRefresh =
+    await runAssistantContextSnapshotIdleRefreshBestEffort({
+      phaseInput,
+    });
+  if (contextSnapshotRefresh) {
+    const contextAssistantCronWakeState = await readAssistantCronWakeState();
+    const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
+      phaseInput,
+      state: contextAssistantCronWakeState,
+    });
+    const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+      assistantCronWake,
+      input: phaseInput,
+      pendingAssistantInputWakeAt,
+    });
+    return withHostedRuntimeWakeCandidate({
+      wake: backgroundWake,
+      result: contextSnapshotRefresh,
+    });
+  }
+
+  if (queuedMessageVolumeReceipts > 0) {
+    const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+      input: phaseInput,
+      pendingAssistantInputWakeAt,
+    });
+    return {
+      checkpointReason: "outbox_receipt",
+      ...(backgroundWake.at ? { nextWakeAt: backgroundWake.at } : {}),
+      ...(shouldExposeHostedAssistantPhaseNextWakeReason(backgroundWake.reason)
+        ? { nextWakeReason: backgroundWake.reason }
+        : {}),
+      progressed: true,
+    };
+  }
+
+  return await resolveDisprovedDefaultWakeCheckpoint({
+    phaseInput,
+    readAssistantCronWakeState,
+    requested: staleDefaultProjectionDisproved,
+  });
+}
+
+async function prepareSystemMailboxDelivery(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  shouldYieldAfterSystemMailboxPreparation: boolean;
+  systemMailboxPreparation: HostedSystemMailboxPreparation;
+}) {
+  const {
+    phaseInput,
+    shouldYieldAfterSystemMailboxPreparation,
+    systemMailboxPreparation,
+  } = input;
+  const systemMailboxDeliveryEffects =
+    shouldCollectSystemMailboxDeliveryEffects({
+      preparation: systemMailboxPreparation,
+      shouldYieldAfterSystemMailboxPreparation,
+    })
+      ? await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
+        includeBackgroundDueIntents: phaseInput.foregroundCausalOnly !== true,
+        messageVolumeReceiptPort: phaseInput.runtime.platform.effectsPort,
+        preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
+          systemMailboxPreparation,
+        ),
+        preferredIntentIds: resolveHostedSystemMailboxPreferredIntentIds(
+          systemMailboxPreparation,
+        ),
+        vaultRoot: phaseInput.restored.vaultRoot,
+      })
+      : [];
+  const systemMailboxDeliveryEffectsForDispatch =
+    phaseInput.foregroundCausalOnly === true
+      ? systemMailboxDeliveryEffects.filter(
+          (effect) => effect.payload.transportIdempotent === true,
+        )
+      : systemMailboxDeliveryEffects;
+  const deferredSystemMailboxDeliveryWakeAt =
+    systemMailboxDeliveryEffectsForDispatch.length
+      < systemMailboxDeliveryEffects.length
+      ? await resolveHostedAssistantOutboxNextWakeAt({
+          vaultRoot: phaseInput.restored.vaultRoot,
+        })
+      : null;
+  const nonIdempotentPhoneCallResultEffectIds =
+    isPhoneCallResultSystemMailboxPreparation(systemMailboxPreparation)
+      ? systemMailboxDeliveryEffectsForDispatch
+          .filter((effect) => effect.payload.transportIdempotent !== true)
+          .map((effect) => effect.effectId)
+      : [];
+  let systemMailboxDeliveryPreparation: HostedAssistantDeliveryPreparation | null = null;
+  if (systemMailboxDeliveryEffectsForDispatch.length > 0) {
+    systemMailboxDeliveryPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: systemMailboxDeliveryEffectsForDispatch,
+      ...(nonIdempotentPhoneCallResultEffectIds.length > 0
+        ? {
+            selectedNonIdempotentEffectIds:
+              nonIdempotentPhoneCallResultEffectIds,
+          }
+        : {}),
+      vaultRoot: phaseInput.restored.vaultRoot,
+    });
+  }
+  return {
+    deferredSystemMailboxDeliveryWakeAt,
+    systemMailboxDeliveryEffects,
+    systemMailboxDeliveryEffectsForDispatch,
+    systemMailboxDeliveryPreparation,
+  };
+}
+
+async function runSystemMailboxMaintenancePhase(
+  input: HostedSystemMailboxMaintenanceInput,
+): Promise<{
+  backgroundMaintenanceYielded: boolean;
+  continueAssistantLane: boolean;
+  initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
+  pendingAssistantInputWakeAt: string | null;
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null;
+}> {
+  const phaseInput = input.input;
+  const hasPendingAssistantInputWakeOverride = Object.hasOwn(
+    input,
+    "pendingAssistantInputWakeAt",
+  );
+  let pendingAssistantInputWakeAt = hasPendingAssistantInputWakeOverride
+    ? input.pendingAssistantInputWakeAt ?? null
+    : await resolvePendingAssistantInputWakeAt(phaseInput, {
+        inspectOnly: input.hasFreshConversationInput,
+      });
+  const hasExclusiveSelection = input.exclusiveRouteActions !== undefined
+    || input.exclusiveWakeKinds !== undefined;
+  const hasBackgroundSelection = input.backgroundRouteActions !== undefined
+    || input.backgroundWakeKinds !== undefined;
+  const foregroundSelection = await prepareForegroundSystemMailboxSelection(
+    input,
+    pendingAssistantInputWakeAt,
+  );
+  const foregroundCausalPreparation = foregroundSelection.foregroundCausalPreparation;
+  pendingAssistantInputWakeAt = foregroundSelection.pendingAssistantInputWakeAt;
+  if (hasExclusiveSelection && foregroundCausalPreparation === null) {
+    return {
+      backgroundMaintenanceYielded: false,
+      continueAssistantLane: false,
+      initialProviderCleanupCheckpoint: null,
+      pendingAssistantInputWakeAt,
+      result: null,
+    };
   }
   const foregroundCausalAttempted = foregroundCausalPreparation !== null;
   if (
@@ -5191,135 +5348,38 @@ async function runSystemMailboxMaintenancePhase(input: {
         result: mergeMemberPreferencesPrePlanningResult(null),
       };
     }
-    const queuedMessageVolumeReceipts =
-      phaseInput.foregroundCausalOnly !== true
-      && !backgroundMaintenanceYielded
-        ? await queueHostedAssistantPendingMessageVolumeReceiptsForVault({
-            effectsPort: phaseInput.runtime.platform.effectsPort,
-            now: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)),
-            vaultRoot: phaseInput.restored.vaultRoot,
-          })
-        : 0;
-    const contextSnapshotRefresh =
-      await runAssistantContextSnapshotIdleRefreshBestEffort({
-        phaseInput,
-      });
-    if (contextSnapshotRefresh) {
-      const contextAssistantCronWakeState = await readAssistantCronWakeState();
-      const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
-        phaseInput,
-        state: contextAssistantCronWakeState,
-      });
-      const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
-        assistantCronWake,
-        input: phaseInput,
-        pendingAssistantInputWakeAt,
-      });
-      return {
-        backgroundMaintenanceYielded,
-        continueAssistantLane: false,
-        initialProviderCleanupCheckpoint,
-        pendingAssistantInputWakeAt,
-        result: mergeMemberPreferencesPrePlanningResult(
-          withHostedRuntimeWakeCandidate({
-            wake: backgroundWake,
-            result: contextSnapshotRefresh,
-          }),
-        ),
-      };
-    }
-
-    if (queuedMessageVolumeReceipts > 0) {
-      const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
-        input: phaseInput,
-        pendingAssistantInputWakeAt,
-      });
-      return {
-        backgroundMaintenanceYielded,
-        continueAssistantLane: false,
-        initialProviderCleanupCheckpoint,
-        pendingAssistantInputWakeAt,
-        result: mergeMemberPreferencesPrePlanningResult({
-          checkpointReason: "outbox_receipt",
-          ...(backgroundWake.at ? { nextWakeAt: backgroundWake.at } : {}),
-          ...(shouldExposeHostedAssistantPhaseNextWakeReason(backgroundWake.reason)
-            ? { nextWakeReason: backgroundWake.reason }
-            : {}),
-          progressed: true,
-        }),
-      };
-    }
-
     return {
       backgroundMaintenanceYielded,
       continueAssistantLane: false,
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
       result: mergeMemberPreferencesPrePlanningResult(
-        await resolveDisprovedDefaultWakeCheckpoint({
+        await runIdleSystemMailboxMaintenance({
+          backgroundMaintenanceYielded,
+          pendingAssistantInputWakeAt,
           phaseInput,
           readAssistantCronWakeState,
-          requested: staleDefaultProjectionDisproved,
+          staleDefaultProjectionDisproved,
         }),
       ),
     };
   }
-  const systemMailboxDeliveryEffects =
-    shouldCollectSystemMailboxDeliveryEffects({
-      preparation: systemMailboxPreparation,
-      shouldYieldAfterSystemMailboxPreparation,
-    })
-      ? await collectHostedAssistantDeliverySideEffects({
-        actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
-        includeBackgroundDueIntents: phaseInput.foregroundCausalOnly !== true,
-        messageVolumeReceiptPort: phaseInput.runtime.platform.effectsPort,
-        preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
-          systemMailboxPreparation,
-        ),
-        preferredIntentIds: resolveHostedSystemMailboxPreferredIntentIds(
-          systemMailboxPreparation,
-        ),
-        vaultRoot: phaseInput.restored.vaultRoot,
-      })
-      : [];
-  const systemMailboxDeliveryEffectsForDispatch =
-    phaseInput.foregroundCausalOnly === true
-      ? systemMailboxDeliveryEffects.filter(
-          (effect) => effect.payload.transportIdempotent === true,
-        )
-      : systemMailboxDeliveryEffects;
-  const deferredSystemMailboxDeliveryWakeAt =
-    systemMailboxDeliveryEffectsForDispatch.length
-      < systemMailboxDeliveryEffects.length
-      ? await resolveHostedAssistantOutboxNextWakeAt({
-          vaultRoot: phaseInput.restored.vaultRoot,
-        })
-      : null;
+  const {
+    deferredSystemMailboxDeliveryWakeAt,
+    systemMailboxDeliveryEffects,
+    systemMailboxDeliveryEffectsForDispatch,
+    systemMailboxDeliveryPreparation,
+  } = await prepareSystemMailboxDelivery({
+    phaseInput,
+    shouldYieldAfterSystemMailboxPreparation,
+    systemMailboxPreparation,
+  });
   const foregroundCausalDeliveryOwnsThisPass =
     isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation)
     && systemMailboxDeliveryEffectsForDispatch.length > 0;
   const foregroundCausalPreparationCompletedWithoutDelivery =
     isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation)
     && systemMailboxDeliveryEffectsForDispatch.length === 0;
-  const nonIdempotentPhoneCallResultEffectIds =
-    isPhoneCallResultSystemMailboxPreparation(systemMailboxPreparation)
-      ? systemMailboxDeliveryEffectsForDispatch
-          .filter((effect) => effect.payload.transportIdempotent !== true)
-          .map((effect) => effect.effectId)
-      : [];
-  let systemMailboxDeliveryPreparation: HostedAssistantDeliveryPreparation | null = null;
-  if (systemMailboxDeliveryEffectsForDispatch.length > 0) {
-    systemMailboxDeliveryPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
-      assistantDeliveryEffects: systemMailboxDeliveryEffectsForDispatch,
-      ...(nonIdempotentPhoneCallResultEffectIds.length > 0
-        ? {
-            selectedNonIdempotentEffectIds:
-              nonIdempotentPhoneCallResultEffectIds,
-          }
-        : {}),
-      vaultRoot: phaseInput.restored.vaultRoot,
-    });
-  }
   const systemMailboxWake = systemMailboxPreparation.status === "retryable_failed"
     ? createHostedRuntimeWakeCandidate(
         systemMailboxPreparation.nextWakeAt,
