@@ -24,11 +24,17 @@ Proof: real PostgreSQL paused-receipt interleavings through actual first-turn co
 
 - [x] Synthetic fail-before and pass-after PostgreSQL proof, focused unit suite, Web typecheck.
 - [x] Inspect bounded transaction/lock ordering, privacy, complexity and full diff.
-- [ ] Scoped commit, draft PR, Ready after focused proof, final ReviewGPT with CI.
-- [ ] Close plan, verify final-head required checks and current-base mergeability; leave for human merge.
+- [x] Scoped commit, draft PR, Ready after focused proof, final ReviewGPT with CI.
+- [x] Close plan through the scoped completion commit; retain the open PR for human merge.
+- [ ] Verify final-head required checks and current-base mergeability after the closure commit; record the result on the PR.
 
 ## Progress
 
 Isolated task checkout created from current origin/main. No competing open PR owns this first-turn race. Parent and ReviewGPT rejected a generic lock insertion because of the group-outreach lock inversion and narrowed implementation to the existing first-turn transaction. Production investigation remains read-only.
 
 The composed exported-completion proof failed on unchanged source for both delivered and failed receipts; no-receipt acceptance passed. After the five-line source correction, all 104 tests across the full PostgreSQL and first-turn unit files pass. Web typecheck and complexity guard pass. The unchanged completion hotspot remains 37; no broader lifecycle refactor is justified. The lock adds one serial query in the existing post-send transaction, with no provider or connection-count increase. Parent candidate review is complete and Product UX is Ready. Changelog is not applicable: only internal delivery tracking changes, with provider sends and member-visible mailbox behavior preserved.
+
+Final ReviewGPT returned PASS on PR #3262 at `8e80d2e9d470053588d555c3fbc6ad04f5c324ad`; requested and captured model `gpt-6-pro`, response hash `290e23e687bd45e35c9c4ce37e528d5a9b10ed448a7982e5d6e896b8a3308983`. Parent validated exact-head evidence and accepted no findings. Closing this plan adds explanatory documentation only; production source and proof remain identical to the reviewed candidate. CI was still running at plan closure, and remains a final-head completion gate. No merge, deployment, production write or replay is part of this task.
+Status: completed
+Updated: 2026-09-11
+Completed: 2026-09-11
