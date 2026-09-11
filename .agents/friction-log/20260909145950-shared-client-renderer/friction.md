@@ -1,6 +1,7 @@
 ---
 title: 'Shared client renderer cannot dispatch focused input keyboard events'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3121'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Assistant Engine coverage omits built CLI fixture prerequisites'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3241'
 ---
 
 ## Expected Behavior

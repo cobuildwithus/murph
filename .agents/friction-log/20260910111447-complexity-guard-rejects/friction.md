@@ -1,6 +1,7 @@
 ---
 title: 'Complexity guard rejects exact function extraction as new debt'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3180'
 ---
 
 ## Expected Behavior
