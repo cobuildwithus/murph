@@ -1038,7 +1038,10 @@ Last verified: 2026-08-31
 - Direct Strava webhook POST delivery must fail closed unless the provider-owned signing secret verifies the `X-Strava-Signature` timestamp and HMAC over the raw body. The Strava GET verify token is only a subscription-challenge/admin secret, not POST delivery authentication. Junction-backed device sync uses Junction's own webhook signature boundary and must not depend on direct Strava webhook trust.
 - Personal Starter image generation and editing require a currently attached
   Stripe card, checked by Web through the existing signed Worker callback and
-  enforced at Cloudflare OpenAI image egress. Missing, unavailable, wrong-mode,
+  enforced at Cloudflare OpenAI image egress and native image tools in Responses
+  HTTP requests and WebSocket client frames. Every image frame checks current
+  access before forwarding; ordinary text never waits for the card callback.
+  Missing, unavailable, wrong-mode,
   or foreign card authority fails closed before the image provider. Card setup
   creates no charge, subscription, or usage grant. See the
   [Starter usage owner](product-specs/starter-usage.md#text-entry-and-image-access)

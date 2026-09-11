@@ -100,6 +100,14 @@ access retain their current allowance owners. This check is in the Cloudflare
 provider interceptor, including requests outside the normal dynamic tool; local
 assistant image generation keeps its existing behavior.
 
+The same access decision covers native `image_generation` tools in OpenAI
+Responses HTTP requests and WebSocket client frames. Each image request checks
+current card attachment, including a later image on an existing socket. Bounded
+JSON inspection and one Responses relay preserve ordinary text streams without
+card-network work; native-memory usage recording remains enabled only for its
+authenticated memory lane. Queued client frames share the existing 32 MiB
+message budget while an access check is pending.
+
 Web resolves the current usage source and, for direct Starter, lists one card
 on the member's existing encrypted Stripe customer binding. It checks mode and
 attachment and rechecks the binding after Stripe responds. Missing cards,
