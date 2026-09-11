@@ -58,7 +58,9 @@ const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.searchParams.has("host") || !["/murph_dev_better_auth_login", "/murph_dev_twilio_verify"].includes(url.pathname)) throw new Error("Canonical auth proof requires its isolated local task database.");
+    || url.search || !/^\/(?:murph_dev_better_auth_login|murph_dev_twilio_verify|murph_test(?:_[a-z0-9_]+)?)$/u.test(url.pathname)) {
+    throw new Error("Canonical auth proof requires an isolated local test database.");
+  }
 }
 const configuration = () => ({ baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma: getPrisma() });
 const jwtKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });

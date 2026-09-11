@@ -1,3 +1,4 @@
+import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -277,57 +278,9 @@ function parseOptionalResolvedLinqDeliveryRoute(
   if (value === undefined || value === null) {
     return null;
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throwResolvedLinqDeliveryRouteInvalid();
-  }
-  const record = value as Record<string, unknown>;
-  const target = readOptionalBodyString(record.target);
-  const targetKind = readOptionalBodyString(record.targetKind);
-  const conversationThreadId = readRequiredNullableBodyString(
-    record,
-    "conversationThreadId",
-  );
-  const directRecipientPhoneNumber = readRequiredNullableBodyString(
-    record,
-    "directRecipientPhoneNumber",
-  );
-  const fromPhoneNumber = readRequiredNullableBodyString(
-    record,
-    "fromPhoneNumber",
-  );
-  if (
-    !target
-    || (targetKind !== "participant" && targetKind !== "thread")
-    || conversationThreadId === undefined
-    || directRecipientPhoneNumber === undefined
-    || fromPhoneNumber === undefined
-    || typeof record.threadIsDirect !== "boolean"
-  ) {
-    throwResolvedLinqDeliveryRouteInvalid();
-  }
-  return {
-    conversationThreadId,
-    directRecipientPhoneNumber,
-    fromPhoneNumber,
-    target,
-    targetKind,
-    threadIsDirect: record.threadIsDirect,
-  };
-}
-
-function readRequiredNullableBodyString(
-  record: Record<string, unknown>,
-  field: string,
-): string | null | undefined {
-  if (!(field in record)) {
-    return undefined;
-  }
-  const value = record[field];
-  if (value === null) {
-    return null;
-  }
-  const normalized = readOptionalBodyString(value);
-  return normalized ?? undefined;
+  const route = parseHostedExecutionResolvedLinqDeliveryRoute(value);
+  if (!route) throwResolvedLinqDeliveryRouteInvalid();
+  return route;
 }
 
 function throwResolvedLinqDeliveryRouteInvalid(): never {

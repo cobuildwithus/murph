@@ -51,8 +51,10 @@ const databaseUrl = process.env.DATABASE_URL ?? "";
 if (enabled) {
   const url = new URL(databaseUrl);
   if (
-    !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
-    || !/^\/(murph_test|murph_dev_[a-z0-9_]+)$/u.test(url.pathname)
+    !["postgres:", "postgresql:"].includes(url.protocol)
+    || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+    || url.search
+    || !/^\/(murph_test(?:_[a-z0-9_]+)?|murph_dev_[a-z0-9_]+)$/u.test(url.pathname)
   ) throw new Error("Terminal retry proof requires an explicitly selected local test database.");
 }
 

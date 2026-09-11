@@ -55,9 +55,6 @@ import type {
   AssistantModelTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
-import {
-  inferDirectEmailThreadFromParticipants,
-} from "@murphai/inboxd/connectors/email/directness";
 
 import type {
   HostedMailboxConversationImportTiming,
@@ -1658,45 +1655,13 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         threadIdentity,
       ),
-      threadIsDirect: resolveHostedEmailConversationDirectness({
-        message: wake.message,
-        threadTarget: emailThreadTarget,
-      }),
+      threadIsDirect: emailThreadTarget?.targetKind === "group"
+        ? false
+        : wake.message.threadIsDirect ?? null,
     };
   }
 
   return null;
-}
-
-function resolveHostedEmailConversationDirectness(input: {
-  message: HostedExecutionEmailConversationMessagePayload;
-  threadTarget: ReturnType<typeof parseHostedEmailThreadTarget>;
-}): boolean | null {
-  const { message, threadTarget } = input;
-  if (threadTarget?.targetKind === "group") {
-    return false;
-  }
-
-  if (typeof message.threadIsDirect === "boolean") {
-    return message.threadIsDirect;
-  }
-  if (message.threadIsDirect === null) {
-    return null;
-  }
-
-  const from = message.from?.trim() ?? "";
-  const selfAddress = message.selfAddress?.trim() ?? "";
-  if (!from || !selfAddress || !Array.isArray(message.to) || !Array.isArray(message.cc)) {
-    return null;
-  }
-
-  return inferDirectEmailThreadFromParticipants({
-    accountAddress: message.identityId,
-    cc: message.cc,
-    from,
-    selfAddresses: [selfAddress],
-    to: message.to,
-  });
 }
 
 function createHostedConversationAssistantInputReplyTarget(

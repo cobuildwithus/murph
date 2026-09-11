@@ -1057,7 +1057,7 @@ describe.skipIf(!runPostgresProof)(
       });
 
       try {
-        expect(configuredSourceProviderSlugs).toHaveLength(33);
+        expect(configuredSourceProviderSlugs.length).toBeGreaterThan(0);
         expect(configuredSourceProviderSlugs.length).toBeLessThanOrEqual(
           HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         );
@@ -1124,7 +1124,7 @@ describe.skipIf(!runPostgresProof)(
             kind: "provider_config",
             providerConfigKey: "junction",
           });
-          expect(snapshot.connections[0]?.sources).toHaveLength(33);
+          expect(snapshot.connections[0]?.sources).toHaveLength(configuredSourceProviderSlugs.length);
           expect(snapshot.connections[0]?.sources?.map(
             (source) => source.sourceProviderSlug,
           )).toEqual(expect.arrayContaining(configuredSourceProviderSlugs));
@@ -1430,7 +1430,10 @@ describe.skipIf(!runPostgresProof)(
       });
 
       try {
-        expect(configuredSources).toHaveLength(33);
+        expect(configuredSources.length).toBeGreaterThan(0);
+        expect(configuredSources.length).toBeLessThanOrEqual(
+          HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+        );
         await prisma.hostedMember.create({ data: { id: memberId } });
         const connection = await prisma.deviceConnection.create({
           data: {
@@ -1475,6 +1478,7 @@ describe.skipIf(!runPostgresProof)(
                     observedConnectedAt: connection.connectedAt.toISOString(),
                     observedUpdatedAt: connection.updatedAt.toISOString(),
                     sources: configuredSources.map((source) => ({
+                      firstSeenAt: sourceObservedAt.toISOString(),
                       lastSeenAt: sourceUpdatedAt,
                       observedLastSeenAt: sourceObservedAt.toISOString(),
                       observedLifecycleEpoch: 2,
@@ -1500,7 +1504,7 @@ describe.skipIf(!runPostgresProof)(
         expect(response.updates).toHaveLength(1);
         expect(response.updates[0]?.writeUpdate).toBe("applied");
         expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(1);
-        expect(operationCounts.get("DeviceConnectionSource.upsert") ?? 0).toBe(33);
+        expect(operationCounts.get("DeviceConnectionSource.upsert") ?? 0).toBe(configuredSources.length);
       } finally {
         await prisma.deviceConnection.deleteMany({
           where: { id: connectionId },

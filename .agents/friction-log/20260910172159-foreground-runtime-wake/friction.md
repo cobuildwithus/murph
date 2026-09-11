@@ -1,6 +1,7 @@
 ---
 title: 'Foreground runtime wake checkpoint test depends on an extra mailbox fetch'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3215'
 ---
 
 ## Expected Behavior

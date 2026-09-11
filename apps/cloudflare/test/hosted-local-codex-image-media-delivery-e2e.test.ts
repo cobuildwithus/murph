@@ -126,7 +126,7 @@ describe("hosted local Codex image media delivery e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    expect(replySend.authorizationStatus).toBe("hosted-sentinel");
+    expect(replySend.authorizationStatus).toBe("expected");
     expect(readObservedLinqMessageParts(replySend)).toEqual([
       {
         type: "text",

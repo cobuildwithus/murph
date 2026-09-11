@@ -1,6 +1,7 @@
 ---
 title: 'Linq inventory PostgreSQL rotation fixture declares a future privacy key'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3219'
 ---
 
 ## Expected Behavior

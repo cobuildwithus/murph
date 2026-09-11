@@ -535,7 +535,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     );
   }, 300_000);
 
-  it("preserves a default-owned row ahead of Environment work", async () => {
+  it("preserves a default-owned row during independent Environment work", async () => {
     await seedProbe(environmentOrderingProbe);
     const baselineStatus = await requireScenario().harness.readUserStatus(
       environmentOrderingProbe.userId,
@@ -580,7 +580,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       });
       await waitForProcessingCheckpointBarrier(
         environmentOrderingProbe.userId,
-        "default",
+        "system_mailbox",
       );
       const heldStatus = await requireScenario().harness.readUserStatus(
         environmentOrderingProbe.userId,
@@ -594,7 +594,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         ? BigInt(heldThrough)
         : 0n;
       expect(heldThroughSeq).toBeLessThan(
-        BigInt(environmentCompletion.append.wake.seq),
+        BigInt(predecessor.wake.seq),
       );
       expect(requireScenario().assistantProviderRequests).toHaveLength(
         providerRequestBaseline,
@@ -1448,7 +1448,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
 // remain unchanged while this race reaches a real idle snapshot deterministically.
 describe.sequential("hosted local foreground checkpoint ordering e2e", () => {
   beforeAll(async () => {
-    orderingLinqStub = await startHostedLocalLinqStub();
+    orderingLinqStub = await startHostedLocalLinqStub({
+      expectedAuthorizationToken: "linq-local-ordering-token",
+    });
     orderingScenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,

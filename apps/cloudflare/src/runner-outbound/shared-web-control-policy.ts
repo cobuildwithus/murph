@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution/connected-apps";
 import {
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -162,6 +163,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   clinicalRecordsConnectLink: defineHostedRunnerWebControlPostRoute(
     "clinical_records_connect_link",
     HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  ),
+  clinicalRecordsFetchDocument: defineHostedRunnerWebControlPostRoute(
+    "clinical_records_fetch_document",
+    HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   ),
   clinicalRecordsFetchPage: defineHostedRunnerWebControlPostRoute(
     "clinical_records_fetch_page",
