@@ -61,12 +61,23 @@ describe("Preview database separation proof", () => {
   });
 
   it("prevents connection URL options from weakening TLS or read-only bounds", () => {
-    const config = databaseProofClientConfig(`${environment.DATABASE_URL}?sslmode=disable&options=-c%20default_transaction_read_only%3Doff`);
+    const config = databaseProofClientConfig(`${environment.DATABASE_URL}?sslmode=disable&connection_limit=99`);
     expect(config.connectionString).toBe(environment.DATABASE_URL);
     expect(config.ssl).toEqual({ rejectUnauthorized: true });
     expect(config.options).toContain("default_transaction_read_only=on");
     expect(config.options).toContain("statement_timeout=3000");
     expect(config.connectionTimeoutMillis).toBe(4_000);
+  });
+
+  it.each(["host=other.example.test", "user=another-role", "options=project%3Dother", "password=other", "port=5433"])(
+    "rejects target overrides instead of probing a modified destination: %s", (query) => {
+      expect(() => databaseProofClientConfig(`${environment.DATABASE_URL}?${query}`)).toThrow();
+    },
+  );
+
+  it("rejects endpoints that could inherit connection identity from ambient PG variables", () => {
+    expect(() => databaseProofClientConfig("postgresql://runtime.example.test/test")).toThrow();
+    expect(() => databaseProofClientConfig("postgresql://test@runtime.example.test/test")).toThrow();
   });
 
   it("publishes only a coarse static result and refuses to reuse existing output", () => {

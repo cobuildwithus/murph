@@ -38,8 +38,17 @@ export function readProofReference(value: string | undefined, now = Date.now()):
 
 export function databaseProofClientConfig(value: string): ClientConfig {
   const url = new URL(value);
-  if (!["postgres:", "postgresql:"].includes(url.protocol) || !url.hostname || !url.pathname.slice(1)) {
+  if (!["postgres:", "postgresql:"].includes(url.protocol) || !url.hostname
+    || !url.username || !url.password || !url.pathname.slice(1)) {
     throw new Error("Invalid database proof endpoint.");
+  }
+  // The PostgreSQL URL parser accepts target overrides such as ?host= and
+  // ?user=. Never silently drop routing input and probe a different target.
+  const nonRoutingOptions = new Set([
+    "sslmode", "pgbouncer", "connection_limit", "pool_timeout", "connect_timeout", "schema",
+  ]);
+  for (const key of url.searchParams.keys()) {
+    if (!nonRoutingOptions.has(key)) throw new Error("Unsupported database proof endpoint options.");
   }
   // URL options must not override read-only mode, deadlines, or verified TLS.
   url.search = "";

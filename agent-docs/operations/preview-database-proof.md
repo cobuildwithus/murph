@@ -13,6 +13,9 @@ leaves the connection. Both Preview runtime and direct migration endpoints must
 be writable-primary endpoints, return the same digest, and differ from the
 approved primary production reference before the result is `different database`.
 Queries themselves are read-only, with verified TLS and short deadlines.
+Only complete connection URLs with supported non-routing query options are
+accepted. Target overrides and ambient credential fallback remain unqualified;
+the probe must not silently change the destination it claims to check.
 
 All other outcomes are `unable to verify`. In particular, a matching digest
 cannot establish `same database`: physical clones may preserve PostgreSQL's
