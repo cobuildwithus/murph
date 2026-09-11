@@ -94,7 +94,7 @@ export async function uploadHostedLocalWorkspaceSnapshot(input: {
       archiveEntries: archivePlan.entries,
       dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
       durableRoot,
-      ivBase64: randomBytes(12).toString("base64"),
+      ivBase64: randomBytes(12).toString("base64url"),
       maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
       outputDir,
     });
