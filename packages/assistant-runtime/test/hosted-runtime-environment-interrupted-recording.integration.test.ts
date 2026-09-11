@@ -33,7 +33,8 @@ import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import { readHostedAssistantInputCurrentDeliveryRoute } from "../src/hosted-runtime/current-delivery-route.ts";
-import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
+import { readHostedProviderCleanupCheckpoint } from "../src/hosted-runtime/provider-cleanup.ts";
+import { readHostedSystemMailboxState, resolveHostedSystemMailboxWakeCandidates } from "../src/hosted-runtime/system-mailbox-state.ts";
 import * as systemWork from "../src/hosted-runtime/workspace-system-work.ts";
 
 test.each(["success", "projection-error", "fresh-foreground"] as const)("settles checkpointed Environment recording in the foreground replacement: %s", async (scenario) => {
@@ -268,10 +269,21 @@ test.each(["success", "projection-error", "fresh-foreground"] as const)("settles
       projectionFailureActive = false;
       vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-future-retry-"));
       roots.push(vaultRoot);
+      const effectContextsBeforeFutureRetry = [...effectContexts];
       runtimeCompletion = runInvocation("system_mailbox");
       result = await withRealTimeout(runtimeCompletion, 10_000, facts);
-      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.nextAttemptAt, new Date(retryAt).toISOString());
-      assert.equal(result.nextWakeAt, new Date(retryAt).toISOString(), facts());
+      const futureRetryState = await readHostedSystemMailboxState(vaultRoot);
+      assert.deepEqual(futureRetryState.pending, retained);
+      assert.deepEqual(effectContexts, effectContextsBeforeFutureRetry);
+      assert.equal(result.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "0");
+      const mailboxWake = await resolveHostedSystemMailboxWakeCandidates({ state: futureRetryState, vaultRoot });
+      assert.equal(mailboxWake.next.at, new Date(retryAt).toISOString());
+      assert.ok(Date.parse(result.nextWakeAt ?? "") <= retryAt, facts());
+      // Provider cleanup can wake the default owner before the recording retry is due.
+      if (result.nextWakeAt !== new Date(retryAt).toISOString()) {
+        assert.equal(result.nextWakeReason, "assistant");
+        assert.equal(result.nextWakeAt, (await readHostedProviderCleanupCheckpoint(vaultRoot))?.nextWakeAt);
+      }
       await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, retryAt - Date.now())));
       vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-due-retry-"));
       roots.push(vaultRoot);
