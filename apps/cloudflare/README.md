@@ -587,17 +587,19 @@ event count, and `double2` is the selected retry delay in milliseconds. For
 `container_busy` only, optional `blob3` records one of these closed control-path
 stages:
 
-- `non_runtime_write_fence`: the active write fence is not runtime-owned.
 - `active_runtime_contention`: an active runtime fence remains contended after
   the liveness check.
-- `cooperative_handoff_pending`: the active child accepted a release wake but
-  has not handed off yet.
 - `background_preemption_unavailable`: the active container exposes no
   background-abort capability.
 - `background_preemption_not_accepted`: background abort returned a bounded
   non-accepted, non-failure status.
 - `stopped_container_record_pending`: a destroyed pending stop target could not
   yet be cleared from the runner record.
+
+Historical reports still recognize `non_runtime_write_fence` and
+`cooperative_handoff_pending`; current code no longer emits them. An exact
+system-mailbox child that accepts a foreground wake is acknowledged without
+requiring a new owner. The child retains its existing authority checks.
 
 The stage is a finite mechanism label, not a processing mode, scenario name,
 identifier, free-text value, or private-state projection. Other retry reasons

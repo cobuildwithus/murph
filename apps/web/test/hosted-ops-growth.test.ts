@@ -197,6 +197,7 @@ describe("hosted ops growth metrics", () => {
     });
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.executeRaw.mockResolvedValue(0);
+    mocks.queryRaw.mockResolvedValue([]);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
     mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValue(0);
@@ -1054,7 +1055,7 @@ describe("hosted ops growth metrics", () => {
     const markup = renderToStaticMarkup(await growthPage.default());
 
     expect(markup).toContain("Recent member retention");
-    expect(markup).toContain("No real member signups yet.");
+    expect(markup).toContain("No real member accounts yet.");
     expect(markup).toContain("Referral link usage");
     expect(markup).toContain("MRR growth per week");
     expect(markup).toContain("Total messages sent");
@@ -1426,7 +1427,7 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("counts distinct senders across personal chats and group containers", async () => {
+  it.each([false, true])("counts distinct senders and supplements recent members from provider receipts (%s)", async (includeProviderActivity) => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     const unregisteredPhone = requireLinqContact("phone", "+15550000002");
@@ -1551,6 +1552,10 @@ describe("hosted ops growth metrics", () => {
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
+    if (includeProviderActivity) mocks.queryRaw.mockResolvedValue([
+      { memberId: "member_no_recent_activity", messagesLast7Days: 2, messagesToday: 2, lastMessageAt: new Date("2026-07-06T11:45:00Z") },
+      { memberId: "member_direct", messagesLast7Days: 1, messagesToday: 0, lastMessageAt: new Date("2026-07-05T11:00:00Z") },
+    ]);
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
@@ -1568,11 +1573,11 @@ describe("hosted ops growth metrics", () => {
       members: [
         {
           createdAt: "2026-07-06T11:30:00.000Z",
-          lastMessageAt: null,
+          lastMessageAt: includeProviderActivity ? "2026-07-06T11:45:00.000Z" : null,
           maskedPhoneNumberHint: "*** 0630",
           memberId: "member_no_recent_activity",
-          messagesLast7Days: 0,
-          messagesToday: 0,
+          messagesLast7Days: includeProviderActivity ? 2 : 0,
+          messagesToday: includeProviderActivity ? 2 : 0,
           onboardingCompleted: false,
           suspended: false,
         },
@@ -1581,7 +1586,7 @@ describe("hosted ops growth metrics", () => {
           lastMessageAt: "2026-07-06T11:30:00.000Z",
           maskedPhoneNumberHint: null,
           memberId: "member_direct",
-          messagesLast7Days: 7,
+          messagesLast7Days: includeProviderActivity ? 8 : 7,
           messagesToday: 4,
           onboardingCompleted: true,
           suspended: false,

@@ -91,6 +91,29 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.admitApplication).toHaveBeenCalledWith({ ...small, rolloutStepPercentage: 100 });
     expect(releaseMocks.runSmokeHostedDeploy).not.toHaveBeenCalled();
   });
+  it.each([true, false])("checks the desired existing small capacity before admission (available=%s)", async available => {
+    const trace: string[] = [];
+    const small = { name: "hosted-worker-smallrunnercontainer", className: "SmallRunnerContainer",
+      applicationId: "small-app", namespaceId: "small-namespace", specification: { max_instances: 10 } };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving",
+      workerOnly: false, applications: [small], retirements: [],
+    }));
+    releaseMocks.assertCapacity.mockImplementation(async () => {
+      trace.push("quota");
+      if (!available) throw new Error("small capacity exceeds account budget");
+    });
+    releaseMocks.admitApplication.mockImplementation(async () => { trace.push("small rollout"); return "modified"; });
+    releaseMocks.assertApplicationReady.mockRejectedValue(new Error("synthetic stop after admission"));
+    await expect(syntheticDeployment()).rejects.toThrow(available
+      ? "synthetic stop after admission" : "small capacity exceeds account budget");
+    expect(releaseMocks.assertCapacity).toHaveBeenCalledExactlyOnceWith({
+      applicationId: small.applicationId, specification: small.specification,
+    });
+    expect(trace).toEqual(available ? ["quota", "small rollout"] : ["quota"]);
+    if (!available) expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+  });
+
   it("retires drained capacity, proves quota, activates compatibility, then rolls the serving image", async () => {
     const trace: string[] = [];
     const deployment = { active: { id: "synthetic-permanent" }, candidate: { id: "synthetic-permanent" }, previous: null };

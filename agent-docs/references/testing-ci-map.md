@@ -4,8 +4,8 @@ Last verified: 2026-09-11
 
 ## Current Repo Checks
 
-The canary outcome suite controls Date at its replica fixture timestamp and
-restores it after each case. An explicit clock advance proves the production
+The canary outcome suite controls Date.now relative to its replica fixture
+timestamp and restores it after each case. An explicit clock advance proves the production
 24-hour expiry check still rejects a matching but expired replica. Run this
 decryption and authority proof with
 `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-production-canary-outcome.test.ts`.
@@ -25,6 +25,13 @@ canonical HTTPS endpoint; local/custom upstream configuration stays Worker-owned
 because arbitrary local ports bypass Cloudflare outbound interception. The
 `provider-egress-token-bridge` hosted-local journey requires the synthetic upstream
 token, so a leaked runner sentinel can no longer count as successful delivery.
+The full-stack scenario normalizes the local Docker host alias to loopback for
+both host Web and Workerd before environment generation. Runner containers still
+receive canonical HTTPS provider URLs through their existing environment owner.
+`hosted-local-linq-host-upstream.test.ts` proves these host bindings reach the
+strict synthetic HTTP upstream through native Workerd without a mocked fetch;
+the scenario helper suite separately verifies generated Worker bindings, explicit
+Web overrides, and canonical container URL/sentinel projection.
 This validates the locally supported protocol boundary; provider receipt delivery,
 media downloading/rendering, and live service behavior still require hosted proof.
 
@@ -611,6 +618,45 @@ one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
 
+The tool-contract suite inventories all exported and route-only registrations
+(currently 56) across eager native, deferred native, and code mode. It compares
+complete canonical JSON from the actual provider boundary and separately checks
+generated automation, nutrition, and personalization declarations. A catalog-wide
+guard rejects empty named-property schemas; intentionally generic connected-app
+arguments and no-argument tools remain supported. The pinned Codex converter can
+still shorten deep automation native parameters and code-mode types, so the full
+JSON supplement remains required. The mixed-mode condition-reminder journeys check
+the complete discovered supplement and exact saved reference, not shortened native
+reference-item fields.
+The custom-inference adapter suite checks complete long descriptions for function,
+namespace, and custom tools through both top-level and additional-tool transport.
+
+Focused live personalization proof uses
+`-- --test 'saves sentence-case preference'`: one sparse saved tone update, no
+persona/voice rewrite, no progress chatter, and a truthful confirmation. Existing
+`-- --test 'uses one canonical nutrition context read for date-window'` covers
+one valid nutrition card from canonical saved data without Goal mutations.
+
+Automation editing has a focused real-App-Server regression in
+`assistant-codex-tool-input-contract.test.ts`: generated code-mode declarations
+must expose a required string `expectedUpdatedAt`, typed lookup/instructions,
+and the original canonical readback guidance. Schema tests retain the exact
+runtime document and reject a missing version before the automation port; the
+failure-boundary test proves the model receives an actionable inspect-and-copy
+repair. CLI automation coverage verifies compact inventory retains `updatedAt`
+without losing pagination or its payload reduction.
+
+Run each synthetic live journey independently through `pnpm test:assistant:live`
+with `-- --test 'quick single edit'` or
+`-- --test 'several edits.*uses inspected versions'`. They use production prompts,
+the automation tool, and versioned fixture ports; assert one inspect/patch pair
+per record, no invalid calls or duplicate writes, and zero versus one early
+progress update. `MURPH_MEASURE_AUTOMATION_INPUT=1` enables the focused
+`automation edit: complete first provider input` tests for identical direct/group
+fixtures through real mixed-mode Codex conversion. They report complete decoded
+request bytes with only `prompt_cache_key` excluded and explicitly mark missing
+exact-tokenizer evidence.
+
 `packages/assistant-engine/test/assistant-codex-tool-input-contract.test.ts` is a
 default-on, credential-free regression gate under the existing package
 `test/**/*.test.ts` inclusion and normal package/PR CI. It starts the REAL pinned
@@ -622,6 +668,16 @@ resolver variants (boolean capability gates and direct/group progress modes),
 including follow-up, maintenance memory, group configuration/challenge/progress
 and both shared-read variants. Route alternatives sharing an identity run in
 separate batches; admission is never broadened to make a test pass.
+
+Automation structural admission also runs the advertised JSON through Ajv 2020
+with standard format validation and compares accepted/rejected fixtures with the
+production argument parser. Every action needs an accepted fixture; cases cover inspected
+versions, nested references/schedules, types, enums, formats, uniqueness, and bounds.
+Personalization checks every advertised enum value and invalid field types against
+runtime admission; all 32 persona-pair/presence combinations also validate the
+complete advertised schema. Ajv and its format plugin are test-only dependencies
+at versions already present in the lockfile. These tests do not claim full
+schema/parser equivalence: runtime-only refinements retain their dedicated tests.
 
 The fixture covers small documents and documents above the current compaction
 threshold, reference scopes/definitions, nested arrays/objects, compositions and
@@ -1130,6 +1186,14 @@ limits, and local proof distinctions are owned by
   `EXISTS` query shape without a private usage-row join. The separate
   `hosted-ai-usage-overshoot-alert-monitor-postgres.test.ts` proof executes that
   query against zero-cap and positive-cap current blocked periods.
+- `apps/cloudflare/test/hosted-runner-container-identity.test.ts` keeps a real
+  standby-claim timeout and single-invocation fallback proof. Its late-result
+  fixture sets the wall clock past the captured deadline before settlement,
+  so timer scheduling cannot change the intended deadline-expired case.
+- `apps/web/test/hosted-runtime-latency-postgres-concurrency.test.ts` exercises
+  real PostgreSQL milestone overlap. Concurrent writes assert the store's
+  explicit contention receipts and replay only a contended milestone after
+  both writers finish, before checking the complete atomic JSON merge.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
   opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
   latency monitor. It runs the production query against 50,000 stale rows per
@@ -1444,7 +1508,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   test against representative captured or synthetic pre-change histories for
   the newly affected path. Routine repo checks still do not validate a live
   Render deploy or a production Temporal Cloud namespace.
-- `packages/assistant-runtime/test/hosted-runtime-environment-interrupted-recording.integration.test.ts` restores a real checkpointed Environment recording into a fresh foreground runtime. It uses the real system-work and assistant-phase owners, synthetic model/transport boundaries, and actual snapshot bytes to prove reply delivery, the handled prefix and the Habitat value in the published Browser Vault replica. Its baseline reproduces a false projection failure when a due mailbox wake hands off an owner that still has durable completion effects. Additional cases preserve a real projection failure through its existing 60-second retry across cold restores, and prove a second foreground message preempts projection before recording finishes.
+- `packages/assistant-runtime/test/hosted-runtime-environment-interrupted-recording.integration.test.ts` restores a real checkpointed Environment recording into a fresh foreground runtime. It uses the real system-work and assistant-phase owners, synthetic model/transport boundaries, and actual snapshot bytes to prove reply delivery, the handled prefix and the Habitat value in the published Browser Vault replica. Its baseline reproduces a false projection failure when a due mailbox wake hands off an owner that still has durable completion effects. Additional cases preserve a real projection failure through its existing 60-second retry across cold restores, prove a second foreground message preempts projection before recording finishes, and keep one browser publication through repeated empty scheduler hints. Fresh conversation input, failed classification, and an incomplete mailbox prefix still interrupt that publication.
 - Environment voice capture is covered by hosted-web recorder dismissal and authenticated upload-route tests; hosted-execution wake parsing; Cloudflare control-client, encrypted-store, Vercel-OIDC staging, write-fenced runtime read/delete, and lifecycle configuration tests; assistant-runtime integrity, transient transcription, constrained Habitat-maintenance, post-checkpoint deletion/retry, and contiguous Browser Vault refresh-control collapse tests that preserve gaps, interleaving, retries, and preemption; plus Environment frontend proof that completion explicitly requests a refresh and waits for a newer replica reference. `packages/assistant-runtime/test/hosted-runtime-environment-completion.integration.test.ts` also verifies the actual Habitat indicator and note in the constructed Browser Vault replica after quiescence and ordinary checkpoint completion. `packages/assistant-runtime/test/hosted-runtime-environment-checkpoint-followup.integration.test.ts` exercises the independent Environment owner and durable recording, proves the committed Habitat reaches Browser Vault before another ordinary due-assistant pass, and interrupts actual replica publication with fresh conversation work to verify immediate continuation. `packages/assistant-runtime/test/hosted-runtime-browser-publication-due-delivery.integration.test.ts` lets a queued outbox delivery become due during checkpoint publication, stalls the real Browser refresh until its shortened test timeout, then cold-restores the returned continuation and proves exactly one persisted send without a runtime wake notification. It covers queued delivery and snapshot recovery, not cron occurrence execution or autonomous Temporal scheduling. Routine CI uses synthetic audio-container bytes and a mocked transcript. It does not grant a real browser microphone permission, call production Workers AI, or prove deletion from the production R2 bucket, so deployed proof still requires one authenticated physical-microphone recording and an operator check of the applied lifecycle rule.
 - Hosted-local E2E scenarios launch the real Codex app-server binary by default, pointed at a local deterministic scripted Responses API stub through the test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider key, so default lanes exercise the production app-server protocol (including dynamic-tool `item/tool/call` relay and shell execution of scripted vault-cli calls) with zero provider spend. These scenarios use the configured provider workspace sandbox inside the already-isolated runner container because the Wrangler-managed outer Docker profile cannot host Codex's nested bubblewrap namespace; the dedicated native permission-sandbox gate above remains the production-profile proof. Production turns continue to require the named member-workspace profile. No automated check calls a paid model provider by default. The opt-in `codex-gateway-prefix` hosted-local E2E scenario runs the real Codex app-server against a local Responses API recorder for cache-prefix diagnostics, fingerprints the first cacheable provider prompt prefix across repeated Linq wakes, and fails if those fingerprints diverge; it is excluded from the default `all` scenario set because it can intentionally fail while provider behavior is under investigation. The opt-in `linq-group-ios-app-download` scenario uses an authenticated live provider turn through the canonical hosted Linq group route and asserts the delivered public App Store link, final-line formatting, single-bubble delivery, and personal-setup boundary; it is manual-only so routine verification never spends provider credits. Codex App Server file/PDF inputs are not advertised as natively supported unless the app-server protocol grows a supported file input item.
 - `apps/cloudflare/test/codex-openai-egress-conformance.test.ts` binds the

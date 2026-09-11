@@ -809,6 +809,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       tx: prisma,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -1762,6 +1763,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       }),
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -1950,6 +1952,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        onSignalStarted: expect.any(Function),
         abortSignal: expect.any(AbortSignal),
         expectedUserId: "member_123",
         mailboxItemId: "mailbox_evt_123",
@@ -2059,6 +2062,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -2111,6 +2115,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",

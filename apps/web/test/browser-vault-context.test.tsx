@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import { gzipSync } from "node:zlib";
 
 import {
@@ -4589,9 +4590,11 @@ async function waitForText(container: HTMLElement, text: string): Promise<void> 
 }
 
 async function waitForCondition(condition: () => boolean, label: string): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  // Let native decompression finish without advancing the provider's fake timers.
+  const deadline = vi.getRealSystemTime() + 1_000;
+  while (vi.getRealSystemTime() < deadline) {
     await act(async () => {
-      await Promise.resolve();
+      await delay(1);
     });
 
     if (condition()) {

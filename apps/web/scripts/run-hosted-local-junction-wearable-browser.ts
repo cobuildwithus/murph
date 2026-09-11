@@ -134,8 +134,13 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
 let stage = "configuration";
 let activePage: Page | null = null;
 let activeConfig: BrowserConfig | null = null;
+let failureDiagnostic: string | null = null;
 
 async function main(): Promise<void> {
+  stage = "configuration";
+  activePage = null;
+  activeConfig = null;
+  failureDiagnostic = null;
   const config = readBrowserConfig(process.env);
   activeConfig = config;
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
@@ -156,7 +161,6 @@ async function main(): Promise<void> {
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(config.timeoutMs);
 
-    stage = "murph_connect_intent";
     await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
     stage = "murph_vital_disclosure";
@@ -208,10 +212,11 @@ async function main(): Promise<void> {
   } catch (error) {
     failed = true;
     failure = error;
+    failureDiagnostic = formatBrowserFailure(error);
   }
 
   try {
-    stage = failed ? `${stage}_cleanup` : "browser_cleanup";
+    if (!failed) stage = "browser_cleanup";
     await closeBrowserSession(session, config);
   } catch (error) {
     if (!failed) {
@@ -461,11 +466,28 @@ async function navigateToHostedLocalStart(
   config: BrowserConfig,
   tunnel: OwnedKernelTunnel | null,
 ): Promise<void> {
-  if (!tunnel) {
-    await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
-    return;
+  if (tunnel) {
+    stage = "kernel_tunnel_ready";
+    await waitForKernelTunnelReady(page, config, tunnel);
   }
 
+  stage = "murph_connect_intent";
+  try {
+    await page.goto(config.startUrl, {
+      timeout: config.timeoutMs,
+      waitUntil: "domcontentloaded",
+    });
+  } catch {
+    throw new Error("Hosted-local connect navigation did not complete.");
+  }
+}
+
+async function waitForKernelTunnelReady(
+  page: Page,
+  config: BrowserConfig,
+  tunnel: OwnedKernelTunnel,
+): Promise<void> {
+  const healthUrl = new URL("/api/internal/health", config.webBaseUrl).toString();
   const deadline = Date.now() + Math.min(
     config.timeoutMs,
     KERNEL_TUNNEL_SETUP_TIMEOUT_MS,
@@ -480,14 +502,15 @@ async function navigateToHostedLocalStart(
     }
     const remainingMs = deadline - Date.now();
     try {
-      await page.goto(config.startUrl, {
+      const response = await page.goto(healthUrl, {
         timeout: Math.min(5_000, remainingMs),
         waitUntil: "domcontentloaded",
       });
-      return;
+      if (response?.status() === 200 && response.url() === healthUrl) return;
     } catch {
-      await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
+      // Navigation errors can contain URLs. Keep readiness diagnostics fixed.
     }
+    await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
   }
   throw new Error("Kernel reverse tunnel did not reach hosted-local Web in time.");
 }
@@ -719,7 +742,7 @@ async function completeGarminPartnerConsent(
   if (await readAuthorizationActionState(saveAction) !== "enabled") {
     throw new Error("Garmin consent did not expose one enabled Save action.");
   }
-  await clickAuthorizationControl(saveAction);
+  await clickAuthorizationControl(saveAction, page, "garmin_consent_save");
   return true;
 }
 
@@ -912,7 +935,7 @@ async function clickFirstVisibleAction(
         ) {
           continue;
         }
-        await clickAuthorizationControl(control);
+        await clickAuthorizationControl(control, page, `authorization_${role}`);
         return true;
       }
     }
@@ -972,7 +995,7 @@ async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
       ) {
         continue;
       }
-      await clickAuthorizationControl(candidate);
+      await clickAuthorizationControl(candidate, page, "whoop_grant");
       return true;
     }
     return false;
@@ -985,14 +1008,19 @@ async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
 
 async function clickAuthorizationControl(
   control: Pick<Locator, "click">,
+  page: Pick<Page, "url">,
+  action: "garmin_consent_save" | "authorization_button" | "authorization_link" | "whoop_grant",
 ): Promise<void> {
+  const before = safePageLocation(page);
   try {
     await control.click();
   } catch (error) {
     const category = error instanceof Error && error.name === "TimeoutError"
       ? "timeout"
       : "other";
-    throw new Error(`Authorization action failed (${category}).`);
+    throw new Error(
+      `Authorization action failed (${category}); action=${action}; before=${before}; after=${safePageLocation(page)}.`,
+    );
   }
 }
 
@@ -1282,12 +1310,16 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
 }
 
 export {
+  main as runHostedLocalJunctionBrowserForTest,
+  formatBrowserFailure as formatHostedLocalJunctionBrowserFailureForTest,
+  safePageLocation as readHostedLocalJunctionDiagnosticLocationForTest,
   buildKernelCliEnvironment as buildKernelCliEnvironmentForTest,
   buildKernelTunnelArguments as buildKernelTunnelArgumentsForTest,
   closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
   disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
+  navigateToHostedLocalStart as navigateToHostedLocalJunctionStartForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
@@ -1347,13 +1379,36 @@ function readOrigin(value: string): string | null {
   }
 }
 
-function safePageLocation(page: Page | null): string {
+function safePageLocation(page: Pick<Page, "url"> | null): string {
   try {
     const url = new URL(page?.url() ?? "");
-    return `${url.origin}${url.pathname}`;
+    if (url.protocol === "chrome-error:") return "browser_error";
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "other";
+    const host = [
+      ...TRUSTED_AUTHORIZATION_DOMAINS,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.garmin,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.oura,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.whoop,
+    ].find((domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+    if (!host) return "other";
+    const route = host === "garmin.com" && url.pathname === "/partner/oauthConfirm"
+      ? "partner_consent"
+      : "other";
+    return `${host}/${route}`;
   } catch {
     return "unavailable";
   }
+}
+
+function formatBrowserFailure(error: unknown): string {
+  if (failureDiagnostic) return failureDiagnostic;
+  const location = stage.startsWith("kernel_tunnel_ready")
+      || stage.startsWith("murph_connect_intent")
+    ? ""
+    : ` (${safePageLocation(activePage)})`;
+  return `Junction wearable browser E2E failed at ${stage}${location}: ${
+    sanitizeFailure(error, activeConfig)
+  }`;
 }
 
 function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
@@ -1386,11 +1441,7 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main().catch((error: unknown) => {
-    process.stderr.write(
-      `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
-        sanitizeFailure(error, activeConfig)
-      }\n`,
-    );
+    process.stderr.write(`${formatBrowserFailure(error)}\n`);
     process.exitCode = 1;
   });
 }

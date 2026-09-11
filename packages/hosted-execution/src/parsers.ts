@@ -246,13 +246,34 @@ export {
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 
-function parseHostedExecutionJournalDataWake(input: {
+function parseHostedClinicalEnrichmentWakeJobId(record: Record<string, unknown>): string {
+  assertExactHostedClinicalRecordsKeys(
+    record,
+    ["eventId", "jobId", "kind", "occurredAt", "userId"],
+    "Hosted execution wake clinical-records.enrichment-requested",
+  );
+  if (typeof record.jobId !== "string" || !/^[a-f0-9]{64}$/u.test(record.jobId)) {
+    throw new TypeError("Hosted clinical enrichment job identity is invalid.");
+  }
+  return record.jobId;
+}
+
+function parseHostedExecutionVaultDataWake(input: {
   eventId: string;
   kind: string;
   occurredAt: string;
   record: Record<string, unknown>;
   wireUserId: string;
 }): HostedExecutionWake | null {
+  if (input.kind === "clinical-records.enrichment-requested") {
+    return {
+      eventId: input.eventId,
+      jobId: parseHostedClinicalEnrichmentWakeJobId(input.record),
+      occurredAt: input.occurredAt,
+      kind: input.kind,
+      userId: input.wireUserId,
+    };
+  }
   if (input.kind === "health.daily-metric.reported") {
     assertExactHostedExecutionKeys(
       input.record,
@@ -293,14 +314,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
   const eventId = requireString(record.eventId, "Hosted execution wake eventId");
   const occurredAt = requireString(record.occurredAt, "Hosted execution wake occurredAt");
   const wireUserId = requireString(record.userId, "Hosted execution wake userId");
-  const journalDataWake = parseHostedExecutionJournalDataWake({
+  const vaultDataWake = parseHostedExecutionVaultDataWake({
     eventId,
     kind,
     occurredAt,
     record,
     wireUserId,
   });
-  if (journalDataWake) return journalDataWake;
+  if (vaultDataWake) return vaultDataWake;
 
   switch (kind) {
     case "conversation.message":

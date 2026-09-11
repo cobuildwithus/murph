@@ -1668,6 +1668,8 @@ describe("hosted runner container identity", () => {
       timedOutController.invocationService.invokedInputs[0]?.orchestration
         ?.standbyAllocationElapsedMs,
     ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS - 1);
+    // Make this settlement late on the wall clock as well as the timeout clock.
+    vi.spyOn(Date, "now").mockReturnValue(timedOutClaim.mock.calls[0]![0].deadlineAtEpochMs + 1);
     finishLateClaim?.({ outcome: "claimed", slotName: "runner--v-release_1--0123456789abcdef0123456789abcdef" });
     await vi.waitFor(() => expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({

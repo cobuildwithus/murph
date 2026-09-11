@@ -35,6 +35,7 @@ import {
 } from "./background-maintenance-cancellation.ts";
 
 import { fetchPendingClinicalDocuments, stageClinicalPageDocuments } from "./clinical-records-maintenance-documents.ts";
+import { admitHostedClinicalEnrichmentWake } from "./clinical-enrichment-wake.ts";
 
 const CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER =
   "@murphai/vault-usecases/clinical-records";
@@ -231,6 +232,22 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       sourceSystem,
       vaultRoot: input.vaultRoot,
     });
+    if (checkpoint.documentAttachments.some((attachment) => attachment.status === "downloaded")) {
+      const { enqueueClinicalEnrichment } = await import("@murphai/vault-usecases/clinical-enrichment");
+      const { jobId } = await enqueueClinicalEnrichment({
+        vaultRoot: input.vaultRoot,
+        manifestPath: result.manifestPath,
+        manifestSha256: result.manifestSha256,
+      });
+      // Publish durable work before advancing the retrieval cursor. Replaying a
+      // saved batch therefore repairs a crash between evidence and admission.
+      await admitHostedClinicalEnrichmentWake({
+        vaultRoot: input.vaultRoot,
+        userId: input.wake.userId,
+        jobId,
+        occurredAt: input.wake.occurredAt,
+      });
+    }
     checkpoint.importedCounts.createdCount += result.canonical.createdCount;
     checkpoint.importedCounts.retractedCount += result.canonical.retractedCount;
     checkpoint.importedCounts.skippedExistingCount += result.canonical.skippedExistingCount;

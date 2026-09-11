@@ -11,6 +11,9 @@ Current responsibilities:
 - settle independent system-work writes before a clean foreground return so late
   completion enters the existing durable checkpoint and browser publication path;
   a real projection failure retains the mailbox item and its existing retry wake
+- qualify empty scheduler hints during default-owner browser publication against
+  the bounded mailbox and current local work, preserving one refresh deadline
+  while real foreground work and shutdown still interrupt it
 - publish a device-sync completion record's retained provider cadence and
   checkpoint mailbox removal inside the same runtime admission after the exact
   completion record is durable, without another provider-free completion wake

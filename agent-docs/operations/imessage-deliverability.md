@@ -102,6 +102,12 @@ serialized maintenance window.
 
 ## Assistant response media
 
+The Linq adapter preserves idempotency keys up to the provider's 255-character
+limit. Longer internal keys are SHA-256 compacted only in the serialized provider
+body, after any rich-link or fallback suffix is added. Persisted outbox keys keep
+their complete automation authority metadata; retries derive the same wire key.
+See Linq's [idempotency contract](https://docs.linqapp.com/channel/imessage/guides/messaging/sending-messages/).
+
 Linq's messaging contract allows up to 100 total parts and up to 40 public-URL
 media parts in one message, but Murph does not treat that provider ceiling as a
 normal authoring budget. A newly authored assistant response may attach at most

@@ -1,4 +1,5 @@
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts/browser-vault";
+import { BROWSER_VAULT_REPLICA_DEFAULT_MAX_AGE_MS } from "@murphai/hosted-execution/browser-vault";
 import type { BrowserVaultEntity } from "@murphai/query/browser-replica-client";
 import {
   buildHostedStorageAad,
@@ -33,16 +34,15 @@ const notReady = { ready: false, totalGoalCount: 0, matchingGoalCount: 0, matchi
 
 describe("production canary canonical outcome observer", () => {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(generatedAt));
     vi.clearAllMocks();
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt) + 60_000);
     mocks.memberId.mockResolvedValue(memberId);
     mocks.authority.mockResolvedValue(undefined);
     mocks.pending.mockResolvedValue(null);
     mocks.control.mockReturnValue({ createBrowserVaultSession: mocks.session });
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => vi.restoreAllMocks());
 
   it.each([
     { entities: [], total: 0, count: 0, ids: 0 },
@@ -85,9 +85,9 @@ describe("production canary canonical outcome observer", () => {
     expect(mocks.session).not.toHaveBeenCalled();
   });
 
-  it("refuses an expired replica even when its source still matches", async () => {
+  it("refuses a replica after the freshness window even with the matching source", async () => {
     await installEncryptedReplica([goal()]);
-    vi.setSystemTime(new Date(Date.parse(generatedAt) + 24 * 60 * 60 * 1_000 + 1));
+    vi.mocked(Date.now).mockReturnValue(Date.parse(generatedAt) + BROWSER_VAULT_REPLICA_DEFAULT_MAX_AGE_MS + 1);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
     expect(mocks.session).not.toHaveBeenCalled();
   });

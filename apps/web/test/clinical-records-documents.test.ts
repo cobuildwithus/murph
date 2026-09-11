@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { hashClinicalFhirPatientId } from "@murphai/clinical-records";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   issueClinicalDocumentTickets, readClinicalDocumentResponse, readClinicalMediaResponse, resolveClinicalDocumentUrl,
@@ -42,10 +43,25 @@ describe("Clinical document attachment boundary", () => {
     expect(JSON.parse(mocks.seal.mock.calls[0]![0].value)).toMatchObject({ sourceKind: "media", url: `${base}/Media/study-1` });
     const media = await readClinicalMediaResponse({
       response: Response.json({ resourceType: "Media", id: "study-1", content: { url: "Binary/image-1" } }),
-      mediaUrl: new URL(`${base}/Media/study-1`), fhirBaseUrl: base, maxResponseBytes: 64 * 1024,
+      mediaUrl: new URL(`${base}/Media/study-1`), fhirBaseUrl: base, patientIdHash: hashClinicalFhirPatientId("patient-1"), maxResponseBytes: 64 * 1024,
     });
     expect(media.binaryUrl.href).toBe(`${base}/Binary/image-1`);
   });
+  it("keeps an interrupted HTTP-200 Media body retryable while preserving byte-limit failures", async () => {
+    const interrupted = new Response(new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(Buffer.from('{"resourceType":"Media",'));
+      controller.error(new TypeError("connection interrupted"));
+    } }), { headers: { "Content-Type": "application/fhir+json" } });
+    const input = { mediaUrl: new URL(`${base}/Media/study-1`), fhirBaseUrl: base,
+      patientIdHash: hashClinicalFhirPatientId("patient-1"), maxResponseBytes: 1024 };
+    await expect(readClinicalMediaResponse({ ...input, response: interrupted })).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_FHIR_FETCH_FAILED", retryable: true,
+    });
+    await expect(readClinicalMediaResponse({ ...input, response: new Response(" ".repeat(1025), {
+      headers: { "Content-Type": "application/fhir+json" },
+    }) })).rejects.toHaveProperty("name", "ClinicalResponseBodyLimitError");
+  });
+
   it("attests both document and diagnostic report attachments without changing their parent", async () => {
     const report = { resourceType: "DiagnosticReport", id: "report-1", meta: parent.meta, subject: parent.subject,
       presentedForm: [{ url: `${base}/Binary/body-2`, contentType: "application/pdf" }] };
