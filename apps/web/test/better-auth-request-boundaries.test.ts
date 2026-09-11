@@ -65,8 +65,12 @@ describe("auth code delivery", () => {
     await hostedAuthDelivery().email({ address: "member@example.test", code: "123456" });
     expect(mocks.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: expect.stringMatching(/^auth-/u), subject: "Your Murph sign-in code", to: ["member@example.test"],
+      text: expect.stringContaining("123456"),
+      html: expect.stringContaining(">123456</span>"),
     }));
-    await expect(hostedAuthDelivery().email({ address: "member@example.test", code: "invalid" })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
+    for (const code of ["invalid", "12345", "1234567", "<img src=x onerror=alert(1)>"]) {
+      await expect(hostedAuthDelivery().email({ address: "member@example.test", code })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
+    }
     expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
   });
   it("redacts provider exceptions from the public error", async () => {
@@ -74,22 +78,5 @@ describe("auth code delivery", () => {
     await expect(hostedAuthDelivery().email({ address: "member@example.test", code: "123456" })).rejects.toMatchObject({
       code: "AUTH_DELIVERY_UNAVAILABLE", message: "We could not send a sign-in code. Try again shortly.",
     });
-  });
-  it("sends SMS with provider privacy settings and refuses redirects", async () => {
-    vi.stubEnv("HOSTED_AUTH_TWILIO_ACCOUNT_SID", `AC${"a".repeat(32)}`);
-    vi.stubEnv("HOSTED_AUTH_TWILIO_API_KEY_SID", `SK${"b".repeat(32)}`);
-    vi.stubEnv("HOSTED_AUTH_TWILIO_API_KEY_SECRET", "synthetic-twilio-secret");
-    vi.stubEnv("HOSTED_AUTH_TWILIO_MESSAGING_SERVICE_SID", `MG${"c".repeat(32)}`);
-    const send = vi.fn().mockResolvedValue(new Response("{}", { status: 201 }));
-    vi.stubGlobal("fetch", send);
-    await hostedAuthDelivery().sms({ phoneNumber: "+12025550147", code: "123456" });
-    const init = send.mock.calls[0]?.[1] as RequestInit;
-    expect(init.redirect).toBe("error");
-    expect(init.body).toBeInstanceOf(URLSearchParams);
-    expect(Object.fromEntries(init.body as URLSearchParams)).toMatchObject({
-      To: "+12025550147", ContentRetention: "discard", AddressRetention: "obfuscate", ValidityPeriod: "300", RiskCheck: "enable",
-    });
-    send.mockResolvedValue(new Response("synthetic private provider body", { status: 500 }));
-    await expect(hostedAuthDelivery().sms({ phoneNumber: "+12025550147", code: "123456" })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
   });
 });

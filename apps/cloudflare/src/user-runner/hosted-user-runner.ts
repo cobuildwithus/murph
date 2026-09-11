@@ -2,14 +2,10 @@ import {
   type HostedHealthDataConsentState,
   type HostedRunnerStatusResponse,
   type HostedRuntimeHealthDataAdmissionResponse,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -112,10 +108,6 @@ export interface HostedRuntimeHealthDataConsentReconcileResult {
   userId: string;
 }
 
-const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
-// The retained hint measured a 693 ms provider-start p50 gain. Abandon its
-// optional admission before it can consume even half of that useful overlap.
-const HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS = 250;
 const HOSTED_WORKSPACE_READ_FAILURE_BODY_MAX_BYTES = 4 * 1_024;
 const HOSTED_WORKSPACE_READ_FAILURE_BODY_TIMEOUT_MS = 1_000;
 const HOSTED_WORKSPACE_READ_FAILURE_CODES = [
@@ -232,6 +224,8 @@ export class HostedUserRunner {
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
+      readHealthDataAdmission: (userId, timeoutMs) =>
+        this.readHostedRuntimeHealthDataAdmissionFromWeb(userId, timeoutMs),
       runnerContainerNamespace,
       readCheckpointHandoff: async (input) =>
         await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
@@ -354,20 +348,7 @@ export class HostedUserRunner {
       startedAtMs: commandStartedAtEpochMs,
       webControlTimeoutMs: this.env.webControlTimeoutMs,
     });
-    const preControllerDeadline = new AbortController();
-    const preControllerTimeout = setTimeout(() => {
-      preControllerDeadline.abort(
-        new DOMException(
-          "Hosted runtime ensure-processing pre-controller budget timed out.",
-          "TimeoutError",
-        ),
-      );
-    }, Math.max(1, commandBudget.deadlineAtMs - Date.now()));
-    let runtimeProcessingStarted = false;
     let deadlineResponse: HostedRuntimeEnsureProcessingResponse | null = null;
-    const isPreControllerDeadlineExpired = (): boolean =>
-      preControllerDeadline.signal.aborted
-      || Date.now() >= commandBudget.deadlineAtMs;
     const readDeadlineResponse = (): HostedRuntimeEnsureProcessingResponse => {
       deadlineResponse ??= createRuntimeProcessingRetryLater({
         analytics: this.runtimeRetryAnalytics,
@@ -377,147 +358,32 @@ export class HostedUserRunner {
       });
       return deadlineResponse;
     };
+    // Bound time queued behind withdrawal. Once admitted to the lock, the
+    // controller owns the same deadline for its individual runtime steps.
+    let queueTimeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<HostedRuntimeEnsureProcessingResponse>((resolve) => {
+      queueTimeout = setTimeout(
+        () => resolve(readDeadlineResponse()),
+        Math.max(1, commandBudget.deadlineAtMs - Date.now()),
+      );
+    });
     const lockedEnsure = this.withRuntimeConsentMutationLock(async () => {
-      if (isPreControllerDeadlineExpired()) {
+      if (Date.now() >= commandBudget.deadlineAtMs) {
         return readDeadlineResponse();
       }
-      const lockInput = withRuntimeOrchestration(input, {
-        runtimeConsentLockAcquiredAtEpochMs: Date.now(),
-        healthDataAdmissionReadStartedAtEpochMs: Date.now(),
-      });
-      let admission: HostedRuntimeHealthDataAdmissionResponse;
-      try {
-        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-          lockInput.userId,
-          { signal: preControllerDeadline.signal },
-        );
-      } catch (error) {
-        if (isPreControllerDeadlineExpired()) {
-          return readDeadlineResponse();
-        }
-        throw error;
-      }
-      const processingInput = withRuntimeOrchestration(lockInput, {
-        healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
-      });
-      if (isPreControllerDeadlineExpired()) {
-        return readDeadlineResponse();
-      }
-      if (!admission.processingAllowed) {
-        return {
-          kind: "retry_later" as const,
-          retryAt: new Date(
-            Date.now() + HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS,
-          ).toISOString(),
-        };
-      }
-      runtimeProcessingStarted = true;
-      clearTimeout(preControllerTimeout);
+      clearTimeout(queueTimeout);
       return await this.runtimeProcessing.ensureForUser({
-        ...processingInput,
+        ...withRuntimeOrchestration(input, {
+          runtimeConsentLockAcquiredAtEpochMs: Date.now(),
+        }),
         commandStartedAtEpochMs,
       });
     });
-    const deadline = new Promise<HostedRuntimeEnsureProcessingResponse>((resolve) => {
-      const onAbort = () => {
-        if (!runtimeProcessingStarted) {
-          resolve(readDeadlineResponse());
-        }
-      };
-      preControllerDeadline.signal.addEventListener("abort", onAbort, {
-        once: true,
-      });
-      void lockedEnsure.finally(() => {
-        preControllerDeadline.signal.removeEventListener("abort", onAbort);
-      }).catch(() => undefined);
-    });
-
     try {
-      const result = await Promise.race([lockedEnsure, deadline]);
-      void lockedEnsure.catch(() => undefined);
-      return result;
+      return await Promise.race([lockedEnsure, deadline]);
     } finally {
-      clearTimeout(preControllerTimeout);
+      clearTimeout(queueTimeout);
     }
-  }
-
-  async prewarmRuntimeShellForUser(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void> {
-    const orchestrationAttemptId =
-      orchestration?.shellPrewarmOrchestrationAttemptId;
-    if (this.runtimeConsentMutationLock) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_consent_busy",
-          ...(orchestrationAttemptId === undefined
-            ? {}
-            : { orchestrationAttemptId }),
-          shellPrewarmSource: source ?? "unknown",
-        },
-        message: "Hosted runner shell prewarm admission decided.",
-        phase: "scheduled",
-        userId,
-      });
-      return;
-    }
-    await this.withRuntimeConsentMutationLock(async () => {
-      const shellPrewarmConsentLockAcquiredAtEpochMs = Date.now();
-      const shellPrewarmAdmissionReadStartedAtEpochMs = Date.now();
-      let admission: HostedRuntimeHealthDataAdmissionResponse;
-      try {
-        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-          userId,
-          { timeoutMs: HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS },
-        );
-      } catch {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
-            ...(orchestrationAttemptId === undefined
-              ? {}
-              : { orchestrationAttemptId }),
-            shellPrewarmSource: source ?? "unknown",
-          },
-          level: "warn",
-          message: "Hosted runner shell prewarm admission decided.",
-          phase: "scheduled",
-          userId,
-        });
-        return;
-      }
-      const shellPrewarmAdmissionReadFinishedAtEpochMs = Date.now();
-      if (!admission.processingAllowed) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
-            ...(orchestrationAttemptId === undefined
-              ? {}
-              : { orchestrationAttemptId }),
-            shellPrewarmSource: source ?? "unknown",
-          },
-          message: "Hosted runner shell prewarm admission decided.",
-          phase: "scheduled",
-          userId,
-        });
-        return;
-      }
-      await this.runtimeProcessing.beginShellPrewarmForUser(
-        userId,
-        source,
-        orchestration === undefined ? undefined : {
-          ...orchestration,
-          shellPrewarmAdmissionReadFinishedAtEpochMs,
-          shellPrewarmAdmissionReadStartedAtEpochMs,
-          shellPrewarmConsentLockAcquiredAtEpochMs,
-        },
-      );
-    });
   }
 
   async reconcileRuntimeHealthDataConsentForUser(
@@ -825,7 +691,7 @@ export class HostedUserRunner {
 
   private async readHostedRuntimeHealthDataAdmissionFromWeb(
     userId: string,
-    input: { signal?: AbortSignal; timeoutMs?: number } = {},
+    timeoutMs = this.env.webControlTimeoutMs,
   ): Promise<HostedRuntimeHealthDataAdmissionResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(this.env.hostedWebAllowHttpHosts
@@ -836,8 +702,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
-      signal: input.signal,
-      timeoutMs: input.timeoutMs ?? this.env.webControlTimeoutMs,
+      timeoutMs,
     });
 
     if (!response.ok) {

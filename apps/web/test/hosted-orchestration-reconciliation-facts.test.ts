@@ -430,6 +430,59 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["nextWakeAt"],
+    ["nextDefaultProcessingWakeAt"],
+    ["inboxMediaRetentionWakeAt"],
+  ] as const)("logs due %s as work pending without mailbox lag", async (field) => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      [field]: FIXED_NOW,
+      systemMailboxProgressGeneration: "1",
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ conversationLagPresent: false, status: "work_pending" }),
+    );
+  });
+
+  it("logs future workspace wakes as idle", async () => {
+    const future = "2026-05-20T12:01:00.000Z";
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: future,
+      nextDefaultProcessingWakeAt: future,
+      nextWakeAt: future,
+      systemMailboxProgressGeneration: "1",
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ status: "idle" }),
+    );
+  });
+
+  it("keeps blocked status when a workspace wake is due", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue(null);
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW,
+    }));
+
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime reconciliation facts.",
+      expect.objectContaining({ status: "blocked" }),
+    );
+  });
+
   it("logs one metadata-only reconciliation record", async () => {
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -824,6 +877,28 @@ describe("hosted orchestration reconciliation facts", () => {
       });
     },
   );
+
+  it("exposes independent model-free work behind an assistant item without advancing handled progress", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "0", hostedMailboxSystemHandledThroughSeq: "4", systemImportedSeq: "4",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "6" },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq
+      .mockResolvedValueOnce({ dedupeKey: "assistant.ask.completed:synthetic", kind: "assistant.ask.completed", laneSeq: "5" })
+      .mockResolvedValueOnce({ dedupeKey: "device-sync.wake:synthetic", kind: "device-sync.wake", laneSeq: "6" });
+    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
+    expect(facts.workspace?.hostedMailboxSystemHandledThroughSeq).toBe("4");
+    expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith({
+      afterSeq: "4", at: new Date(FIXED_NOW), modelFreeOnly: true,
+      prisma: expect.objectContaining({ kind: "prisma" }), userId: MEMBER_ID,
+    });
+  });
 
   it("uses zero as the system handled frontier when no checkpoint exists", async () => {
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([

@@ -1255,7 +1255,6 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantInputId"];
   deviceSyncMessagingReturnTarget?:
     HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncMessagingReturnTarget"];
-  deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
   initialAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"];
   latestAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["latestAssistantInputBatch"];
@@ -1324,7 +1323,6 @@ function createPhaseInput(input: {
       input.clearAssistantAutomationScheduleChanged,
     currentAssistantInputId: input.currentAssistantInputId,
     deviceSyncMessagingReturnTarget: input.deviceSyncMessagingReturnTarget,
-    deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,
     initialMailboxImport: {

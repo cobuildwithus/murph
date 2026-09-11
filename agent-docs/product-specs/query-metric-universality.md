@@ -32,8 +32,8 @@ composable architecture with minimal complexity.
 2. `measurement`/`test` events → generic (`measurementMetricPoints`; same
    open-world posture, qualifiers preserved in context).
 3. `observation` events → **no generic path**. They only become metric
-   points by surviving a triple registry: the importers wearable metric
-   catalog (`@murphai/importers/device-providers/metric-catalog`, consumed
+   points by surviving a triple registry: the health-metrics wearable metric
+   catalog (`@murphai/health-metrics`, consumed
    by `packages/query/src/wearables/candidates.ts: mapScalarMetric`), then
    one of the four summary kind sets
    (`packages/query/src/wearables/types.ts: SLEEP/RECOVERY/BODY/ACTIVITY_METRIC_KEYS`),

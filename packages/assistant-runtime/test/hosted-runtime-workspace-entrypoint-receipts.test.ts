@@ -1,6 +1,8 @@
 import {
   TEST_NOW,
-  createBundleRef,
+  createResolvedDeviceSyncSystemMailboxItem,
+  createDeviceSyncSystemWakeForMailboxItem,
+  createSnapshotFixtureRef,
   createCanonicalReceiptLogArtifacts,
   createDeferred,
   createMailboxItem,
@@ -22,6 +24,8 @@ import {
   sha256Hex,
   withRealTimeout,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
+
+import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 
 import assert from "node:assert/strict";
 import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -153,9 +157,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: snapshotInput.reason === "import" ? "1".repeat(64) : "2".repeat(64),
-              key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
               size: 512,
             }),
           };
@@ -229,9 +232,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: snapshotInput.reason === "import" ? "3".repeat(64) : "4".repeat(64),
-                key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
                 size: 512,
               }),
             };
@@ -443,9 +445,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: "5".repeat(64),
-              key: "users/bundles/member-synthetic/receipt-recovery-failed.bundle.json",
               size: 512,
             }),
           };
@@ -1175,16 +1176,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}`);
           assert.equal(snapshotInput.reason, "idle_shutdown");
-          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
-          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-          artifactLabelsByHash.set(hotHash, "canonical-hot-state");
-          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+          artifactLabelsByHash.set(snapshot.hash, "canonical-workspace");
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return {
-            snapshotRef: createBundleRef({
-              hash: hotHash,
-              key: "users/bundles/member-synthetic/canonical-hot.bundle.json",
-              size: hotSnapshot.bundle.byteLength,
-            }),
+            snapshotRef: snapshot.snapshotRef,
           };
         },
         async importItem() {
@@ -1472,8 +1468,6 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
             async createCheckpointSnapshot() {
               snapshotCalls += 1;
               const snapshot = await createVaultSnapshotBundle({
-                key:
-                  `users/bundles/member-synthetic/receipt-capacity-${snapshotCalls}.bundle.json`,
                 vaultRoot,
               });
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -1770,9 +1764,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
     }
   });
 
-  test("restores canonical write receipts and context dirtiness from a pre-idle checkpoint", async () => {
+  test.each([false, true])("preserves restored receipts across metadata publication and another crash (append: %s)", async (append) => {
     const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const restoredVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const metadataVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    let initialPlatform: HostedRuntimePlatform;
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const restoredCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1793,7 +1789,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
           async importItem() {
             throw new Error("Mailbox import should not run without mailbox items.");
           },
-          platform: createPlatform({
+          platform: initialPlatform = createPlatform({
             artifactBytesByHash,
             events,
             mailboxPort: createMailboxPort({
@@ -1871,7 +1867,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
       ]);
-      const workspaceAfterCrash = checkpointedWorkspaces[0];
+      let workspaceAfterCrash = checkpointedWorkspaces[0];
       assert.ok(workspaceAfterCrash);
       assert.equal(
         workspaceAfterCrash.redactedStatus?.hostedCanonicalWriteReceiptLogEntryCount,
@@ -1897,6 +1893,71 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         code: "ENOENT",
       });
 
+      const restoredReceiptHash = workspaceAfterCrash.redactedStatus?.hostedCanonicalWriteReceiptLogSha256;
+      const restoredReceiptSize = workspaceAfterCrash.redactedStatus?.hostedCanonicalWriteReceiptLogByteSize;
+      const metadataAbort = new AbortController();
+      const metadataStop = new Error("Synthetic loss before the next snapshot.");
+      const metadataRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const systemItem = createMailboxItem({ kind: "device-sync.wake", lane: "system", laneSeq: "1" });
+      await expect(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: { workspaceVersion: workspaceAfterCrash.version },
+      }), {
+        async createCheckpointSnapshot() {
+          throw new Error("The second crash must occur before a snapshot.");
+        },
+        async importItem(item) {
+          return await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncSystemMailboxItem(item.item),
+            vaultRoot: metadataVaultRoot,
+            wake: createDeviceSyncSystemWakeForMailboxItem(item.item),
+          });
+        },
+        platform: {
+          ...createPlatform({
+            artifactBytesByHash,
+            events,
+            mailboxPort: createMailboxPort({ events, items: [systemItem] }),
+            workspacePort: createWorkspacePort({
+              events,
+              checkpointRequests: metadataRequests,
+              workspace: workspaceAfterCrash,
+              checkpointWorkspace(request) {
+                if (metadataRequests.length === 1) {
+                  assert.equal(request.redactedStatus?.hostedCanonicalWriteReceiptLogSha256, restoredReceiptHash);
+                  assert.equal(request.redactedStatus?.hostedCanonicalWriteReceiptLogByteSize, restoredReceiptSize);
+                  assert.deepEqual(request.snapshotRef, baseSnapshotRef);
+                }
+                workspaceAfterCrash = createWorkspaceState({
+                  redactedStatus: request.redactedStatus,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+                if (!append || metadataRequests.length === 2) metadataAbort.abort(metadataStop);
+                return workspaceAfterCrash;
+              },
+            }),
+          }),
+          workspaceSnapshotPort: initialPlatform.workspaceSnapshotPort,
+        },
+        async runAssistantPhase(input) {
+          assert.equal(append, true);
+          await runCanonicalWrite({
+            vaultRoot: input.restored.vaultRoot,
+            operationType: "hosted_canonical_write_test",
+            summary: "Append after restored mailbox metadata publication.",
+            occurredAt: TEST_NOW,
+            mutate: async ({ batch }) => {
+              await batch.stageTextWrite("journal/2026-04-27.md", "later committed note\n");
+            },
+          });
+          return { progressed: false };
+        },
+        signal: metadataAbort.signal,
+        vaultRoot: metadataVaultRoot,
+      })).rejects.toBe(metadataStop);
+      assert.equal(metadataRequests.length, append ? 2 : 1);
+      assert.ok(workspaceAfterCrash);
+
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
           workspaceVersion: workspaceAfterCrash.version,
@@ -1905,17 +1966,10 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`restore-snapshot:${snapshotInput.reason}`);
           assert.equal(snapshotInput.reason, "idle_shutdown");
-          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({
-            vaultRoot: restoredVaultRoot,
-          });
-          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          const snapshot = await createVaultSnapshotBundle({ vaultRoot: restoredVaultRoot });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return {
-            snapshotRef: createBundleRef({
-              hash: hotHash,
-              key: "users/bundles/member-synthetic/canonical-crash-restore-hot.bundle.json",
-              size: hotSnapshot.bundle.byteLength,
-            }),
+            snapshotRef: snapshot.snapshotRef,
           };
         },
         async importItem() {
@@ -1974,6 +2028,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       await assert.rejects(stat(path.join(restoredVaultRoot, rawDeleteRelativePath)), {
         code: "ENOENT",
       });
+      if (append) assert.equal(await readFile(path.join(restoredVaultRoot, "journal/2026-04-27.md"), "utf8"), "later committed note\n");
       assert.equal(restoredCheckpointRequests.length, 1);
       assert.equal(restoredCheckpointRequests[0]?.reason, "idle_shutdown");
       const restoredCheckpointStatus = restoredCheckpointRequests[0]?.redactedStatus ?? {};
@@ -1990,6 +2045,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         undefined,
       );
     } finally {
+      await removeTempRoot(metadataVaultRoot);
       await removeTempRoot(firstVaultRoot);
       await removeTempRoot(restoredVaultRoot);
     }
@@ -2217,22 +2273,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       });
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
-      const baseRef = createBundleRef({
+      const baseRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: "users/bundles/member-synthetic/canonical-pre-checkpoint-base.bundle.json",
         size: baseBundle.byteLength,
       });
       artifactBytesByHash.set(baseHash, baseBundle);
-      const initialHotSnapshot = await snapshotHostedAssistantRuntimeHotState({
-        vaultRoot: sourceVaultRoot,
-      });
-      const initialHotHash = sha256HostedBundleHex(initialHotSnapshot.bundle);
-      const initialHotRef = createBundleRef({
-        hash: initialHotHash,
-        key: "users/bundles/member-synthetic/canonical-pre-checkpoint-initial-hot.bundle.json",
-        size: initialHotSnapshot.bundle.byteLength,
-      });
-      artifactBytesByHash.set(initialHotHash, initialHotSnapshot.bundle);
       const platform = createPlatform({
         artifactBytesByHash,
         events,
@@ -2244,10 +2289,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
           checkpointRequests,
           events,
           workspace: createWorkspaceState({
-            snapshotRef: buildHostedExecutionLayeredSnapshotRef({
-              base: baseRef,
-              hot: initialHotRef,
-            }),
+            snapshotRef: baseRef,
             version: "0",
           }),
         }),
@@ -2261,15 +2303,10 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}`);
           assert.equal(snapshotInput.reason, "idle_shutdown");
-          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
-          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return {
-            snapshotRef: createBundleRef({
-              hash: hotHash,
-              key: "users/bundles/member-synthetic/canonical-pre-checkpoint-hot.bundle.json",
-              size: hotSnapshot.bundle.byteLength,
-            }),
+            snapshotRef: snapshot.snapshotRef,
           };
         },
         async importItem(item) {

@@ -3960,7 +3960,6 @@ text(result.output);
           developerInstructions,
           dynamicTools: tools,
           env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
-          excludeResumeTurns: true,
           groupConversation,
           prompt,
         })

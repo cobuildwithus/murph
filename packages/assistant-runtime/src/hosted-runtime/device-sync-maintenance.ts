@@ -15,9 +15,6 @@ import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
 import type {
-  SerializableConfiguredDeviceSyncProviderConfigs,
-} from "@murphai/device-syncd/config";
-import type {
   DeviceSyncJobFailureDiagnostic,
   DeviceSyncJobFailureEventOrigin,
   DeviceSyncJobRecord,
@@ -220,7 +217,6 @@ export async function runHostedDeviceSyncPass(
     deviceSyncConfig,
     deviceSyncPort,
     hasHostedConnections: (preloadedSnapshot?.connections.length ?? 0) > 0,
-    memberProviderConfigs: preloadedSnapshot?.providerConfigs ?? {},
     platformEnv,
     shouldYield,
     vaultRoot,
@@ -251,6 +247,13 @@ export async function runHostedDeviceSyncPass(
     snapshot: null,
   };
   let processedJobs = 0;
+  const yieldPass = () => buildHostedDeviceSyncYieldedPassResult({
+    processedJobs,
+    retainFollowUpWakeUntilCheckpoint: options.retainFollowUpWakeUntilCheckpoint ?? false,
+    service,
+    syncState,
+    wake,
+  });
 
   try {
     options.onStage?.("retry_fence");
@@ -401,14 +404,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     options.onStage?.("source_staleness");
@@ -418,14 +414,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     syncState = await reconcileHostedDeviceSyncPassControlPlane({
@@ -445,14 +434,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     options.onStage?.("dense_raw_retention");
@@ -468,14 +450,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     const serviceNextWakeAt = resolveHostedDeviceSyncServiceNextWakeAt(service);
@@ -522,14 +497,7 @@ export async function runHostedDeviceSyncPass(
     };
   } catch (error) {
     if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
     throw error;
   } finally {
@@ -2185,7 +2153,6 @@ function createHostedDeviceSyncRuntime(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
   hasHostedConnections: boolean;
-  memberProviderConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
   platformEnv: Readonly<Record<string, string>>;
   shouldYield?: (() => boolean) | null;
   vaultRoot: string;
@@ -2198,7 +2165,6 @@ function createHostedDeviceSyncRuntime(input: {
     createConfiguredDeviceSyncProvidersFromConfigs(
       resolveHostedRuntimeDeviceSyncProviderConfigs(
         input.deviceSyncConfig.providerConfigs,
-        input.memberProviderConfigs,
         input.platformEnv,
       ),
     ),

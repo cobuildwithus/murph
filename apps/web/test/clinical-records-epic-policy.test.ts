@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { clinicalFhirRetrievalSliceSchema } from "@murphai/clinical-records";
 import baseline from "./fixtures/clinical-records-query-baseline.json";
 
 import {
@@ -48,9 +49,33 @@ const EXACT_EPIC_REGISTRATION_API_NAMES = [
   "ServiceRequest.Read (Orders) (R4)",
   "ServiceRequest.Search (Orders) (R4)",
   "Specimen.Read (Patient Chart) (R4)",
+  "DocumentReference.Search (Radiology Results) (R4)",
+  "DocumentReference.Search (External CCDA) (R4)",
+  "DocumentReference.Search (Outside Record - Clinical Notes) (R4)",
+  "Observation.Search (Outside Record Vital Signs) (R4)",
 ] as const;
 
 describe("Epic Clinical Records acquisition policy", () => {
+  it.each([
+    ["document-references-imaging", "DocumentReference", "imaging-result"],
+    ["document-references-external-ccda", "DocumentReference", "external-ccda"],
+    ["document-references-outside-notes", "DocumentReference", "external-clinical-note"],
+    ["outside-vital-sign-observations", "Observation", "external-vital-signs"],
+  ])("requests the patient-bound lifetime %s variant", (queryScopeId, resourceType, category) => {
+    const plan = buildEpicBetaRetrievalPlan({
+      frozenAt: new Date("2026-09-10T12:00:00Z"), pageCount: "100", resourceTypes: [resourceType],
+    });
+    const slice = requireSlice(plan, queryScopeId);
+    expect(slice.coverage).toBe("whole-family");
+    expect(buildEpicBetaInitialFhirPageUrl({
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      pageCount: "100", patientId: "patient-1", retrievalSlice: slice,
+    }).href).toBe(`https://fhir.example.test/FHIR/R4/${resourceType}?patient=patient-1&category=${category}&_count=100`);
+    expect(buildEpicBetaSmartResourceScope({
+      resourceType, permissionVersion: "v2",
+    })).toBe(`patient/${resourceType}.s`);
+  });
+
   it("activates every primary longitudinal query in a stable execution order", () => {
     const active = EPIC_ACQUISITION_POLICY.queries;
 
@@ -59,7 +84,7 @@ describe("Epic Clinical Records acquisition policy", () => {
       "launch/patient",
       "openid",
     ]);
-    expect(EPIC_ACQUISITION_POLICY.queries).toHaveLength(24);
+    expect(EPIC_ACQUISITION_POLICY.queries).toHaveLength(28);
     expect(active.map((query) => query.queryScopeId)).toEqual([
       "patient-demographics",
       "laboratory-observations",
@@ -85,6 +110,10 @@ describe("Epic Clinical Records acquisition policy", () => {
       "provider-goals",
       "service-requests",
       "vital-sign-observations",
+      "document-references-imaging",
+      "document-references-external-ccda",
+      "document-references-outside-notes",
+      "outside-vital-sign-observations",
     ]);
     expect(new Set(active.map((query) => query.resourceType))).toEqual(
       new Set(EPIC_BETA_RESOURCE_TYPES),
@@ -138,11 +167,11 @@ describe("Epic Clinical Records acquisition policy", () => {
       pageCount: "100",
       resourceTypes: EPIC_BETA_RESOURCE_TYPES,
     });
-    expect(plan.slices).toHaveLength(24);
+    expect(plan.slices).toHaveLength(28);
     expect(plan.slices.filter((slice) => slice.coverage === "whole-family"))
-      .toHaveLength(15);
+      .toHaveLength(28);
     expect(plan.slices.filter((slice) => slice.coverage === "bounded-window"))
-      .toHaveLength(9);
+      .toHaveLength(0);
     expect(plan.slices.map((slice) =>
       [slice.queryScopeId, slice.resourceType, slice.coverage, slice.sliceId].join(":")
     )).toEqual([
@@ -155,21 +184,25 @@ describe("Epic Clinical Records acquisition policy", () => {
       "condition-encounter-diagnoses:Condition:whole-family:whole",
       "condition-problem-list:Condition:whole-family:whole",
       "device-implants:Device:whole-family:whole",
-      "document-references-notes:DocumentReference:bounded-window:window-20260422-20260721",
-      "encounters:Encounter:bounded-window:window-20250721-20260721",
+      "document-references-notes:DocumentReference:whole-family:whole",
+      "encounters:Encounter:whole-family:whole",
       "family-member-history:FamilyMemberHistory:whole-family:whole",
-      "immunizations:Immunization:bounded-window:window-20250721-20260721",
+      "immunizations:Immunization:whole-family:whole",
       "medication-dispenses:MedicationDispense:whole-family:whole",
       "medication-requests:MedicationRequest:whole-family:whole",
-      "observation-assessments:Observation:bounded-window:window-20250721-20260721",
-      "observation-sdoh-assessments:Observation:bounded-window:window-20250721-20260721",
-      "observation-social-history:Observation:bounded-window:window-20250721-20260721",
-      "procedure-orders:Procedure:bounded-window:window-20250721-20260721",
-      "procedure-surgeries:Procedure:bounded-window:window-20250721-20260721",
+      "observation-assessments:Observation:whole-family:whole",
+      "observation-sdoh-assessments:Observation:whole-family:whole",
+      "observation-social-history:Observation:whole-family:whole",
+      "procedure-orders:Procedure:whole-family:whole",
+      "procedure-surgeries:Procedure:whole-family:whole",
       "procedure-surgical-history:Procedure:whole-family:whole",
       "provider-goals:Goal:whole-family:whole",
       "service-requests:ServiceRequest:whole-family:whole",
-      "vital-sign-observations:Observation:bounded-window:window-20250721-20260721",
+      "vital-sign-observations:Observation:whole-family:whole",
+      "document-references-imaging:DocumentReference:whole-family:whole",
+      "document-references-external-ccda:DocumentReference:whole-family:whole",
+      "document-references-outside-notes:DocumentReference:whole-family:whole",
+      "outside-vital-sign-observations:Observation:whole-family:whole",
     ]);
     const urls = plan.slices.map((retrievalSlice) => buildEpicBetaInitialFhirPageUrl({
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
@@ -177,7 +210,8 @@ describe("Epic Clinical Records acquisition policy", () => {
       patientId: "patient-1",
       retrievalSlice,
     }).toString());
-    expect(new Set(urls).size).toBe(24);
+    // The two surgical variants share Epic's category and now have identical lifetime queries.
+    expect(new Set(urls).size).toBe(27);
 
     const patientSlice = requireSlice(plan, "patient-demographics");
     expect(buildEpicBetaInitialFhirPageUrl({
@@ -203,38 +237,28 @@ describe("Epic Clinical Records acquisition policy", () => {
     })).toBe("epic-fhir-r4:DiagnosticReport:search:patient:_count=100:v1");
   });
 
-  it("freezes bounded windows into the Epic-owned search parameter", () => {
-    const plan = buildEpicBetaRetrievalPlan({
-      frozenAt: new Date("2026-07-21T12:00:00.000Z"),
-      pageCount: "100",
-      resourceTypes: ["DocumentReference", "Observation"],
-    });
-    const noteSlice = requireSlice(plan, "document-references-notes");
-    const socialHistorySlice = requireSlice(plan, "observation-social-history");
+  it("requests available lifetime history without a lower or upper date cutoff", () => {
+    for (const frozenAt of [new Date("2026-07-21T12:00:00Z"), new Date("2030-01-01T00:00:00Z")]) {
+      const plan = buildEpicBetaRetrievalPlan({ frozenAt, pageCount: "100", resourceTypes: EPIC_BETA_RESOURCE_TYPES });
+      for (const retrievalSlice of plan.slices) {
+        expect(retrievalSlice.coverage).toBe("whole-family");
+        const url = buildEpicBetaInitialFhirPageUrl({
+          fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1", retrievalSlice,
+        });
+        for (const parameter of ["period", "date", "issued"]) expect(url.searchParams.has(parameter)).toBe(false);
+      }
+    }
+  });
 
-    expect(noteSlice).toMatchObject({
-      coverage: "bounded-window",
-      from: "2026-04-22T12:00:00.000Z",
-      sliceId: "window-20260422-20260721",
-      to: "2026-07-21T12:00:00.000Z",
-    });
-    expect(buildEpicBetaInitialFhirPageUrl({
-      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
-      pageCount: "100",
-      patientId: "patient-1",
-      retrievalSlice: noteSlice,
-    }).toString()).toBe(
-      "https://fhir.example.test/FHIR/R4/DocumentReference?patient=patient-1&category=clinical-note&period=ge2026-04-22T12%3A00%3A00.000Z&period=lt2026-07-21T12%3A00%3A00.000Z&_count=100",
-    );
-    expect(buildEpicBetaInitialFhirPageUrl({
-      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
-      pageCount: "100",
-      patientId: "patient-1",
-      retrievalSlice: socialHistorySlice,
-    }).searchParams.getAll("issued")).toEqual([
-      "ge2025-07-21T12:00:00.000Z",
-      "lt2026-07-21T12:00:00.000Z",
-    ]);
+  it("resumes already-frozen bounded runs without changing their search identity", () => {
+    const bounded = baseline.filter((row) => row.slice.coverage === "bounded-window");
+    expect(bounded).toHaveLength(9);
+    for (const row of bounded) {
+      const retrievalSlice = clinicalFhirRetrievalSliceSchema.parse(row.slice);
+      expect(buildEpicBetaInitialFhirPageUrl({
+        fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1", retrievalSlice,
+      }).href).toBe(row.url);
+    }
   });
 
   it("pins the exact current Epic portal registration names", () => {
@@ -243,18 +267,23 @@ describe("Epic Clinical Records acquisition policy", () => {
     ).toEqual(EXACT_EPIC_REGISTRATION_API_NAMES);
   });
 
-  it("preserves every ordered request, fingerprint and scope across full and partial grants", () => {
+  it("preserves query fingerprints and scopes while expanding date coverage across grants", () => {
     for (const resourceTypes of [EPIC_BETA_RESOURCE_TYPES, ["Patient", "Observation", "Condition"]]) {
       const plan = buildEpicBetaRetrievalPlan({
         frozenAt: new Date("2026-07-21T12:00:00.000Z"), pageCount: "100", resourceTypes,
       });
-      expect(plan.slices.map((slice) => ({
+      expect(plan.slices.filter((slice) => baseline.some((row) => row.slice.queryScopeId === slice.queryScopeId)).map((slice) => ({
         slice,
         url: buildEpicBetaInitialFhirPageUrl({
           fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1", retrievalSlice: slice,
         }).href,
         scope: buildEpicBetaSmartResourceScope({ resourceType: slice.resourceType, permissionVersion: "v2" }),
-      }))).toEqual(baseline.filter((row) => resourceTypes.some((type) => type === row.slice.resourceType)));
+      }))).toEqual(baseline.filter((row) => resourceTypes.some((type) => type === row.slice.resourceType)).map((row) => {
+        const url = new URL(row.url);
+        for (const parameter of ["period", "date", "issued"]) url.searchParams.delete(parameter);
+        const { from: _from, to: _to, ...slice } = row.slice;
+        return { ...row, slice: { ...slice, coverage: "whole-family", sliceId: "whole" }, url: url.href };
+      }));
     }
   });
 });

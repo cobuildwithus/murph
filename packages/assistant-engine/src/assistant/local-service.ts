@@ -2774,7 +2774,7 @@ export async function sendAssistantMessageLocal(
   } finally {
     // The automation pass owns maintenance for auto-reply turns; every
     // independently-started turn keeps a post-turn owner so direct ask/chat/
-    // assistantd use cannot grow runtime state (transcripts, event logs)
+    // direct local use cannot grow runtime state (transcripts, event logs)
     // without bound. Post-turn keeps it off the foreground reply path.
     if (input.turnTrigger !== 'automation-auto-reply') {
       await runAssistantTurnBestEffort(() =>

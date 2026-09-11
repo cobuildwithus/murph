@@ -9,17 +9,19 @@ import { hostedAuthTransactionAdapter } from "./adapter";
 import type { HostedAuthUserFields } from "./migration-source";
 import { hostedAuthOtpIdentifier, lockHostedAuthOtpTx } from "./otp-store";
 import { makeHostedAuthSessionRoomTx } from "./session-limit";
+import { verifyHostedAuthSmsOtpTx } from "./sms-otp";
 
 export type HostedAuthOtp = { kind: "email"; address: string; code: string }
-  | { kind: "phone"; phoneNumber: string; code: string };
+  | { kind: "phone"; phoneNumber: string; code: string; verificationId: string };
 
 const OTP_REJECTIONS = new Set(["INVALID_OTP", "OTP_NOT_FOUND", "OTP_EXPIRED", "TOO_MANY_ATTEMPTS"]);
 
 /**
  * The pinned plugins consume a code before invoking user/session hooks. Their
  * standalone endpoints do not make subsequent canonical writes atomic. This
- * private boundary commits wrong-code budgets, but rolls back consumption and
- * every identity/session write on failures after proof. Callers prepare crypto
+ * private boundary commits email wrong-code budgets, but rolls back consumption
+ * and every identity/session write on failures after proof. SMS approval and its
+ * attempt reservation are already durable before entry. Callers prepare crypto
  * and provider evidence before entry; the callback contains database work only.
  */
 export async function commitHostedAuthOtp(input: {
@@ -51,8 +53,13 @@ export async function commitHostedAuthOtp(input: {
       generateId: ({ model }) => model === "user" ? input.memberId : randomUUID(),
       delivery: {
         email: async () => { throw new Error("Delivery is forbidden inside login completion."); },
-        sms: async () => { throw new Error("Delivery is forbidden inside login completion."); },
       },
+      verifyPhoneOtp: async ({ phoneNumber, code }) => input.otp.kind === "phone"
+        && phoneNumber === input.otp.phoneNumber && code === input.otp.code
+        && verifyHostedAuthSmsOtpTx({
+          adapter: hostedAuthTransactionAdapter(input.prisma, tx, {}),
+          phoneNumber, code, verificationId: input.otp.verificationId,
+        }),
       hooks: {
         user: {
           create: { before: async () => {

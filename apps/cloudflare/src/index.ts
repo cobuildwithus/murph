@@ -1,6 +1,7 @@
 export { ContainerProxy } from "@cloudflare/containers";
 export { DeploySmokeRunnerContainer, NextRunnerContainer, RunnerContainer } from "./runner-container.ts";
 export { StandbyRunnerContainer } from "./standby-runner-container.ts";
+export { SmallRunnerContainer } from "./small-runner-container.ts";
 export {
   DatabaseHealthDurableObject,
 } from "./worker/database-health-durable-object.ts";

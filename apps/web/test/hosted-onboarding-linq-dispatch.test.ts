@@ -114,7 +114,6 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqInstantStartPhonePrefixes: ["+44"] as readonly string[],
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
-      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -165,7 +164,9 @@ const mocks = vi.hoisted(() => {
     shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
     }),
-    signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+    signalHostedMailboxAppendRuntime: vi.fn<
+      typeof import("../src/lib/hosted-orchestration/signal-runtime").signalHostedMailboxAppendRuntime
+    >(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
@@ -4470,10 +4471,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
-      prewarmRuntimeShell,
     });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
@@ -4605,7 +4604,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -7946,10 +7944,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
-      prewarmRuntimeShell,
     });
     mocks.startHostedLinqChatTypingIndicator.mockImplementation(
       (input: { chatId: string }) => {
@@ -7972,8 +7968,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input) => {
       callOrder.push("conversation-signal");
+      input.onSignalStarted?.();
       return {
         signalAccepted: true,
         workflowId: `hosted-user-runtime:${memberId}`,
@@ -8045,14 +8042,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(activationWakeIndex).toBeGreaterThan(signalIndex);
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
-    expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
-      expect.objectContaining({
-        wakeHandoff: expect.not.objectContaining({
-          runtimeShellPrewarmOrchestrationAttemptId: expect.any(String),
-        }),
-      }),
-    );
     expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
       userId: memberId,
@@ -8108,6 +8097,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         userId: memberId,
       },
       mailboxItemId: "mailbox_instant_first_turn_outbound",
+      onSignalStarted: expect.any(Function),
     });
 
     typingResult.resolve({ ok: false, status: 503 });
@@ -8214,10 +8204,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const ensureRuntimeProcessing = vi.fn<
       (input: { userId: string }) => Promise<{ accepted: boolean }>
     >(async () => ({ accepted: true }));
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
-      prewarmRuntimeShell,
     });
     mocks.startHostedLinqChatTypingIndicator.mockRejectedValueOnce(
       new Error("typing unavailable"),
@@ -8252,7 +8240,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
@@ -14537,7 +14524,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const prisma = asPrismaTransactionClient({
       hostedLinqLine: buildHostedLinqLineFixture({
-        activeMemberLimit: 1,
         maxNewConversationsPerDay: 1,
         phoneNumber: homeLinePhone,
       }),
@@ -15319,7 +15305,6 @@ function buildManagedInboundHostedLinqLineFixture(
         )
       )
         ? [{
-            activeMemberLimit: null,
             assignmentWeight: 1,
             configuredAt: new Date("2026-03-26T00:00:00.000Z"),
             egressPolicy: "enabled",
@@ -15341,7 +15326,6 @@ function buildManagedInboundHostedLinqLineFixture(
 }
 
 function buildHostedLinqLineFixture(input: {
-  activeMemberLimit?: number | null;
   maxNewConversationsPerDay?: number | null;
   phoneNumber: string;
 }): HostedLinqLineFixture {
@@ -15355,7 +15339,6 @@ function buildHostedLinqLineFixture(input: {
         )
       )
         ? [{
-            activeMemberLimit: input.activeMemberLimit ?? null,
             assignmentWeight: 1,
             maxNewConversationsPerDay: input.maxNewConversationsPerDay ?? null,
             phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(input.phoneNumber),
@@ -15377,7 +15360,6 @@ function buildHostedLinqLineFixture(input: {
 
 function buildHostedLinqLinePoolFixture(input: {
   lines: Array<{
-    activeMemberLimit?: number | null;
     maxNewConversationsPerDay?: number | null;
     phoneNumber: string;
     proactiveConversationCount?: number | null;
@@ -15385,7 +15367,6 @@ function buildHostedLinqLinePoolFixture(input: {
   }>;
 }): HostedLinqLineFixture {
   const rows = input.lines.map((line) => ({
-    activeMemberLimit: line.activeMemberLimit ?? null,
     assignmentWeight: 1,
     configuredAt: new Date("2026-03-26T00:00:00.000Z"),
     egressPolicy: "enabled",
@@ -15413,7 +15394,6 @@ function buildHostedLinqLinePoolFixture(input: {
         : rows;
 
       return matchingRows.map((row) => ({
-        activeMemberLimit: row.activeMemberLimit,
         assignmentWeight: row.assignmentWeight,
         configuredAt: row.configuredAt,
         egressPolicy: row.egressPolicy,
@@ -15531,7 +15511,6 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
               )
             )
               ? [{
-                  activeMemberLimit: null,
                   assignmentWeight: 1,
                   maxNewConversationsPerDay: null,
                   phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

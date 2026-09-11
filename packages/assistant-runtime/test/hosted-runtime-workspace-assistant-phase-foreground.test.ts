@@ -1639,7 +1639,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     },
   );
 
-  it("drains approved continuations before respecting the durable mailbox frontier", async () => {
+  it("drains approved continuations while independent device work remains eligible", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     vi.useFakeTimers();
     vi.setSystemTime(new Date(now));
@@ -1783,8 +1783,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         }));
         const postCheckpoint = await result.afterCheckpoint?.();
         expect(postCheckpoint).toEqual(expect.objectContaining({
-          nextWakeAt: index === 0 ? now : codexRetryAt,
-          nextWakeReason: "assistant",
+          nextWakeAt: now,
+          nextWakeReason: index === 0 ? "assistant" : "device-sync.reconcile",
         }));
         workspace = createDueAssistantWorkspace({
           nextWakeAt: postCheckpoint?.nextWakeAt ?? now,
@@ -1833,7 +1833,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
       ]);
       expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
       expect(deviceResult).toEqual(expect.objectContaining({
-        nextWakeAt: codexRetryAt,
+        nextWakeAt: now,
+        nextWakeReason: "device-sync.reconcile",
         progressed: false,
       }));
       await deviceResult.afterCheckpoint?.();
@@ -2322,7 +2323,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      afterDurableCheckpoint: expect.any(Array),
+      afterDurableCheckpoint: expect.any(Function),
       checkpointReason: "system_mailbox_receipt",
       redactedStatus: expect.objectContaining({
         hostedSystemMailboxRecordDeferred: true,
@@ -2369,7 +2370,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
 
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      afterDurableCheckpoint: expect.any(Array),
+      afterDurableCheckpoint: expect.any(Function),
       checkpointReason: "system_mailbox_receipt",
       redactedStatus: expect.objectContaining({
         hostedSystemMailboxRecordDeferred: true,
@@ -3785,68 +3786,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     }));
   });
 
-  it("attempts pending assistant input before due device-sync work", async () => {
-    const callOrder: string[] = [];
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
-    mocks.runHostedDeviceSyncWakeLane.mockImplementationOnce(async () => {
-      callOrder.push("device-sync");
-      return {
-        deviceSyncProcessed: 1,
-        deviceSyncSkipped: false,
-        nextWakeAt: "2026-04-27T00:11:00.000Z",
-        nextWakeReason: "device-sync.reconcile",
-        parserProcessed: 0,
-        postCheckpointRecord: null,
-      };
-    });
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
-      callOrder.push("assistant");
-      return {
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: false,
-        nextWakeAt: null,
-        redactedLogEntries: [],
-      };
-    });
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 0,
-      now: () => "2026-04-27T00:10:00.000Z",
-      resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
-        publicBaseUrl: "https://device-sync.example.test",
-        secret: "synthetic-device-sync-secret",
-      },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-27T00:09:59.000Z",
-        nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
-    }));
-
-    expect(callOrder).toEqual(["assistant", "device-sync"]);
-    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
-    expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "canonical_runtime_commit",
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
-      progressed: true,
-    }));
-  });
-
   it("runs an assistant pass after deferred manual runtime-control work", async () => {
     const callOrder: string[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -4051,165 +3990,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
 
     expect(result.checkpointReason).toBe("activation_bootstrap");
-  });
-
-  it("records dirty post-checkpoint work for due device-sync work", async () => {
-    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
-      deviceSyncProcessed: 2,
-      deviceSyncSkipped: false,
-      nextWakeAt: "not-a-timestamp",
-      parserProcessed: 0,
-      postCheckpointRecord: {
-        connectionId: "dsc_dirty",
-        kind: "device-sync.dirty-processed",
-        nextWakeAt: "2026-04-27T00:11:00.000Z",
-        processedRevision: "42",
-      },
-    });
-    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValueOnce({
-      nextWakeAt: "2026-04-27T00:13:00.000Z",
-      recorded: 1,
-      stillDirty: true,
-    });
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      now: () => "2026-04-27T00:00:00.000Z",
-      resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
-        publicBaseUrl: "https://device-sync.example.test",
-        secret: "synthetic-device-sync-secret",
-      },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
-    }));
-
-    expect(result.progressed).toBe(true);
-    expect(result.nextWakeAt).toBe("2026-04-27T00:11:00.000Z");
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalled();
-    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
-      expect.objectContaining({
-        wake: expect.objectContaining({
-          kind: "runtime.timer",
-          userId: "member_synthetic_phase",
-        }),
-      }),
-    );
-
-    const postCheckpoint = await result.afterCheckpoint?.();
-
-    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      afterDurableCheckpoint: expect.any(Function),
-    }));
-    await runHostedWorkspaceDurableCheckpointEffects(postCheckpoint?.afterDurableCheckpoint);
-    expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).toHaveBeenCalledWith({
-      record: {
-        connectionId: "dsc_dirty",
-        kind: "device-sync.dirty-processed",
-        nextWakeAt: "2026-04-27T00:11:00.000Z",
-        processedRevision: "42",
-      },
-      runtime: expect.any(Object),
-    });
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "assistant_runtime_commit",
-      nextWakeAt: "2026-04-27T00:11:00.000Z",
-      nextWakeReason: "device-sync.reconcile",
-      redactedStatus: expect.objectContaining({
-        hostedDeviceSyncDirtyAckDeferred: true,
-        hostedDeviceSyncDirtyAckRecorded: false,
-        hostedDeviceSyncDirtyStillPending: true,
-      }),
-    }));
-  });
-
-  it("logs dirty checkpoint failures and preserves the retry wake", async () => {
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
-      deviceSyncProcessed: 2,
-      deviceSyncSkipped: false,
-      nextWakeAt: "not-a-timestamp",
-      parserProcessed: 0,
-      postCheckpointRecord: {
-        connectionId: "dsc_dirty",
-        kind: "device-sync.dirty-processed",
-        nextWakeAt: "2026-04-27T00:11:00.000Z",
-        processedRevision: "42",
-      },
-    });
-    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockRejectedValueOnce(
-      new Error("synthetic dirty checkpoint failure"),
-    );
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      logRequests,
-      now: () => "2026-04-27T00:00:00.000Z",
-      resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
-        publicBaseUrl: "https://device-sync.example.test",
-        secret: "synthetic-device-sync-secret",
-      },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
-    }));
-    const postCheckpoint = await result.afterCheckpoint?.();
-    const effects = postCheckpoint?.afterDurableCheckpoint;
-    const effect = typeof effects === "function" ? effects : effects?.[0];
-    if (!effect) {
-      throw new Error("Expected deferred device-sync dirty checkpoint effect.");
-    }
-
-    await expect(effect()).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:11:00.000Z",
-      nextWakeReason: "device-sync.reconcile",
-    });
-    const failureLog = logRequests
-      .flatMap((request) => request.entries)
-      .find((entry) => entry.redactedJson?.failureEventOrigin === "checkpoint");
-    expect(failureLog).toEqual(expect.objectContaining({
-      component: "device-sync",
-      errorCode: "checkpoint_error",
-      eventCode: "device-sync.dirty_ack_persistence_failed",
-      level: "warn",
-      phase: "checkpoint",
-      redactedJson: expect.objectContaining({
-        errorCode: "checkpoint_error",
-        failureEventOrigin: "checkpoint",
-        nextWakeAtPresent: true,
-        safeErrorMessage: "Hosted execution failed while recording a checkpoint.",
-      }),
-    }));
-    expect(JSON.stringify(logRequests)).not.toContain(
-      "synthetic dirty checkpoint failure",
-    );
   });
 
   it("runs pending provider cleanup after a system mailbox receipt without delivery effects", async () => {

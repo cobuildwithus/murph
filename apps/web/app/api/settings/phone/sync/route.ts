@@ -13,6 +13,8 @@ import {
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { logHostedOnboardingDiagnostic } from "@/src/lib/hosted-onboarding/logging";
+import { sha256Hex } from "@/src/lib/primitives";
 import {
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
@@ -40,6 +42,22 @@ export const POST = withJsonError(async (request: Request) => {
     await readHostedPrivyUserById(appSession.privyUserId),
   );
   const phoneNumber = normalizePhoneNumber(providerSession.identity.phone?.number);
+
+  // Record the provider comparison before the guard can reject it. Only the
+  // selected verified phone can grant authority; raw account presence cannot.
+  try {
+    const providerPhoneAccountPresent = providerSession.linkedAccounts.some((account) => account.type === "phone");
+    logHostedOnboardingDiagnostic("hosted-onboarding.phone-sync.provider-state", {
+      memberRef: sha256Hex(`murph:phone-sync:${auth.member.id}`).slice(0, 16),
+      expectationKind: expectation.kind,
+      expectedPhonePresent: expectation.phoneNumber !== null,
+      providerPhonePresent: phoneNumber !== null,
+      providerPhoneAccountPresent,
+      providerPhoneMatchesExpectation: phoneNumber === expectation.phoneNumber,
+      providerPhoneState: phoneNumber !== null ? "verified"
+        : providerPhoneAccountPresent ? "unusable_account" : "absent_account",
+    });
+  } catch { /* Diagnostics must not change phone verification or recovery. */ }
 
   assertPhoneSyncExpectation({
     expectation,

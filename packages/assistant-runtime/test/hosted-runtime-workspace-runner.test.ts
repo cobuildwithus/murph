@@ -1,4 +1,17 @@
+import {
+  createPlatform as createV2SnapshotFixturePlatform,
+  createSnapshotFixtureRef,
+} from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
+import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
+import * as assistantEngine from "@murphai/assistant-engine";
+import { runHostedAssistantAutomationLane } from "../src/hosted-runtime/maintenance.ts";
+import { createHostedWorkspaceSystemWork } from "../src/hosted-runtime/workspace-system-work.ts";
+import type { HostedWorkspaceRunnerInput, HostedWorkspaceDurableCheckpointEffect } from "../src/hosted-runtime/workspace-runner.ts";
+import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
+import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
+import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
+import type { HostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -8,6 +21,7 @@ import path from "node:path";
 import {
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
+  restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
 import {
   resolveAssistantStatePaths,
@@ -405,6 +419,23 @@ describe("foreground checkpoint lease diagnostics", () => {
 });
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("keeps a newly staged receipt when an older metadata publication finishes", async () => {
+    const builder = createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_synthetic_publication", expectedWorkspaceVersion: "0",
+      leaseGeneration: "1", snapshotRef: null,
+    });
+    const earlierStatus = { hostedCanonicalWriteReceiptLogSha256: "a".repeat(64) };
+    builder.recordCheckpoint({ checkpointed: true, workspace: createWorkspaceState({ version: "1", redactedStatus: earlierStatus }) });
+    const metadataResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
+    const publication = metadataResponse.promise.then((response) => builder.recordCheckpoint(response));
+    const stagedStatus = { hostedCanonicalWriteReceiptLogSha256: "b".repeat(64) };
+    builder.recordRedactedStatus(stagedStatus);
+    metadataResponse.resolve({ checkpointed: true, workspace: createWorkspaceState({ version: "2", redactedStatus: earlierStatus }) });
+    await publication;
+    assert.equal(builder.latestWorkspace()?.version, "2");
+    assert.equal(builder.readRedactedStatus()?.hostedCanonicalWriteReceiptLogSha256, stagedStatus.hostedCanonicalWriteReceiptLogSha256);
+  });
+
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-initial-input-tail-"));
     const olderItem = createMailboxItem({
@@ -3323,9 +3354,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
-      const snapshotRef = createBundleRef({
+      const snapshotRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: `cloudflare-workspace-base/${baseHash}.bundle`,
         size: baseBundle.byteLength,
       });
       const artifactGetCalls: string[] = [];
@@ -3343,10 +3373,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createPlatform({
-          artifactBytesByHash,
-          artifactGetCalls,
-          mailboxPort,
+        platform: createV2SnapshotFixturePlatform({
+          artifactBytesByHash, artifactGetCalls, mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         vaultRoot,
@@ -3390,10 +3418,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       artifactGetCalls.length = 0;
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createPlatform({
-          artifactBytesByHash,
-          artifactGetCalls,
-          mailboxPort,
+        platform: createV2SnapshotFixturePlatform({
+          artifactBytesByHash, artifactGetCalls, mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         vaultRoot,
@@ -6435,7 +6461,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           await withTestTimeout(projectionStartedPromise, 1_000);
           assert.equal(projectionFinished, false);
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          // Establish delivery cancellation before releasing the projection;
+          // its terminal failure must not race the retryable-stop assertion.
+          const deliveryPrepared = input.prepareAutoReplyDelivery?.();
           releaseProjection();
+          await deliveryPrepared;
           await waitForCondition(() => projectionFinished);
           return {
             checkpointReason: "canonical_runtime_commit",
@@ -11357,4 +11387,506 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("Timed out waiting for hosted workspace runner condition.");
+}
+
+// This composes the real workspace runner and automation lane, mailbox owner,
+// WHOOP provider, importer, WriteBatch/receipt persistence, and query. The engine
+// pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
+// owner requirement: these reads intentionally start after the commit settles.
+describe("foreground device ingestion", () => {
+  test("retains an independent device receipt when vault-share publication fails", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    try {
+      fixture.stageDeviceWake();
+      await fixture.run(async () => {
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      const effect = fixture.effects[0];
+      assert.ok(effect);
+      const completion = await effect({ vaultShareProjectionResult: { outcome: "error" } });
+      assert.equal(fixture.acks.length, 0);
+      const pending = (await readHostedSystemMailboxState(fixture.vaultRoot)).pending;
+      const retained = pending.find((item) => item.itemId === "device_concurrent");
+      assert.equal(retained?.status, "recording");
+      assert.equal(retained?.lastErrorCode, "HOSTED_VAULT_SHARE_PROJECTION_FAILED");
+      assert.equal(completion?.nextWakeAt, retained?.nextAttemptAt);
+      assert.ok(completion?.requiresFollowUpCheckpoint);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("imports newly staged device data while the model is held and preserves one receipt chain", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    const modelStarted = createDeferred<void>();
+    const writeAfterImport = createDeferred<void>();
+    const afterWrite = createDeferred<void>();
+    const modelRelease = createDeferred<void>();
+    const providerRelease = createDeferred<void>();
+    let modelFinished = false;
+    fixture.holdProvider = async () => await providerRelease.promise;
+    const heldModel = vi.spyOn(assistantEngine, "runAssistantAutomationPass").mockImplementationOnce(async (
+      pass: Parameters<typeof assistantEngine.runAssistantAutomationPass>[0],
+    ): ReturnType<typeof assistantEngine.runAssistantAutomationPass> => {
+      await fixture.foregroundWrite("before");
+      await pass.onProviderRequestStarted?.({
+        assistantInputIds: [], providerRequestOrdinal: 0,
+        source: "linq", startedAt: TEST_NOW,
+      });
+      modelStarted.resolve();
+      await writeAfterImport.promise;
+      await fixture.foregroundWrite("after");
+      afterWrite.resolve();
+      await modelRelease.promise;
+      modelFinished = true;
+      return {
+        cronProcessed: 0, currentTurnDeliveryIntentIds: [], nextWakeAt: null,
+        outboxAttempted: 0, progressed: true,
+        replies: { considered: 1, failed: 0, nextWakeAt: null, replied: 1, skipped: 0 },
+        routing: { considered: 0, failed: 0, nextWakeAt: null, noAction: 0, routed: 0, skipped: 0 },
+      };
+    });
+    const run = fixture.run(async (phase) => {
+      await runHostedAssistantAutomationLane({
+        assistantRuntimeState: {
+          assistantActiveProfileId: null, assistantActiveProfileManagedBy: null,
+          assistantActiveProfileReady: true, assistantConfigInvalid: false,
+          assistantConfigPresent: true, assistantConfigStatus: "hosted-env",
+          assistantConfigured: true, assistantProvider: "codex-cli",
+        },
+        executionContext: { hosted: { memberId: TEST_USER_ID, userEnvKeys: [] } },
+        onProviderRequestStarted: phase.onProviderRequestStarted,
+        requestId: "request_synthetic_held_model", runtime: fixture.ownerInput.runtime,
+        signal: fixture.authority.signal, vaultRoot: fixture.vaultRoot,
+        wake: { eventId: "evt_synthetic_held_model", kind: "runtime.timer",
+          occurredAt: TEST_NOW, triggerKind: "runtime_timer", userId: TEST_USER_ID },
+      });
+      await phase.prepareAutoReplyDelivery?.();
+      return { checkpointReason: "assistant_runtime_commit", progressed: true };
+    });
+    try {
+      await withTestTimeout(modelStarted.promise, 5_000);
+      fixture.stageConversation();
+      fixture.stageDeviceWake();
+      await withTestTimeout(fixture.providerStarted.promise, 5_000);
+      // Foreground admission is independent of a held device provider request.
+      fixture.stageConversation();
+      await waitForCondition(() => fixture.conversationImports === 2, 5_000);
+      assert.equal(fixture.providerAborted, false);
+      providerRelease.resolve();
+      await waitForCondition(() => fixture.effects.length > 0, 5_000);
+      writeAfterImport.resolve();
+      await afterWrite.promise;
+      await rebuildQueryProjection(fixture.vaultRoot);
+      const points = await listMetricPoints(fixture.vaultRoot, { limit: null });
+      assert.ok(points.some((point) => point.metricKey === "readiness-score"));
+      assert.equal(modelFinished, false);
+      assert.equal(fixture.acks.length, 0);
+      const log = await readHostedCanonicalWriteReceiptLog({
+        artifactStore: fixture.platform.artifactStore,
+        status: fixture.workspace.redactedStatus,
+      });
+      assert.ok(log.entryCount >= 3);
+      // A separate previousStatus would drop a predecessor in this interleave.
+      assert.deepEqual([...new Set(fixture.receiptCounts)],
+        Array.from({ length: log.entryCount }, (_, index) => index + 1));
+      modelRelease.resolve();
+      const result = await run;
+      assert.equal(fixture.acks.length, 0);
+      assert.equal(fixture.effects.length, 1);
+      assert.equal(result.runtimeStateDirty, true);
+      const pending = (await readHostedSystemMailboxState(fixture.vaultRoot)).pending;
+      assert.ok(pending.some((item) => item.itemId === "device_concurrent" && item.status === "recording"));
+      // Lose the local workspace after snapshot but before ack, then restore
+      // those exact bytes. Recovery must not refetch or reimport the device data.
+      const snapshot = await snapshotHostedBundleRoots({
+        kind: "vault", roots: [{ root: fixture.vaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(snapshot);
+      await rm(fixture.vaultRoot, { recursive: true, force: true });
+      await restoreHostedBundleRoots({
+        bytes: snapshot, expectedKind: "vault", roots: { vault: fixture.vaultRoot },
+      });
+      const fetchCount = fixture.providerFetches;
+      fixture.effects.splice(0);
+      await fixture.owner?.recover(["run-environment-interview"]);
+      assert.equal(fixture.effects.length, 0);
+      await fixture.owner?.recover();
+      assert.equal(fixture.providerFetches, fetchCount);
+      assert.equal(fixture.acks.length, 0);
+      fixture.newerDirtyRevision = true;
+      for (const effect of fixture.effects.splice(0)) await effect();
+      assert.equal(fixture.acks.length, 1);
+      assert.equal(fixture.acks[0]?.processedRevision, "7");
+      assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
+      assert.ok((await readHostedSystemMailboxState(fixture.vaultRoot)).pending.some(
+        (item) => item.routeAction === "run-device-sync-wake",
+      ));
+    } finally {
+      fixture.authority.abort();
+      providerRelease.resolve();
+      writeAfterImport.resolve();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      heldModel.mockRestore();
+      await fixture.cleanup();
+    }
+  });
+
+  test("keeps system staging alive after the conversation budget is full without admitting another input", async () => {
+    const fixture = await createForegroundDeviceFixture(1);
+    const modelStarted = createDeferred<void>();
+    const modelRelease = createDeferred<void>();
+    fixture.stageConversation();
+    const run = fixture.run(async (phase) => {
+      assert.equal(phase.initialAssistantInputBatch?.assistantInputIds.length, 1);
+      phase.onProviderRequestStarted?.();
+      modelStarted.resolve();
+      await modelRelease.promise;
+      await phase.prepareAutoReplyDelivery?.();
+      return { progressed: false };
+    });
+    try {
+      await withTestTimeout(modelStarted.promise, 5_000);
+      fixture.stageConversation();
+      fixture.stageDeviceWake();
+      await waitForCondition(() => fixture.effects.length > 0, 5_000);
+      await rebuildQueryProjection(fixture.vaultRoot);
+      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some(
+        (point) => point.metricKey === "readiness-score",
+      ));
+      assert.equal(fixture.conversationImports, 1);
+      assert.equal(fixture.acks.length, 0);
+      modelRelease.resolve();
+      await withTestTimeout(run, 5_000);
+    } finally {
+      fixture.authority.abort();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  test.each(["request", "body"] as const)(
+    "keeps a stalled provider %s through delivery and settles it at the workspace boundary",
+    async (stall: "request" | "body") => {
+      const fixture = await createForegroundDeviceFixture();
+      const modelRelease = createDeferred<void>();
+      const modelStarted = createDeferred<void>();
+      let delivered = false;
+      const awaitAbort = async (signal: AbortSignal) => await new Promise<void>((_resolve, reject) => {
+        const abort = () => { fixture.providerAborted = true; reject(signal.reason); };
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      });
+      fixture.holdProvider = stall === "request" ? awaitAbort : null;
+      fixture.holdBody = stall === "body";
+      const run = fixture.run(async (phase) => {
+        phase.onProviderRequestStarted?.();
+        modelStarted.resolve();
+        await modelRelease.promise;
+        await phase.prepareAutoReplyDelivery?.();
+        delivered = true;
+        return { progressed: false };
+      });
+      try {
+        await withTestTimeout(modelStarted.promise, 5_000);
+        fixture.stageDeviceWake();
+        await withTestTimeout(fixture.providerStarted.promise, 5_000);
+        fixture.stageConversation();
+        await withTestTimeout(fixture.conversationStaged.promise, 5_000);
+        assert.equal(fixture.providerAborted, false);
+        assert.equal(delivered, false);
+        modelRelease.resolve();
+        await withTestTimeout(run, 2_000);
+        assert.equal(delivered, true);
+        assert.equal(fixture.providerAborted, false);
+        await fixture.owner?.quiesce();
+        assert.equal(fixture.providerAborted, true);
+        await Promise.all(fixture.tracked);
+        const writesAtReturn = fixture.receiptCounts.length;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(fixture.receiptCounts.length, writesAtReturn);
+        assert.equal(fixture.acks.length, 0);
+        assert.equal(fixture.peakProviderRequests, 1);
+      } finally {
+        fixture.authority.abort();
+        modelRelease.resolve();
+        await run.catch(() => undefined);
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  test("rolls back a device commit rejected by the authority checkpoint", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    const modelStarted = createDeferred<void>();
+    const modelRelease = createDeferred<void>();
+    const receiptRelease = createDeferred<void>();
+    const receiptStarted = createDeferred<void>();
+    fixture.beforeDeviceCheckpoint = async () => {
+      receiptStarted.resolve();
+      await receiptRelease.promise;
+    };
+    const run = fixture.run(async (phase) => {
+      phase.onProviderRequestStarted?.();
+      modelStarted.resolve();
+      await modelRelease.promise;
+      return { progressed: false };
+    });
+    try {
+      await withTestTimeout(modelStarted.promise, 5_000);
+      fixture.stageDeviceWake();
+      await withTestTimeout(receiptStarted.promise, 5_000);
+      fixture.authority.abort(new Error("Synthetic lease lost"));
+      receiptRelease.resolve();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      await Promise.allSettled(fixture.tracked);
+      await rebuildQueryProjection(fixture.vaultRoot);
+      assert.equal((await listMetricPoints(fixture.vaultRoot, { limit: null })).some(
+        (point) => point.metricKey === "readiness-score",
+      ), false);
+      assert.equal(fixture.acks.length, 0);
+    } finally {
+      receiptRelease.resolve();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      await fixture.cleanup();
+    }
+  });
+});
+
+async function createForegroundDeviceFixture(limitPerLane = 10) {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-concurrent-device-"));
+  await initializeVault({ createdAt: TEST_NOW, vaultRoot, timezone: "UTC" });
+  const authority = new AbortController();
+  const items: HostedMailboxItem[] = [];
+  const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+  const artifacts = new Map<string, Uint8Array>();
+  const acks: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0][] = [];
+  const tracked: Promise<void>[] = [];
+  const receiptCounts: number[] = [];
+  const providerStarted = createDeferred<void>();
+  const conversationStaged = createDeferred<void>();
+  const wake: HostedExecutionDeviceSyncWake = {
+    connectionId: "connection_concurrent",
+    eventId: "device-sync.wake:concurrent",
+    expectedConnectedAt: TEST_NOW,
+    hint: { reason: "dirty" },
+    kind: "device-sync.wake",
+    occurredAt: TEST_NOW,
+    provider: "whoop",
+    reason: "webhook_hint",
+    userId: TEST_USER_ID,
+  };
+  const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+    async createConnectLink() { throw new Error("No connection creation in ingestion"); },
+    async applyUpdates(request) {
+      return { appliedAt: TEST_NOW, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
+        connection: null, connectionId: update.connectionId, status: "updated" as const,
+        tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+      })) };
+    },
+    async fetchSnapshot() {
+      return {
+        connections: [{
+          connection: {
+            accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+            connectedAt: TEST_NOW, createdAt: TEST_NOW, updatedAt: TEST_NOW,
+            displayName: "Synthetic device", externalAccountId: "synthetic_device",
+            id: "connection_concurrent", metadata: {}, provider: "whoop",
+            scopes: ["offline", "read:sleep", "read:recovery"], status: "active",
+          },
+          credential: { kind: "oauth_tokens", tokenBundle: {
+            accessToken: "synthetic-token", refreshToken: "synthetic-refresh",
+            accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+            keyVersion: "synthetic", tokenVersion: 1,
+          } },
+          localState: {
+            lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+            lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+            nextReconcileAt: "2099-01-01T00:00:00.000Z",
+          },
+          sources: [],
+        }],
+        generatedAt: TEST_NOW, userId: TEST_USER_ID,
+      };
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false, nextWakeAt: null, userId: TEST_USER_ID,
+        items: [{
+          connectionId: "connection_concurrent", dirtyRevision: "7", processedRevision: "0",
+          dirtyResources: [{ count: 1, dirtyPayloadId: "payload_concurrent", jobKind: "resource",
+            payload: { resourceType: "recovery", resourceId: "sleep_concurrent" },
+            resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
+            windowEnd: null, windowStart: null }],
+          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
+          userId: TEST_USER_ID, windowEnd: null, windowStart: null,
+        }],
+      };
+    },
+    async ackDirtyStateProcessed(request) {
+      acks.push(request);
+      return {
+        connectionId: request.connectionId,
+        dirtyRevision: fixture.newerDirtyRevision ? "8" : request.processedRevision,
+        processedRevision: request.processedRevision, recorded: true,
+        stillDirty: fixture.newerDirtyRevision, nextWakeAt: fixture.newerDirtyRevision ? TEST_NOW : null,
+        userId: TEST_USER_ID,
+      };
+    },
+  };
+  const platform = {
+    ...createPlatform({
+      artifactBytesByHash: artifacts,
+      artifactPut: async (artifact) => { artifacts.set(artifact.sha256, artifact.bytes); },
+      mailboxPort: createMailboxPort({ items }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+    }),
+    deviceSyncPort,
+  };
+  const ownerInput: Parameters<typeof createHostedWorkspaceSystemWork>[0]["preparation"] = {
+    now: () => TEST_NOW,
+    operatorHomeRoot: path.join(vaultRoot, ".runtime", "synthetic-operator"),
+    runtime: {
+      commitTimeoutMs: null, forwardedEnv: {}, platform, platformEnv: {}, userEnv: {},
+      resolvedConfig: {
+        channelCapabilities: { emailSendReady: false, telegramBotConfigured: false },
+        deviceSync: {
+          providerConfigs: { whoop: { baseUrl: "https://whoop.example.test", clientId: "synthetic-client", clientSecret: "synthetic-secret" } },
+          publicBaseUrl: "https://sync.example.test", secret: "synthetic-device-secret",
+        },
+      },
+    },
+    runtimeEnv: {}, signal: authority.signal, vaultRoot,
+  };
+  const effects: HostedWorkspaceDurableCheckpointEffect[] = [];
+  const fixture = {
+    acks, authority, conversationStaged, effects, ownerInput, platform, providerStarted,
+    owner: null as ReturnType<typeof createHostedWorkspaceSystemWork> | null,
+    receiptCounts, tracked, vaultRoot,
+    workspace: createWorkspaceState(),
+    newerDirtyRevision: false, providerAborted: false, conversationImports: 0,
+    providerFetches: 0, activeProviderRequests: 0, peakProviderRequests: 0,
+    holdBody: false,
+    holdProvider: null as ((signal: AbortSignal) => Promise<void>) | null,
+    beforeDeviceCheckpoint: null as (() => Promise<void>) | null,
+    stageDeviceWake() {
+      items.push(createMailboxItem({ id: "device_concurrent", kind: "device-sync.wake",
+        dedupeKey: wake.eventId, lane: "system", laneSeq: "1" }));
+      runtimeWakeSignal.notify();
+    },
+    stageConversation() {
+      const seq = String(items.filter((item) => item.lane === "conversation").length + 1);
+      items.push(createMailboxItem({ id: `conversation_concurrent_${seq}`, laneSeq: seq }));
+      runtimeWakeSignal.notify();
+    },
+    async foregroundWrite(label: string) {
+      await applyCanonicalWriteBatch({
+        audit: { action: "device_import", commandName: "test.concurrentForeground", summary: "Synthetic foreground write" },
+        operationType: "synthetic_foreground_write", summary: label,
+        textWrites: [{ content: `${label}\n`, overwrite: true, relativePath: `bank/synthetic-${label}.md` }],
+        vaultRoot,
+      });
+    },
+    run(runAssistantPhase: NonNullable<Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"]>) {
+      const runnerInput: HostedWorkspaceRunnerInput = {
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_concurrent_device", expectedWorkspaceVersion: fixture.workspace.version,
+          leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+        }),
+        async checkpointRuntimeRedactedStatus(input) {
+          const log = await readHostedCanonicalWriteReceiptLog({
+            artifactStore: platform.artifactStore, status: input.redactedStatus,
+          });
+          const lastEntry = log.entries.at(-1);
+          const lastReceiptBytes = lastEntry ? artifacts.get(lastEntry.sha256) : null;
+          const lastReceipt = lastReceiptBytes
+            ? JSON.parse(new TextDecoder().decode(lastReceiptBytes)) as { operationType?: string }
+            : null;
+          if (lastReceipt?.operationType === "device_batch_import") {
+            await fixture.beforeDeviceCheckpoint?.();
+          }
+          authority.signal.throwIfAborted();
+          fixture.workspace = createWorkspaceState({
+            redactedStatus: input.redactedStatus,
+            version: String(BigInt(fixture.workspace.version) + 1n),
+          });
+          if (log.entryCount > 0) receiptCounts.push(log.entryCount);
+          return { checkpointed: true, workspace: fixture.workspace };
+        },
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          if (item.item.lane === "system") {
+            await enqueueHostedSystemMailboxItem({ item, vaultRoot, wake });
+          } else {
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(item.item, "Synthetic concurrent foreground input"),
+              vault: vaultRoot,
+            });
+            await enqueueHostedPendingAssistantInputId({ inputId: staged.inputId, vaultRoot });
+            fixture.conversationImports += 1;
+            conversationStaged.resolve();
+            return { assistantInputId: staged.inputId, status: "imported" };
+          }
+          return { status: "imported" };
+        },
+        kickSystemWork: () => fixture.owner?.kick(),
+        limitPerLane, now: () => TEST_NOW, platform, requestId: "request_concurrent_device",
+        runAssistantPhase, runtimeWakeSignal, signal: authority.signal,
+        trackLocalWorkspaceMutationCompletion: (completion) => { if (completion) tracked.push(completion); },
+        vaultRoot, workspace: fixture.workspace,
+      };
+      fixture.owner = createHostedWorkspaceSystemWork({
+        preparation: ownerInput, runnerInput,
+        onCompleted(completion) {
+          if (completion.afterDurableCheckpoint) effects.push(...(typeof completion.afterDurableCheckpoint === "function"
+            ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
+        },
+        onFailure(error) { if (!authority.signal.aborted) throw error; },
+        settleOwnedMutations: async () => { await Promise.allSettled(tracked); },
+      });
+      fixture.owner.resume();
+      return runHostedWorkspaceUntilIdleOrBudget(runnerInput);
+    },
+    async cleanup() {
+      authority.abort();
+      await fixture.owner?.quiesce();
+      vi.unstubAllGlobals();
+      await rm(vaultRoot, { recursive: true, force: true });
+    },
+  };
+  vi.stubGlobal("fetch", async (request: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.href : request.url);
+    assert.equal(url.hostname, "whoop.example.test");
+    assert.ok(init?.signal);
+    fixture.providerFetches += 1;
+    fixture.activeProviderRequests += 1;
+    fixture.peakProviderRequests = Math.max(fixture.peakProviderRequests, fixture.activeProviderRequests);
+    providerStarted.resolve();
+    try {
+      await fixture.holdProvider?.(init.signal);
+      if (fixture.holdBody) {
+        const signal = init.signal;
+        return new Response(new ReadableStream({
+          start(controller) {
+            const abort = () => { fixture.providerAborted = true; controller.error(signal.reason); };
+            if (signal.aborted) abort();
+            else signal.addEventListener("abort", abort, { once: true });
+          },
+        }));
+      }
+      const response = url.pathname.endsWith("/recovery")
+        ? { sleep_id: "sleep_concurrent", updated_at: TEST_NOW, score: { recovery_score: 72, resting_heart_rate: 54 } }
+        : { id: "sleep_concurrent", cycle_id: "cycle_concurrent", start: "2026-04-24T22:00:00.000Z", end: "2026-04-25T06:00:00.000Z", updated_at: TEST_NOW };
+      return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
+    } finally {
+      fixture.activeProviderRequests -= 1;
+    }
+  });
+  return fixture;
 }

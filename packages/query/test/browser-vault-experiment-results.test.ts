@@ -1027,6 +1027,57 @@ test("browser count path treats partial intervention sessions as logged", () => 
   assert.notEqual(result?.progress?.adherence.status, "not_started");
 });
 
+test.each([
+  { calendar: false, missedSessions: 1, skippedSessions: 1 },
+  { calendar: true, missedSessions: 2, skippedSessions: 0 },
+])("preserves all progress counts for calendar=$calendar", ({ calendar, missedSessions, skippedSessions }) => {
+  const client = createBrowserVaultQueryClient(createReplica({
+    generatedAt: "2026-04-12T12:00:00.000Z",
+    entities: [
+      experimentEntity({
+        runPlan: {
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-11",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+          adherenceTargets: [{
+            targetId: "sauna",
+            label: "Sauna",
+            phase: "intervention",
+            ...(calendar ? { calendar: { kind: "daily", timeZone: "UTC" } } : {}),
+            evidence: {
+              kind: "linkedEventCount",
+              eventKind: "intervention_session",
+              missing: "missed_after_grace",
+            },
+            grace: { hours: 0 },
+          }],
+        },
+      }),
+      sessionEvent("2026-04-08", "completed", { attributes: { source: "manual" } }),
+      sessionEvent("2026-04-09", "partial", { attributes: { source: "manual" } }),
+      sessionEvent("2026-04-10", "missed"),
+      sessionEvent("2026-04-11", "skipped"),
+    ],
+  }));
+
+  const result = selectBrowserVaultExperimentResults(client, "exp_sauna");
+
+  assert.deepEqual(result?.progress?.adherence, {
+    completedSessions: 1,
+    confirmedSessions: 2,
+    expectedSessionsByNow: 4,
+    loggedSessions: 2,
+    minimumUsefulSessions: 2,
+    missedSessions,
+    partialSessions: 1,
+    skippedSessions,
+    status: "met_minimum",
+    targetSessions: 4,
+  });
+  assert.equal(result?.schedule === null, !calendar);
+});
+
 test("renders the exact saved outcome after raw metric rows age out", () => {
   const outcome = savedOutcome();
   const client = createBrowserVaultQueryClient(
@@ -3850,8 +3901,62 @@ test("does not synthesize legacy schedules for unsupported explicit metric adher
   assert.ok(result);
   assert.equal(result.schedule, null);
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "invalid_schedule"));
-  assert.equal(result.progress?.adherence.status, "unknown");
-  assert.equal(result.progress?.adherence.loggedSessions, 0);
+  assert.deepEqual(result.progress?.adherence, {
+    completedSessions: 0,
+    expectedSessionsByNow: null,
+    loggedSessions: 0,
+    minimumUsefulSessions: null,
+    missedSessions: 0,
+    partialSessions: 0,
+    skippedSessions: 0,
+    status: "unknown",
+    targetSessions: null,
+  });
+});
+
+test("keeps ambiguous target progress unknown despite scheduled session evidence", () => {
+  const client = createBrowserVaultQueryClient(createReplica({
+    generatedAt: "2026-04-10T12:00:00.000Z",
+    entities: [
+      experimentEntity({
+        runPlan: {
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-09",
+          targetSessions: 2,
+          minimumUsefulSessions: 1,
+          adherenceTargets: ["first", "second"].map((targetId) => ({
+            targetId,
+            label: targetId,
+            phase: "intervention",
+            calendar: { kind: "daily", timeZone: "UTC" },
+            evidence: {
+              kind: "linkedEventCount",
+              eventKind: "intervention_session",
+              missing: "missed_after_grace",
+            },
+            grace: { hours: 0 },
+          })),
+        },
+      }),
+      sessionEvent("2026-04-08", "completed"),
+      sessionEvent("2026-04-09", "partial"),
+    ],
+  }));
+
+  const result = selectBrowserVaultExperimentResults(client, "exp_sauna");
+
+  assert.equal(result?.schedule?.cells.length, 4);
+  assert.deepEqual(result?.progress?.adherence, {
+    completedSessions: 0,
+    expectedSessionsByNow: null,
+    loggedSessions: 0,
+    minimumUsefulSessions: null,
+    missedSessions: 0,
+    partialSessions: 0,
+    skippedSessions: 0,
+    status: "unknown",
+    targetSessions: null,
+  });
 });
 
 test("keeps comparator-bounded metric thresholds unknown", () => {

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
   hostedPhoneLookupKeyMatchesValue: vi.fn(),
+  logHostedOnboardingDiagnostic: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirement: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
   prismaClient: {
@@ -25,6 +26,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
+  logHostedOnboardingDiagnostic: mocks.logHostedOnboardingDiagnostic,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
@@ -129,14 +134,12 @@ describe("settings phone sync route", () => {
     mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
     mocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockResolvedValue({
       rawFingerprint: "prepared-fingerprint",
-      sourceBillingRef: null,
       sourceIdentity: null,
       sourceMemberId: "member_unused",
       targetIdentity: null,
       targetMemberId: "member_123",
     });
     mocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-      autoTrialBilling: null,
       sourceMemberId: "member_unused",
     });
     mocks.deleteHostedPrivyPhoneTransferSourceAccountData.mockResolvedValue({
@@ -314,6 +317,14 @@ describe("settings phone sync route", () => {
     });
 
     expect(response.status).toBe(409);
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
+      "hosted-onboarding.phone-sync.provider-state",
+      expect.objectContaining({
+        expectationKind: "exact", expectedPhonePresent: true,
+        providerPhonePresent: true, providerPhoneMatchesExpectation: false,
+        providerPhoneState: "verified",
+      }),
+    );
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -322,6 +333,50 @@ describe("settings phone sync route", () => {
         retryable: true,
       },
     });
+  });
+
+  it.each([
+    { accounts: [], state: "absent_account" },
+    { accounts: [{ type: "phone", number: "+14155552671" }], state: "unusable_account" },
+    { accounts: [{ type: "phone", number: "invalid-private-value", verified_at: 1_700_000_000 }], state: "unusable_account" },
+  ])("records $state before rejecting an exact phone, without private values", async ({ accounts, state }) => {
+    const { buildHostedPrivySessionState } = await vi.importActual<typeof import("../src/lib/hosted-onboarding/privy-user")>(
+      "../src/lib/hosted-onboarding/privy-user",
+    );
+    mocks.buildHostedPrivySessionState.mockImplementationOnce(buildHostedPrivySessionState);
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        { type: "email", address: "private@example.test", verified_at: 1_700_000_000 },
+        ...accounts,
+      ],
+    });
+    const response = await postSync({ kind: "exact", phoneNumber: "+14155550000" });
+
+    expect(response.status).toBe(409);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
+    expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledExactlyOnceWith(
+      "hosted-onboarding.phone-sync.provider-state", {
+        memberRef: expect.stringMatching(/^[a-f0-9]{16}$/u),
+        expectationKind: "exact", expectedPhonePresent: true,
+        providerPhonePresent: false, providerPhoneAccountPresent: accounts.length > 0,
+        providerPhoneMatchesExpectation: false, providerPhoneState: state,
+      },
+    );
+    const logged = JSON.stringify(mocks.logHostedOnboardingDiagnostic.mock.calls);
+    for (const privateValue of ["member_123", "did:privy:user_123", "+14155550000", "+14155552671", "invalid-private-value", "private@example.test"]) {
+      expect(logged).not.toContain(privateValue);
+    }
+  });
+
+  it.each([
+    { phoneNumber: "+14155552671", status: 200 },
+    { phoneNumber: "+14155550000", status: 409 },
+  ])("preserves status $status when diagnostics throw", async ({ phoneNumber, status }) => {
+    mocks.logHostedOnboardingDiagnostic.mockImplementationOnce(() => { throw new Error("logger unavailable"); });
+    const response = await postSync({ kind: "exact", phoneNumber });
+    expect(response.status).toBe(status);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
   });
 
   it("waits through an absent intermediate state in an existing-phone transfer", async () => {

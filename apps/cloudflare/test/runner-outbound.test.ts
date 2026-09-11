@@ -1,3 +1,4 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { gzipSync } from "node:zlib";
@@ -121,7 +122,6 @@ import {
 } from "../src/hosted-email.ts";
 import {
   createHostedArtifactStore,
-  createHostedBundleStore,
 } from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { createCloudflareArtifactStore } from "../src/runtime-platform/artifact-store.ts";
@@ -6955,7 +6955,7 @@ describe("handleRunnerOutboundRequest", () => {
       keyId: runtimeRootKeyId,
       userId: "member_123",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: bucket.api,
       key: runtimeRootKey,
       keyId: runtimeRootKeyId,

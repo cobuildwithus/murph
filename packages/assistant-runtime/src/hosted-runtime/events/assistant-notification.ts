@@ -1,3 +1,4 @@
+import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
 import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 
@@ -991,7 +992,9 @@ function withOperatorTaskExecution(
   if (operatorTask) {
     input.assistantTargetOverride = {
       model: HOSTED_ASSISTANT_SOL_MODEL,
-      modelProvider: "openai",
+      modelProvider: resolveHostedOperatorModelProvider(
+        executionContext.hosted?.defaultTarget?.modelProvider,
+      ),
     };
     const hosted = executionContext.hosted;
     const recorder = hosted?.usageRecorder;

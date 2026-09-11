@@ -121,6 +121,9 @@ describe("hosted runner container identity", () => {
     const standby = createAllocatingStandbyHarness({ slotName, stateStore, bindDelayMs: 100 });
     const invocationService = new RecordingRuntimeInvocationService();
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService,
       runnerContainerNamespace: standby.namespace,
@@ -212,6 +215,9 @@ describe("hosted runner container identity", () => {
     });
     const invoke = vi.spyOn(service, "invokePreparedWithFence").mockResolvedValue({ status: "idle", nextWakeAt: null });
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService: service,
       runnerContainerNamespace: namespace,
@@ -436,6 +442,9 @@ describe("hosted runner container identity", () => {
     });
     const invoke = vi.spyOn(service, "invokePreparedWithFence");
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService: service,
       runnerContainerNamespace: namespace,
@@ -558,6 +567,9 @@ describe("hosted runner container identity", () => {
       },
     };
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService,
       runnerContainerNamespace: createRunnerContainerNamespace({
@@ -612,6 +624,9 @@ describe("hosted runner container identity", () => {
     const invocationService = new RecordingRuntimeInvocationService();
     const readyContainerNames: string[] = [];
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService,
       runnerContainerNamespace: createRunnerContainerNamespace({
@@ -1220,6 +1235,9 @@ describe("hosted runner container identity", () => {
     });
     const ensuredContainerNames: string[] = [];
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService: new RecordingRuntimeInvocationService(),
       runnerContainerNamespace: createRunnerContainerNamespace({
@@ -1323,6 +1341,9 @@ describe("hosted runner container identity", () => {
     };
     const invocationService = new RecordingRuntimeInvocationService();
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService,
       runnerContainerNamespace,
@@ -1449,6 +1470,9 @@ describe("hosted runner container identity", () => {
         slotName,
       }));
       const controller = new RuntimeProcessingController({
+        readHealthDataAdmission: async (userId) => ({
+          userId, consentState: "granted", processingAllowed: true,
+        }),
         env: createHostedExecutionEnvironment(),
         invocationService: new RecordingRuntimeInvocationService(),
         runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
@@ -1517,6 +1541,9 @@ describe("hosted runner container identity", () => {
       const invocationService = new RecordingRuntimeInvocationService();
       return {
         controller: new RuntimeProcessingController({
+          readHealthDataAdmission: async (userId) => ({
+            userId, consentState: "granted", processingAllowed: true,
+          }),
           env: createHostedExecutionEnvironment(),
           invocationService,
           runnerContainerNamespace: createRunnerContainerNamespace({}),
@@ -1681,6 +1708,9 @@ describe("hosted runner container identity", () => {
       };
     });
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService: new RecordingRuntimeInvocationService(),
       runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
@@ -1788,6 +1818,9 @@ describe("hosted runner container identity", () => {
     });
     const invocationService = new RecordingRuntimeInvocationService();
     const controller = new RuntimeProcessingController({
+      readHealthDataAdmission: async (userId) => ({
+        userId, consentState: "granted", processingAllowed: true,
+      }),
       env: createHostedExecutionEnvironment(),
       invocationService,
       runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({

@@ -87,7 +87,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
-    "deviceProviderApplications DeviceProviderApplication[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
@@ -2489,7 +2488,6 @@ describe("hosted Prisma baseline migration", () => {
     expect(schema).not.toContain("model LinqRecipientBinding");
     expect(schema).not.toContain("model LinqWebhookEvent");
   });
-
 
   it("keeps legacy Linq delivery health blocking until the post-drain lane", () => {
     const schema = readFileSync(

@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isHostedSystemMailboxModelFreeExactNotificationItem,
-  projectHostedSystemMailboxModelFreeFrontier,
-  projectHostedSystemMailboxModelFreeNotificationFrontier,
+  selectHostedModelFreeSystemMailboxItems,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 
 type PendingItem = Parameters<typeof isHostedSystemMailboxModelFreeExactNotificationItem>[0];
@@ -65,13 +64,13 @@ function environmentInterview(laneSeq: string): PendingItem {
   } as PendingItem;
 }
 
-describe("blocked model-free exact notification frontier", () => {
-  it("admits a canonical exact group join at the durable frontier before later work", () => {
+describe("model-free mailbox admission", () => {
+  it("admits an exact group join and independent maintenance", () => {
     const notification = exactNotification({ laneSeq: "1" });
     const later = maintenance("2");
     expect(isHostedSystemMailboxModelFreeExactNotificationItem(notification)).toBe(true);
-    expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later, notification] }).pending).toEqual([notification]);
-    expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later] }).pending).toEqual([later]);
+    expect(selectHostedModelFreeSystemMailboxItems({ pending: [later, notification] }).pending).toEqual([later, notification]);
+    expect(selectHostedModelFreeSystemMailboxItems({ pending: [later] }).pending).toEqual([later]);
   });
 
   it("admits a canonical exact wearable delivery-stall notice", () => {
@@ -87,32 +86,32 @@ describe("blocked model-free exact notification frontier", () => {
     }))).toBe(false);
   });
 
-  it("does not overtake a generic notification at the durable frontier", () => {
+  it("keeps independent maintenance eligible while a generic notification needs the assistant", () => {
     const generic = exactNotification({
       dedupeKey: "assistant.notification.requested:generic",
       laneSeq: "1",
     });
     const later = maintenance("2");
     expect(isHostedSystemMailboxModelFreeExactNotificationItem(generic)).toBe(false);
-    expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later, generic] }).pending).toEqual([]);
+    expect(selectHostedModelFreeSystemMailboxItems({ pending: [later, generic] }).pending).toEqual([later]);
   });
 
-  it("does not admit an exact notification behind an earlier durable item", () => {
+  it("admits an exact notification independently of an assistant item", () => {
     const earlier = assistantAsk("1");
     const notification = exactNotification({ laneSeq: "2" });
-    expect(projectHostedSystemMailboxModelFreeNotificationFrontier({
+    expect(selectHostedModelFreeSystemMailboxItems({
       pending: [notification, earlier],
-    }).pending).toEqual([earlier]);
+    }).pending).toEqual([notification]);
   });
 
-  it("admits Environment only when it is the exact durable frontier", () => {
+  it("admits environment work independently of an assistant item", () => {
     const earlier = assistantAsk("1");
     const environment = environmentInterview("2");
 
-    expect(projectHostedSystemMailboxModelFreeFrontier({
+    expect(selectHostedModelFreeSystemMailboxItems({
       pending: [environment, earlier],
-    }).pending).toEqual([]);
-    expect(projectHostedSystemMailboxModelFreeFrontier({
+    }).pending).toEqual([environment]);
+    expect(selectHostedModelFreeSystemMailboxItems({
       pending: [environment],
     }).pending).toEqual([environment]);
   });

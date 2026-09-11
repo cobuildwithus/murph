@@ -51,7 +51,7 @@ place. It must not reload Privy login or restore legacy credential writers.
 | `HOSTED_AUTH_STORAGE_KEY` | Independent canonical 32-byte base64url pre-auth encryption and separated blind-lookup/rate-limit domains | Retain while auth records exist. Rotation needs a reviewed reindex/re-encryption procedure; do not replace it as a rollout toggle. |
 | `HOSTED_AUTH_EMAIL_FROM`, existing `RESEND_API_KEY` | OTP email delivery through the existing email owner | Qualify sender/delivery in hosted staging. |
 | `HOSTED_AUTH_TELEGRAM_CLIENT_ID` | Numeric Telegram login client ID; verified token audience and browser popup configuration | Qualify the registered Web origin, profile ID and bot messaging scopes before Telegram login is exposed. |
-| `HOSTED_AUTH_TWILIO_ACCOUNT_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SECRET`, `HOSTED_AUTH_TWILIO_MESSAGING_SERVICE_SID` | Dedicated SMS sender credentials/configuration | Qualify service, destination coverage and fraud controls before exposing phone login. |
+| `HOSTED_AUTH_TWILIO_ACCOUNT_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SID`, `HOSTED_AUTH_TWILIO_API_KEY_SECRET`, `HOSTED_AUTH_TWILIO_VERIFY_SERVICE_SID` | Dedicated Twilio Verify SMS service and API key | Qualify six-digit codes, destination coverage and fraud controls before exposing phone login. |
 
 All secret provisioning occurs through the reviewed hosted configuration path.
 Use the same stable values across compatible builds in one environment. The
@@ -79,6 +79,48 @@ billing continuations, settings recovery, cross-format logout and background
 native renewal. Issuance pause and legacy-admission disable have separate tests.
 These local proofs do not qualify actual KMS, provider deliverability, app-store
 upgrades or dormant devices.
+
+## SMS verification owner
+
+Use a dedicated [Twilio Verify service](https://www.twilio.com/docs/verify/api/service)
+with the friendly name Murph, SMS enabled and six-digit codes. Verify manages
+sending numbers; do not provision a Programmable Messaging sender pool for login.
+The restricted API key needs `twilio/verify/verification/create` and
+`twilio/verify/verification-check/create`. Service settings can be qualified in
+Console or with a separate diagnostic key; `twilio/verify/service/read` is not a
+runtime requirement. Keep Verify fraud protection enabled and
+qualify the intended destination countries before activation. See the
+[restricted-key permissions](https://www.twilio.com/docs/iam/api-keys/restricted-api-keys).
+
+The private SMS owner replaces the existing encrypted verification record under
+the OTP contact lock, then starts Verify outside the transaction. A late send
+response may attach its verification SID only to that exact, unexpired record.
+Verification reserves at most three attempts per local generation before the
+external check. An approved response persists a keyed digest bound to the code
+and generation, never the plaintext code. Final completion rechecks that proof,
+expiry and generation, then consumes it with canonical member/contact writes and
+session issuance in one database-only transaction. A failed canonical commit can
+retry the same approved code without calling the already-consumed provider again.
+
+The local challenge expires five minutes after each send request. Twilio can
+reuse its code and verification SID within its own validity window; a resend
+replaces the local generation even when the displayed code stays the same.
+Twilio expiry can therefore precede the local deadline. A lost provider approval
+response or a failure before its local save requires a new code request; it
+cannot be treated as approved. Start/check calls have a ten-second deadline,
+propagate request cancellation and do not retry automatically. Missing service
+configuration, rejected provider authority and malformed responses fail closed.
+
+Keep issuance off while deploying this owner. Old raw SMS records and new Verify
+records are mutually incompatible; users would need a fresh code if switching
+formats during active issuance. Existing sessions and email codes retain their
+readers and formats. There is no database migration. Before the held client
+adoption release, update its phone credential-change owner to prepare Verify
+approval outside locks and revalidate it inside the credential transaction, then
+qualify send/check, same-member login, credential changes and real-device receipt.
+A deployed backend alone is not activation approval. Once Verify issuance is
+active, recovery builds must include this challenge reader; pausing issuance
+preserves existing sessions.
 
 ## Approval migration
 
@@ -281,9 +323,11 @@ adapter, OTP and session code. Public contracts: [adapter factory](https://bette
 [email OTP](https://better-auth.com/docs/plugins/email-otp),
 [phone OTP](https://better-auth.com/docs/plugins/phone-number), and
 [sessions](https://better-auth.com/docs/concepts/session-management).
-SMS transport follows the [Twilio Message resource](https://www.twilio.com/docs/messaging/api/message-resource):
-bounded validity, discarded message content, obfuscated retained addresses and
-fraud checking. IP admission uses [Vercel request headers](https://vercel.com/docs/headers/request-headers).
+SMS transport follows [Twilio Verify start](https://www.twilio.com/docs/verify/api/verification)
+and [verification check](https://www.twilio.com/docs/verify/api/verification-check),
+with explicit fraud checking and local expiry/attempt bounds. The former
+Programmable Messaging content/address retention parameters do not apply to
+Verify. IP admission uses [Vercel request headers](https://vercel.com/docs/headers/request-headers).
 PR 3 must qualify [Telegram's current login contract](https://core.telegram.org/bots/telegram-login),
 including verified numeric user identity, nonce binding and one-use completion;
 the OIDC subject must not be assumed to equal the existing numeric bot user ID.

@@ -1,3 +1,4 @@
+import { buildFhirHistoryNote, buildFhirSourceNote, FHIR_HISTORY_RESOURCE_TYPES } from "./history.ts";
 import { createHash } from "node:crypto";
 
 import type {
@@ -101,8 +102,12 @@ const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
   ["8462-4", { facet: "bp-diastolic", metric: "diastolic-blood-pressure", title: "Diastolic blood pressure", unit: "mmHg" }],
   ["8867-4", { facet: "heart-rate", metric: "heart-rate", title: "Heart rate", unit: "bpm" }],
   ["9279-1", { facet: "respiratory-rate", metric: "respiratory-rate", title: "Respiratory rate", unit: "breaths/min" }],
+  ["2708-6", { facet: "spo2", metric: "spo2", title: "Oxygen saturation", unit: "percent" }],
   ["59408-5", { facet: "spo2", metric: "spo2", title: "Oxygen saturation", unit: "percent" }],
   ["8310-5", { facet: "temperature", metric: "temperature", title: "Body temperature", unit: "Cel" }],
+  ["8302-2", { facet: "body-height", metric: "body-height", title: "Body height", unit: "cm" }],
+  ["39156-5", { facet: "bmi", metric: "bmi", title: "BMI", unit: "kg/m^2" }],
+  ["9843-4", { facet: "head-circumference", metric: "head-circumference", title: "Head circumference", unit: "cm" }],
   ["29463-7", { facet: "body-weight", metric: "body-weight", title: "Body weight", unit: "kg" }],
 ]);
 
@@ -128,12 +133,14 @@ const LABORATORY_CATEGORY_CODES = new Set(["laboratory"]);
 const RESULT_STATUS_NORMAL_CODES = new Set(["n"]);
 const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll"]);
 const VITAL_LOINC_CODES = new Set(VITAL_LOINC_BY_CODE.keys());
-const CLINICAL_NOTE_MAX_LENGTH = 4_000;
 const DIAGNOSTIC_SUMMARY_MAX_LENGTH = 1_000;
 const LAB_RESULT_TEXT_MAX_LENGTH = 160;
 const LAB_RESULT_MAX_COUNT = 500;
 const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, string>>([
-  ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"]])],
+  ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"], ["g", "g"]])],
+  ["body-height", new Map([["[in_i]", "in"], ["in", "in"]])],
+  ["head-circumference", new Map([["[in_i]", "in"], ["in", "in"]])],
+  ["bmi", new Map([["kg/m2", "kg/m^2"]])],
   ["bp-diastolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
   ["bp-systolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
   ["heart-rate", new Map([
@@ -150,7 +157,7 @@ const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, str
     ["breaths/minute", "breaths/min"],
   ])],
   ["spo2", new Map([["%", "percent"], ["percent", "percent"]])],
-  ["temperature", new Map([["cel", "Cel"]])],
+  ["temperature", new Map([["cel", "Cel"], ["[degf]", "degF"], ["degf", "degF"]])],
 ]);
 type QuantityComparator = NonNullable<BloodTestResultRecord["comparator"]>;
 type BloodTestResultFlag = NonNullable<BloodTestResultRecord["flag"]>;
@@ -179,6 +186,7 @@ const IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES = new Set(["active"]);
 const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
 const RETRACTED_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["entered-in-error", "refuted"]);
 const REVIEW_HOLD_RESOURCE_TYPES = new Set([
+  ...FHIR_HISTORY_RESOURCE_TYPES,
   "DiagnosticReport",
   "DocumentReference",
   "Observation",
@@ -784,21 +792,23 @@ function mapFhirResource(context: FhirResourceContext): MappedFhirResource {
     return mapAllergyIntolerance(resourceContext(context, context.resource));
   }
 
-  switch (readString(context.resource.resourceType)) {
-    case "Condition":
-      return reviewOnly(context, "condition registry import not implemented");
-    case "MedicationRequest":
-    case "MedicationStatement":
-      return reviewOnly(context, "medication history import not implemented");
-    case "Encounter":
-      return reviewOnly(context, "externalRef-idempotent encounter import not implemented");
-    case "Procedure":
-      return reviewOnly(context, "procedure import not implemented");
-    case "Immunization":
-      return reviewOnly(context, "externalRef-idempotent immunization import not implemented");
-    default:
-      return reviewOnly(context, "FHIR resource type is raw evidence only in v1");
-  }
+  return FHIR_HISTORY_RESOURCE_TYPES.has(context.resource.resourceType)
+    ? mapClinicalHistory(context)
+    : reviewOnly(context, "FHIR resource type is raw evidence only in v1");
+}
+
+function mapClinicalHistory(context: FhirResourceContext): MappedFhirResource {
+  const resourceId = readResourceId(context.resource);
+  if (!resourceId) return reviewOnly(context, "FHIR resource id is missing");
+  const note = buildFhirHistoryNote(context.resource);
+  if (!note) return reviewOnly(context, "clinical history content or date is unavailable or exceeds supported import bounds");
+  return upsertOrReview(context, {
+    ...note,
+    kind: "note",
+    source: "import",
+    evidence: [evidenceForResource(context, resourceId)],
+    externalRef: externalRefForResource(context, context.resource.resourceType, resourceId),
+  }, "clinical history exceeds supported import bounds");
 }
 
 function resourceContext<TResource extends Resource>(
@@ -855,6 +865,15 @@ function retractionDecision(
 }
 
 function authoritativeRetractionReason(resource: Resource): string | null {
+  if (FHIR_HISTORY_RESOURCE_TYPES.has(resource.resourceType)) {
+    const fields = Object.fromEntries(Object.entries(resource));
+    if (fields.status === "entered-in-error") return `FHIR ${resource.resourceType} entered-in-error`;
+    const verification = fields.verificationStatus;
+    if (isRecord(verification) && readUnknownArray(verification.coding).some((coding) =>
+      isRecord(coding) && coding.code === "entered-in-error"
+      && coding.system === `http://terminology.hl7.org/CodeSystem/${resource.resourceType === "Condition" ? "condition" : "allergyintolerance"}-verification`
+    )) return `FHIR ${resource.resourceType} entered-in-error`;
+  }
   if (isObservation(resource) || isDiagnosticReport(resource)) {
     const status = readString(resource.status)?.toLowerCase();
     if (status === "cancelled" || status === "entered-in-error") {
@@ -1159,7 +1178,8 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
     return reviewOnly(context, "document reference text is not available in raw FHIR page");
   }
   const note = noteDecision.text;
-  if (note.length > CLINICAL_NOTE_MAX_LENGTH) {
+  const sourceNote = buildFhirSourceNote(note);
+  if (!sourceNote) {
     return reviewOnly(context, "document reference text exceeds supported import bounds");
   }
 
@@ -1179,7 +1199,7 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
       occurredAt,
       source: "import",
       title,
-      note,
+      ...sourceNote,
       noteType: "fhir_document_reference",
       authoredAt: readIsoDateTime(context.resource.date),
       evidence: [evidenceForResource(context, resourceId)],
@@ -1206,7 +1226,7 @@ function mapAllergyIntolerance(
   }
 
   if (!isNoKnownAllergy(context.resource)) {
-    return reviewOnly(context, "allergy registry import not implemented");
+    return mapClinicalHistory(context);
   }
 
   if (!hasImportableAllergyStatus(context.resource)) {

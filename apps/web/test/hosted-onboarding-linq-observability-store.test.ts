@@ -24,7 +24,6 @@ import {
   readHostedLinqGroupLineRecoveryAuthoritiesTx,
   readHostedLinqGroupLineRecoveryAuthorityTx,
   readHostedLinqDeliveryProviderDispatchIntentsTx,
-  recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
   resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
@@ -1301,50 +1300,11 @@ describe("hosted Linq observability stores", () => {
       .not.toContain("hello");
   });
 
-  it("records attempts and later preserves provider ids as lookup keys on acceptance", async () => {
+  it("preserves provider ids as lookup keys on acceptance", async () => {
     const fixture = createObservabilityPrismaFixture();
     const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
       "linq-message:event-123",
     );
-
-    await expect(recordHostedLinqDeliveryAttemptTx({
-      idempotencyKey: "linq-message:event-123",
-      linqChatId: "chat_123",
-      prisma: fixture.prisma as never,
-      source: "hosted_webhook_side_effect",
-      sourceRef: "linq-message:event-123",
-      targetKind: "thread",
-      template: "invite_signup",
-    })).resolves.toEqual({
-      id: "hld_random",
-    });
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
-      select: expect.objectContaining({
-        acceptedAt: true,
-        deliveredAt: true,
-        failedAt: true,
-        id: true,
-        lastReceiptAt: true,
-        messageLookupKey: true,
-        skippedAt: true,
-        status: true,
-      }),
-      where: {
-        idempotencyKey: deliveryIdempotencyLookupKey,
-      },
-    });
-    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
-          idempotencyKey: deliveryIdempotencyLookupKey,
-          sourceRef: expect.stringMatching(/^hbid:linq\.delivery-source-ref:/u),
-          status: "attempted",
-        }),
-        select: { id: true },
-      }),
-    );
-    expect(fixture.hostedLinqDeliveryUpsert).not.toHaveBeenCalled();
 
     await markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: "linq-message:event-123",
@@ -4733,53 +4693,11 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
   });
 
-  it("reopens a pre-provider skipped delivery so a later eligible retry can attach receipts", async () => {
+  it("attaches receipts after an eligible retry is accepted", async () => {
     const fixture = createObservabilityPrismaFixture();
     const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
       "linq-message:event-123",
     );
-    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
-      acceptedAt: null,
-      deliveredAt: null,
-      failedAt: new Date("2026-03-26T12:00:00.000Z"),
-      id: "hld_skipped_retry",
-      lastReceiptAt: null,
-      messageLookupKey: null,
-      skippedAt: new Date("2026-03-26T12:00:00.000Z"),
-      status: "skipped",
-    });
-    fixture.hostedLinqDeliveryUpdate.mockResolvedValueOnce({
-      id: "hld_skipped_retry",
-    });
-
-    await expect(recordHostedLinqDeliveryAttemptTx({
-      idempotencyKey: "linq-message:event-123",
-      linqChatId: "chat_123",
-      prisma: fixture.prisma as never,
-      source: "hosted_webhook_side_effect",
-      sourceRef: "linq-message:event-123",
-      targetKind: "thread",
-      template: "invite_signup",
-    })).resolves.toEqual({
-      id: "hld_skipped_retry",
-    });
-
-    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          failedAt: null,
-          failureCode: null,
-          failureReason: null,
-          skippedAt: null,
-          skipReason: null,
-          status: "attempted",
-        }),
-        where: {
-          id: "hld_skipped_retry",
-        },
-      }),
-    );
-
     await markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: "linq-message:event-123",
       linqChatId: "chat_123",

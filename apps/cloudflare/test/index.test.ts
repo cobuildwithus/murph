@@ -1,3 +1,4 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -18,9 +19,6 @@ import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
 } from "../src/browser-vault-store.ts";
-import {
-  createHostedBundleStore,
-} from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import hostedLocalTestWorker from "../src/hosted-local-test-index.ts";
 import worker from "../src/index.ts";
@@ -361,7 +359,6 @@ describe("cloudflare worker routes", () => {
       "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
-      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -400,7 +397,6 @@ describe("cloudflare worker routes", () => {
       "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
-      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -1851,7 +1847,7 @@ describe("cloudflare worker routes", () => {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       NODE_ENV: "test",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: env.BUNDLES,
       key: getTestHostedRuntimeRootKey("runtime"),
       keyId: "udrk:runtime:test-root",
@@ -3824,13 +3820,21 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
-    it("routes shell startup through the consent-owning user runner", async () => {
-      const prewarmRuntimeShellForUser = vi.fn<
-        NonNullable<UserRunnerDurableObjectStubLike["prewarmRuntimeShellForUser"]>
-      >(async () => undefined);
-      const stub = createUserRunnerStub({ prewarmRuntimeShellForUser });
+    it.each([
+      "",
+      "{}",
+      ...["linq-instant-start", "linq-message-routing", "linq-typing-started"].map(
+        (source) => JSON.stringify({
+          orchestrationAttemptId: "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+          requestStartedAtEpochMs: 1_788_000_000_000,
+          source,
+        }),
+      ),
+      '{"obsoleteField":true}',
+      "ignored legacy body",
+    ])("does not address a runtime owner for a retired shell hint: %s", async (body) => {
       const runnerContainerGetByName = vi.fn();
-      const userRunnerGetByName = vi.fn(() => stub);
+      const userRunnerGetByName = vi.fn();
       const env = createWorkerEnv(createUserRunnerStub(), {
         RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
         USER_RUNNER: { getByName: userRunnerGetByName },
@@ -3840,12 +3844,7 @@ describe("cloudflare worker routes", () => {
         await signControlRequest(new Request(
           "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
           {
-            body: JSON.stringify({
-              orchestrationAttemptId:
-                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-              requestStartedAtEpochMs: 1_788_000_000_000,
-              source: "linq-message-routing",
-            }),
+            body,
             headers: { "content-type": "application/json; charset=utf-8" },
             method: "POST",
           },
@@ -3853,138 +3852,9 @@ describe("cloudflare worker routes", () => {
         env,
       );
 
-      expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({ accepted: true });
-      expect(userRunnerGetByName).toHaveBeenCalledWith("test-user");
-      expect(stub.bindUser).not.toHaveBeenCalled();
-      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
-        "test-user",
-        "linq-message-routing",
-        expect.objectContaining({
-          shellPrewarmRuntimeControlAuthFinishedAtEpochMs: expect.any(Number),
-          shellPrewarmRuntimeControlAuthStartedAtEpochMs: expect.any(Number),
-          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
-          shellPrewarmOrchestrationAttemptId:
-            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-          shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
-        }),
-      );
-      const orchestration = prewarmRuntimeShellForUser.mock.calls[0]?.[2];
-      expect(orchestration?.shellPrewarmRuntimeControlAuthStartedAtEpochMs)
-        .toBeLessThanOrEqual(
-          orchestration?.shellPrewarmRuntimeControlAuthFinishedAtEpochMs
-            ?? Number.NEGATIVE_INFINITY,
-        );
-      expect(runnerContainerGetByName).not.toHaveBeenCalled();
-    });
-
-    it("does not recreate runner state for a delayed shell hint after account deletion", async () => {
-      const request = await signControlRequest(new Request(
-        "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-        {
-          body: "{}",
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "POST",
-        },
-      ));
-      const harness = createRuntimeControlRunnerHarness({
-        healthDataAdmission: {
-          consentState: "missing",
-          processingAllowed: false,
-        },
-      });
-      await harness.runner.bindUser("test-user");
-      await expect(
-        harness.runner.deleteHostedUserData("test-user"),
-      ).resolves.toMatchObject({ ok: true });
-      vi.mocked(harness.namespace.getByName).mockClear();
-      const bindUser = vi.fn(async (userId: string) =>
-        await harness.runner.bindUser(userId)
-      );
-      const prewarmRuntimeShellForUser = vi.fn(async (
-        userId: string,
-        source?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[1],
-        orchestration?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[2],
-      ) => await harness.runner.prewarmRuntimeShellForUser(
-        userId,
-        source,
-        orchestration,
-      ));
-      const stub = createUserRunnerStub({
-        bindUser,
-        prewarmRuntimeShellForUser,
-      });
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        USER_RUNNER: {
-          getByName: vi.fn(() => stub),
-        },
-      });
-
-      const response = await worker.fetch(request, env);
-
-      expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({ accepted: true });
-      expect(bindUser).not.toHaveBeenCalled();
-      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
-        "test-user",
-        undefined,
-        expect.objectContaining({
-          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
-        }),
-      );
-      expect(harness.namespace.getByName).not.toHaveBeenCalled();
-      expect(
-        harness.sql.exec("SELECT user_id FROM runner_meta").toArray(),
-      ).toEqual([]);
-    });
-
-    it("rejects nonempty shell-prewarm bodies without resolving a runtime owner", async () => {
-      const runnerContainerGetByName = vi.fn();
-      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
-        USER_RUNNER: { getByName: userRunnerGetByName },
-      });
-
-      const response = await worker.fetch(
-        await signControlRequest(new Request(
-          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-          {
-            body: JSON.stringify({ wake: true }),
-            headers: { "content-type": "application/json; charset=utf-8" },
-            method: "POST",
-          },
-        )),
-        env,
-      );
-
-      expect(response.status).toBe(400);
-      expect(runnerContainerGetByName).not.toHaveBeenCalled();
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: "Not found" });
       expect(userRunnerGetByName).not.toHaveBeenCalled();
-    });
-
-    it("rejects shell prewarm when the only credential is a web callback signature", async () => {
-      const runnerContainerGetByName = vi.fn();
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
-      });
-
-      const response = await worker.fetch(
-        await signWebCallbackControlRequest(
-          new Request(
-            "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-            {
-              body: "{}",
-              headers: { "content-type": "application/json; charset=utf-8" },
-              method: "POST",
-            },
-          ),
-          env,
-        ),
-        env,
-      );
-
-      expect(response.status).toBe(401);
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
@@ -4073,8 +3943,6 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
@@ -4132,8 +4000,6 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
@@ -5383,7 +5249,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     })),
-    prewarmRuntimeShellForUser: vi.fn(async () => undefined),
     publishHostedPrivateMedia: vi.fn(async () => ({
       ok: false as const,
       reason: "not-configured" as const,

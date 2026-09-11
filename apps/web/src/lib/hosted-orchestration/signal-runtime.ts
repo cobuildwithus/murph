@@ -58,6 +58,7 @@ export interface SignalHostedUserRuntimeWorkflowInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   ensureWorkspace?: boolean;
+  onSignalStarted?: () => void;
   prisma?: PrismaClient;
   signal: HostedRuntimeSignal;
   taskQueue?: string | null;
@@ -81,6 +82,7 @@ export interface SignalHostedMailboxAppendInput {
     userId: string;
   };
   mailboxItemId: string;
+  onSignalStarted?: () => void;
   prisma?: PrismaClient;
 }
 
@@ -163,6 +165,7 @@ export async function signalHostedMailboxAppendRuntime(
     client: input.client,
     environment: input.environment,
     ensureWorkspace: input.knownCheckpoint === undefined,
+    onSignalStarted: input.onSignalStarted,
     prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
@@ -505,19 +508,26 @@ export async function signalHostedUserRuntimeWorkflow(
     || HOSTED_USER_RUNTIME_TASK_QUEUE;
   const signal = parseHostedRuntimeSignal(input.signal);
 
-  const signalWithStart = () => client.workflow.signalWithStart(
-    HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-    {
-      args: [{
-        options: readHostedRuntimeTemporalWorkflowOptions(environment),
-        userId: input.userId,
-      }],
-      signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
-      signalArgs: [signal],
-      taskQueue,
-      workflowId,
-    },
-  );
+  const signalWithStart = () => {
+    input.abortSignal?.throwIfAborted();
+    const pending = client.workflow.signalWithStart(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      {
+        args: [{
+          options: readHostedRuntimeTemporalWorkflowOptions(environment),
+          userId: input.userId,
+        }],
+        signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
+        signalArgs: [signal],
+        taskQueue,
+        workflowId,
+      },
+    );
+    // Access and pointer validation have completed. An ephemeral latency hint
+    // may overlap this request; success still requires its acknowledgement.
+    input.onSignalStarted?.();
+    return pending;
+  };
   if (input.abortSignal) {
     await client.withAbortSignal(input.abortSignal, signalWithStart);
   } else {

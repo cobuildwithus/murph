@@ -1,4 +1,6 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -51,9 +53,6 @@ import {
   type HostedStandbySlotBinding,
 } from "../src/standby-runner-contract.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
-import {
-  createHostedBundleStore,
-} from "../src/bundle-store.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
 } from "../src/browser-vault-store.ts";
@@ -340,6 +339,64 @@ describe("HostedUserRunner execution coordination", () => {
     expect(emitted).not.toContain(oversizedDetail);
   });
 
+  it("checks admission once for startup and never for subsequent active wakes", async () => {
+    const completion = createDeferred<HostedWorkspaceInvocationResult>();
+    const readAdmission = vi.fn(() => "granted" as const);
+    const ensureProcessing = vi.fn(async () => ({
+      action: "woken" as const, kind: "accepted" as const,
+    }));
+    const { runner, invoke, flushWaitUntil } = createRunnerHarness({
+      readHealthDataConsentState: readAdmission,
+      ensureProcessing,
+      invocationResults: [completion.promise],
+    });
+    await expect(runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "session-start",
+    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readAdmission).toHaveBeenCalledOnce();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockClear();
+    readAdmission.mockImplementation(() => { throw new Error("Redundant admission callback"); });
+    for (const orchestrationAttemptId of ["warm-wake-one", "warm-wake-two"]) {
+      await expect(runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId,
+      })).resolves.toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    }
+    expect(readAdmission).toHaveBeenCalledOnce();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
+    completion.resolve({ nextWakeAt: null, status: "idle" });
+    await flushWaitUntil();
+  });
+
+  it.each(["revoked", "unavailable"] as const)(
+    "rechecks admission before replacing an inactive session: %s",
+    async (admission) => {
+      const readAdmission = vi.fn(() => {
+        if (admission === "unavailable") throw new Error("Admission unavailable");
+        return "revoked" as const;
+      });
+      const { runner, sql, invoke } = createRunnerHarness({
+        readHealthDataConsentState: readAdmission,
+        ensureProcessing: async () => ({ kind: "start-required", reason: "no-active-child" }),
+        readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      });
+      await runner.bindUser(TEST_USER_ID);
+      writeRuntimeFenceForTest(sql, { runnerContainerName: TEST_USER_ID });
+      const replacement = runner.ensureRuntimeProcessingForUser({
+        userId: TEST_USER_ID, orchestrationAttemptId: "replacement-admission",
+      });
+      if (admission === "unavailable") {
+        await expect(replacement).rejects.toThrow("Admission unavailable");
+      } else {
+        await expect(replacement).resolves.toMatchObject({ kind: "retry_later" });
+      }
+      expect(readAdmission).toHaveBeenCalledOnce();
+      expect(invoke).not.toHaveBeenCalled();
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    },
+  );
+
   it("denies runtime processing when the authoritative consent read is revoked", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -362,280 +419,10 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
     expect(writeDataPoint).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
-  it("does not address the runner container when shell prewarm observes revoked consent", async () => {
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "revoked",
-    });
-
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toEqual([]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
-          shellPrewarmSource: "unknown",
-        },
-        message: "Hosted runner shell prewarm admission decided.",
-      }),
-    );
-  });
-
-  it("accepts legacy shell hints without allocating a member-specific shell", async () => {
-    const prewarmShell = vi.fn(async () => ({
-      action: "start_issued" as const,
-      kind: "started" as const,
-    }));
-    const { runner } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "granted",
-    });
-
-    await runner.prewarmRuntimeShellForUser(
-      TEST_USER_ID,
-      "linq-message-routing",
-      {
-        shellPrewarmOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
-      },
-    );
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          orchestrationAttemptId:
-            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "linq-message-routing",
-        },
-      }),
-    );
-  });
-
-  it("leaves fresh foreground container selection to the standby pool in allocate mode", async () => {
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "granted",
-      runnerRuntimeEnvSource: {
-        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-      },
-    });
-
-    await runner.prewarmRuntimeShellForUser(
-      TEST_USER_ID,
-      "linq-message-routing",
-    );
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toEqual([]);
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "linq-message-routing",
-        },
-        message: "Hosted runner shell prewarm admission decided.",
-      }),
-    );
-  });
-
-  it("abandons a slow shell hint admission before authoritative processing begins", async () => {
-    vi.useFakeTimers();
-    let admissionReads = 0;
-    const firstAdmissionStarted = createDeferred<void>();
-    const authoritativeAdmissionStarted = createDeferred<void>();
-    const releaseAuthoritativeAdmission = createDeferred<"granted">();
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: ({ timeoutMs }) => {
-        admissionReads += 1;
-        if (admissionReads === 1) {
-          expect(timeoutMs).toBe(250);
-          firstAdmissionStarted.resolve(undefined);
-          return new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
-          });
-        }
-        expect(timeoutMs).toBe(30_000);
-        authoritativeAdmissionStarted.resolve(undefined);
-        return releaseAuthoritativeAdmission.promise;
-      },
-    });
-
-    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    await firstAdmissionStarted.promise;
-    const ensure = runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "authoritative-after-slow-hint-admission",
-      userId: TEST_USER_ID,
-    });
-
-    await vi.advanceTimersByTimeAsync(249);
-    expect(admissionReads).toBe(1);
-    expect(runnerContainerNames).toEqual([]);
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(prewarm).resolves.toBeUndefined();
-    await authoritativeAdmissionStarted.promise;
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toEqual([]);
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
-          shellPrewarmSource: "unknown",
-        },
-        level: "warn",
-      }),
-    );
-
-    releaseAuthoritativeAdmission.resolve("granted");
-    await expect(ensure).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-  });
-
-  it("drops repeated shell hints instead of queuing them ahead of authoritative processing", async () => {
-    let admissionReads = 0;
-    const firstAdmissionStarted = createDeferred<void>();
-    const releaseFirstAdmission = createDeferred<"granted">();
-    const authoritativeAdmissionStarted = createDeferred<void>();
-    const releaseAuthoritativeAdmission = createDeferred<"granted">();
-    const prewarmShell = vi.fn(async () => ({
-      action: "start_issued" as const,
-      kind: "started" as const,
-    }));
-    const { runner } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: ({ timeoutMs }) => {
-        admissionReads += 1;
-        if (admissionReads === 1) {
-          expect(timeoutMs).toBe(250);
-          firstAdmissionStarted.resolve(undefined);
-          return releaseFirstAdmission.promise;
-        }
-        expect(timeoutMs).toBe(30_000);
-        authoritativeAdmissionStarted.resolve(undefined);
-        return releaseAuthoritativeAdmission.promise;
-      },
-    });
-
-    const firstPrewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    await firstAdmissionStarted.promise;
-    let settledDuplicateCount = 0;
-    const duplicatePrewarms = Array.from({ length: 4 }, () =>
-      runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
-        settledDuplicateCount += 1;
-      })
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(settledDuplicateCount).toBe(4);
-    expect(admissionReads).toBe(1);
-
-    const ensure = runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "authoritative-after-repeated-hints",
-      userId: TEST_USER_ID,
-    });
-    releaseFirstAdmission.resolve("granted");
-    await expect(firstPrewarm).resolves.toBeUndefined();
-    await authoritativeAdmissionStarted.promise;
-
-    expect(admissionReads).toBe(2);
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "unknown",
-        },
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
-      ([entry]) =>
-        entry.details?.shellPrewarmAdmissionOutcome === "skipped_consent_busy",
-    )).toHaveLength(4);
-    await expect(Promise.all(duplicatePrewarms)).resolves.toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
-
-    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
-      .resolves.toBeUndefined();
-    expect(admissionReads).toBe(2);
-    expect(prewarmShell).not.toHaveBeenCalled();
-
-    releaseAuthoritativeAdmission.resolve("granted");
-    await expect(ensure).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-  });
-
-  it("releases consent withdrawal after the bounded shell hint admission budget", async () => {
-    vi.useFakeTimers();
-    let admissionReads = 0;
-    const firstAdmissionStarted = createDeferred<void>();
-    const withdrawalAdmissionStarted = createDeferred<void>();
-    const destroyInstance = vi.fn(async () => undefined);
-    const prewarmShell = vi.fn();
-    const { runner } = createRunnerHarness({
-      destroyInstance,
-      prewarmShell,
-      readHealthDataConsentState: ({ timeoutMs }) => {
-        admissionReads += 1;
-        if (admissionReads === 1) {
-          expect(timeoutMs).toBe(250);
-          firstAdmissionStarted.resolve(undefined);
-          return new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
-          });
-        }
-        expect(timeoutMs).toBe(30_000);
-        withdrawalAdmissionStarted.resolve(undefined);
-        return "revoked";
-      },
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    await firstAdmissionStarted.promise;
-    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(
-      TEST_USER_ID,
-    );
-
-    await vi.advanceTimersByTimeAsync(249);
-    expect(admissionReads).toBe(1);
-    expect(destroyInstance).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(prewarm).resolves.toBeUndefined();
-    await withdrawalAdmissionStarted.promise;
-    await expect(withdrawal).resolves.toMatchObject({
-      consentState: "revoked",
-      processingAllowed: false,
-      runnerContainerDestroyOk: true,
-    });
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(destroyInstance).toHaveBeenCalledOnce();
-  });
-
-  it("bounds consent admission inside the runtime command deadline", async () => {
+  it.each(["timer", "late_response"] as const)("bounds consent admission inside the runtime command deadline: %s", async (expiry) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const admissionStarted = createDeferred<void>();
@@ -643,7 +430,7 @@ describe("HostedUserRunner execution coordination", () => {
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => ({ kind: "ready" }));
-    const { runner, sql } = createRunnerHarness({
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       readHealthDataConsentState: async () => {
         admissionStarted.resolve(undefined);
@@ -659,13 +446,19 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     await admissionStarted.promise;
-    await vi.advanceTimersByTimeAsync(4_000);
+    if (expiry === "timer") {
+      await vi.advanceTimersByTimeAsync(4_000);
+    } else {
+      vi.setSystemTime(Date.now() + 4_000);
+      releaseAdmission.resolve(undefined);
+    }
 
     await expect(response).resolves.toEqual({
       kind: "retry_later",
       retryAt: "2026-04-27T00:00:14.000Z",
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
       failure_count: 0,
@@ -792,24 +585,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
   });
 
-  it("lets authoritative readiness allocate after an inert legacy shell hint", async () => {
-    const prewarmShell = vi.fn();
-    const ensureReadyForProcessing = vi.fn(async () => ({ kind: "ready" as const }));
-    const { runner, runnerContainerNames } = createRunnerHarness({ prewarmShell, ensureReadyForProcessing });
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-    expect(runnerContainerNames).toEqual([]);
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "orchestration-after-inert-shell-hint",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      kind: "runtime_processing_accepted",
-    });
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(ensureReadyForProcessing).toHaveBeenCalledOnce();
-    expect(new Set(runnerContainerNames).size).toBe(1);
-    expect(runnerContainerNames[0]).toMatch(/^runner--v-local--[0-9a-f]{32}$/u);
-  });
-
   it("destroys a prior-version pending prewarm before binding a current fence", async () => {
     const runnerRuntimeEnvSource: Record<string, unknown> = {
       ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
@@ -818,10 +593,6 @@ describe("HostedUserRunner execution coordination", () => {
     const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
     const priorDestroyInstance = vi.fn(async () => undefined);
     const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      prewarmShell: vi.fn(async () => ({
-        action: "start_issued" as const,
-        kind: "started" as const,
-      })),
       readHealthDataConsentState: () => "granted",
       runnerContainerStubForName(name, defaultStub) {
         if (name !== priorRunnerContainerName) {
@@ -847,62 +618,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(priorDestroyInstance).toHaveBeenCalledOnce();
   });
 
-  it("does not replace a pending prior-version stop target with another hint", async () => {
-    const runnerRuntimeEnvSource: Record<string, unknown> = {
-      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-      CF_VERSION_METADATA: { id: "prior" },
-    };
-    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
-    const prewarmShell = vi.fn(async () => ({
-      action: "start_issued" as const,
-      kind: "started" as const,
-    }));
-    const { runner, sql } = createRunnerHarness({
-      prewarmShell,
-      readHealthDataConsentState: () => "granted",
-      runnerRuntimeEnvSource,
-    });
-
-    await runner.bindUser(TEST_USER_ID);
-    sql.exec("UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1", priorRunnerContainerName);
-    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
-      priorRunnerContainerName,
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-          shellPrewarmSource: "unknown",
-        },
-      }),
-    );
-  });
-
-  it("does not recreate a shell after completed consent withdrawal", async () => {
-    const prewarmShell = vi.fn();
-    const destroyInstance = vi.fn(async () => undefined);
-    const { runner } = createRunnerHarness({
-      destroyInstance,
-      prewarmShell,
-      readHealthDataConsentState: () => "revoked",
-    });
-
-    await expect(
-      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
-    ).resolves.toMatchObject({
-      consentState: "revoked",
-      processingAllowed: false,
-    });
-    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
-
-    expect(destroyInstance).toHaveBeenCalledOnce();
-    expect(prewarmShell).not.toHaveBeenCalled();
-  });
-
   it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -910,7 +625,7 @@ describe("HostedUserRunner execution coordination", () => {
     const writeDataPoint = vi.fn();
     const { invoke, runner } = createRunnerHarness({
       readHealthDataConsentState: () => {
-        vi.setSystemTime(fixedNowMs + 10);
+        vi.setSystemTime(fixedNowMs + 40);
         return "granted";
       },
       runtimeRetryAnalytics: { writeDataPoint },
@@ -940,10 +655,10 @@ describe("HostedUserRunner execution coordination", () => {
       cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
       userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
       runtimeConsentLockAcquiredAtEpochMs: fixedNowMs,
-      healthDataAdmissionReadStartedAtEpochMs: fixedNowMs,
-      healthDataAdmissionReadFinishedAtEpochMs: fixedNowMs + 10,
-      userRunnerEnsureStartedAtEpochMs: fixedNowMs + 10,
-      runnerStateBindStartedAtEpochMs: fixedNowMs + 10,
+      healthDataAdmissionReadStartedAtEpochMs: fixedNowMs + 30,
+      healthDataAdmissionReadFinishedAtEpochMs: fixedNowMs + 40,
+      userRunnerEnsureStartedAtEpochMs: fixedNowMs,
+      runnerStateBindStartedAtEpochMs: fixedNowMs,
       runnerStateBindFinishedAtEpochMs: fixedNowMs + 20,
       runnerStateReadStartedAtEpochMs: fixedNowMs + 20,
       runnerStateReadFinishedAtEpochMs: fixedNowMs + 30,
@@ -1003,8 +718,32 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
-  it("invokes a retained slot using its verified resolution without another binding RPC", async () => {
-    const slotName = `runner--v-release_1--${"d".repeat(32)}`;
+  it.each([true, false])("allocates a small runner only for the selected account (selected=%s)", async selected => {
+    const claimReadyStandby = vi.fn(async () => ({ outcome: "no_ready_slot" as const }));
+    const h = createRunnerHarness({
+      runnerRuntimeEnvSource: { ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "release_1" }, HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+        HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "true",
+        HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256: createHash("sha256")
+          .update(selected ? TEST_USER_ID : "member-other-synthetic").digest("hex"),
+      },
+      standbyCoordinatorNamespace: { getByName: () => ({ claimReadyStandby,
+        ensureReadyStandby: async () => ({ accepted: true as const }),
+      }) },
+    });
+    await expect(h.runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "small-allocation-synthetic",
+      conversationWorkPending: true,
+    })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    await h.flushWaitUntil();
+    expect(h.invoke).toHaveBeenCalledOnce();
+    expect(h.runnerContainerNames[0]).toMatch(selected
+      ? /^runner-small--v-release_1--[a-f0-9]{32}$/u : /^runner--v-release_1--[a-f0-9]{32}$/u);
+    expect(claimReadyStandby).toHaveBeenCalledTimes(selected ? 0 : 1);
+  });
+
+  it.each(["runner", "runner-small"])("invokes a retained %s slot with selection disabled and no extra binding RPC", async prefix => {
+    const slotName = `${prefix}--v-release_1--${"d".repeat(32)}`;
     const binding: HostedStandbySlotBinding = {
       claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
       releaseId: "release_1", region: "GLOBAL", slotName,
@@ -1343,6 +1082,12 @@ describe("HostedUserRunner execution coordination", () => {
     ).rejects.toThrow("health-data consent withdrawal");
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
     expect(readActiveRunnerContainerNameForTest(sql)).toBe(priorRunnerContainerName);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      userId: TEST_USER_ID, orchestrationAttemptId: "wake-after-failed-withdrawal-stop",
+    })).resolves.toMatchObject({ kind: "retry_later" });
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
 
     await expect(
       runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
@@ -2414,14 +2159,6 @@ describe("HostedUserRunner execution coordination", () => {
         stateReadFinishedAtEpochMs: 1_777_000_000_042,
       },
       kind: "ready",
-      shellPrewarmObservation: {
-        firstHintAtEpochMs: 1_777_000_000_010,
-        finishedAtEpochMs: 1_777_000_000_030,
-        hintCount: 2,
-        operationElapsedMs: 20,
-        outcome: "cold_start_observed",
-        source: "linq-typing-started",
-      },
     }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
@@ -2506,12 +2243,6 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 1_250,
-      shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
-      shellPrewarmFinishedAtEpochMs: 1_777_000_000_030,
-      shellPrewarmHintCount: 2,
-      shellPrewarmOperationElapsedMs: 20,
-      shellPrewarmOutcome: "cold_start_observed",
-      shellPrewarmSource: "linq-typing-started",
       workspaceReadElapsedMs: 1_250,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
@@ -2872,6 +2603,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => ({ kind: "ready" }));
     const { invoke, runner, sql } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -2917,6 +2649,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => ({ kind: "ready" }));
     const { invoke, runner } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -3251,6 +2984,7 @@ describe("HostedUserRunner execution coordination", () => {
     >(async () => await readiness.promise);
     const { invoke, runner, sql } = createRunnerHarness({
       bucket,
+      allowedRunnerSecretKeys: "SYNTHETIC_TOOL_TOKEN",
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -3491,6 +3225,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     firstInvocationResult.resolve({ nextWakeAt: null, status: "idle" });
     await flushWaitUntil();
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-restored-owner-recheck",
@@ -3950,8 +3685,6 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
-          healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-          healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
           runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
           runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
@@ -4008,8 +3741,6 @@ describe("HostedUserRunner execution coordination", () => {
         activeFenceTargetWasPriorVersion: false,
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
         runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
-        healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-        healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
         runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
@@ -4835,7 +4566,7 @@ describe("HostedUserRunner execution coordination", () => {
     }
   });
 
-  it("preserves the active foreground owner before retrying system-mailbox work", async () => {
+  it("notifies the active foreground owner of system work without changing its mode or fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -4860,12 +4591,19 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-system-mailbox-behind-foreground",
       processingMode: "system_mailbox",
       userId: TEST_USER_ID,
-    })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: "2026-04-27T00:00:05.000Z",
+    })).resolves.toMatchObject({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: token.attemptId,
     });
 
-    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(ensureProcessing.mock.calls[0]?.[0].activeRuntime).toMatchObject({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      processingMode: "default",
+    });
+    expect(ensureProcessing.mock.calls[0]?.[0].activeRuntime).not.toHaveProperty("requestedProcessingMode");
     expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -7307,10 +7045,6 @@ describe("HostedUserRunner execution coordination", () => {
     const currentDestroyInstance = vi.fn(async () => undefined);
     const { runner, runnerContainerNames, sql } = createRunnerHarness({
       bucket: new ListableMemoryEncryptedR2Bucket(),
-      prewarmShell: vi.fn(async () => ({
-        action: "start_issued" as const,
-        kind: "started" as const,
-      })),
       runnerContainerStubForName(name, defaultStub) {
         return {
           ...defaultStub,
@@ -7333,36 +7067,6 @@ describe("HostedUserRunner execution coordination", () => {
     expect(runnerContainerNames).toEqual([priorRunnerContainerName]);
     expect(priorDestroyInstance).toHaveBeenCalledOnce();
     expect(currentDestroyInstance).not.toHaveBeenCalled();
-  });
-
-  it("drops shell prewarm while account deletion owns the consent lock", async () => {
-    const destroyStarted = createDeferred<void>();
-    const releaseDestroy = createDeferred<void>();
-    const destroyInstance = vi.fn(async () => {
-      destroyStarted.resolve(undefined);
-      await releaseDestroy.promise;
-    });
-    const prewarmShell = vi.fn();
-    const { runner, runnerContainerNames, sql } = createRunnerHarness({
-      bucket: new ListableMemoryEncryptedR2Bucket(),
-      destroyInstance,
-      healthDataProcessingAllowed: false,
-      prewarmShell,
-      readHealthDataConsentState: () => "missing",
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
-    await destroyStarted.promise;
-    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
-      .resolves.toBeUndefined();
-
-    releaseDestroy.resolve(undefined);
-    await expect(deletion).resolves.toMatchObject({ ok: true });
-
-    expect(prewarmShell).not.toHaveBeenCalled();
-    expect(runnerContainerNames).toHaveLength(1);
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
@@ -9044,7 +8748,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const bucket = new MemoryEncryptedR2Bucket();
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: getTestHostedRuntimeRootKey("runtime"),
       keyId: "udrk:runtime:test-root",
@@ -9251,6 +8955,7 @@ function readHostedMediaAssetRowCount(sql: TestSqlStorageLike): number {
 }
 
 function createRunnerHarness(input: {
+  allowedRunnerSecretKeys?: string;
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
@@ -9278,7 +8983,6 @@ function createRunnerHarness(input: {
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   workspaceResponse?: () => Promise<Response> | Response;
   platformAiUsageAllowed?: boolean | (() => boolean);
-  prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
@@ -9421,37 +9125,6 @@ function createRunnerHarness(input: {
           ),
         }
       : {}),
-    ...(input.prewarmShell
-      ? {
-          beginShellPrewarm: createDirectOnlyRpcMethod<
-            NonNullable<HostedExecutionContainerStubLike["beginShellPrewarm"]>
-          >(
-            async function (
-              this: HostedExecutionContainerStubLike,
-              prewarmInput,
-            ) {
-              expect(this).toBe(stub);
-              const operation = input.prewarmShell?.call(this, prewarmInput);
-              void operation?.catch(() => undefined);
-              return { accepted: true };
-            },
-          ),
-          prewarmShell: createDirectOnlyRpcMethod<
-            NonNullable<HostedExecutionContainerStubLike["prewarmShell"]>
-          >(
-            async function (
-              this: HostedExecutionContainerStubLike,
-              prewarmInput,
-            ) {
-              expect(this).toBe(stub);
-              return await input.prewarmShell?.call(this, prewarmInput) ?? {
-                action: "start_issued",
-                kind: "started",
-              };
-            },
-          ),
-        }
-      : {}),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: createDirectOnlyRpcMethod<
@@ -9547,6 +9220,7 @@ function createRunnerHarness(input: {
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: input.allowedRunnerSecretKeys,
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
@@ -9555,6 +9229,7 @@ function createRunnerHarness(input: {
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     createHostedRunnerContainerNamespaceRouter({
       exactUser: input.runnerContainerNamespace === undefined ? namespace : input.runnerContainerNamespace,
+      small: namespace,
       standby: input.standbyContainerNamespace ?? {
         getByName(name) {
           const container = namespace.getByName(name);

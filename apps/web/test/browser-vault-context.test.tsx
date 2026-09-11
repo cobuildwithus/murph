@@ -116,9 +116,7 @@ import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-pro
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
 import { logoutHostedAppSession, verifyHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
-import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
-import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 import JournalPageClient from "../app/(dashboard)/journal/journal-page-client";
 
 beforeEach(() => {
@@ -1606,67 +1604,6 @@ test("browser-vault provider does not poll an empty vault while a device import 
   await rendered.cleanup();
 });
 
-test("a missing replica leaves Overview and History in a stable unavailable state without Retry controls", async () => {
-  vi.useFakeTimers();
-  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-    encryptedReplica: null,
-    freshness: "stale",
-    memberId: "member_123",
-    replicaAad: null,
-    replicaKeyEnvelope: null,
-    replicaRef: null,
-    refreshPending: true,
-    state: "empty",
-    workspaceVersion: "1",
-  }));
-
-  installBrowserVaultCryptoMocks();
-  vi.stubGlobal("fetch", fetchMock);
-
-  const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(
-      "div",
-      null,
-      createElement(OverviewPageClient),
-      createElement(HistoryPageClient),
-    )),
-    { requireButton: false },
-  );
-
-  await waitForText(rendered.container, "Preparing your dashboard");
-  assert.equal(rendered.container.textContent?.includes("Preparing your timeline"), true);
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(25_000);
-  });
-
-  assert.equal(rendered.container.textContent?.includes("Could not load your overview"), true);
-  assert.equal(rendered.container.textContent?.includes("Could not load history"), true);
-  assert.equal(rendered.container.textContent?.includes("Your dashboard is ready for data"), false);
-  assert.equal(rendered.container.textContent?.includes("No timeline entries yet"), false);
-  assert.equal(
-    [...rendered.container.querySelectorAll("button")].filter(
-      (button) => button.textContent === "Retry",
-    ).length,
-    0,
-  );
-
-  const fetchCountBeforeFocus = fetchMock.mock.calls.length;
-  await act(async () => {
-    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
-  });
-  await waitForCondition(
-    () => fetchMock.mock.calls.length === fetchCountBeforeFocus + 1,
-    "terminal-state focus observation",
-  );
-
-  assert.equal(rendered.container.textContent?.includes("Could not load your overview"), true);
-  assert.equal(rendered.container.textContent?.includes("Could not load history"), true);
-  assert.equal(rendered.container.textContent?.includes("Preparing your dashboard"), false);
-  assert.equal(rendered.container.textContent?.includes("Preparing your timeline"), false);
-
-  await rendered.cleanup();
-});
 
 test("browser-vault provider preserves readable stale data when bounded observation cannot load the referenced replica", async () => {
   vi.useFakeTimers();

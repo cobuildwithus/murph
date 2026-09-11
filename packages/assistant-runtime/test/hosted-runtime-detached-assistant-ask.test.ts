@@ -1,3 +1,4 @@
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,6 +42,9 @@ import {
 import type {
   HostedWorkspaceDurableCheckpointEffect,
 } from "../src/hosted-runtime/workspace-runner.ts";
+
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+import type { HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
 
 const TEST_NOW = "2026-07-15T12:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_detached_ask";
@@ -839,7 +843,97 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("dispatches an operator diagnostic directly without consent review or delivery authority", async () => {
+  test("expires the owned diagnostic child and settles through existing prepare without a late answer", async () => {
+    const vaultRoot = await createVaultRoot();
+    const started = createDeferred<void>();
+    const logs: HostedRuntimeLogEntry[] = [];
+    let prepareCalls = 0;
+    let completeCalls = 0;
+    try {
+      await writePending(vaultRoot, [createPendingAsk({ eventId: "ask_deadline", itemId: "item_deadline", operator: true })]);
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(new Date(TEST_NOW));
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              completeCalls += 1;
+              return { action: "complete", status: "completed" };
+            }
+            prepareCalls += 1;
+            return prepareCalls === 1
+              ? { action: "prepare", status: "ready", question: "Synthetic deadline probe", targetLabel: null }
+              : { action: "prepare", status: "terminal", terminalReason: "expired" };
+          },
+        },
+        codexHome: null, env: {}, onStateMutation() {}, vaultRoot,
+        logPort: { async write(request) { logs.push(...parseHostedRuntimeLogRequest(request).entries); return { loggedCount: request.entries.length }; } },
+        async executeOperatorDiagnostic(input) {
+          started.resolve();
+          return await new Promise((_resolve, reject) => {
+            input.abortSignal?.addEventListener("abort", () => reject(input.abortSignal?.reason), { once: true });
+          });
+        },
+      });
+      const first = controller.kickExact("item_deadline");
+      await started.promise;
+      assert.equal(controller.activeDiagnosticDeadline(), Date.parse(TEST_NOW) + 600_000);
+      await vi.advanceTimersByTimeAsync(600_000);
+      await first;
+      assert.equal(controller.activeDiagnosticDeadline(), null);
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.status, "pending");
+      await controller.kickExact("item_deadline");
+      await controller.closeAndRequeue();
+      await drainHostedRuntimeLogWritesBestEffort();
+      assert.equal(prepareCalls, 2);
+      assert.equal(completeCalls, 0);
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      assert.deepEqual(logs.map((entry) => entry.redactedJson?.outcome), ["expired", "expired"]);
+      assert.equal(logs[0]?.redactedJson?.stage, "execute");
+      assert.equal(logs[0]?.redactedJson?.elapsedMs, 600_000);
+    } finally {
+      vi.useRealTimers();
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("logs a bounded diagnostic failure before retry clears local error state", async () => {
+    const vaultRoot = await createVaultRoot();
+    const logs: HostedRuntimeLogEntry[] = [];
+    try {
+      await writePending(vaultRoot, [createPendingAsk({ eventId: "ask_error", itemId: "item_error", operator: true })]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: { async request() {
+          return { action: "prepare", status: "ready", question: "private synthetic question marker", targetLabel: null };
+        } },
+        codexHome: null, env: {}, now: () => TEST_NOW, onStateMutation() {}, vaultRoot,
+        logPort: { async write(request) { logs.push(...parseHostedRuntimeLogRequest(request).entries); return { loggedCount: request.entries.length }; } },
+        async executeOperatorDiagnostic() { throw new Error("Synthetic timeout private-error-marker"); },
+      });
+      await controller.kickExact("item_error");
+      await controller.closeAndRequeue();
+      await drainHostedRuntimeLogWritesBestEffort();
+      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+      assert.equal(pending?.status, "pending");
+      assert.equal(pending?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
+      assert.equal(logs.length, 1);
+      assert.equal(logs[0]?.eventCode, "assistant.pass_finished");
+      assert.equal(logs[0]?.redactedJson?.outcome, "failed");
+      assert.equal(logs[0]?.redactedJson?.stage, "execute");
+      assert.ok(logs[0]?.errorCode);
+      assert.doesNotMatch(JSON.stringify(logs), /private-error-marker|private synthetic question|ask_error|item_error/);
+      assert.equal(controller.activeDiagnosticDeadline(), null);
+    } finally { await removeVaultRoot(vaultRoot); }
+  });
+
+  test.each([
+    ["hosted-openai", "hosted-openai"],
+    ["venice", "hosted-openai"],
+    ["hosted-custom-inference", "hosted-openai"],
+    ["hosted-chatgpt-openai", "hosted-chatgpt-openai"],
+    ["openai-local-test", "openai-local-test"],
+    ["venice-local-test", "openai-local-test"],
+  ])("dispatches an operator diagnostic with hosted authentication from %s without consent review or delivery authority", async (memberProvider, operatorProvider) => {
     const groupRuntimeRoot = await createVaultRoot();
     const records: AssistantUsageRecord[] = [];
     const deferred: HostedWorkspaceDurableCheckpointEffect[] = [];
@@ -881,7 +975,7 @@ describe("hosted detached assistant ask controller", () => {
         codexHome: "/hosted/codex-home",
         env: {},
         model: "gpt-5.6-luna",
-        modelProvider: "openai",
+        modelProvider: memberProvider,
         usageRecordPort: { async recordUsage(record) { records.push(record); return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true }; } },
         deferUsageUntilAfterDurableCheckpoint(effect) { deferred.push(effect); },
         executeAsk,
@@ -911,7 +1005,7 @@ describe("hosted detached assistant ask controller", () => {
       assert.ok(operatorInput);
       assert.equal(operatorInput.feedbackDiagnostic, true);
       assert.equal(operatorInput.model, "gpt-5.6-sol");
-      assert.equal(operatorInput.modelProvider, "openai");
+      assert.equal(operatorInput.modelProvider, operatorProvider);
       assert.equal(operatorInput.codexHome, "/hosted/codex-home");
       assert.equal(operatorInput.question, "What is the synthetic status?");
       assert.equal(operatorInput.workspaceRoot, groupRuntimeRoot);
@@ -1269,7 +1363,7 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("suppresses a sending wake and aborts, awaits, then requeues the exact ask", async () => {
+  test.each([false, true])("suppresses a sending wake and drains the exact ask on shutdown (operator=%s)", async (operator) => {
     const vaultRoot = await createVaultRoot();
     const askStarted = createDeferred<void>();
     const childExited = createDeferred<void>();
@@ -1291,7 +1385,7 @@ describe("hosted detached assistant ask controller", () => {
 
     try {
       await writePending(vaultRoot, [
-        createPendingAsk({ eventId: "ask_event_abort", itemId: "item_abort" }),
+        createPendingAsk({ eventId: "ask_event_abort", itemId: "item_abort", operator }),
         createPendingAsk({ eventId: "ask_event_later", itemId: "item_later" }),
       ]);
       const controller = createHostedDetachedAssistantAskController({
@@ -1309,6 +1403,7 @@ describe("hosted detached assistant ask controller", () => {
         codexHome: null,
         env: {},
         executeAsk,
+        executeOperatorDiagnostic: executeAsk,
         now: () => TEST_NOW,
         onStateMutation() {
           events.push("state.mutated");

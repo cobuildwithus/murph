@@ -2,19 +2,17 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
-import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
+import { isSmallRunnerMember } from "../small-runner-profile.ts";
 import type {
   WorkerAnalyticsEngineDatasetLike,
 } from "../worker-contracts.js";
@@ -23,7 +21,6 @@ import {
   RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   type HostedExecutionContainerNamespaceLike,
   type RunnerContainerColdStartTiming,
-  type RunnerContainerShellPrewarmObservation,
   type RunnerContainerStartupFailureStage,
 } from "../runner-container.js";
 import {
@@ -142,7 +139,6 @@ type FreshRuntimeStartPreparation =
       preparedAtEpochMs: number;
       runtimePreparationWaitAfterContainerReadyMs: number;
       startupOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
-      shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
     }
   | {
       kind: "retry";
@@ -198,29 +194,6 @@ function withRuntimeProcessingOrchestration(
       ...(input.orchestration ?? {}),
       ...orchestration,
     },
-  };
-}
-
-function toShellPrewarmOrchestrationDiagnostics(
-  observation: RunnerContainerShellPrewarmObservation | undefined,
-): RuntimeProcessingOrchestrationDiagnostics | null {
-  if (!observation) {
-    return null;
-  }
-  return {
-    ...(observation.orchestration ?? {}),
-    shellPrewarmFirstHintAtEpochMs: observation.firstHintAtEpochMs,
-    shellPrewarmHintCount: observation.hintCount,
-    ...(observation.finishedAtEpochMs === undefined ? {} : {
-      shellPrewarmFinishedAtEpochMs: observation.finishedAtEpochMs,
-    }),
-    ...(observation.operationElapsedMs === undefined ? {} : {
-      shellPrewarmOperationElapsedMs: observation.operationElapsedMs,
-    }),
-    ...(observation.outcome === undefined ? {} : {
-      shellPrewarmOutcome: observation.outcome,
-    }),
-    shellPrewarmSource: observation.source,
   };
 }
 
@@ -289,6 +262,8 @@ export class RuntimeProcessingController {
     private readonly input: {
       env: HostedExecutionEnvironment;
       invocationService: Pick<RuntimeInvocationService, "prepareForFreshStart" | "invokePreparedWithFence">;
+      readHealthDataAdmission: (userId: string, timeoutMs: number) =>
+        Promise<HostedRuntimeHealthDataAdmissionResponse>;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
       readCheckpointHandoff?: (input: {
         attemptId: string;
@@ -314,28 +289,6 @@ export class RuntimeProcessingController {
     return createRuntimeProcessingRetryLaterResponse({
       ...input,
       analytics: this.input.runtimeRetryAnalytics ?? null,
-    });
-  }
-
-  async beginShellPrewarmForUser(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void> {
-    // Hints never create member-specific shells. The memberless coordinator
-    // owns optional prewarming in every mode; allocation alone binds a target.
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-        ...(orchestration?.shellPrewarmOrchestrationAttemptId === undefined ? {} : {
-          orchestrationAttemptId: orchestration.shellPrewarmOrchestrationAttemptId,
-        }),
-        shellPrewarmSource: source ?? "unknown",
-      },
-      message: "Hosted runner shell prewarm admission decided.",
-      phase: "scheduled",
-      userId,
     });
   }
 
@@ -514,8 +467,7 @@ export class RuntimeProcessingController {
       if (
         activeFence.processingMode === "inbox_media_retention"
         || (
-          activeFence.processingMode === "system_mailbox"
-          && requestedProcessingMode === "default"
+          cooperativeMailboxOwnerHandoff
           && triggeredByTrustedWebDirect
         )
       ) {
@@ -527,7 +479,10 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
-      if (!cooperativeMailboxOwnerHandoff) {
+      // Retention waits behind either conversational owner. Default and system
+      // work can wake the same child; only foreground promotion requests a mode
+      // handoff below. A system wake never downgrades a foreground owner.
+      if (requestedProcessingMode === "inbox_media_retention") {
         const activeRuntimeState =
           await this.readActiveRuntimeFenceLiveness({
             activeFence,
@@ -1035,6 +990,7 @@ export class RuntimeProcessingController {
     }
 
     const releaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
+    const small = await isSmallRunnerMember(this.input.runnerRuntimeEnvSource, userId);
     const cold = (reason: RunnerAllocationReason, outcome: "disabled" | "fallback" = "disabled") =>
       measureRunnerAllocationStep(input.timings, "runnerTargetBindElapsedMs", () => this.bindFreshRunnerTarget({
         claimId: createHostedStandbyClaimId(),
@@ -1043,8 +999,11 @@ export class RuntimeProcessingController {
         reason,
         releaseId,
         runtimeInput: input.input,
-        slotName: createHostedRunnerSlotName(releaseId),
+        slotName: createHostedRunnerSlotName(releaseId, small ? "small" : "default"),
       }));
+    // The experiment has no shared pristine inventory. Warm retention above
+    // remains exact-target based, including after selection is disabled.
+    if (small) return await cold("mode_not_allocate");
     if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate") {
       return await cold("mode_not_allocate");
     }
@@ -1289,9 +1248,45 @@ export class RuntimeProcessingController {
     input: RuntimeProcessingInput;
     runtimeWakeStartedAt: number;
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
+    // An existing write fence owns an admitted session. Only a new session
+    // (including replacement) needs the Web-owned consent/member read.
     let processingInput = withRuntimeProcessingOrchestration(input.input, {
       freshStartRequestedAtEpochMs: Date.now(),
+      healthDataAdmissionReadStartedAtEpochMs: Date.now(),
     });
+    let admission: HostedRuntimeHealthDataAdmissionResponse;
+    try {
+      admission = await runRuntimeProcessingCommandStep({
+        budget: input.commandBudget,
+        operation: () => this.input.readHealthDataAdmission(
+          processingInput.userId,
+          readRuntimeProcessingCommandStepTimeoutMs({
+            budget: input.commandBudget,
+            stepTimeoutMs: this.input.env.webControlTimeoutMs,
+          }),
+        ),
+        stepTimeoutMs: this.input.env.webControlTimeoutMs,
+      });
+      if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
+        throw new Error(RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE);
+      }
+    } catch (error) {
+      if (!isRuntimeProcessingCommandBudgetTimeout(error)) throw error;
+      return this.createRetryLater({
+        orchestrationAttemptId: processingInput.orchestrationAttemptId,
+        reason: "command_budget_exhausted",
+        userId: processingInput.userId,
+      });
+    }
+    processingInput = withRuntimeProcessingOrchestration(processingInput, {
+      healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
+    });
+    if (!admission.processingAllowed) {
+      return {
+        kind: "retry_later",
+        retryAt: new Date(Date.now() + 60_000).toISOString(),
+      };
+    }
     const initialRecord = await this.input.stateStore.readState();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -1416,8 +1411,7 @@ export class RuntimeProcessingController {
         freshStartContainerReadyAtEpochMs: preparation.containerReadyAtEpochMs,
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
-      ...(preparation.startupOrchestration ?? {}),
-      ...(preparation.shellPrewarmOrchestration ?? {}),
+      ...preparation.startupOrchestration,
     });
     const preparationOrchestration =
       preparation.prepared.input.orchestration ?? {};
@@ -1432,7 +1426,7 @@ export class RuntimeProcessingController {
         ...toRuntimeInvocationInput(processingInput),
         orchestration: {
           ...preparationOrchestration,
-          ...(processingInput.orchestration ?? {}),
+          ...processingInput.orchestration,
           ...(runtimeInvocationPreparationElapsedMs === undefined ? {} : {
             runtimeInvocationPreparationElapsedMs,
           }),
@@ -1464,7 +1458,7 @@ export class RuntimeProcessingController {
       input: {
         ...prepared.input,
         orchestration: {
-          ...(prepared.input.orchestration ?? {}),
+          ...prepared.input.orchestration,
           freshStartInvocationAcceptedAtEpochMs: Date.now(),
         },
       },
@@ -1606,9 +1600,6 @@ export class RuntimeProcessingController {
       startupOrchestration: toContainerColdStartOrchestrationDiagnostics(
         startupConfirmed.coldStartTiming,
       ),
-      shellPrewarmOrchestration: toShellPrewarmOrchestrationDiagnostics(
-        startupConfirmed.shellPrewarmObservation,
-      ),
     };
   }
 
@@ -1644,7 +1635,6 @@ export class RuntimeProcessingController {
     | {
         coldStartTiming?: RunnerContainerColdStartTiming;
         confirmed: true;
-        shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
       }
     | {
         confirmed: false;
@@ -1752,9 +1742,6 @@ export class RuntimeProcessingController {
           coldStartTiming: readinessResult.coldStartTiming,
         }),
         confirmed: true,
-        ...(readinessResult.shellPrewarmObservation === undefined ? {} : {
-          shellPrewarmObservation: readinessResult.shellPrewarmObservation,
-        }),
       };
     } catch (error) {
       if (

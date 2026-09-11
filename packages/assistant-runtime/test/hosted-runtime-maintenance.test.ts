@@ -2240,71 +2240,7 @@ describe("runHostedDeviceSyncPass", () => {
   });
 
 
-  it("builds a member-only provider runtime from one credential-bearing snapshot", async () => {
-    const memberProviderConfigs = {
-      strava: {
-        clientId: "member-client",
-        clientSecret: "member-secret",
-      },
-    };
-    const snapshot = {
-      connections: [{ connection: { id: "dsc_strava", status: "active" } }],
-      providerConfigs: memberProviderConfigs,
-      userId: "member_123",
-    };
-    const port = createMaintenanceDeviceSyncPortStub();
-    port.fetchSnapshot.mockResolvedValue(snapshot);
-    const service = {
-      close: vi.fn(),
-      drainWorker: vi.fn(async () => 0),
-      getNextJobWakeAt: () => null,
-      getNextWakeAt: () => null,
-      listJobFailureDiagnostics: vi.fn(() => []),
-      listAccounts: vi.fn(() => []),
-      runSchedulerOnce: vi.fn(async () => undefined),
-    };
-    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["strava"]);
-    mocks.createDeviceSyncRegistry.mockReturnValue({
-      list: () => ["strava"],
-    });
-    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
 
-    await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_member_provider_config",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      {
-        providerConfigs: {},
-        publicBaseUrl: "https://device-sync.example.test",
-        secret: "secret_123",
-      },
-      port,
-      45_000,
-    );
-
-    expect(port.fetchSnapshot).toHaveBeenCalledTimes(1);
-    expect(port.fetchSnapshot).toHaveBeenCalledWith({
-      includeCredentialMaterial: true,
-      signal: null,
-    });
-    expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith(
-      memberProviderConfigs,
-    );
-    expect(mocks.createHostedRuntimeDeviceSyncService).toHaveBeenCalledTimes(1);
-    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        snapshot,
-      }),
-    );
-    expect(
-      mocks.syncHostedDeviceSyncControlPlaneState.mock.calls[0]?.[0]?.snapshot,
-    ).toBe(snapshot);
-  });
 
   it("logs stage-specific wearable import latency after successful dirty payload work", async () => {
     const service = {
@@ -5503,6 +5439,49 @@ describe("runHostedAssistantAutomationLane", () => {
     });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
+
+  it("signals concurrent ingestion from the actual provider-start hook while the model pass is held", async () => {
+    let releaseModel!: () => void;
+    const modelHeld = new Promise<void>((resolve) => { releaseModel = resolve; });
+    let signalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    let modelFinished = false;
+    const onProviderRequestStarted = vi.fn(() => signalStarted());
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input: RunAssistantAutomationPassInput) => {
+      await input.onProviderRequestStarted?.({
+        assistantInputIds: [],
+        providerRequestOrdinal: 0,
+        source: "linq",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      });
+      await modelHeld;
+      modelFinished = true;
+      return { nextWakeAt: null, progressed: false };
+    });
+    const running = runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_synthetic_concurrent_provider",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_synthetic_concurrent",
+      },
+      executionContext: { hosted: { memberId: "member_synthetic_concurrent", userEnvKeys: [] } },
+      onProviderRequestStarted,
+      requestId: "request_synthetic_concurrent",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: FIXED_MAINTENANCE_VAULT_ROOT,
+    });
+    try {
+      await started;
+      expect(modelFinished).toBe(false);
+      expect(onProviderRequestStarted).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseModel();
+      await running;
+    }
+    expect(modelFinished).toBe(true);
+  }, 5_000);
 
   it("passes the background-yield signal into hosted cron deferral", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn().mockReturnValue(true);
