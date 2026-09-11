@@ -176,6 +176,8 @@ export interface HostedLocalFullStackScenario {
     userId: string,
     input?: {
       pollIntervalMs?: number;
+      /** Require new work since the last completion; defaults to true. */
+      requireProgress?: boolean;
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
@@ -491,7 +493,11 @@ async function startHostedLocalFullStackScenarioAttempt(
             request.body,
             providerRequestBodyFingerprintSecret,
           ),
+          fixtureMatch: request.fixtureMatch ?? "not_applicable",
           method: request.method,
+          queuedResponseCount: request.queuedResponseCount ?? null,
+          requestKind: request.requestKind ?? "unknown",
+          responseStatus: request.responseStatus ?? null,
           url: request.url,
         }));
         const recentLogs = status ? summarizeHostedRecentLogsForFailure(status) : [];
@@ -656,7 +662,11 @@ async function startHostedLocalFullStackScenarioAttempt(
       waitForHostedCompletion: async (userId, waitInput) => {
         const progressWasAlreadyObserved = observedProgressUsers.delete(userId);
         const previousCompletion = lastCompletedStatusByUser.get(userId);
-        if (!progressWasAlreadyObserved && previousCompletion !== undefined) {
+        if (
+          waitInput?.requireProgress !== false
+          && !progressWasAlreadyObserved
+          && previousCompletion !== undefined
+        ) {
           await scenarioHarness.waitForHostedProgress(userId, {
             afterStatus: previousCompletion,
             pollIntervalMs: waitInput?.pollIntervalMs,

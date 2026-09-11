@@ -22,6 +22,9 @@ import {
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
+  countHostedLocalRuntimeAdmissionWindow,
+} from "./helpers/hosted-local-runtime-admission-window.js";
+import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -48,7 +51,7 @@ const reminderInstructions =
   "Send the user the hosted-local recurring break reminder.";
 const reminderText = "Time for your short break.";
 const dirtyResourceCount = 113;
-const systemMailboxFirstAdmissionWindowMs = 30_000;
+const firstRuntimeAdmissionWindowMs = 30_000;
 const deviceSyncReminderOverlapLeadMs = 60_000;
 const scheduledReminderLeadMs = 180_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
@@ -248,6 +251,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         userId,
         { timeoutMs: 420_000 },
       );
+      const wakeAcceptedAt = new Date();
       const acceptedWake = wakeResult.wakeResult;
       expect(acceptedWake.kind).toBe("runtime_processing_accepted");
       if (acceptedWake.kind !== "runtime_processing_accepted") {
@@ -272,9 +276,16 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       devicePassStagingObservationArmed = false;
 
       const [firstWindowAdmissionCount] = await Promise.all([
-        countFirstSystemMailboxAdmissionWindow({
+        countHostedLocalRuntimeAdmissionWindow({
+          acceptedWake,
           beforeAt: schedule.dueAtIso,
+          buildFailureMessage: async (lines) =>
+            await activeScenario.buildFailureMessage(userId, lines),
           notBefore: runtimeLogsFrom,
+          readStdout: () => activeScenario.harness.cloudflareStdoutTail(),
+          timeoutMs: observationTimeoutMs,
+          wakeAcceptedAt,
+          windowMs: firstRuntimeAdmissionWindowMs,
         }),
         waitForShutdownCheckpointPublicationBarrier(schedule.dueAtIso),
       ]);
@@ -631,94 +642,6 @@ async function waitForPositiveDeviceSyncPassFinished(input: {
       processedJobs: readFiniteNumber(row.redactedJson, "processedJobs"),
     })))}`,
   ]));
-}
-
-interface RuntimeAdmissionObservation {
-  acceptedAt: string;
-  orchestrationAttemptId: string;
-  workspaceAttemptId: string;
-}
-
-async function countFirstSystemMailboxAdmissionWindow(input: {
-  beforeAt: string;
-  notBefore: Date;
-}): Promise<number> {
-  const deadline = Date.now() + observationTimeoutMs;
-  let firstAdmissionAtMs: number | null = null;
-  const observedAdmissions = new Map<string, RuntimeAdmissionObservation>();
-  let admissions: RuntimeAdmissionObservation[] = [];
-
-  while (Date.now() < deadline) {
-    for (const admission of listRuntimeAdmissionsSince(input.notBefore)) {
-      observedAdmissions.set(admission.workspaceAttemptId, admission);
-    }
-    admissions = [...observedAdmissions.values()].sort((left, right) =>
-      Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt)
-    );
-    const firstAdmission = admissions[0] ?? null;
-    if (firstAdmissionAtMs === null && firstAdmission !== null) {
-      firstAdmissionAtMs = Date.parse(firstAdmission.acceptedAt);
-      const reminderDueAtMs = Date.parse(input.beforeAt);
-      if (
-        !Number.isFinite(reminderDueAtMs)
-        || reminderDueAtMs
-          < firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs
-      ) {
-        throw new Error(
-          "The reminder deadline does not leave one full system-mailbox admission window.",
-        );
-      }
-    }
-    if (
-      firstAdmissionAtMs !== null
-      && Date.now()
-        >= firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs
-    ) {
-      const admissionWindowEndMs =
-        firstAdmissionAtMs + systemMailboxFirstAdmissionWindowMs;
-      return admissions.filter((admission) =>
-        Date.parse(admission.acceptedAt) < admissionWindowEndMs
-      ).length;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out observing the first system-mailbox runtime admission window.",
-    `observed accepted attempts: ${JSON.stringify(admissions)}`,
-  ]));
-}
-
-function listRuntimeAdmissionsSince(
-  notBefore: Date,
-): RuntimeAdmissionObservation[] {
-  const admissions = new Map<string, RuntimeAdmissionObservation>();
-  for (const line of requireScenario().harness.cloudflareStdoutTail().split(/\r?\n/u)) {
-    const parsed = parseJson(line.trim());
-    if (
-      !isRecord(parsed)
-      || parsed.component !== "hosted.runner"
-      || parsed.phase !== "runtime.starting"
-      || typeof parsed.time !== "string"
-      || !Number.isFinite(Date.parse(parsed.time))
-      || Date.parse(parsed.time) < notBefore.getTime()
-      || !isRecord(parsed.details)
-      || typeof parsed.details.orchestrationAttemptId !== "string"
-      || parsed.details.orchestrationAttemptId.startsWith("hosted-local-wake:")
-      || typeof parsed.details.runtimeProcessingAction !== "string"
-      || typeof parsed.details.workspaceAttemptId !== "string"
-    ) {
-      continue;
-    }
-    admissions.set(parsed.details.workspaceAttemptId, {
-      acceptedAt: parsed.time,
-      orchestrationAttemptId: parsed.details.orchestrationAttemptId,
-      workspaceAttemptId: parsed.details.workspaceAttemptId,
-    });
-  }
-  return [...admissions.values()].sort((left, right) =>
-    Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt)
-  );
 }
 
 async function expectPendingDirtyResourceCount(
