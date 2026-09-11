@@ -46,6 +46,7 @@ vi.mock("@murphai/core", async (importOriginal) => ({
 }));
 
 import {
+  appendJsonlRecord,
   initializeVault,
   readEventLedgerShardRecords,
   upsertEvent,
@@ -58,6 +59,7 @@ import {
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
   HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+  HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS,
   runHostedIdleCheckpointMaintenance,
 } from "../src/hosted-runtime/idle-maintenance.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
@@ -351,6 +353,173 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(recordUsage).not.toHaveBeenCalled();
   });
 
+  it("does not retry unchanged cleanup failures inside the container idle window", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-07-05T00:00:00.000Z");
+    runInboxMediaRetention.mockRejectedValue(new Error("synthetic unavailable cleanup"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const wakes: number[] = [];
+    try {
+      let now = start;
+      while (now < start + 6 * 60 * 60 * 1000 && wakes.length < 100) {
+        vi.setSystemTime(now);
+        wakes.push(now);
+        const outcome = await runHostedIdleCheckpointMaintenance({
+          credentialSource: "platform", memberId: "member_synthetic_retention",
+          model: null, providerName: null, pendingWork: false,
+          recordUsage: null, resolveAssistantSessionId: null,
+          shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+        });
+        expect(outcome.nextWakeAt).toBeDefined();
+        now = Date.parse(outcome.nextWakeAt!);
+      }
+      expect(warn).toHaveBeenCalledTimes(6);
+      expect(wakes).toHaveLength(6);
+      expect(wakes[1]! - wakes[0]!).toBe(60 * 60 * 1000);
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks an unchanged legacy migration blocker daily using the real retention owners", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-blocked-retention-"));
+    const now = Date.parse("2026-07-05T00:00:00.000Z");
+    const ledgerPath = "ledger/inbox-captures/2026/2026-06.jsonl";
+    const sourceDirectory = "raw/inbox/email/2026/06/cap_synthetic_legacy";
+    const envelopePath = `${sourceDirectory}/envelope.json`;
+    const actual = await vi.importActual<typeof import("@murphai/inboxd/retention")>(
+      "@murphai/inboxd/retention",
+    );
+    runInboxEnvelopeMigration.mockImplementation(actual.runInboxEnvelopeMigration);
+    runInboxTextRetention.mockImplementation(actual.runInboxTextRetention);
+    try {
+      await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+      await appendJsonlRecord({ vaultRoot, relativePath: ledgerPath, record: {
+        schemaVersion: "murph.inbox-capture.v1", captureId: "cap_synthetic_legacy",
+        identityKey: "email:self", eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VB98",
+        source: "email", externalId: "synthetic-legacy", thread: { id: "synthetic", isDirect: true },
+        actor: { isSelf: false }, occurredAt: "2026-06-01T00:00:00.000Z",
+        recordedAt: "2026-06-01T00:00:00.000Z", raw: {}, sourceDirectory,
+        rawRefs: [envelopePath], attachments: [], text: "Synthetic old content", envelopePath,
+      } });
+      const original = await fs.readFile(path.join(vaultRoot, ledgerPath), "utf8");
+      vi.useFakeTimers({ toFake: ["Date"] });
+      for (let day = 0; day < 2; day += 1) {
+        vi.setSystemTime(now + day * 24 * 60 * 60 * 1000);
+        const outcome = await runHostedIdleCheckpointMaintenance({
+          credentialSource: "platform", memberId: "member_synthetic_retention",
+          model: null, providerName: null, pendingWork: false,
+          recordUsage: null, resolveAssistantSessionId: null,
+          shutdownSignal: null, vaultRoot, wakeSignal: null,
+        });
+        expect(outcome.nextWakeAt).toBe(new Date(now + (day + 1) * 24 * 60 * 60 * 1000).toISOString());
+        expect(await fs.readFile(path.join(vaultRoot, ledgerPath), "utf8")).toBe(original);
+      }
+    } finally {
+      vi.useRealTimers();
+      await fs.rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not immediately continue a migration batch that applied nothing because it is blocked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxEnvelopeMigration.mockResolvedValue({
+      activeOperationCount: 0, blockerCount: 1, candidateBytes: 10,
+      candidateCount: 251, deletedBytes: 0, deletedCount: 0, hasMore: true,
+      hasWork: true, mismatchCount: 1, missingLedgerCount: 0,
+      mode: "apply", mutated: false, scannedEnvelopeCount: 252,
+    });
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform", memberId: "member_synthetic_retention",
+        model: null, providerName: null, pendingWork: false,
+        recordUsage: null, resolveAssistantSessionId: null,
+        shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+      });
+      expect(outcome.nextWakeAt).toBe("2026-07-06T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["2026-07-05T00:10:00.000Z", "2026-07-05T00:10:00.000Z"],
+    ["2026-07-07T00:00:00.000Z", "2026-07-06T00:00:00.000Z"],
+  ])("keeps real expiry %s scheduled alongside a blocked legacy capture", async (expiry, expected) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxTextRetention.mockResolvedValue({
+      expiredCaptures: 0, hasMoreEligibleCaptures: false,
+      legacyCapturesSkipped: 1, nextEligibleAt: expiry,
+    });
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform", memberId: "member_synthetic_retention",
+        model: null, providerName: null, pendingWork: false,
+        recordUsage: null, resolveAssistantSessionId: null,
+        shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+      });
+      expect(outcome.nextWakeAt).toBe(expected);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves an earlier expiry on failure and recovers without a stale retry wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const reportRetentionIssue = vi.fn(async () => { throw new Error("synthetic log outage"); });
+    runHostedPendingAssistantInputContentRetention.mockResolvedValueOnce({
+      inputsRetired: 0, inputsSuppressed: 0, nextEligibleAt: "2026-07-05T00:02:00.000Z",
+    });
+    runInboxMediaRetention.mockRejectedValueOnce(new Error("synthetic private fixture content"));
+    const input = {
+      credentialSource: "platform" as const, memberId: "member_synthetic_retention",
+      model: null, providerName: null, pendingWork: false,
+      recordUsage: null, reportRetentionIssue, resolveAssistantSessionId: null,
+      shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+    };
+    try {
+      const failed = await runHostedIdleCheckpointMaintenance(input);
+      expect(failed.nextWakeAt).toBe("2026-07-05T00:02:00.000Z");
+      expect(reportRetentionIssue).toHaveBeenCalledWith({
+        stage: "media", outcome: "failed", errorCode: "runtime_error",
+      });
+      vi.setSystemTime(new Date(failed.nextWakeAt!));
+      const recovered = await runHostedIdleCheckpointMaintenance(input);
+      expect(recovered.nextWakeAt).toBeUndefined();
+      expect(runInboxTextRetention).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("continues immediately when an unblocked migration batch makes progress", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxEnvelopeMigration.mockResolvedValue({
+      activeOperationCount: 0, blockerCount: 0, candidateBytes: 10,
+      candidateCount: 251, deletedBytes: 9, deletedCount: 250, hasMore: true,
+      hasWork: true, mismatchCount: 0, missingLedgerCount: 0,
+      mode: "apply", mutated: true, scannedEnvelopeCount: 251,
+    });
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform", memberId: "member_synthetic_retention",
+        model: null, providerName: null, pendingWork: false,
+        recordUsage: null, resolveAssistantSessionId: null,
+        shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
+      });
+      expect(outcome.nextWakeAt).toBe("2026-07-05T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("runs inbox media retention during idle maintenance and keeps compaction fail-open", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
@@ -386,7 +555,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       expect(outcome).toEqual({
         kind: "skipped",
         nextWakeAt: new Date(
-          Date.parse("2026-07-05T00:00:00.000Z") + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+          Date.parse("2026-07-05T00:00:00.000Z") + HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS,
         ).toISOString(),
         nextWakeReason: "inbox_media_retention",
         reason: "below_threshold",

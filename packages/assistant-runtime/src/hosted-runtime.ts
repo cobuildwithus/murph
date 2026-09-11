@@ -7812,6 +7812,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   >[0]["persistGeneratedImageRetention"];
   providerName: string | null;
   recordUsage: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["recordUsage"];
+  reportRetentionIssue?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["reportRetentionIssue"];
   resolveAssistantSessionId: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["resolveAssistantSessionId"];
   shutdownSignal: AbortSignal | null;
   vaultRoot: string;
@@ -7849,6 +7850,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
     providerName: input.providerName,
     recordUsage: input.recordUsage,
+    reportRetentionIssue: input.reportRetentionIssue,
     resolveAssistantSessionId: input.resolveAssistantSessionId,
     shutdownSignal: input.shutdownSignal,
     vaultRoot: input.vaultRoot,
@@ -7907,6 +7909,20 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
         },
         providerName: null,
         recordUsage: null,
+        reportRetentionIssue: async (issue) => {
+          await writeHostedRuntimeLogBestEffort({
+            entry: {
+              ...buildHostedRuntimeLogContextFields(input.canonicalWriteRunnerInput.runtimeLogContext),
+              component: "runtime",
+              eventCode: "runtime.retention_issue",
+              // Buffer diagnostic delivery so an arriving foreground wake can preempt.
+              level: "info",
+              phase: "checkpoint",
+              redactedJson: { ...issue },
+            },
+            platform: input.canonicalWriteRunnerInput.platform,
+          });
+        },
         resolveAssistantSessionId: null,
         shutdownSignal: input.shutdownSignal,
         vaultRoot: input.vaultRoot,

@@ -4182,6 +4182,20 @@ due-time projection on the workspace/status surface. Assistant work uses
 independent `inboxMediaRetentionWakeAt` field. Web does not materialize timer
 rows, and Cloudflare does not persist timer work items.
 
+Idle retention immediately continues actionable bounded batches, but an envelope
+migration blocked before apply is not actionable continuation. Unmigrated legacy
+captures and migration blockers recheck after 24 hours, matching protected media.
+Cleanup exceptions retry after one hour so an unchanged failure does not keep the
+runner inside its idle window. Foreground/shutdown interruption retains its short
+five-minute retry. Earlier expiry deadlines already discovered by completed passes
+remain scheduled, and ordinary idle maintenance may retry sooner. These schedules
+do not bypass migration equivalence checks or claim that blocked content expired.
+Retention-only invocations report `runtime.retention_issue` through the existing
+best-effort runtime-log owner: closed stage/outcome values, safe error codes, and
+legacy/migration blocker counts only. Log failures do not affect checkpoints.
+The additive event is safe with an older consumer, which may drop its diagnostics;
+release the Web log consumer first when complete diagnostic coverage is required.
+
 If the runner needs a synthetic in-process object for logging or execution
 plumbing, it may use an internal-only `runtime.timer` wake. That object is not a
 persisted mailbox row unless an external product/control-plane mutation
