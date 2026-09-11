@@ -176,6 +176,8 @@ export interface HostedLocalFullStackScenario {
     userId: string,
     input?: {
       pollIntervalMs?: number;
+      /** Require new work since the last completion; defaults to true. */
+      requireProgress?: boolean;
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
@@ -657,7 +659,11 @@ async function startHostedLocalFullStackScenarioAttempt(
       waitForHostedCompletion: async (userId, waitInput) => {
         const progressWasAlreadyObserved = observedProgressUsers.delete(userId);
         const previousCompletion = lastCompletedStatusByUser.get(userId);
-        if (!progressWasAlreadyObserved && previousCompletion !== undefined) {
+        if (
+          waitInput?.requireProgress !== false
+          && !progressWasAlreadyObserved
+          && previousCompletion !== undefined
+        ) {
           await scenarioHarness.waitForHostedProgress(userId, {
             afterStatus: previousCompletion,
             pollIntervalMs: waitInput?.pollIntervalMs,
