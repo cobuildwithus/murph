@@ -1,6 +1,6 @@
 # Bound hosted runtime churn without delaying real input
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -60,4 +60,6 @@ Explain why the existing no-progress backoff failed to contain repeated interrup
 - Scheduler regression failed on the prior code with twenty immediate admissions and no clock advance. With the fix it admits eight passes across 52.5 simulated minutes, retains the unchanged semantic fingerprint across Continue-As-New, and caps retries at ten minutes.
 - Public focused proof: 36 mailbox-state cases, 104 runtime system/preemption/concurrency cases, and both imported-device and locally materialized timer completion variants passed. Runtime and Web typechecks, ten changelog rendering cases, docs drift, and the complexity diff guard passed.
 - Private focused proof: 399 workflow-machine cases, three replay cases (including the new old-default-loop fixture), entrypoint tests and three native quiescence E2E cases passed. Removing the replay guard intentionally makes the new fixture fail at the old second admission; the production guard was restored afterward.
-- Remaining: final public content checks, private required `pnpm verify`, scoped diff/privacy review, commits, ReviewGPT, and exact-head CI.
+- Candidate review: source/test/doc readback and privacy review passed; the production change removes the duplicate ownership prerequisite and adds no new state or dependency.
+- Candidates: public PR #3260 corrects the producer; private PR #132 contains older projections. Private required `pnpm verify`, required ReviewGPT and exact-head CI remain pending; no production mutation was performed.
+Completed: 2026-09-11
