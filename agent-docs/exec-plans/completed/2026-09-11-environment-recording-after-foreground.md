@@ -1,6 +1,6 @@
 # Finish interrupted Environment recording after foreground work
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -61,5 +61,10 @@ and the saved Habitat indicator in the published Browser Vault replica.
 
 - Red: the composed replacement regression fails with one retained recording, the projection-failure code, a future retry and no projection-scope read or replica publication.
 - Initial green: the same regression passes after the two handoff conditions; the foreground reply, handled prefix and actual Habitat replica all complete.
-- Pending: corrected real-owner regression, neighboring durable-effect/system-work tests, runtime typecheck, docs drift, complexity and privacy inspection.
+- Green: all three real-owner cases pass in 67.62 seconds, including the actual 60-second failure retry and fresh-foreground preemption. Eight selected existing runtime regressions pass across five files. Runtime typecheck passes.
+- Green: docs drift and whitespace checks pass; complexity debt remains 546 with maximum 252 and 21 unchanged existing hotspots. Parent inspection confirms two production conditions, existing state ownership and synthetic fixture privacy.
+- Product UX: Ready for this patch boundary. The actual foreground replies, durable handled prefix and published Habitat are proved through composed owners; model/control transport remains synthetic. No autonomous Temporal or production success is claimed.
+- Green: all 10 focused changelog rendering tests pass; the production archive reference returns HTTP 200 and contains its documented anchor.
+- Changelog: PR #3277 is associated with the existing Environment recovery item; its public copy and presentation remain unchanged.
 - Pending: exact-head PR CI and ReviewGPT; then the unchanged managed foreground-priority journey and release pipeline.
+Completed: 2026-09-11
