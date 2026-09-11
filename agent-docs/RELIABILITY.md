@@ -507,8 +507,14 @@ Last verified: 2026-09-04
   of preserving stale authority. Orchestration may delay repeated system-only
   processing for 30 seconds, two minutes, then ten minutes while the progress
   generation and handled-through frontier remain unchanged. Workspace-version,
-  attempt, signal, and selected-wake churn are not progress. Due foreground,
-  default-processing, provider-owned, and retention work bypasses the delay
+  attempt, signal, and selected-wake churn are not progress.
+  Local system timers use the same execution-class predicate as imported work;
+  a missing Web lane sequence changes handled-prefix accounting, never wake
+  ownership. Known device reconciliation wakes cannot acquire default-owner
+  bypass authority from the independent default-wake projection. The private
+  Temporal consumer versions that defensive admission correction for replay.
+  Due foreground, default-processing, provider-owned, and retention work bypasses
+  the delay
   without clearing it. When live runtime evaluation disproves an overdue
   default-processing projection and selects a due model-free frontier, the
   runtime checkpoints the corrected projections before releasing that pass.

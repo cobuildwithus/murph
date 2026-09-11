@@ -4,6 +4,10 @@ Last verified: 2026-09-05
 
 ## Purpose
 
+Local system-timer ownership and progress-based churn containment are owned by
+`agent-docs/RELIABILITY.md`; automatic restart, admission and replay regressions
+are indexed in `agent-docs/references/testing-ci-map.md`.
+
 Prepared device-webhook revision rebinding and content-free transport/replan
 diagnostics are owned by `agent-docs/RELIABILITY.md`; local PostgreSQL burst and
 cryptographic-binding proof is indexed in `agent-docs/references/testing-ci-map.md`.

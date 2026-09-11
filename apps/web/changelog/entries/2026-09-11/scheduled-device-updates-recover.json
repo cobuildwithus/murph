@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "scheduled-device-updates-recover",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Scheduled device updates recover in the background",
+    "summary": "Scheduled device updates now use the same recovery path as incoming device data.",
+    "details": "Pending updates keep their place and can complete through background recovery.",
+    "relevanceTags": [
+      "devices"
+    ],
+    "sourcePullRequests": []
+  }
+}
