@@ -1062,6 +1062,15 @@ fallback. Member-funded core usage and Murph-funded tool usage remain separate
 authorities on the same invocation fence. The full contract lives in
 `agent-docs/product-specs/bring-your-own-inference.md`.
 
+Inference settings writes do not notify or start runners. Each normal mailbox
+fetch carries the saved managed provider plus the selected custom connection
+revision, derived from the same member read. The runtime compares that revision
+with its existing model alias and hands pending work to a fresh invocation when
+the route differs. No separate configuration cache, invalidation signal, or
+settings retry is required. Web must emit the optional revision field before a
+new runtime serves custom inference; absent custom identity cannot confirm a
+custom invocation. Older readers ignore the additive field.
+
 ## Hosted Computer Authentication
 
 `apps/web` owns both Kernel login transports behind the existing durable

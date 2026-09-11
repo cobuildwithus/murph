@@ -216,8 +216,10 @@ Allowed Temporal state is tiny and pointer-only:
   that calls the existing Cloudflare processing adapter when facts are idle. It
   carries no provider value or credential, is discarded while facts are
   blocked, and is cleared after accepted processing only when no newer wake
-  arrived. Authenticated provider changes are the current Web producer of this
-  payload-free signal. Newly committed hosted-group projection grants instead
+  arrived. Settings no longer produce this signal: inference preferences are
+  saved in Postgres and observed through normal invocation and mailbox reads.
+  The signal remains supported for existing histories and operational callers.
+  Newly committed hosted-group projection grants instead
   atomically admit the existing durable `runtime.maintenance-requested`
   system-mailbox row with the grant transaction, then signal its pointer after
   commit.
@@ -871,11 +873,11 @@ The hard-cut architecture is accepted when:
   no private revision pointer or reader policy. Missing, stale, skipped,
   canceled, duplicated, malformed, or failed proof remains red or pending.
 
-- Every public `main` push runs the exact-main producer and compatibility
+- Every public `main` push runs the exact-candidate producer and compatibility
   controller again in `.github/workflows/temporal-web-deployment-admission.yml`.
   Vercel must select the `Temporal Web production admission` job as a
   production Deployment Check; with that external binding in place, production
-  domains stay on the previous deployment until the current public commit,
+  domains stay on the previous deployment until the pinned public candidate,
   current private `main`, and current live readers produce one accepted proof.
   That same private run selects the `production_core` scope from its canonical
   integration manifest: Linq delivery, scheduled reminder, hosted-web browser
@@ -891,8 +893,14 @@ The hard-cut architecture is accepted when:
   configuration and reject mismatch without exporting its component values.
   The release mode rejects an arbitrary public ref; public pull requests remain
   fixture-only and never execute beside private source. The public controller
-  re-reads both branch heads, and private protected attestations re-read the
-  supported reader set and both heads, before success. Every `main` commit creates one managed
+  and private protected attestations re-read both branch heads before success:
+  public main may advance if the exact tested candidate remains its ancestor;
+  private main must still equal the dispatched controller. The supported reader
+  set, lifecycle, routing and target must remain unchanged. Required public main
+  checks use SHA-scoped concurrency; Web admission retains its active run and
+  coalesces waiting pushes to the latest candidate. The private plan, runner
+  bundle and scenarios all retain the requested public SHA, never the newer tip.
+  Deploy this private consumer before the public controller change. Every `main` commit creates one managed
   candidate, and no local production upload or historical promotion/rollback
   path may compete with that Git owner. Rollback uses a fresh revert commit so
   it receives current proof. This proves the reconciliation-facts wire boundary

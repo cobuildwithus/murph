@@ -8,7 +8,12 @@ export {
   VAULT_LAYOUT,
   VAULT_SCHEMA_VERSION,
 } from "./constants.ts";
-export { VaultError, isVaultError } from "./errors.ts";
+export {
+  VaultError,
+  isVaultError,
+  isActiveCanonicalWriteLockError,
+  type CanonicalWriteLockErrorDetails,
+} from "./errors.ts";
 export { deterministicContractId } from "./ids.ts";
 export {
   createDeviceBatchImportSession,

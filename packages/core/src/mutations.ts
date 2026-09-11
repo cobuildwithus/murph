@@ -4695,6 +4695,128 @@ function mapCurrentDeviceEventOwners(
   };
 }
 
+// A provider update and the member overlay above it are one ordered revision
+// pair, regardless of whether the provider changed content or only its version.
+function buildDeviceProviderRevisionEntries(input: {
+  entry: PreparedDeviceEventEntry;
+  externalRef: ExternalRef;
+  latest: EventRecord;
+  maxRevision: number;
+  memberMatch?: IndexedEventExternalRefMatch;
+  migratesIdentity: boolean;
+  migratesTimestamp: boolean;
+  indexedProviderRecord?: EventRecord;
+}): {
+  providerEntry: PreparedJsonlEntry<EventRecord>;
+  memberEntry?: PreparedJsonlEntry<EventRecord>;
+} {
+  const { entry, externalRef, latest, memberMatch } = input;
+  const revision = Math.max(eventSpineRevision(latest), input.maxRevision) + 1;
+  const providerEntry = {
+    relativePath: entry.relativePath,
+    record: {
+      ...entry.record,
+      id: latest.id,
+      lifecycle: buildEventSpineLifecycle(revision),
+    },
+  };
+  if (!memberMatch) {
+    return { providerEntry };
+  }
+  const migratesMemberOccurrence = input.migratesTimestamp
+    && input.indexedProviderRecord !== undefined
+    && latest.occurredAt === input.indexedProviderRecord.occurredAt
+    && latest.dayKey === input.indexedProviderRecord.dayKey;
+  const memberEntry = {
+    relativePath: migratesMemberOccurrence
+      ? entry.relativePath
+      : memberMatch.relativePath || toEventLedgerFile(latest.occurredAt),
+    record: {
+      ...latest,
+      ...(migratesMemberOccurrence
+        ? { occurredAt: entry.record.occurredAt, dayKey: entry.record.dayKey }
+        : {}),
+      ...(input.migratesTimestamp || input.migratesIdentity
+        ? { externalRef, dataOrigin: entry.record.dataOrigin }
+        : {}),
+      lifecycle: buildEventSpineLifecycle(revision + 1),
+    },
+  };
+  return { providerEntry, memberEntry };
+}
+
+function shouldRetainJunctionSparseRevision(
+  indexedExternalRef: ExternalRef,
+  externalRef: ExternalRef,
+): boolean {
+  if (
+    !isJunctionSparseIntervalExternalRef(indexedExternalRef)
+    || !isJunctionSparseIntervalExternalRef(externalRef)
+    || (indexedExternalRef.version === undefined && externalRef.version === undefined)
+  ) {
+    return false;
+  }
+  const comparison = compareIncomingExternalRefVersion(indexedExternalRef, externalRef);
+  if (comparison === null) {
+    const incomingVersion = externalRef.version;
+    const existingVersion = indexedExternalRef.version;
+    const replacesUnorderedBaseline = incomingVersion !== undefined
+      && isWritableIsoDateTime(incomingVersion)
+      && (existingVersion === undefined || !isWritableIsoDateTime(existingVersion));
+    if (!replacesUnorderedBaseline) {
+      throw new VaultError(
+        "EVENT_SOURCE_REVISION_UNORDERED",
+        "Changed Junction sparse intervals require comparable explicit provider revisions; nothing was imported.",
+      );
+    }
+  }
+  if (comparison === 0) {
+    throw new VaultError(
+      "EVENT_SOURCE_REVISION_CONFLICT",
+      "Junction sparse interval content conflicts at the same provider revision; nothing was imported.",
+    );
+  }
+  return comparison !== null && comparison < 0;
+}
+
+function shouldRetainWhoopProviderRevision(input: {
+  index: EventExternalRefIndex;
+  refKey: string;
+  latest: EventRecord;
+  incoming: EventRecord;
+  externalRef: ExternalRef;
+  indexedExternalRef: ExternalRef;
+  matchedEntries: ResolvedDeviceEventIdentity["matchedEntries"];
+}): boolean {
+  const { index, refKey, latest, incoming, externalRef, indexedExternalRef, matchedEntries } = input;
+  if (indexedExternalRef.system !== "whoop" || externalRef.system !== "whoop") {
+    return false;
+  }
+  const comparison = compareIncomingExternalRefVersion(indexedExternalRef, externalRef);
+  if (comparison !== null && comparison < 0) {
+    return true;
+  }
+  if (comparison !== 0) {
+    return false;
+  }
+  const baselineRevision = whoopSleepTypeProviderBaselineRevision(index, refKey, latest.id, incoming);
+  if (baselineRevision === null) {
+    throw new VaultError(
+      "EVENT_SOURCE_REVISION_CONFLICT",
+      `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+        `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
+        `"${externalRef.version}"; nothing was imported.`,
+    );
+  }
+  // sleepType normalization cannot resurrect deletions or replace a newer
+  // canonical/member revision. Unrelated snapshot resources may still commit.
+  return isDeletedEventSpineRecord(latest)
+    || eventSpineRevision(latest) !== baselineRevision
+    || matchedEntries.some((match) =>
+      hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+    );
+}
+
 // Device-sync ingestion invariant 4: merge is idempotent on the record's own
 // externalRef, so overlapping push/pull re-imports of the same provider record
 // must not mint new events. Re-imports with identical content (ignoring
@@ -4732,6 +4854,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
   // Keep the provider baseline and optional member overlay together in both
   // the in-memory index and the ordered append list.
   const stageProviderRevision = (input: {
+    entryIndex?: number;
     refKey: string;
     externalRef: ExternalRef;
     providerEntry: PreparedJsonlEntry<EventRecord>;
@@ -4764,6 +4887,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
     appendEntries.push(providerEntry);
     if (memberEntry) {
       appendEntries.push(memberEntry);
+    }
+    if (input.entryIndex !== undefined) {
+      appendRecordIdByPreparedRecordId.set(
+        entries[input.entryIndex]!.record.id,
+        providerEntry.record.id,
+      );
+      recordsByEntryIndex.set(input.entryIndex, current);
+      supersededCount += 1;
     }
   };
 
@@ -4989,43 +5120,30 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
+    const historicalUserEditMatch = matchedEntries.find((match) =>
+      hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+    );
     if (matchesIndexedProviderContent && !reassertsUnversionedSetMember) {
-      const historicalUserEditMatch = matchedEntries.find((match) =>
-        hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
-      );
       if (
         historicalUserEditMatch
         && indexedSourceVersionComparison !== null
         && indexedSourceVersionComparison > 0
       ) {
-        const providerRevision = Math.max(
-          eventSpineRevision(latest),
-          index.maxRevisionById.get(latest.id) ?? 0,
-        ) + 1;
-        const providerBaseline: EventRecord = {
-          ...entry.record,
-          id: latest.id,
-          lifecycle: buildEventSpineLifecycle(providerRevision),
-        };
-        const retainedMemberRevision: EventRecord = {
-          ...latest,
-          ...(migratesJunctionNoIdProfileIdentity
-            ? { externalRef, dataOrigin: entry.record.dataOrigin }
-            : {}),
-          lifecycle: buildEventSpineLifecycle(providerRevision + 1),
-        };
-        const retainedMemberPath = historicalUserEditMatch.indexedMatch.relativePath
-          || toEventLedgerFile(latest.occurredAt);
         stageProviderRevision({
+          entryIndex,
           refKey,
           externalRef,
-          providerEntry: { relativePath: entry.relativePath, record: providerBaseline },
-          memberEntry: { relativePath: retainedMemberPath, record: retainedMemberRevision },
+          ...buildDeviceProviderRevisionEntries({
+            entry,
+            externalRef,
+            latest,
+            maxRevision: index.maxRevisionById.get(latest.id) ?? 0,
+            memberMatch: historicalUserEditMatch.indexedMatch,
+            migratesIdentity: migratesJunctionNoIdProfileIdentity,
+            migratesTimestamp: false,
+          }),
           matchedEntries,
         });
-        appendRecordIdByPreparedRecordId.set(entry.record.id, providerBaseline.id);
-        recordsByEntryIndex.set(entryIndex, retainedMemberRevision);
-        supersededCount += 1;
         continue;
       }
       if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
@@ -5044,91 +5162,22 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (
       indexedProviderMatch
-      && isJunctionSparseIntervalExternalRef(indexedProviderMatch.indexedExternalRef)
-      && isJunctionSparseIntervalExternalRef(externalRef)
       && (
-        indexedProviderMatch.indexedExternalRef.version !== undefined
-        || externalRef.version !== undefined
+        shouldRetainJunctionSparseRevision(indexedProviderMatch.indexedExternalRef, externalRef)
+        || shouldRetainWhoopProviderRevision({
+          index,
+          refKey,
+          latest,
+          incoming: entry.record,
+          externalRef,
+          indexedExternalRef: indexedProviderMatch.indexedExternalRef,
+          matchedEntries,
+        })
       )
     ) {
-      const sourceVersionComparison = compareIncomingExternalRefVersion(
-        indexedProviderMatch.indexedExternalRef,
-        externalRef,
-      );
-      if (sourceVersionComparison === null) {
-        const incomingVersion = externalRef.version;
-        const existingVersion = indexedProviderMatch.indexedExternalRef.version;
-        const replacesUnorderedBaseline = incomingVersion !== undefined
-          && isWritableIsoDateTime(incomingVersion)
-          && (existingVersion === undefined || !isWritableIsoDateTime(existingVersion));
-        if (!replacesUnorderedBaseline) {
-          throw new VaultError(
-            "EVENT_SOURCE_REVISION_UNORDERED",
-            "Changed Junction sparse intervals require comparable explicit provider revisions; nothing was imported.",
-          );
-        }
-      }
-      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
-        skippedDuplicateCount += 1;
-        retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
-        continue;
-      }
-      if (sourceVersionComparison === 0) {
-        throw new VaultError(
-          "EVENT_SOURCE_REVISION_CONFLICT",
-          "Junction sparse interval content conflicts at the same provider revision; nothing was imported.",
-        );
-      }
-    }
-
-    if (
-      indexedProviderMatch
-      && indexedProviderMatch.indexedExternalRef.system === "whoop"
-      && externalRef.system === "whoop"
-    ) {
-      const sourceVersionComparison = compareIncomingExternalRefVersion(
-        indexedProviderMatch.indexedExternalRef,
-        externalRef,
-      );
-      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
-        skippedDuplicateCount += 1;
-        retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
-        continue;
-      }
-      const sleepTypeBaselineRevision = sourceVersionComparison === 0
-        ? whoopSleepTypeProviderBaselineRevision(index, refKey, latest.id, entry.record)
-        : null;
-      const hasSleepTypeProviderBaseline = sleepTypeBaselineRevision !== null;
-      if (
-        sourceVersionComparison === 0
-        && !hasSleepTypeProviderBaseline
-      ) {
-        throw new VaultError(
-          "EVENT_SOURCE_REVISION_CONFLICT",
-          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-            `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
-            `"${externalRef.version}"; nothing was imported.`,
-        );
-      }
-      if (
-        hasSleepTypeProviderBaseline
-        && (
-          isDeletedEventSpineRecord(latest)
-          || eventSpineRevision(latest)
-            !== sleepTypeBaselineRevision
-          || matchedEntries.some((match) =>
-            hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
-          )
-        )
-      ) {
-        // sleepType is provider normalization metadata. Never resurrect a
-        // deleted event or replace a newer canonical revision merely to
-        // backfill it; preserving this row also lets unrelated snapshot
-        // resources commit.
-        skippedDuplicateCount += 1;
-        retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
-        continue;
-      }
+      skippedDuplicateCount += 1;
+      retainRecord(entryIndex, latest, eventSpineRevisionsAreComplete(index, latest.id));
+      continue;
     }
 
     // Companion HealthKit sync versions are nonnegative monotonic integers.
@@ -5176,57 +5225,22 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    const historicalUserEditMatch = matchedEntries.find((match) =>
-      hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
-    );
-
-    const revision = Math.max(
-      eventSpineRevision(latest),
-      index.maxRevisionById.get(latest.id) ?? 0,
-    ) + 1;
-    const superseding: EventRecord = {
-      ...entry.record,
-      id: latest.id,
-      lifecycle: buildEventSpineLifecycle(revision),
-    };
-    const migratesRetainedMemberOccurrence = migratesJunctionStableProfileTimestamp
-      && indexedProviderMatch !== undefined
-      && latest.occurredAt === indexedProviderMatch.indexedRecord.occurredAt
-      && latest.dayKey === indexedProviderMatch.indexedRecord.dayKey;
-    const retainedMemberRevision = historicalUserEditMatch
-      ? {
-          ...latest,
-          ...(migratesJunctionStableProfileTimestamp
-            ? {
-                ...(migratesRetainedMemberOccurrence
-                  ? { occurredAt: entry.record.occurredAt, dayKey: entry.record.dayKey }
-                  : {}),
-                externalRef,
-                dataOrigin: entry.record.dataOrigin,
-              }
-            : migratesJunctionNoIdProfileIdentity
-              ? { externalRef, dataOrigin: entry.record.dataOrigin }
-              : {}),
-          lifecycle: buildEventSpineLifecycle(revision + 1),
-        }
-      : null;
-    const retainedMemberPath = migratesRetainedMemberOccurrence
-      ? entry.relativePath
-      : historicalUserEditMatch?.indexedMatch.relativePath
-        || toEventLedgerFile(latest.occurredAt);
-
     stageProviderRevision({
+      entryIndex,
       refKey,
       externalRef,
-      providerEntry: { relativePath: entry.relativePath, record: superseding },
-      memberEntry: retainedMemberRevision
-        ? { relativePath: retainedMemberPath, record: retainedMemberRevision }
-        : undefined,
+      ...buildDeviceProviderRevisionEntries({
+        entry,
+        externalRef,
+        latest,
+        maxRevision: index.maxRevisionById.get(latest.id) ?? 0,
+        memberMatch: historicalUserEditMatch?.indexedMatch,
+        migratesIdentity: migratesJunctionNoIdProfileIdentity,
+        migratesTimestamp: migratesJunctionStableProfileTimestamp,
+        indexedProviderRecord: indexedProviderMatch?.indexedRecord,
+      }),
       matchedEntries,
     });
-    appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
-    recordsByEntryIndex.set(entryIndex, retainedMemberRevision ?? superseding);
-    supersededCount += 1;
   }
 
   for (const set of authoritativeEventSets) {

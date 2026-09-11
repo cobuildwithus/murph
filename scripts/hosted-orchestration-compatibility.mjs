@@ -573,6 +573,17 @@ async function resolvePrivateMain({ encodedPrivateRepository, token }) {
   ));
 }
 
+// A later merge does not change the candidate that produced these fixtures.
+// Compare immutable SHAs and require an exact ancestor, never arbitrary PR code.
+export function inspectPublicCandidateAncestry(comparison, candidateSha) {
+  assertSha(candidateSha, "public candidate SHA");
+  if (comparison?.status !== "ahead"
+    || comparison.base_commit?.sha !== candidateSha
+    || comparison.merge_base_commit?.sha !== candidateSha) {
+    throw new Error("Public deployment candidate is not in protected branch history.");
+  }
+}
+
 export async function runTemporalCompatibility({
   dispatchMode = TEMPORAL_COMPATIBILITY_MODE,
   expectedBaseRef,
@@ -619,7 +630,11 @@ export async function runTemporalCompatibility({
         "public deployment branch revalidation",
       ), expectedBaseRef);
       if (currentSha !== publicSha) {
-        throw new Error("Public deployment branch changed during Temporal compatibility proof.");
+        inspectPublicCandidateAncestry(await fetchJson(
+          `https://api.github.com/repos/${encodedPublicRepository}/compare/${publicSha}...${currentSha}`,
+          { headers: githubHeaders(publicToken) },
+          "public deployment candidate ancestry",
+        ), publicSha);
       }
       return;
     }
