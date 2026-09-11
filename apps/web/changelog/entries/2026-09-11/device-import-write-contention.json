@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "device-import-write-contention",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable wearable updates",
+    "summary": "Murph retries a wearable update if another save briefly prevents it from being recorded.",
+    "details": "Retries stay limited, and existing records remain protected while the other save finishes.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3325
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 # Preserve device imports through canonical write contention
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -40,3 +40,10 @@ ReviewGPT authored the accepted eight-file patch. Core supplies a closed active/
 Focused proof: 14 contention service scenarios passed, including real canonical stress readback after release, terminal unsupported errors, three-attempt exhaustion, connection/disconnect/lease fencing, and foreground abort precedence. Core locking and parallel ownership: 11 tests passed. Core, importers and device-syncd typechecks passed. Complexity guard passed: unchanged existing service hotspots (81 and 46); the classifier adds no asynchronous work or new owner. Documentation index now routes the new reliability contract.
 
 Product UX: Patch; Ready. Accepted updates survive temporary active contention and commit after normal release within the existing attempt budget. Persistent contention still exhausts; stale and unknown failures retain prior behavior. Existing dead jobs are not replayed. No provider API, prompt, permission or member-message behavior changes. Final PR review and exact-head CI remain pending.
+
+## Local completion and PR handoff
+
+PR #3325 contains the exact accepted production patch. Full device-service regression: 163 passed; core locking and parallel ownership: 11 passed; source recovery policy: 17 passed. Changelog production-component rendering: 10 passed. Affected three-package typechecks, complexity, docs drift, docs gardening and whitespace checks passed. Parent review found no additional production changes necessary. No new Frog entry was needed; existing entries #2662 and #2588 cover observed tooling friction.
+
+Implementation and local proof are complete. The original session owns final ReviewGPT on the stable pushed head concurrently with required CI and will record their disposition in the PR and automation evidence. This historical plan does not claim those still-pending gates passed. No merge, deployment, production replay or provider action is authorized by this completion.
+Completed: 2026-09-11
