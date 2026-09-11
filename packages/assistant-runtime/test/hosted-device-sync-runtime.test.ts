@@ -17,6 +17,11 @@ import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-
 import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
+import {
+  buildJunctionWearableHostedReplayPlan,
+  DEFAULT_JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_RELATIVE_PATH,
+  JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
+} from "@murphai/vault-usecases/testing";
 
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
@@ -27,7 +32,7 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { buildJunctionProviderSourceInstanceKey, canonicalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import {
   resolveGoogleHealthFitbitMigrationSources,
 } from "@murphai/device-syncd/fitbit-migration";
@@ -95,6 +100,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
+  systemMailboxItemIsDue,
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -12140,6 +12146,290 @@ describe("hosted device-sync runtime", () => {
       await cleanup();
     }
   });
+
+  test("a retained Junction smoke replay owner drains all payloads after a controlled yield", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-junction-retained-replay-",
+    );
+    const connectionId = "hosted_junction_retained_replay";
+    const occurredAt = new Date().toISOString();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Unexpected network request during replay setup");
+    });
+    try {
+      const plan = await buildJunctionWearableHostedReplayPlan({
+        fixturePath: DEFAULT_JUNCTION_WEARABLE_HOSTED_REPLAY_FIXTURE_RELATIVE_PATH,
+        replaySize: "smoke",
+      });
+      assert.equal(plan.dirtyResources.length, 48);
+      assert.equal(plan.replay.droppedRecordCount, 0);
+      assert.equal(plan.resources.length, 6);
+      assert.ok(plan.resources.every((resource) => resource.recordCount === 8));
+      const resources = plan.dirtyResources.map((resource, index) => ({
+        ...resource,
+        dirtyPayloadId: `replay_payload_${index}`,
+      }));
+      const remaining = new Map(resources.map((resource) => [resource.dirtyPayloadId, resource]));
+      const acknowledged: string[] = [];
+      let processedRevision = "0";
+      let recordingCheckpoint = false;
+      let controlMetadata: Record<string, unknown> = { fixture: "junction-wearable-hosted-replay" };
+      let controlLocalState: NonNullable<Parameters<typeof buildRuntimeSnapshot>[0]["localState"]> = {};
+      const sources = plan.sources.map((source) => {
+        const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+          connectionId,
+          sourceProviderSlug: source.sourceProviderSlug,
+        });
+        assert.ok(sourceInstanceKey);
+        return {
+          ...source,
+          firstSeenAt: occurredAt,
+          lastDataAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: occurredAt,
+          resourceCount: plan.resources.filter((resource) =>
+            canonicalizeJunctionProviderSlug(resource.provider)
+              === canonicalizeJunctionProviderSlug(source.sourceProviderSlug)
+          ).length,
+          sourceInstanceKey,
+          status: "connected" as const,
+        };
+      });
+      const port: HostedRuntimeDeviceSyncPort = {
+        async fetchSnapshot() {
+          return buildRuntimeSnapshot({
+            connectedAt: occurredAt,
+            connectionId,
+            credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+            externalAccountId: plan.connection.externalAccountId,
+            generatedAt: new Date().toISOString(),
+            hostedUpdatedAt: occurredAt,
+            localState: controlLocalState,
+            metadata: controlMetadata,
+            provider: "junction",
+            sources,
+          });
+        },
+        async fetchDirtyStates(input) {
+          assert.equal(input?.connectionId, connectionId);
+          const staged = input?.stagedDirtyAcks ?? [];
+          const excluded = new Set(staged.flatMap((ack) => ack.processedDirtyPayloadIds ?? []));
+          const visible = [...remaining.values()].filter((resource) => !excluded.has(resource.dirtyPayloadId));
+          const effectiveRevision = staged.some((ack) => ack.processedRevision === "1")
+            ? "1" : processedRevision;
+          return {
+            hasMore: false,
+            items: visible.length > 0 || effectiveRevision === "0" ? [buildDirtyState({
+              connectionId,
+              dirtyResources: visible,
+              processedRevision: effectiveRevision,
+              provider: "junction",
+            })] : [],
+            nextWakeAt: null,
+            userId: "member_123",
+          };
+        },
+        async ackDirtyStateProcessed(input) {
+          assert.equal(recordingCheckpoint, true, "Payload acknowledgement must follow the checkpoint");
+          assert.equal(input.connectionId, connectionId);
+          assert.equal(input.processedRevision, "1");
+          processedRevision = input.processedRevision;
+          for (const id of input.processedDirtyPayloadIds ?? []) {
+            const resource = remaining.get(id);
+            assert.ok(resource, "Each original payload must be acknowledged exactly once");
+            assert.ok(input.completedImports?.some((receipt) =>
+              receipt.dirtyPayloadId === id && receipt.resource === resource.resource
+              && canonicalizeJunctionProviderSlug(receipt.sourceProviderSlug)
+                === canonicalizeJunctionProviderSlug(resource.sourceProviderSlug)
+            ), "Payload acknowledgement must carry its successful canonical import receipt");
+            acknowledged.push(id);
+            remaining.delete(id);
+          }
+          return {
+            connectionId,
+            dirtyRevision: "1",
+            nextWakeAt: remaining.size > 0 ? new Date().toISOString() : null,
+            processedRevision,
+            recorded: true,
+            stillDirty: remaining.size > 0,
+            userId: "member_123",
+          };
+        },
+        async applyUpdates(input) {
+          for (const update of input.updates) {
+            assert.equal(update.connectionId, connectionId);
+            controlMetadata = { ...controlMetadata, ...update.connection?.metadata };
+            controlLocalState = { ...controlLocalState, ...update.localState };
+          }
+          return {
+            appliedAt: new Date().toISOString(),
+            updates: input.updates.map((update) => ({
+              connection: null,
+              connectionId: update.connectionId,
+              status: "updated" as const,
+              tokenUpdate: "unchanged" as const,
+              writeUpdate: "applied" as const,
+            })),
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() { throw new Error("Unexpected connection request during replay"); },
+      };
+      // Hosted Junction reconstructs its provider from platform authority, not member credentials.
+      const platformEnv = {
+        JUNCTION_API_KEY: "sk_us_test_123",
+        JUNCTION_CLIENT_USER_ID_SECRET: "retained-replay-test-secret",
+        JUNCTION_ENV: "sandbox",
+        JUNCTION_REGION: "us",
+      };
+      fetchSpy.mockImplementation(async (input) => {
+        const url = new URL(readTestUrl(input));
+        assert.equal(url.pathname, `/v2/user/providers/${plan.connection.externalAccountId}`,
+          "Inline replay must not make unexpected provider requests");
+        return createTestJsonResponse({ providers: sources.map((source, index) => ({
+          id: `replay_source_${index}`,
+          name: source.displayName,
+          slug: source.sourceProviderSlug,
+          status: "connected",
+        })) });
+      });
+      const config: NonNullable<Parameters<typeof runHostedDeviceSyncPass>[2]> = {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: DEVICE_SYNC_SECRET,
+      };
+      const readJobs = () => {
+        const database = openSqliteRuntimeDatabase(path.join(
+          vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite",
+        ));
+        try {
+          return database.prepare(`
+            select status, canonical_import_receipts_json as receipts
+            from device_job order by created_at, id
+          `).all() as Array<{ receipts: string; status: string }>;
+        } finally {
+          database.close();
+        }
+      };
+      const recordPass = async (
+        item: HostedSystemMailboxPendingItem,
+        result: Awaited<ReturnType<typeof runHostedDeviceSyncPass>>,
+      ) => {
+        assert.ok(result.postCheckpointRecord);
+        const recording: HostedSystemMailboxPendingItem = {
+          ...item,
+          attemptCount: item.attemptCount + 1,
+          lastAttemptAt: new Date().toISOString(),
+          nextAttemptAt: null,
+          postCheckpointRecord: result.postCheckpointRecord,
+          status: "recording",
+        };
+        await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+          pending: [...state.pending.filter((pending) => pending.itemId !== item.itemId), recording],
+        }));
+        recordingCheckpoint = true;
+        try {
+          const recorded = await recordHostedSystemMailboxItemAfterCheckpoint({
+            deviceSyncCompletionAcceptedInCurrentAdmission: true,
+            item: recording,
+            runtime: createDeviceSyncPostCheckpointRuntime(port),
+            vaultRoot,
+          });
+          assert.equal(recorded.failed, 0);
+        } finally {
+          recordingCheckpoint = false;
+        }
+      };
+      await initializeVault({ createdAt: occurredAt, timezone: "UTC", vaultRoot });
+      const wake = buildDeviceSyncWake({
+        connectionId, expectedConnectedAt: occurredAt, hint: { jobs: [], reason: "direct-resource-replay" },
+        occurredAt, provider: "junction", reason: "webhook_hint",
+      });
+      const original: HostedSystemMailboxPendingItem = {
+        attemptCount: 0, itemId: wake.eventId, lastAttemptAt: null,
+        lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: wake.eventId,
+        mailboxLaneSeq: "1", nextAttemptAt: null, occurredAt, postCheckpointRecord: null,
+        preferenceCausalSeq: null, requestId: null, routeAction: "run-device-sync-wake", status: "pending", wake,
+      };
+      let shouldYield = false;
+      await withHostedCanonicalWritePort({
+        async persistCanonicalWrite() {},
+        async persistRuntimeState() {},
+      }, async () => {
+        // This controlled boundary proves retained work; it does not reproduce a historical timeout.
+        const firstStartedAt = Date.now();
+        const first = await runHostedDeviceSyncPass(wake, vaultRoot, config, port, 120_000, {
+          platformEnv,
+          retainFollowUpWakeUntilCheckpoint: true,
+          shouldYield: () => shouldYield,
+          onProcessedJobs(count) {
+            assert.ok(count > 0 && count < resources.length);
+            const succeeded = readJobs().filter((job) => job.status === "succeeded");
+            assert.equal(succeeded.length, count);
+            assert.ok(succeeded.every((job) => JSON.parse(job.receipts).length > 0));
+            shouldYield = true;
+          },
+        });
+        const firstFinishedAt = Date.now();
+        assert.equal(first.skipped, true);
+        assert.ok(first.processedJobs > 0 && first.processedJobs < resources.length);
+        assert.ok(first.nextWakeAt);
+        const retryAtMs = Date.parse(first.nextWakeAt);
+        assert.ok(retryAtMs >= firstStartedAt + 30_000);
+        assert.ok(retryAtMs <= firstFinishedAt + 30_000);
+        assert.equal(acknowledged.length, 0);
+        await rebuildQueryProjection(vaultRoot);
+        assert.ok((await listMetricPoints(vaultRoot, { limit: null })).length > 0);
+        await recordPass(original, first);
+        assert.equal(acknowledged.length, first.processedJobs);
+        const retained = (await readHostedSystemMailboxState(vaultRoot)).pending.find((item) => item.itemId === original.itemId);
+        assert.ok(retained);
+        assert.equal(retained.deviceSyncContinuationOwner, true);
+        assert.equal(retained.status, "pending");
+        assert.equal(retained.wake.kind, "device-sync.wake");
+        assert.equal(retained.wake.kind === "device-sync.wake" && retained.wake.connectionId, connectionId);
+        assert.ok(retained.nextAttemptAt);
+        assert.equal(retained.nextAttemptAt, first.nextWakeAt);
+        assert.equal(systemMailboxItemIsDue(retained, new Date(Date.parse(retained.nextAttemptAt) - 1).toISOString()), false);
+        assert.equal(systemMailboxItemIsDue(retained, retained.nextAttemptAt), true);
+        assert.ok(remaining.size > 0);
+        // Jump only to the retained owner's due boundary. Logical Date then advances with real time;
+        // timers and I/O remain real while the consumer reconstructs its service from SQLite.
+        vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+        vi.setSystemTime(new Date(retained.nextAttemptAt));
+        shouldYield = false;
+        const resumed = await runHostedDeviceSyncPass(retained.wake, vaultRoot, config, port, 120_000, {
+          platformEnv,
+          retainFollowUpWakeUntilCheckpoint: true,
+        });
+        assert.equal(resumed.skipped, false);
+        await recordPass(retained, resumed);
+      });
+      assert.equal(remaining.size, 0);
+      assert.deepEqual([...acknowledged].sort(), resources.map((resource) => resource.dirtyPayloadId).sort());
+      assert.equal(new Set(acknowledged).size, resources.length);
+      const jobs = readJobs();
+      assert.ok(jobs.length >= resources.length);
+      assert.ok(jobs.every((job) => job.status === "succeeded"));
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.some((item) => item.itemId === original.itemId), false);
+      await rebuildQueryProjection(vaultRoot);
+      const points = await listMetricPoints(vaultRoot, { limit: null });
+      for (const expectation of JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS) {
+        assert.ok(points.filter((point) => point.metricKey === expectation.metricKey).length >= expectation.minimumRows,
+          `Expected canonical replay metric ${expectation.metricKey}`);
+      }
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+      await cleanup();
+    }
+  }, 120_000);
 
   test("a version retry preserves completed dirty work without a second admission", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
