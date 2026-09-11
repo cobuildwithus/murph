@@ -6,7 +6,7 @@ import {
   wrapHostedBrowserSessionKey,
   type HostedUserRecipientPublicKeyJwk,
 } from "@murphai/runtime-state";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authority: vi.fn(), control: vi.fn(), memberId: vi.fn(), pending: vi.fn(), session: vi.fn(), workspace: vi.fn(),
@@ -32,13 +32,18 @@ const generatedAt = "2026-09-10T12:00:00.000Z";
 const notReady = { ready: false, totalGoalCount: 0, matchingGoalCount: 0, matchingGoalIdCount: 0 };
 
 describe("production canary canonical outcome observer", () => {
+  let nowSpy: MockInstance<() => number>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt));
     mocks.memberId.mockResolvedValue(memberId);
     mocks.authority.mockResolvedValue(undefined);
     mocks.pending.mockResolvedValue(null);
     mocks.control.mockReturnValue({ createBrowserVaultSession: mocks.session });
   });
+
+  afterEach(() => nowSpy.mockRestore());
 
   it.each([
     { entities: [], total: 0, count: 0, ids: 0 },
@@ -84,6 +89,13 @@ describe("production canary canonical outcome observer", () => {
   it("waits when a reply has been delivered but its conversation turn is not checkpointed", async () => {
     await installEncryptedReplica([goal()]);
     mocks.pending.mockResolvedValue({ id: "synthetic-pending-conversation" });
+    expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replica older than the freshness limit before opening a session", async () => {
+    await installEncryptedReplica([goal()]);
+    nowSpy.mockReturnValue(Date.parse(generatedAt) + 24 * 60 * 60 * 1_000 + 1);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
     expect(mocks.session).not.toHaveBeenCalled();
   });

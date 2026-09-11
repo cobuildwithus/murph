@@ -14,7 +14,7 @@ const roots: string[] = [];
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const empty: ClinicalDocumentExtractionOutput = { status: "complete", records: [] };
 const occurredAt = "2020-03-12T12:00:00.000Z";
-const measurement = (time = occurredAt) => ({ kind: "measurement" as const, occurredAt: time, title: "Synthetic heart rate", note: null, measurements: [{ metric: "heart-rate", value: 70, unit: "bpm" }] });
+const measurement = (time = occurredAt) => ({ kind: "measurement" as const, occurredAt: time, title: "Synthetic heart rate", note: null, measurements: [{ metric: "heart-rate" as const, value: 70, unit: "bpm" }] });
 
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
