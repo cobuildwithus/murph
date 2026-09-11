@@ -38,4 +38,12 @@ A consumed wake can race with stage completion. Preserve the qualified notificat
 
 The correction reuses the existing wake and prefetch owners without changing persisted schemas. Completed work must survive empty hints at all seven boundaries; real inputs retain prompt handoff. Blocked assistant invocations preserve observed owner authority because they cannot inspect conversation input. Tests now enqueue actual foreground rows in projection/acknowledgment preemption fixtures.
 
-Runtime and Web typechecks, the changelog page tests (10 cases), and the complexity guard pass. Final focused runtime verification is in progress. Required CI and ReviewGPT remain pending on the pushed candidate.
+Runtime and Web typechecks, the changelog page tests (10 cases), and the complexity guard pass. Final focused runtime verification passes: 72 tests across five files, including all 15 new convergence/preemption cases. Required CI and ReviewGPT remain pending on the pushed candidate.
+
+## Product UX
+
+Patch; local journeys Ready. No member action or prompt changes. Quiet completion, empty scheduler bursts, real conversation preemption, projection failure/recovery, shutdown, and blocked-assistant handoff were replayed through their existing owners. Publication/callback ports use synthetic responses; real snapshots persist handling progress. Production release convergence remains an operational check after deployment.
+
+## Delivery
+
+Draft PR #3226 contains the candidate. Its existing wearable-import changelog item now includes this PR. Required exact-head CI and final ReviewGPT remain open completion gates.
