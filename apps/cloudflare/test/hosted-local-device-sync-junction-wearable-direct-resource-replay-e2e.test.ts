@@ -1,6 +1,10 @@
 import { createHmac, randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+} from "@murphai/assistant-engine";
 
 import {
   buildCloudflareHostedControlUserStatusPath,
@@ -411,13 +415,16 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       ? undefined
       : await activeScenario.buildFailureMessage(experimentAdherenceUserId, [
           "Hosted Junction activity nudge made an unexpected number of model requests.",
-          `latest user input matches nudge instructions: ${JSON.stringify(
+          `assistant request scopes: ${JSON.stringify(
             activeScenario.assistantProviderRequests
               .filter((request) => request.url === "/v1/responses")
-              .map((request) => hostedLocalAssistantProviderLatestUserInputContains(
-                request,
-                experimentActivityNudgeInstructions,
-              )),
+              .map((request) => ({
+                nudge: hostedLocalAssistantProviderLatestUserInputContains(request, experimentActivityNudgeInstructions),
+                setup: hostedLocalAssistantProviderLatestUserInputContains(request, experimentSetupText),
+                managed: [...MURPH_MANAGED_AUTOMATIONS, MURPH_ONBOARDING_FOLLOWUP_AUTOMATION]
+                  .filter((seed) => hostedLocalAssistantProviderLatestUserInputContains(request, seed.instructions))
+                  .map((seed) => seed.slug),
+              })),
           )}`,
         ]);
     expect(nudgeProviderRequestCount, nudgeProviderFailure).toBe(nudgeProviderBaseline + 2);

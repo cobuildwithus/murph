@@ -640,6 +640,9 @@ async function waitForPositiveDeviceSyncPassFinished(input: {
     `observed device-sync events: ${JSON.stringify(lastLogs.map((row) => ({
       eventCode: row.eventCode,
       processedJobs: readFiniteNumber(row.redactedJson, "processedJobs"),
+      passStage: row.redactedJson?.passStage,
+      outcome: row.redactedJson?.outcome,
+      yieldReason: row.redactedJson?.yieldReason,
     })))}`,
   ]));
 }
