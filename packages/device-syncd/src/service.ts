@@ -2,6 +2,7 @@ import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import {
   createDeviceProviderSnapshotImportSession,
   createImporters,
+  isActiveCanonicalWriteLockError,
   JunctionSparseCalendarRepairNormalizationError,
   normalizeKnownJunctionSourceProviderSlug,
 } from "@murphai/importers";
@@ -2428,6 +2429,15 @@ function normalizeExecutionError(error: unknown): {
       message: summarizeDeviceSyncErrorMessage(error),
       retryable: error.retryable,
       accountStatus: error.accountStatus,
+    };
+  }
+
+  if (isActiveCanonicalWriteLockError(error)) {
+    return {
+      code: "CANONICAL_WRITE_LOCKED",
+      details: {},
+      message: "Canonical vault writes are temporarily busy.",
+      retryable: true,
     };
   }
 

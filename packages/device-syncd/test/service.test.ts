@@ -9,7 +9,14 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { initializeVault } from "@murphai/core";
+import {
+  acquireCanonicalWriteLock,
+  initializeVault,
+  inspectCanonicalWriteLock,
+  readJsonlRecords,
+  VaultError,
+  withCanonicalWriteLockScope,
+} from "@murphai/core";
 import {
   createImporters,
   JunctionSparseCalendarRepairNormalizationError,
@@ -14647,5 +14654,398 @@ test("a foreground yield during a recovery trigger cannot replay the provider mu
     );
   } finally {
     close();
+  }
+});
+
+async function holdCanonicalLockWithContention(vaultRoot: string) {
+  const owner = await acquireCanonicalWriteLock(vaultRoot);
+  let failure: unknown;
+  try {
+    await assert.rejects(
+      () => withCanonicalWriteLockScope(vaultRoot, async () => {
+        const unexpected = await acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 0 });
+        await unexpected.release();
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof VaultError);
+        assert.equal(error.code, "CANONICAL_WRITE_LOCKED");
+        failure = error;
+        return true;
+      },
+    );
+    assert.ok(failure instanceof VaultError);
+    return { owner, failure };
+  } catch (error) {
+    await owner.release();
+    throw error;
+  }
+}
+
+async function createCanonicalContentionServiceFixture(input: {
+  vaultRoot: string;
+  now: () => Date;
+  importer: DeviceSyncImporterPort;
+  shouldYieldJobExecution?: () => boolean;
+}) {
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: input.now },
+    config: {
+      vaultRoot: input.vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(input.vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: input.shouldYieldJobExecution,
+    },
+    providers: [createFakeProvider({
+      async exchangeAuthorizationCode() {
+        return {
+          externalAccountId: "synthetic-canonical-contention",
+          displayName: "Synthetic device",
+          scopes: [],
+          tokens: { accessToken: "synthetic-token" },
+          initialJobs: [{ kind: "resource", payload: { resourceId: "synthetic-resource" }, maxAttempts: 3 }],
+        };
+      },
+    })],
+    importer: input.importer,
+  });
+  try {
+    const begin = await fixture.service.startConnection({ provider: "demo" });
+    const { account } = await fixture.service.handleOAuthCallback({
+      provider: "demo", state: begin.state, code: "synthetic-contention",
+    });
+    const jobId = readFirstJobIdForAccountForTesting(fixture.store, account.id);
+    assert.ok(jobId);
+    return { ...fixture, account, jobId };
+  } catch (error) {
+    fixture.close();
+    throw error;
+  }
+}
+
+test("device sync service retains a canonical lock contention job until the writer releases", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-canonical-contention");
+  let now = new Date("2026-08-15T12:00:00.000Z");
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const { owner, failure } = await holdCanonicalLockWithContention(vaultRoot);
+  const canonicalImporter = createImporters();
+  let contention = true;
+  let imports = 0;
+  const warnEvents: unknown[] = [];
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: { warn: (message, details) => { warnEvents.push({ message, details }); } },
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_fake_test_placeholder",
+      clientUserIdSecret: "test-only-hmac-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["stress_level"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/synthetic-canonical-contention") {
+          return createJsonResponse({ providers: [{
+            id: "synthetic-garmin", slug: "garmin", name: "Garmin", status: "connected",
+            resource_availability: { stress_level: true },
+          }] });
+        }
+        if (url.pathname === "/v2/timeseries/synthetic-canonical-contention/stress_level/grouped") {
+          return createJsonResponse({ groups: { garmin: [{
+            data: [
+              { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
+              { timestamp: "2026-08-12T07:05:00.000Z", value: 30 },
+              { timestamp: "2026-08-12T07:10:00.000Z", value: 25 },
+              { timestamp: "2026-08-12T19:00:30.000Z", value: 70 },
+              { timestamp: "2026-08-12T19:05:00.000Z", value: 80 },
+              { timestamp: "2026-08-12T19:59:30.250Z", value: 60 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }] } });
+        }
+        throw new Error(`Unexpected synthetic Junction request: ${url.pathname}`);
+      },
+    })],
+    importer: {
+      async importDeviceProviderSnapshot(input, options) {
+        // Reproduce the exact real core error at the importer port, without a
+        // production lock wait or a mock claiming that a canonical write happened.
+        if (contention) throw failure;
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input, options);
+        imports += 1;
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+  });
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "synthetic-canonical-contention",
+      displayName: "Synthetic device",
+      scopes: [],
+      status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const job = fixture.store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        resource: "stress_level", resourceCategory: "timeseries", temporalAuthorityTimeZone: "UTC",
+        windowStart: "2026-08-12T00:00:00.000Z", windowEnd: "2026-08-13T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      maxAttempts: 3,
+    });
+    const ledgerPath = "ledger/events/2026/2026-08.jsonl";
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, job.id);
+    assert.equal(imports, 0);
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+    await assert.rejects(readFile(path.join(vaultRoot, ledgerPath)), { code: "ENOENT" });
+    const retained = fixture.store.getJobById(job.id);
+    assert.ok(retained);
+    assert.equal(retained.status, "queued");
+    assert.equal(retained.attempts, 1);
+    assert.equal(retained.maxAttempts, 3);
+    assert.equal(retained.leaseOwner, null);
+    assert.equal(retained.availableAt, new Date(now.getTime() + computeRetryDelayMs(1)).toISOString());
+    assert.equal(retained.lastErrorCode, "CANONICAL_WRITE_LOCKED");
+    assert.equal(fixture.store.getAccountById(account.id)?.status, "active");
+    const diagnostic = fixture.service.listJobFailureDiagnostics()[0];
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.retryable, true);
+    assert.equal(diagnostic.jobDisposition, "queued");
+    assert.equal(diagnostic.remainingAttempts, 2);
+    assert.equal(diagnostic.accountStatus, null);
+    assert.equal(diagnostic.summary, "Canonical vault writes are temporarily busy.");
+    assert.deepEqual(diagnostic.details, {});
+    assert.equal(JSON.stringify(warnEvents).includes(failure.message), false);
+    assert.equal(JSON.stringify(warnEvents).includes(owner.metadata.command), false);
+    assert.equal(JSON.stringify(warnEvents).includes(vaultRoot), false);
+
+    await owner.release();
+    contention = false;
+    now = new Date(Date.parse(retained.availableAt) - 1);
+    assert.equal(await fixture.service.runWorkerOnce(account.id), null);
+    now = new Date(retained.availableAt);
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, job.id);
+    assert.equal(imports, 1);
+    assert.equal(fixture.store.getJobById(job.id)?.status, "succeeded");
+    assert.equal(fixture.store.getJobById(job.id)?.attempts, 2);
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "unlocked");
+    const records = await readJsonlRecords({ vaultRoot, relativePath: ledgerPath });
+    const facets = latestLiveRecords(records).filter((record) =>
+      record.kind === "observation"
+      && typeof record.metric === "string"
+      && record.metric.startsWith("stress-")
+      && record.metric !== "stress-level"
+    );
+    assert.equal(facets.length, 3);
+    for (const record of facets) assert.equal(record.occurredAt, "2026-08-12T19:59:30.250Z");
+    const recovered = fixture.store.getAccountById(account.id);
+    assert.equal(recovered?.status, "active");
+    assert.equal(recovered?.disconnectGeneration, account.disconnectGeneration);
+    assert.equal(recovered?.lastErrorCode, null);
+    assert.equal(await fixture.service.runWorkerOnce(account.id), null);
+    assert.equal(imports, 1);
+  } finally {
+    await owner.release();
+    fixture.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+for (const [name, failure] of [
+  ["stale", new VaultError("CANONICAL_WRITE_LOCKED", "Synthetic stale lock.", { lockState: "stale" })],
+  ["legacy without state", new VaultError("CANONICAL_WRITE_LOCKED", "Canonical vault writes are already in progress.", { metadata: { pid: process.pid } })],
+  ["unknown state", new VaultError("CANONICAL_WRITE_LOCKED", "Synthetic lock.", { lockState: "unknown" })],
+  ["malformed state", new VaultError("CANONICAL_WRITE_LOCKED", "Synthetic lock.", { lockState: { active: true } })],
+  ["null state", new VaultError("CANONICAL_WRITE_LOCKED", "Synthetic lock.", { lockState: null })],
+  ["other canonical error", new VaultError("CANONICAL_WRITE_LOCK_REQUIRED", "Synthetic permanent error.", { lockState: "active" })],
+  ["untyped lookalike", Object.assign(new Error("Synthetic lock."), { code: "CANONICAL_WRITE_LOCKED", details: { lockState: "active" } })],
+  ["ordinary permanent failure", new Error("Synthetic invalid snapshot.")],
+] as const) {
+  test(`canonical lock contention keeps ${name} failures terminal`, async () => {
+    const vaultRoot = await makeTempDirectory("murph-device-syncd-canonical-terminal");
+    let calls = 0;
+    const fixture = await createCanonicalContentionServiceFixture({
+      vaultRoot,
+      now: () => new Date("2030-01-01T12:00:00.000Z"),
+      importer: { async importDeviceProviderSnapshot() { calls += 1; throw failure; } },
+    });
+    try {
+      await fixture.service.runWorkerOnce();
+      const job = fixture.store.getJobById(fixture.jobId);
+      assert.equal(job?.status, "dead");
+      assert.equal(job?.attempts, 1);
+      assert.equal(job?.lastErrorCode, "SYNC_JOB_FAILED");
+      assert.equal(fixture.service.listJobFailureDiagnostics()[0]?.retryable, false);
+      assert.equal(fixture.store.getAccountById(fixture.account.id)?.status, "active");
+      assert.equal(await fixture.service.runWorkerOnce(), null);
+      assert.equal(calls, 1);
+    } finally {
+      fixture.close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+test("canonical lock contention exhausts the existing resource job attempt ceiling", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-canonical-exhaustion");
+  let now = new Date("2030-01-01T12:00:00.000Z");
+  const { owner, failure } = await holdCanonicalLockWithContention(vaultRoot);
+  let calls = 0;
+  const fixture = await createCanonicalContentionServiceFixture({
+    vaultRoot, now: () => now,
+    importer: { async importDeviceProviderSnapshot() { calls += 1; throw failure; } },
+  });
+  try {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      assert.equal((await fixture.service.runWorkerOnce())?.id, fixture.jobId);
+      const job = fixture.store.getJobById(fixture.jobId);
+      assert.ok(job);
+      assert.equal(job.attempts, attempt);
+      assert.equal(job.maxAttempts, 3);
+      assert.equal(job.status, attempt < 3 ? "queued" : "dead");
+      assert.equal(job.lastErrorCode, "CANONICAL_WRITE_LOCKED");
+      assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+      assert.equal(fixture.store.getAccountById(fixture.account.id)?.status, "active");
+      if (attempt < 3) {
+        assert.equal(job.availableAt, new Date(now.getTime() + computeRetryDelayMs(attempt)).toISOString());
+        now = new Date(Date.parse(job.availableAt) - 1);
+        assert.equal(await fixture.service.runWorkerOnce(), null);
+        now = new Date(job.availableAt);
+      }
+    }
+    assert.equal(calls, 3);
+    const diagnostics = fixture.service.listJobFailureDiagnostics();
+    assert.deepEqual(diagnostics.map((item) => item.jobDisposition), ["queued", "queued", "dead"]);
+    assert.equal(diagnostics[2]?.remainingAttempts, 0);
+    await owner.release();
+    now = new Date(now.getTime() + 24 * 60 * 60_000);
+    assert.equal(await fixture.service.runWorkerOnce(), null);
+    assert.equal(calls, 3, "releasing the lock must not resurrect exhausted work");
+  } finally {
+    await owner.release();
+    fixture.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+for (const fence of ["connection revision", "disconnect", "job lease"] as const) {
+  test(`canonical lock contention preserves the ${fence} owner`, async () => {
+    const vaultRoot = await makeTempDirectory("murph-device-syncd-canonical-fence");
+    const now = new Date("2030-01-01T12:00:00.000Z");
+    const { owner, failure } = await holdCanonicalLockWithContention(vaultRoot);
+    let beforeFailure: (() => Promise<void>) | null = null;
+    const fixture = await createCanonicalContentionServiceFixture({
+      vaultRoot, now: () => now,
+      importer: { async importDeviceProviderSnapshot() {
+        assert.ok(beforeFailure);
+        await beforeFailure();
+        throw failure;
+      } },
+    });
+    beforeFailure = async () => {
+      if (fence === "connection revision") {
+        fixture.store.patchAccount(fixture.account.id, { metadata: { newerConnection: true } });
+      } else if (fence === "disconnect") {
+        await fixture.service.disconnectAccount(fixture.account.id, fixture.account.connectedAt);
+      } else {
+        expireJobLeaseForTesting(fixture.store, fixture.jobId, new Date(now.getTime() - 1).toISOString());
+        assert.equal(fixture.store.claimDueJob("synthetic-successor", now.toISOString(), 60_000)?.id, fixture.jobId);
+      }
+    };
+    try {
+      const before = fixture.store.getAccountById(fixture.account.id);
+      assert.ok(before);
+      await fixture.service.runWorkerOnce();
+      const job = fixture.store.getJobById(fixture.jobId);
+      const account = fixture.store.getAccountById(fixture.account.id);
+      assert.ok(job);
+      assert.ok(account);
+      assert.deepEqual(fixture.service.listJobFailureDiagnostics(), []);
+      assert.equal(account.lastErrorCode, null);
+      assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+      if (fence === "connection revision") {
+        assert.equal(account.localConnectionRevision, before.localConnectionRevision + 1);
+        assert.equal(account.metadata.newerConnection, true);
+        assert.equal(job.status, "queued");
+        assert.equal(job.attempts, 0);
+        assert.equal(job.availableAt, now.toISOString());
+        assert.equal(job.lastErrorCode, null);
+      } else if (fence === "disconnect") {
+        assert.equal(account.status, "disconnected");
+        assert.equal(account.disconnectGeneration, before.disconnectGeneration + 1);
+        assert.equal(job.status, "dead");
+        assert.equal(job.lastErrorCode, "ACCOUNT_DISCONNECTED");
+      } else {
+        assert.equal(job.status, "running");
+        assert.equal(job.leaseOwner, "synthetic-successor");
+        assert.equal(job.lastErrorCode, null);
+      }
+    } finally {
+      await owner.release();
+      fixture.close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+test("canonical lock contention does not override foreground abort or ordinary success", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-canonical-yield");
+  const now = new Date("2030-01-01T12:00:00.000Z");
+  const { owner, failure } = await holdCanonicalLockWithContention(vaultRoot);
+  let yieldRequested = false;
+  let calls = 0;
+  const fixture = await createCanonicalContentionServiceFixture({
+    vaultRoot, now: () => now,
+    shouldYieldJobExecution: () => yieldRequested,
+    importer: { async importDeviceProviderSnapshot(_input, options) {
+      calls += 1;
+      if (calls === 1) {
+        assert.ok(options?.signal);
+        const signal = options.signal;
+        yieldRequested = true;
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("synthetic import did not yield")), 1_000);
+          signal.addEventListener("abort", () => { clearTimeout(timeout); resolve(); }, { once: true });
+        });
+        // A wrapped abort must stay stronger than the outer error's classification.
+        throw Object.assign(failure, { cause: signal.reason });
+      }
+      return { applied: true, events: [] };
+    } },
+  });
+  try {
+    await fixture.service.runWorkerOnce();
+    const yielded = fixture.store.getJobById(fixture.jobId);
+    assert.equal(yielded?.status, "queued");
+    assert.equal(yielded?.attempts, 0);
+    assert.equal(yielded?.availableAt, now.toISOString());
+    assert.equal(yielded?.lastErrorCode, null);
+    assert.deepEqual(fixture.service.listJobFailureDiagnostics(), []);
+    assert.equal(fixture.service.listJobTimingDiagnostics()[0]?.outcome, "yielded");
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+    await owner.release();
+    yieldRequested = false;
+    await fixture.service.runWorkerOnce();
+    assert.equal(fixture.store.getJobById(fixture.jobId)?.status, "succeeded");
+    assert.equal(fixture.store.getJobById(fixture.jobId)?.attempts, 1);
+    assert.equal(calls, 2);
+  } finally {
+    await owner.release();
+    fixture.close();
+    await rm(vaultRoot, { recursive: true, force: true });
   }
 });

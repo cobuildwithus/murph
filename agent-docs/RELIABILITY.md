@@ -1458,6 +1458,16 @@ Last verified: 2026-09-04
   of a future stream wrapper. Remove these two fields and their shared classifier
   once the framing/encoding prerequisite is characterized, or the bounded
   window yields no useful evidence; retained records expire under existing policy.
+- Core tags `CANONICAL_WRITE_LOCKED` errors with a closed `details.lockState`
+  (`active` or `stale`). Device imports retry only a real `VaultError` whose
+  code and owner-supplied state identify active contention. The existing local
+  job owner retains its backoff, attempt ceiling, lease and connection fences;
+  foreground cancellation/yield keeps its existing precedence. Missing, unknown
+  or malformed states, stale locks and other canonical failures retain their
+  existing classification. Contention diagnostics use a fixed summary without
+  lock metadata, paths, process commands or identifiers. This classification
+  adds no lock cleanup, wait extension or retry owner; older errors without
+  the discriminator remain fail-closed.
 - Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
   failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
   existing device-sync job owner, which requeues with its normal bounded backoff.
