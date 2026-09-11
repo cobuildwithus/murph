@@ -3908,6 +3908,19 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
+
+After a default-mode checkpoint, foreground checks, vault-share delivery, and
+required durable-effect follow-up checkpoints precede the Browser Vault offer.
+The runtime offers that committed projection before ordinary due-assistant work or
+deferred device maintenance can dirty state again. Browser-only wake retry and
+acknowledgement stay within that offer. A runtime-wake interruption or timeout
+returns through the existing invocation continuation owner, preserving immediate
+foreground admission or the bounded requested-refresh retry and earlier pending
+assistant wakes. Ordinary due work without a fresh runtime wake can wait for
+the existing 30-second Browser refresh budget and a successor invocation;
+fresh conversations and the exact due-assistant durability barrier retain
+priority ahead of that offer.
+
 In production, the configured idle checkpoint delay is at least 180 seconds,
 and every dirty foreground pass that progresses work restarts that hard lower
 bound. A no-progress phase that requests only a runtime-projection checkpoint
