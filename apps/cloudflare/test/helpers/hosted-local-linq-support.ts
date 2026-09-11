@@ -512,7 +512,7 @@ export async function startHostedLocalLinqStub(input: {
       const attachmentId = decodeURIComponent(request.url.split("/").at(-1) ?? "");
       writeJsonResponse(response, 200, {
         download_url: buildHostedLocalLinqAttachmentDownloadUrl(
-          resolveHostedLocalLinqAttachmentDownloadBaseUrl(request, attachmentDownloadBaseUrl),
+          attachmentDownloadBaseUrl,
           attachmentId,
         ),
       });
@@ -591,7 +591,8 @@ export async function startHostedLocalLinqStub(input: {
   const containerBaseUrl =
     `http://${formatHostedLocalLinqUrlHost(resolveHostedLocalLinqContainerHost())}:${tcpPort}`;
   const runnerBaseUrl = `http://${hostedLocalRunnerProviderHost}:${tcpPort}`;
-  attachmentDownloadBaseUrl = `${baseUrl}${linqAttachmentDownloadBasePath}`;
+  // Keep the CDN override on an allowed hostname when Linux rewrites loopback URLs.
+  attachmentDownloadBaseUrl = `${runnerBaseUrl}${linqAttachmentDownloadBasePath}`;
   attachmentDownloadContainerBaseUrl =
     `${containerBaseUrl}${linqAttachmentDownloadBasePath}`;
 
@@ -1303,22 +1304,6 @@ function buildHostedLocalLinqAttachmentDownloadUrl(
         ? "mp4"
         : "wav";
   return `${attachmentDownloadBaseUrl}/${encodeURIComponent(attachmentId)}.${extension}`;
-}
-
-function resolveHostedLocalLinqAttachmentDownloadBaseUrl(
-  request: Pick<IncomingMessage, "headers">,
-  fallbackBaseUrl: string,
-): string {
-  const host = request.headers.host?.trim();
-  if (!host) {
-    return fallbackBaseUrl;
-  }
-
-  try {
-    return new URL(linqAttachmentDownloadBasePath, `http://${host}`).toString().replace(/\/$/u, "");
-  } catch {
-    return fallbackBaseUrl;
-  }
 }
 
 function buildHostedLocalLinqVoiceMemoBytes(): Uint8Array {

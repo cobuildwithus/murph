@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-09-10
+Last verified: 2026-09-11
 
 ## Current Repo Checks
 
@@ -21,6 +21,16 @@ because arbitrary local ports bypass Cloudflare outbound interception. The
 token, so a leaked runner sentinel can no longer count as successful delivery.
 This validates the locally supported protocol boundary; provider receipt delivery,
 media downloading/rendering, and live service behavior still require hosted proof.
+
+The shared Linq stub advertises attachment bytes through its fixed
+`host.docker.internal` CDN origin, independently of the proxied API Host.
+Webhook and audio fixtures use that same origin for the runner CDN override;
+Linux bridge rewriting must not turn it into a rejected numeric-host override.
+The helper suite checks the actual runner config, PDF/PNG/WAV metadata URLs,
+and credential-free byte routes. The assistant-runtime Linq event suite proves
+canonical authenticated metadata lookup followed by the allowed local byte
+download while rejecting the bridge-origin direct locator. Full Linux container
+reachability, image normalization, and final replies remain hosted E2E proof.
 
 `node scripts/run-postgres-tests.mjs --shard 1/4` runs the first of four
 required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
@@ -867,7 +877,12 @@ limits, and local proof distinctions are owned by
   device-sync backlog. It admits 113 distinct valid Junction resources, holds
   the first receipt-bounded positive device pass at the existing publication
   barrier, then releases that barrier only after the recurring Linq reminder
-  is due. With the reminder provider response held at provider entry, it proves
+  is due. Its admission observer binds the accepted wake's runtime attempt and
+  requires exactly one owner across the full 30-second window, including a
+  helper-started or already active owner. Focused fake-clock tests in
+  `apps/cloudflare/test/helpers/hosted-local-runtime-admission-window.test.ts`
+  preserve that window, detect replacements, and reject a missing initial start
+  or insufficient reminder runway. With the reminder provider response held at provider entry, it proves
   that unfinished resources remain durable while exactly one scheduled
   provider request is active. It then releases the response and passively
   observes exactly one Linq send, at least two positive bounded device passes,
@@ -876,6 +891,14 @@ limits, and local proof distinctions are owned by
   boundary are observational. Private Murph Cloud owns its dedicated
   `Public Murph Integration` matrix leg and includes that leg in the Temporal
   orchestration aggregator.
+- Hosted assistant-provider stub failures include only the allowlisted request
+  kind, fixture match, queue size, and completed response status alongside the
+  existing request fingerprint and byte count. An unfinished held stream keeps
+  a null status. The Junction nudge's strict model-request assertion adds only
+  whether each request's latest user input matches the known synthetic nudge
+  instructions; historical matches do not identify the current turn. Focused
+  stub and failure-formatter tests preserve queue behavior and exclude request
+  text and identifiers from this metadata.
 - Focused hosted-local lifecycle tests prove that file teardown aborts and
   joins a scenario setup still pending after a suite-hook timeout, propagates
   that cancellation through the dev harness, and signals only the exact child
