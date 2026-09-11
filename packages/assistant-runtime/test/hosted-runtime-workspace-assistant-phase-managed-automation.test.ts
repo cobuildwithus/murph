@@ -868,7 +868,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
     }));
 
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
       expect.objectContaining({
