@@ -1,12 +1,12 @@
-# Restore hosted Environment completion and publication
+# Correct Environment checkpoint timing and completion signals
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
 ## Goal
 
-- A completed Environment interview reaches durable mailbox completion and publishes its updated Habitat data to Browser Vault while preserving prompt foreground replies.
+- Correct the reproduced checkpoint-timing and completion-signal defects behind delayed Environment publication, with focused proof that foreground timing and exact owner identity remain intact.
 
 ## Success criteria
 
@@ -41,8 +41,8 @@ Updated: 2026-09-11
 
 1. Done: traced the failed composed cases and reproduced the checkpoint timing and future-continuation owner-release boundaries.
 2. Done: preserve the existing quiet window for a no-progress projection correction and always send the existing exact-fence callback. Updated the existing owners and related changelog item.
-3. Run focused verification and parent review, then open the PR and start ReviewGPT with CI.
-4. Merge through normal protections and verify the managed hosted proof and deployment.
+3. Done: focused tests, affected typechecks, complexity, docs, changelog rendering, and parent candidate review pass. PR #3269 is prepared for final ReviewGPT concurrently with CI.
+4. Release follow-up: the overall cleanup completion owner retains merge, managed hosted proof, exact production deployment, and post-deploy readback. This implementation plan does not claim those pending outcomes.
 
 ## Decisions
 
@@ -63,3 +63,9 @@ Updated: 2026-09-11
 - Complete hosted priority admission has not yet passed. Its original timeouts, browser publication checks, and foreground-provider limits remain unchanged; the diagnostic query now reports only typed wait reasons and timestamps.
 - The private scheduler companion must separate a live owner horizon from the existing no-progress backoff. Public focused proof does not establish deployed Temporal timing.
 - Managed admission, exact Web promotion and ordinary drain, compatible scheduler deployment, and Worker/container convergence remain release-owner follow-up. This candidate alone does not claim production rollout or authorize a rollback.
+
+## Implementation handoff
+
+- Candidate implementation and focused proof are complete in PR #3269. The final local timer helper reduces runtime complexity debt by one; Cloudflare debt is unchanged. Changelog archive rendering passes all 10 cases.
+- Product UX remains Hold for the complete hosted proof and production convergence. The remaining managed release work above stays with the original cleanup session.
+Completed: 2026-09-11
