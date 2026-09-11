@@ -20,6 +20,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { initializeVault, readHabitatAspect } from "@murphai/core";
+import { parseBrowserVaultReplica } from "@murphai/query/browser";
 import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import { test, vi } from "vitest";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -71,6 +72,14 @@ test.each(["no-active-share", "error"] as const)("settles concurrent Environment
           browserVaultReplicaPort: {
             async write({ replica }) {
               events.push("replica.write");
+              const habitat = parseBrowserVaultReplica(replica).entities.find(
+                (entity) => entity.family === "habitat"
+                  && entity.attributes.aspect === "sleep-environment",
+              );
+              assert.deepEqual(habitat?.attributes.indicators, { night_temp_c: 19 });
+              assert.deepEqual(habitat?.attributes.indicatorNotes, {
+                night_temp_c: "The bedroom stays near 19 degrees at night.",
+              });
               return createBrowserVaultReplicaRef(replica);
             },
             async publishRef({ replicaRef }) {

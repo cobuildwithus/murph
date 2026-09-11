@@ -2999,6 +2999,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
       );
     };
+    const updateIdleCheckpointTimerAfterWorkspacePass = (
+      passResult: HostedWorkspaceRunnerResult,
+    ): void => {
+      if (!passResult.runtimeStateDirty) {
+        return;
+      }
+      if (passResult.assistantPhaseResult?.progressed === false
+        && passResult.assistantPhaseResult.runtimeProjectionCheckpointRequested === true) {
+        // Correcting a wake preserves an active quiet window, but does not
+        // start another one after the preceding checkpoint has completed.
+        ensureIdleCheckpointStartBy(Date.now());
+      } else {
+        markIdleCheckpointTimerAfterDirtyWork();
+      }
+    };
     if (runtimeStateDirty) {
       markIdleCheckpointTimerAfterDirtyWork();
     }
@@ -5637,9 +5652,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         pendingDurableCheckpointEffects.push(...passResult.afterDurableCheckpoint);
         systemMailboxProgressedSinceCheckpoint ||=
           passResult.assistantPhaseResult?.systemMailboxProgressed === true;
-        if (passResult.runtimeStateDirty) {
-          markIdleCheckpointTimerAfterDirtyWork();
-        }
+        updateIdleCheckpointTimerAfterWorkspacePass(passResult);
 
         const committedPassWorkspace = resolveHostedWorkspaceRunnerCommittedWorkspace({
           result: passResult,

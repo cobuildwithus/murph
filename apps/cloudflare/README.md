@@ -821,11 +821,11 @@ completion, may enter the corresponding identity-safe recovery or clear path.
 After an exact successful completion clears the fence, Cloudflare makes at most
 one signed, bodyless owner-release callback to web with a timeout capped at two
 seconds. Its signed query binds the opaque runtime attempt whose fence was
-cleared and may include the exact positive `immediateRecheckRequested` edge. A
-known future mailbox retry continuation skips the callback unless the result
-carries that edge. The edge means the invocation newly committed an unserviced
-default or retention schedule; it does not carry the schedule itself. Without
-the edge, Web signals only when current runnable mailbox lag or a live system
+cleared and may include the exact positive `immediateRecheckRequested` edge.
+A future mailbox retry continuation still sends this callback so Web can
+recheck actionable work after the owner releases its fence. The edge means the
+invocation newly committed an unserviced default or retention schedule; it does
+not carry the schedule itself. Without the edge, Web signals only when current runnable mailbox lag or a live system
 mailbox item beyond the handled-through frontier remains. Exact callbacks use
 the attempt-bound owner-release signal; legacy pointerless callbacks use the
 facts-only recheck. A persisted due wake alone therefore never becomes a
