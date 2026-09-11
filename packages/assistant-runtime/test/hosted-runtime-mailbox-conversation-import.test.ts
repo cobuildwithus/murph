@@ -50,7 +50,6 @@ import {
 } from "@murphai/runtime-state";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 
-import * as channelActivity from "../src/hosted-runtime/channel-activity.ts";
 import {
   createHostedConversationMailboxImportItem,
   importHostedConversationMailboxItem,
@@ -1547,9 +1546,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
   });
 
-  test.each([null, Date.parse("2026-04-26T00:00:00.050Z")])("inherits active typing (%s) with runtime latency on import", async (activeTypingAcceptedAt) => {
-    const activeTyping = vi.spyOn(channelActivity, "readHostedActiveLinqTypingAcceptedAt")
-      .mockReturnValue(activeTypingAcceptedAt);
+  test("records runtime latency on import without inferring typing", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -1607,20 +1604,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    if (activeTypingAcceptedAt !== null) {
-      await vi.waitFor(() => expect(latencyTraceRequests).toHaveLength(3));
-      expect(latencyTraceRequests).toContainEqual({ event: expect.objectContaining({
-        milestone: "linq_typing_accepted",
-        at: new Date(activeTypingAcceptedAt).toISOString(),
-        assistantInputIds: [expect.any(String)],
-        runtimeAttemptId: "attempt_latency_trace_1",
-      }) });
-      expect(activeTyping).toHaveBeenCalledWith("chat_latency");
-    }
-    activeTyping.mockRestore();
-    expect(latencyTraceRequests.map((request) => request.event).filter((event) =>
-      !(event.type === "assistant_milestone" && event.milestone === "linq_typing_accepted")
-    )).toEqual([
+    expect(latencyTraceRequests.map((request) => request.event)).toEqual([
       expect.objectContaining({
         mailboxItemId: item.item.id,
         runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",
@@ -1853,148 +1837,6 @@ describe("hosted mailbox conversation import adapter", () => {
       foregroundWaitResolvedAtEpochMs: 1_777_000_000_200,
     });
   });
-
-  test.each((["telegram", "linq"] as const).flatMap((channel) =>
-    ["active", "stopped", "aborted", "unrelated", "failed", "pending", "pending-failed", "pending-aborted", "pending-unrelated", "pending-slow"].map((scenario) => ({ channel, scenario }))
-  ))(
-    "inherits $channel typing only from a live matching session: $scenario",
-    async ({ channel, scenario }) => {
-      const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-telegram-followup-"));
-      tempRoots.push(parentRoot);
-      const vaultRoot = path.join(parentRoot, "vault");
-      const requests: HostedRuntimeLatencyTraceRequest[] = [];
-      const record = vi.fn(async (request: HostedRuntimeLatencyTraceRequest) => {
-        requests.push(request);
-        return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
-      });
-      const runtime = createRuntime({ platform: { latencyTracePort: { record } } });
-      const importMessage = async (messageId: string, threadId = "12345") => {
-        const wake = createConversationWake({
-          eventId: `evt_telegram_${messageId}`,
-          message: channel === "linq" ? {
-            channel: "linq",
-            phoneLookupKey: "synthetic-contact",
-            linqMessage: {
-              chatId: threadId, messageId, from: "synthetic-contact", isFromMe: false,
-              parts: [{ type: "text", value: "Synthetic follow-up" }],
-            },
-          } : {
-            channel: "telegram",
-            telegramMessage: {
-              messageId,
-              schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
-              text: "Synthetic follow-up",
-              threadId,
-            },
-          },
-        });
-        const outcome = await importHostedConversationMailboxItem({
-          decodePayload: createDecodedPayloadDecoder(wake),
-          async importConversationWake() {
-            return { captureId: null, metrics: { nextWakeAt: null, parserProcessed: 0 } };
-          },
-          async prepareWakeContext() {},
-          item: createResolvedConversationMailboxItem({ dedupeKey: wake.eventId, id: `mailbox_${messageId}` }),
-          runtime,
-          runtimeAttemptId: "attempt_telegram_followup",
-          vaultRoot,
-        });
-        expect(outcome.status).toBe("imported");
-        const staged = requests.map(({ event }) => event).find((event) =>
-          event.type === "assistant_input_staged" && event.mailboxItemId === `mailbox_${messageId}`
-        );
-        if (staged?.type !== "assistant_input_staged") throw new Error("Expected staged input");
-        return staged.assistantInputId;
-      };
-      const initialInputId = await importMessage("1");
-      const initialEvent = await readAssistantInputEvent({ vault: vaultRoot, inputId: initialInputId });
-      if (!initialEvent?.conversation) throw new Error("Expected initial conversation input");
-      const conversationKey = resolveAssistantConversationLookupKey({
-        conversation: conversationRefFromAssistantInputConversation(initialEvent.conversation),
-      });
-      if (!conversationKey) throw new Error("Expected Telegram conversation key");
-      const admissionHook = vi.fn(async () => ({ kind: "no-new-input" as const }));
-      const controller = createAssistantActiveTurnInputController({
-        admissionHook,
-        conversationKeys: [conversationKey],
-        sessionId: "session_telegram_followup",
-        turnId: "turn_telegram_followup",
-        vault: vaultRoot,
-      });
-      const signalController = new AbortController();
-      const pending = scenario.startsWith("pending");
-      const failed = scenario.endsWith("failed");
-      let releaseProvider!: () => void;
-      const providerReady = new Promise<void>((resolve) => { releaseProvider = resolve; });
-      const providerFetch = vi.fn<typeof fetch>(async () => {
-        if (pending) await providerReady;
-        return new Response(
-          JSON.stringify(failed ? { ok: false, description: "Synthetic failure" } : { ok: true, result: true }),
-          { status: failed ? 400 : 200, headers: { "content-type": "application/json" } },
-        );
-      });
-      const typing = channelActivity.createHostedAssistantChannelTypingDependencies({
-        forwardedEnv: { LINQ_API_TOKEN: "synthetic-token" }, userEnv: {},
-        linqDeliveryContexts: [{
-          target: "12345", directRecipientPhoneNumber: "synthetic-contact",
-          fromPhoneNumber: null, replyToMessageId: "1", routeAuthority: null,
-          service: null, threadIsDirect: true,
-        }],
-        platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
-        providerFetch,
-        signal: signalController.signal,
-        latencyTraceContext: {
-          assistantInputIds: [initialInputId], latencyTracePort: { record },
-          runtimeAttemptId: "attempt_telegram_followup", source: "linq",
-        },
-      });
-      const start = (channel === "telegram" ? typing.startTelegramTyping! : typing.startLinqTyping!)({ target: "12345" });
-      const settledStart = start.catch(() => undefined);
-      let handle = pending ? undefined : await settledStart;
-      let restoreAcceptanceClock = () => {};
-      try {
-        if (scenario === "stopped") await handle?.stop();
-        if (scenario === "aborted") signalController.abort();
-        const followupReceivedAt = Date.now();
-        const followupInputId = await importMessage("2", scenario.endsWith("unrelated") ? "67890" : "12345");
-        if (pending) {
-          // Import and live admission must finish while the sole provider call is pending.
-          expect(providerFetch).toHaveBeenCalledOnce();
-          if (!scenario.endsWith("unrelated")) expect(admissionHook).toHaveBeenCalled();
-          if (scenario === "pending-aborted") signalController.abort();
-          const acceptanceClock = vi.spyOn(Date, "now").mockReturnValue(
-            followupReceivedAt + (scenario === "pending-slow" ? 3001 : 1000),
-          );
-          restoreAcceptanceClock = () => { acceptanceClock.mockRestore(); };
-          releaseProvider();
-          handle = await settledStart;
-        }
-        await Promise.resolve();
-        const acceptances = requests.map(({ event }) => event).filter((event) =>
-          event.type === "assistant_milestone" && event.milestone === `${channel}_typing_accepted`
-        );
-        const inherited = scenario === "active" || scenario === "pending" || scenario === "pending-slow";
-        expect(acceptances).toHaveLength(inherited ? 2 : failed || scenario === "pending-aborted" ? 0 : 1);
-        if (inherited) {
-          expect(acceptances).toEqual(expect.arrayContaining([
-            { ...acceptances[0], assistantInputIds: [initialInputId], source: channel },
-            { ...acceptances[0], assistantInputIds: [followupInputId], source: channel },
-          ]));
-          expect(admissionHook).toHaveBeenCalled();
-          if (pending) expect(acceptances[0]?.at).toBe(new Date(
-            followupReceivedAt + (scenario === "pending-slow" ? 3001 : 1000),
-          ).toISOString());
-        }
-        expect(providerFetch).toHaveBeenCalledTimes(channel === "linq" && scenario === "stopped" ? 2 : 1);
-      } finally {
-        controller.close();
-        releaseProvider();
-        handle = await settledStart;
-        await handle?.stop();
-        restoreAcceptanceClock();
-      }
-    },
-  );
 
   test("records Telegram staged trace callbacks with Telegram source", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-latency-"));

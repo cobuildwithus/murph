@@ -127,6 +127,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         target: "12345",
       });
       expect(handle).toBeDefined();
+      executionContext.hosted.channelTypingDependencies.onTypingAccepted({
+        acceptedInputIds: ["admitted-telegram-followup"], at: new Date().toISOString(), channel: "telegram",
+      });
       await handle.stop();
       return {
         assistantAutomationProgressed: false,
@@ -144,7 +147,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     });
     expect(providerFetch).toHaveBeenCalledOnce();
     expect(traceRequests).toContainEqual({ event: {
-      assistantInputIds: ["ain_00000000000000000000000000000001"],
+      assistantInputIds: ["admitted-telegram-followup"],
       at: expect.any(String),
       milestone: "telegram_typing_accepted",
       runtimeAttemptId: "attempt_synthetic_phase",

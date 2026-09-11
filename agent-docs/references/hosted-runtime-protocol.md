@@ -2037,8 +2037,14 @@ first, then Web/Vercel.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
-`assistant_milestone` events for Linq typing request start/acceptance and the
-first locally observed Codex output/text. An accepted ephemeral Linq progress
+`assistant_milestone` events for Linq typing request start, Linq/Telegram typing
+acceptance, and the first locally observed Codex output/text. The engine's turn
+handle reports typing acceptance for the initial accepted-input journal and each
+subsequent admitted input, including pre-provider probes and live steering.
+Admission observes the same provider readiness promise regardless of import
+ordering. The original acceptance timestamp is retained; inactive, stopped or
+aborted handles contribute no new evidence. Mailbox staging never infers typing
+from a process-global target map, and telemetry never delays admission. An accepted ephemeral Linq progress
 send emits `progress_update_accepted` at the provider-acceptance boundary; a
 failed or merely attempted send emits no progress milestone. Progress snapshots
 the active provider request's accepted input ids when Linq accepts the send; it

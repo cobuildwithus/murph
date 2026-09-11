@@ -59,10 +59,6 @@ import {
   inferDirectEmailThreadFromParticipants,
 } from "@murphai/inboxd/connectors/email/directness";
 
-import {
-  readHostedActiveLinqTypingAcceptedAt,
-  readHostedActiveTelegramTypingAcceptedAt,
-} from "./channel-activity.ts";
 import type {
   HostedMailboxConversationImportTiming,
   HostedMailboxItemImportOutcome,
@@ -651,11 +647,6 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
     wake: input.wake,
   });
 
-  const activeTypingAcceptedAt = input.wake.message.channel === "linq"
-    ? readHostedActiveLinqTypingAcceptedAt(input.wake.message.linqMessage.chatId ?? "")
-    : input.wake.message.channel === "telegram"
-      ? readHostedActiveTelegramTypingAcceptedAt(input.wake.message.telegramMessage.threadId)
-      : null;
   try {
     void latencyTracePort.record({
       event: {
@@ -678,24 +669,6 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
           ? {}
           : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
-    }).then(async () => {
-      // Live-admitted input shares the existing session, including a provider
-      // start still in flight. Observe it only after staging, off the reply path.
-      const acceptedAt = await activeTypingAcceptedAt;
-      if (acceptedAt !== null && input.runtimeAttemptId) {
-        recordHostedAssistantMilestonesBestEffort({
-          context: {
-            assistantInputIds: [input.inputId],
-            latencyTracePort,
-            runtimeAttemptId: input.runtimeAttemptId,
-            source,
-          },
-          milestones: [{
-            at: new Date(acceptedAt).toISOString(),
-            milestone: source === "telegram" ? "telegram_typing_accepted" : "linq_typing_accepted",
-          }],
-        });
-      }
     }).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.
     });

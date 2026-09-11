@@ -12,11 +12,17 @@ input. Preserve provider calls, asynchronous telemetry, and store scoping.
 
 ## Cause and smallest correction
 
-The engine starts typing once per turn. The importer already inherits Linq
-acceptance, but Telegram has no equivalent observation. Extend channel-activity's
-ephemeral typing evidence and its import handoff; retire observations on stop
-and abort. The existing trace and alert ledger remain the durable owners.
-No schema, provider policy, prompt, or delivery behavior changes are needed.
+Round 4 exposed an earlier ordering: an import during receipt preparation occurs
+before any typing tracker exists. The user resumed work and requested complexity
+collapse, explicitly continuing remediation and the next review round.
+
+Move accepted typing evidence to the engine's existing turn handle and accepted
+input journal. Admission observes the handle's readiness promise without waiting
+on telemetry. The provider handle exposes its existing active state so stop,
+abort, expiry and refresh failure remain authoritative. Hosted code only translates
+this callback into existing trace milestones. Remove global typing telemetry,
+pending-acceptance state and the mailbox importer handoff; preserve Linq's original
+provider cooldown. No new durable state, timers, provider calls or database reads.
 
 ## Proof and completion
 
@@ -64,3 +70,27 @@ No schema, provider policy, prompt, or delivery behavior changes are needed.
   landed on main in #3264; private compatibility failed installing Temporal CLI
   with ECONNRESET before any reader proof. New exact-head CI must prove both.
 - Round 4 and exact-head CI remain pending on the next pushed candidate.
+
+- Round 4 on `693e05ab9215a1e3d0940a1b12efffb4943a1f82` confirmed
+  pre-start imports lack evidence; all required CI passed on that head.
+- Retrospective: successive import-time samples followed timing cases instead
+  of canonical turn membership. The correction collapses ownership into the
+  engine handle and journal; focused proof now exercises actual pre-provider
+  admission after an input is staged during receipt preparation.
+
+- Complexity collapse removes 65 net production lines: both global telemetry
+  readers, Telegram target tracking, pending-acceptance state and import handoff
+  are gone. Linq's pre-existing provider cooldown map remains unchanged.
+- Four pre-start regressions fail without the journal-to-handle wiring and pass
+  with it. The live-steering test observes evidence before provider completion.
+- Focused proof: 186 hosted runtime tests, 158 engine tests, and 29 provider
+  helper tests pass; final observer-lifetime cases and changed admission probes
+  are rechecked after the last edits. Engine, runtime and operator-config
+  typechecks pass. Complexity guard reports no added debt across 19 source files;
+  existing hotspots remain unchanged. Documentation drift and diff checks pass.
+- Parent review confirms canonical admission and provider lifecycle ownership,
+  exact opaque IDs/source/attempt scoping, and no additional provider call, timer,
+  foreground wait or durable owner. Prior local PostgreSQL threshold, missing
+  evidence, retry and deduplication proof is unchanged by this producer-only edit.
+- User continuation authorizes substantive round 5 after the prior cap pause.
+  Start on the stable pushed candidate alongside exact-head CI.

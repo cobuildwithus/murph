@@ -54,7 +54,6 @@ import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
   createHostedAssistantChannelTypingDependencies,
-  readHostedActiveTelegramTypingAcceptedAt,
 } from "../src/hosted-runtime/channel-activity.ts";
 
 beforeEach(() => {
@@ -163,7 +162,7 @@ test("hosted Linq typing uses the hosted env after target context validation", a
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.refreshMs, 45_000);
 });
 
-test("hosted Linq typing records exact request and acceptance milestones without payload data", async () => {
+test("hosted Linq typing records requests and admitted-input acceptance without payload data", async () => {
   const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
     matchedCount: 1,
     recorded: true,
@@ -203,6 +202,7 @@ test("hosted Linq typing records exact request and acceptance milestones without
   const handle = await typing.startLinqTyping?.({
     target: "chat_typing_trace_1",
   });
+  typing.onTypingAccepted?.({ acceptedInputIds: assistantInputIds, at: new Date().toISOString(), channel: "linq" });
   await vi.waitFor(() => {
     expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
   });
@@ -227,7 +227,7 @@ test("hosted Linq typing records exact request and acceptance milestones without
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("msg_typing_trace_1");
   const acceptedAt = latencyTraceRecord.mock.calls[1]?.[0].event.at;
   assistantInputIds[0] = "input_typing_trace_2";
-  await typing.startLinqTyping?.({ target: "chat_typing_trace_1" });
+  typing.onTypingAccepted?.({ acceptedInputIds: ["input_typing_trace_2"], at: acceptedAt!, channel: "linq" });
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
   await vi.waitFor(() => expect(latencyTraceRecord).toHaveBeenLastCalledWith({ event: expect.objectContaining({
     assistantInputIds: ["input_typing_trace_2"],
@@ -1130,90 +1130,23 @@ test("hosted progress Linq delivery recovers the redacted routed same-wake chat"
   });
 });
 
-test("Telegram typing records acceptance only after the provider starts the indicator", async () => {
+test.each(["linq", "telegram"])("typing telemetry uses admitted IDs and the actual %s channel", async (channel) => {
   const record = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
     matchedCount: 1, recorded: true, unmatchedCount: 0,
   }));
-  const handle = { stop: vi.fn(async () => undefined) };
-  mocks.startTelegramTypingIndicator.mockResolvedValue(handle);
-  const typing = createHostedAssistantChannelTypingDependencies({
-    forwardedEnv: {},
-    platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
-    providerFetch: vi.fn<typeof fetch>(),
-    userEnv: {},
-    latencyTraceContext: {
-      assistantInputIds: ["synthetic-input"],
-      latencyTracePort: { record },
-      runtimeAttemptId: "synthetic-attempt",
-      source: "linq",
-    },
-  });
-  const trackedHandle = await typing.startTelegramTyping?.({ target: "synthetic-thread" });
-  expect(trackedHandle).toBeDefined();
-  expect(record).toHaveBeenCalledWith({ event: {
-    assistantInputIds: ["synthetic-input"],
-    at: expect.any(String),
-    milestone: "telegram_typing_accepted",
-    runtimeAttemptId: "synthetic-attempt",
-    source: "telegram",
-    type: "assistant_milestone",
-  } });
-  await trackedHandle?.stop();
-  expect(handle.stop).toHaveBeenCalledOnce();
-  expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-thread")).toBeNull();
-  record.mockClear();
-  mocks.startTelegramTypingIndicator.mockResolvedValue(undefined);
-  await typing.startTelegramTyping?.({ target: "synthetic-thread" });
-  expect(record).not.toHaveBeenCalled();
-});
-
-test.each([false, true])("Telegram typing evidence follows its handle without awaiting telemetry (pending predecessor: %s)", async (pendingPredecessor) => {
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date("2026-09-11T00:00:00.000Z"));
-  const signalController = new AbortController();
-  const firstStop = vi.fn(async () => { throw new Error("synthetic stop failure"); });
-  const secondStop = vi.fn(async () => undefined);
-  let releaseFirst!: () => void;
-  const firstReady = new Promise<void>((resolve) => { releaseFirst = resolve; });
-  mocks.startTelegramTypingIndicator
-    .mockImplementationOnce(async () => {
-      if (pendingPredecessor) await firstReady;
-      return { stop: firstStop };
-    })
-    .mockResolvedValueOnce({ stop: secondStop });
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {}, userEnv: {},
-    platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
-    providerFetch: vi.fn<typeof fetch>(),
-    signal: signalController.signal,
     latencyTraceContext: {
-      assistantInputIds: ["synthetic-input"],
-      latencyTracePort: { record: () => new Promise(() => {}) },
-      runtimeAttemptId: "synthetic-attempt", source: "telegram",
+      assistantInputIds: ["initial-input"], latencyTracePort: { record },
+      runtimeAttemptId: "synthetic-attempt", source: "linq",
     },
   });
-  try {
-    const firstStart = typing.startTelegramTyping?.({ target: "synthetic-lifetime" });
-    if (!pendingPredecessor) {
-      await firstStart;
-      expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBe(Date.now());
-    }
-    vi.advanceTimersByTime(1000);
-    const second = await typing.startTelegramTyping?.({ target: "synthetic-lifetime" });
-    const secondAcceptedAt = Date.now();
-    vi.advanceTimersByTime(1000);
-    releaseFirst();
-    const first = await firstStart;
-    await expect(first?.stop()).rejects.toThrow("synthetic stop failure");
-    expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBe(secondAcceptedAt);
-    signalController.abort();
-    expect(readHostedActiveTelegramTypingAcceptedAt("synthetic-lifetime")).toBeNull();
-    await second?.stop({ providerStop: false });
-    expect(secondStop).toHaveBeenCalledWith({ providerStop: false });
-    expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledTimes(2);
-  } finally {
-    releaseFirst();
-    signalController.abort();
-    vi.useRealTimers();
-  }
+  typing.onTypingAccepted?.({
+    acceptedInputIds: ["admitted-followup"], at: "2026-09-11T00:00:00.000Z", channel,
+  });
+  await vi.waitFor(() => expect(record).toHaveBeenCalledWith({ event: {
+    assistantInputIds: ["admitted-followup"], at: "2026-09-11T00:00:00.000Z",
+    milestone: `${channel}_typing_accepted`, runtimeAttemptId: "synthetic-attempt",
+    source: channel, type: "assistant_milestone",
+  } }));
 });
