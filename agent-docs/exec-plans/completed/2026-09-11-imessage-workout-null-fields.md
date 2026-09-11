@@ -1,6 +1,6 @@
 # Restore Messages workout submission compatibility
 
-Status: active
+Status: completed
 Created: 2026-09-11
 
 ## Outcome and protected contract
@@ -28,5 +28,7 @@ The Messages Web ingress owns compatibility with installed native clients. Resto
 - Web typecheck passed after narrowing the validated exercises array at its guarded access.
 - Parent walkthrough: sparse apply and snapshot requests normalize into the unchanged shared schema; malformed completed results and missing mutation preconditions fail closed; omitted/null retries admit identical envelopes. Patch UX Ready at this changed admission boundary.
 - Complexity guard passed with zero hotspots. No awaited operation or provider input changed.
-- Remaining completion: PR provenance, final review, exact-head CI. Production deployment and a member retry remain separate outcome proof.
+- Implementation is complete in PR #3286. Final review and exact-head CI are tracked on that PR by the original task owner. Production deployment and a member retry remain separate outcome proof.
 - Private production evidence stays outside repository artifacts.
+Updated: 2026-09-11
+Completed: 2026-09-11
