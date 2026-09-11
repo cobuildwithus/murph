@@ -299,7 +299,7 @@ async function waitForConversationImportAtLeast(
 
   while (Date.now() - startedAt < input.timeoutMs) {
     const status = await readHostedRunnerStatusWithLogLimit(100);
-    const importedSeq = readLatestImportedConversationSeq(status);
+    const importedSeq = status.mailboxLag.find((lane) => lane.lane === "conversation")?.importedSeq ?? null;
     if (importedSeq !== null && compareSeq(importedSeq, seq) >= 0) {
       return status;
     }
@@ -315,28 +315,6 @@ function readConversationMaxSeq(status: HostedRunnerStatusResponse): string {
     throw new Error("Status did not include conversation mailbox lag.");
   }
   return lane.maxSeq;
-}
-
-function readLatestImportedConversationSeq(
-  status: Pick<HostedRunnerStatusResponse, "recentLogs">,
-): string | null {
-  const logs = status.recentLogs ?? [];
-  let latest: string | null = null;
-
-  for (const log of logs) {
-    if (log.eventCode !== "mailbox.imported") {
-      continue;
-    }
-    const seq = log.redactedJson?.conversationSeqEnd;
-    if (typeof seq !== "string" || seq.trim().length === 0) {
-      continue;
-    }
-    if (latest === null || compareSeq(seq, latest) > 0) {
-      latest = seq;
-    }
-  }
-
-  return latest;
 }
 
 function compareSeq(left: string, right: string): number {
