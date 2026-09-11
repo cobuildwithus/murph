@@ -1,6 +1,6 @@
 # Use authorized hosted email routes for audience scope
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -32,4 +32,12 @@ No new state, RPC, dependency, audience abstraction, or migration. Do not change
 
 ## Verification
 
-Pending implementation and focused proof.
+- Three To/Cc/Bcc regression cases failed before the fix and pass afterward; 31 Worker ingress tests pass.
+- 14 focused email import tests and 20 focused callback tests pass, including explicit/missing facts, group override/redaction, verified-owner-only recipient replacement and revoked verification.
+- Real Codex gpt-5.6-terra, local subscription: personal email containing Cc yields one queued direct reply, zero dynamic/command actions; response reviewed Ready. Initial fixture lacked the required delivery idempotency key; fixed the synthetic request and reran successfully on the same subscription.
+- Assistant engine, runtime and Worker typechecks pass; 10 changelog page tests pass.
+- Complexity guard passes; 48 net production source lines deleted, ingress debt decreases by one.
+- Parent review confirms authorized route and sender identity remain distinct; no new lookup, state, migration or prompt builder.
+- Product UX Ready: current personal alias replies work with extra headers, group scope remains isolated, missing legacy metadata fails closed and direct send recipient still revalidates.
+- PR #3233 contains the completed candidate; exact-head CI and ReviewGPT follow Ready. No merge or deploy requested.
+Completed: 2026-09-10
