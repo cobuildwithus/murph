@@ -508,6 +508,33 @@ function resolveUnverifiedExternalAudienceResponse(prompt: string): string {
     : UNVERIFIED_EXTERNAL_AUDIENCE_RESPONSE
 }
 
+function buildCompletedAssistantAskResult(input: {
+  outcome: AssistantDeliveryOutcome
+  prompt: string
+  response: string
+  responseDisposition?: 'none'
+  vault: string
+}): AssistantAskResult {
+  const { outcome } = input
+  return normalizeAssistantAskResultForReturn({
+    vault: redactAssistantDisplayPath(input.vault),
+    status: 'completed',
+    prompt: input.prompt,
+    response: input.response,
+    ...(input.responseDisposition === 'none'
+      ? { responseDisposition: 'none' as const }
+      : {}),
+    media: outcome.media,
+    session: outcome.session,
+    delivery: outcome.kind === 'sent' ? outcome.delivery : null,
+    deliveryDeferred: outcome.kind === 'queued',
+    deliveryIntentId: outcome.kind === 'not-requested' ? null : outcome.intentId,
+    deliveryError: outcome.kind === 'queued' || outcome.kind === 'failed'
+      ? outcome.error
+      : null,
+  })
+}
+
 async function completeUnverifiedExternalAudienceTurn(input: {
   message: AssistantMessageInput
   plan: AssistantTurnSharedPlan
@@ -565,23 +592,11 @@ async function completeUnverifiedExternalAudienceTurn(input: {
 
   return {
     outcome,
-    result: normalizeAssistantAskResultForReturn({
-      delivery: outcome.kind === 'sent' ? outcome.delivery : null,
-      deliveryDeferred: outcome.kind === 'queued',
-      deliveryError:
-        outcome.kind === 'queued' || outcome.kind === 'failed'
-          ? outcome.error
-          : null,
-      deliveryIntentId:
-        outcome.kind === 'sent' || outcome.kind === 'queued' || outcome.kind === 'failed'
-          ? outcome.intentId
-          : null,
-      media: outcome.media,
+    result: buildCompletedAssistantAskResult({
+      outcome,
       prompt: input.message.prompt,
       response: input.response,
-      session: outcome.session,
-      status: 'completed',
-      vault: redactAssistantDisplayPath(input.message.vault),
+      vault: input.message.vault,
     }),
   }
 }
@@ -1643,6 +1658,52 @@ export async function sendAssistantMessageLocal(
                 : precedingReplyDeliveryContextOrdinal,
           })
         }
+        const recordCurrentProviderUsage = async (usageInput: {
+          providerResult: Parameters<typeof recordAssistantUsageEvent>[0]['providerResult']
+          additionalUsages: Parameters<typeof recordAdditionalAssistantUsageEvents>[0]['additionalUsages']
+          providerRequestOutcome?: Parameters<typeof recordAssistantUsageEvent>[0]['providerRequestOutcome']
+        }): Promise<void> => {
+          const usageRecordStartedAt = Date.now()
+          const primaryUsageRecordOrdinal = nextUsageRecordOrdinal
+          nextUsageRecordOrdinal += 1
+          await recordAssistantUsageEvent({
+            executionContext,
+            ...(providerRequestStartedAtMs === null
+              ? {}
+              : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
+            providerRequestAcceptedInputIds,
+            providerRequestOrdinal: primaryUsageRecordOrdinal,
+            ...(usageInput.providerRequestOutcome === undefined
+              ? {}
+              : { providerRequestOutcome: usageInput.providerRequestOutcome }),
+            providerResult: usageInput.providerResult,
+            turnId: currentUserTurn.turnId,
+          })
+          emitTurnTiming({
+            elapsedMs: elapsedSince(turnTimingStartedAt),
+            providerRequestOrdinal,
+            sinceProviderResultMs: providerResultReturnedAt === null
+              ? null
+              : elapsedSince(providerResultReturnedAt),
+            stage: 'usage-recorded',
+            stepElapsedMs: elapsedSince(usageRecordStartedAt),
+          })
+          const additionalUsages = usageInput.additionalUsages?.map(
+            (usageDraft) => ({
+              ...usageDraft,
+              providerRequestOrdinal: nextUsageRecordOrdinal++,
+            }),
+          )
+          await recordAdditionalAssistantUsageEvents({
+            additionalUsages,
+            effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
+            executionContext,
+            providerRequestAcceptedInputIds,
+            providerResult: usageInput.providerResult,
+            turnId: currentUserTurn.turnId,
+          })
+        }
+
         type CurrentProviderRequestResult =
           | {
               kind: 'completed'
@@ -1859,42 +1920,10 @@ export async function sendAssistantMessageLocal(
                 sessionId: providerOutcome.session.sessionId,
               })
             }
-            const usageRecordStartedAt = Date.now()
-            const primaryUsageRecordOrdinal = nextUsageRecordOrdinal
-            nextUsageRecordOrdinal += 1
-            await recordAssistantUsageEvent({
-              executionContext,
-              ...(providerRequestStartedAtMs === null
-                ? {}
-                : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
-              providerRequestAcceptedInputIds,
-              providerRequestOrdinal: primaryUsageRecordOrdinal,
+            await recordCurrentProviderUsage({
+              providerResult: failedProviderResult,
+              additionalUsages: providerOutcome.additionalUsages,
               providerRequestOutcome: providerOutcome.providerRequestOutcome,
-              providerResult: failedProviderResult,
-              turnId: currentUserTurn.turnId,
-            })
-            emitTurnTiming({
-              elapsedMs: elapsedSince(turnTimingStartedAt),
-              providerRequestOrdinal,
-              sinceProviderResultMs: providerResultReturnedAt === null
-                ? null
-                : elapsedSince(providerResultReturnedAt),
-              stage: 'usage-recorded',
-              stepElapsedMs: elapsedSince(usageRecordStartedAt),
-            })
-            const additionalUsages = providerOutcome.additionalUsages?.map(
-              (usageDraft) => ({
-                ...usageDraft,
-                providerRequestOrdinal: nextUsageRecordOrdinal++,
-              }),
-            )
-            await recordAdditionalAssistantUsageEvents({
-              additionalUsages,
-              effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
-              executionContext,
-              providerRequestAcceptedInputIds,
-              providerResult: failedProviderResult,
-              turnId: currentUserTurn.turnId,
             })
             if (
               requestInput.allowFailedNoReplyRecovery &&
@@ -2045,30 +2074,12 @@ export async function sendAssistantMessageLocal(
                 turnId: currentUserTurn.turnId,
                 vault: input.vault,
               })
-              const result = normalizeAssistantAskResultForReturn({
-                vault: redactAssistantDisplayPath(input.vault),
-                status: 'completed',
+              const result = buildCompletedAssistantAskResult({
+                outcome: finalDeliveryOutcome,
                 prompt: currentInput.prompt,
                 response: '',
-                responseDisposition: 'none' as const,
-                media: finalDeliveryOutcome.media,
-                session: finalDeliveryOutcome.session,
-                delivery:
-                  finalDeliveryOutcome.kind === 'sent'
-                    ? finalDeliveryOutcome.delivery
-                    : null,
-                deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
-                deliveryIntentId:
-                  finalDeliveryOutcome.kind === 'sent' ||
-                  finalDeliveryOutcome.kind === 'queued' ||
-                  finalDeliveryOutcome.kind === 'failed'
-                    ? finalDeliveryOutcome.intentId
-                    : null,
-                deliveryError:
-                  finalDeliveryOutcome.kind === 'queued' ||
-                  finalDeliveryOutcome.kind === 'failed'
-                    ? finalDeliveryOutcome.error
-                    : null,
+                responseDisposition: 'none',
+                vault: input.vault,
               })
               turnInputController.complete(result)
               return {
@@ -2099,41 +2110,9 @@ export async function sendAssistantMessageLocal(
               sharedPlan,
             })
           }
-          const usageRecordStartedAt = Date.now()
-          const primaryUsageRecordOrdinal = nextUsageRecordOrdinal
-          nextUsageRecordOrdinal += 1
-          await recordAssistantUsageEvent({
-            executionContext,
-            ...(providerRequestStartedAtMs === null
-              ? {}
-              : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
-            providerRequestAcceptedInputIds,
-            providerRequestOrdinal: primaryUsageRecordOrdinal,
+          await recordCurrentProviderUsage({
             providerResult: currentProviderResult,
-            turnId: currentUserTurn.turnId,
-          })
-          emitTurnTiming({
-            elapsedMs: elapsedSince(turnTimingStartedAt),
-            providerRequestOrdinal,
-            sinceProviderResultMs: providerResultReturnedAt === null
-              ? null
-              : elapsedSince(providerResultReturnedAt),
-            stage: 'usage-recorded',
-            stepElapsedMs: elapsedSince(usageRecordStartedAt),
-          })
-          const additionalUsages = currentProviderResult.additionalUsages?.map(
-            (usageDraft) => ({
-              ...usageDraft,
-              providerRequestOrdinal: nextUsageRecordOrdinal++,
-            }),
-          )
-          await recordAdditionalAssistantUsageEvents({
-            additionalUsages,
-            effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
-            executionContext,
-            providerRequestAcceptedInputIds,
-            providerResult: currentProviderResult,
-            turnId: currentUserTurn.turnId,
+            additionalUsages: currentProviderResult.additionalUsages,
           })
 
           return {
@@ -2293,28 +2272,10 @@ export async function sendAssistantMessageLocal(
               )
               continue
             }
-            precedingResponseSegments.push({
-              followUpRequest: segment.followUpRequest,
-              ...(segment.contextReferences === undefined
-                ? {}
-                : {
-                    contextReferences: segment.contextReferences?.map(
-                      (reference) => ({ ...reference }),
-                    ) ?? null,
-                  }),
+            precedingResponseSegments.push(buildAssistantPrecedingReplySegment({
+              segment,
               deliveryContext: resolvedDeliveryContext.context,
-              response: segment.response,
-              ...(segment.transcriptResponse === undefined
-                ? {}
-                : { transcriptResponse: segment.transcriptResponse }),
-              media: segment.media ?? [],
-              ...(segment.targetInputId
-                ? {
-                    deliveryContextOrdinal: segment.deliveryContextOrdinal,
-                    targetInputId: segment.targetInputId,
-                  }
-                : {}),
-            })
+            }))
         }
         const precedingResponses = precedingResponseSegments.map((segment) => {
           const response = resolveAssistantPersistedReplyText({
@@ -2347,38 +2308,13 @@ export async function sendAssistantMessageLocal(
             vault: input.vault,
           })
         }
-        const noReplySelected = providerResult.finalAction?.kind === 'none'
-        const rawFinalResponseText = noReplySelected
-          ? null
-          : resolveAssistantProviderFinalResponseText(providerResult)
-        const finalResponseText =
-          rawFinalResponseText === null
-            ? null
-            : resolveAssistantPersistedReplyText({
-                messageInput: finalReplyInput,
-                rawResponse: rawFinalResponseText,
-                session: currentSession,
-                sharedPlan,
-              })
-        const rawTranscriptResponseText = noReplySelected
-          ? null
-          : providerResult.transcriptResponse ??
-            (providerResult.responseCard
-              ? renderAssistantResponseCardTranscriptText(providerResult.responseCard)
-              : null)
-        const transcriptResponseText =
-          rawTranscriptResponseText === null
-            ? null
-            : resolveAssistantPersistedReplyText({
-                messageInput: finalReplyInput,
-                rawResponse: rawTranscriptResponseText,
-                session: currentSession,
-                sharedPlan,
-              })
-        const assistantTranscriptText = resolveAssistantProviderTranscriptText({
-          media: providerResult.responseMedia,
-          response: transcriptResponseText,
-        })
+        const { rawFinalResponseText, finalResponseText, assistantTranscriptText } =
+          resolveAssistantFinalReplyContent({
+            providerResult,
+            finalReplyInput,
+            currentSession,
+            sharedPlan,
+          })
         const turnArtifactsStartedAt = Date.now()
         const session = await finalizeAssistantTurnArtifacts({
           assistantTranscriptText,
@@ -2649,28 +2585,14 @@ export async function sendAssistantMessageLocal(
           vault: input.vault,
         })
 
-        const result = normalizeAssistantAskResultForReturn({
-          vault: redactAssistantDisplayPath(input.vault),
-          status: 'completed',
+        const result = buildCompletedAssistantAskResult({
+          outcome: finalDeliveryOutcome,
           prompt: currentInput.prompt,
           response: finalResponse,
           ...(finalResponseDisposition === 'none'
             ? { responseDisposition: 'none' as const }
             : {}),
-          media: finalDeliveryOutcome.media,
-          session: finalDeliveryOutcome.session,
-          delivery: finalDeliveryOutcome.kind === 'sent' ? finalDeliveryOutcome.delivery : null,
-          deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
-          deliveryIntentId:
-            finalDeliveryOutcome.kind === 'sent' ||
-            finalDeliveryOutcome.kind === 'queued' ||
-            finalDeliveryOutcome.kind === 'failed'
-              ? finalDeliveryOutcome.intentId
-              : null,
-          deliveryError:
-            finalDeliveryOutcome.kind === 'queued' || finalDeliveryOutcome.kind === 'failed'
-              ? finalDeliveryOutcome.error
-              : null,
+          vault: input.vault,
         })
         turnInputController.complete(result)
         const productFeedbackCandidate =
@@ -3151,6 +3073,81 @@ function isManualAssistantTurnTrigger(
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
+}
+
+function buildAssistantPrecedingReplySegment({
+  segment,
+  deliveryContext,
+}: {
+  segment: NonNullable<ExecutedAssistantProviderTurnResult['precedingResponseSegments']>[number]
+  deliveryContext: AssistantReplyDeliveryContext | null
+}): AssistantPrecedingReplySegment {
+  return {
+    followUpRequest: segment.followUpRequest,
+    ...(segment.contextReferences === undefined
+      ? {}
+      : {
+          contextReferences: segment.contextReferences?.map(
+            (reference) => ({ ...reference }),
+          ) ?? null,
+        }),
+    deliveryContext,
+    response: segment.response,
+    ...(segment.transcriptResponse === undefined
+      ? {}
+      : { transcriptResponse: segment.transcriptResponse }),
+    media: segment.media ?? [],
+    ...(segment.targetInputId
+      ? {
+          deliveryContextOrdinal: segment.deliveryContextOrdinal,
+          targetInputId: segment.targetInputId,
+        }
+      : {}),
+  }
+}
+
+function resolveAssistantFinalReplyContent({
+  providerResult,
+  finalReplyInput,
+  currentSession,
+  sharedPlan,
+}: {
+  providerResult: ExecutedAssistantProviderTurnResult
+  finalReplyInput: AssistantMessageInput
+  currentSession: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}) {
+  if (providerResult.finalAction?.kind === 'none') {
+    return {
+      rawFinalResponseText: null,
+      finalResponseText: null,
+      assistantTranscriptText: null,
+    }
+  }
+  const rawFinalResponseText = resolveAssistantProviderFinalResponseText(providerResult)
+  const finalResponseText = resolveAssistantPersistedReplyText({
+    messageInput: finalReplyInput,
+    rawResponse: rawFinalResponseText,
+    session: currentSession,
+    sharedPlan,
+  })
+  const rawTranscriptResponseText = providerResult.transcriptResponse ??
+    (providerResult.responseCard
+      ? renderAssistantResponseCardTranscriptText(providerResult.responseCard)
+      : null)
+  const transcriptResponseText = rawTranscriptResponseText === null
+    ? null
+    : resolveAssistantPersistedReplyText({
+        messageInput: finalReplyInput,
+        rawResponse: rawTranscriptResponseText,
+        session: currentSession,
+        sharedPlan,
+      })
+  const assistantTranscriptText = resolveAssistantProviderTranscriptText({
+    media: providerResult.responseMedia,
+    response: transcriptResponseText,
+  })
+  return { rawFinalResponseText, finalResponseText, assistantTranscriptText }
 }
 
 function resolveAssistantProviderFinalResponseText(
