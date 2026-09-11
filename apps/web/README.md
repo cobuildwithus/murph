@@ -2209,7 +2209,16 @@ The Vercel Git integration is the only production deployment owner. Every
 commit pushed to `main` creates one managed production candidate; no
 repository ignore command may suppress that candidate. The candidate remains
 off the production domains until its configured Deployment Checks, including
-`Temporal Web production admission`, pass for that exact current commit.
+`Temporal Web production admission`, pass for that exact candidate commit. Required main checks retain independent
+SHA-scoped proof. Web admission finishes its active candidate and keeps only the
+newest waiting run, using GitHub's existing concurrency group. Public main may
+advance during proof: both controllers require the tested SHA to remain an
+ancestor of the observed protected-main tip. Private main and live Temporal
+reader/routing/target freshness remain required. Vercel's managed Git integration
+continues to own production ordering and promotion; admission never promotes an
+artifact itself. Deploy the private ancestry-aware consumer before this public
+controller. Verify one candidate reaches production while a later merge is still
+being checked, then verify a delayed older check cannot replace a newer release.
 
 Do not deploy production from the local CLI, promote an existing deployment,
 use Instant Rollback, or force-promote past a Deployment Check. Those paths do

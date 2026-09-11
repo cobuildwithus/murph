@@ -871,11 +871,11 @@ The hard-cut architecture is accepted when:
   no private revision pointer or reader policy. Missing, stale, skipped,
   canceled, duplicated, malformed, or failed proof remains red or pending.
 
-- Every public `main` push runs the exact-main producer and compatibility
+- Every public `main` push runs the exact-candidate producer and compatibility
   controller again in `.github/workflows/temporal-web-deployment-admission.yml`.
   Vercel must select the `Temporal Web production admission` job as a
   production Deployment Check; with that external binding in place, production
-  domains stay on the previous deployment until the current public commit,
+  domains stay on the previous deployment until the pinned public candidate,
   current private `main`, and current live readers produce one accepted proof.
   That same private run selects the `production_core` scope from its canonical
   integration manifest: Linq delivery, scheduled reminder, hosted-web browser
@@ -891,8 +891,14 @@ The hard-cut architecture is accepted when:
   configuration and reject mismatch without exporting its component values.
   The release mode rejects an arbitrary public ref; public pull requests remain
   fixture-only and never execute beside private source. The public controller
-  re-reads both branch heads, and private protected attestations re-read the
-  supported reader set and both heads, before success. Every `main` commit creates one managed
+  and private protected attestations re-read both branch heads before success:
+  public main may advance if the exact tested candidate remains its ancestor;
+  private main must still equal the dispatched controller. The supported reader
+  set, lifecycle, routing and target must remain unchanged. Required public main
+  checks use SHA-scoped concurrency; Web admission retains its active run and
+  coalesces waiting pushes to the latest candidate. The private plan, runner
+  bundle and scenarios all retain the requested public SHA, never the newer tip.
+  Deploy this private consumer before the public controller change. Every `main` commit creates one managed
   candidate, and no local production upload or historical promotion/rollback
   path may compete with that Git owner. Rollback uses a fresh revert commit so
   it receives current proof. This proves the reconciliation-facts wire boundary
@@ -904,6 +910,31 @@ The hard-cut architecture is accepted when:
   scenario that starts managed local Temporal, signals through web, queries the
   workflow, and proves the worker reaches Cloudflare ensure-processing. Heavier
   continuity/stress cases remain opt-in.
+
+## Compatibility controller upgrades
+
+The pull-request compatibility workflow executes the controller from trusted
+public `main`, not the controller proposed by that pull request. A successor
+controller therefore cannot authorize its own admission. When changing the
+controller and producer fixture together would fail the current controller,
+use two pull requests:
+
+1. Land only the controller/bootstrap change, keeping the candidate producer
+   fixture compatible with the currently trusted controller and supported
+   private readers. Run the existing controller contract tests and require the
+   ordinary exact-head compatibility status to pass under the old controller.
+2. After that merge is on public `main`, open or refresh the producer/runtime
+   change against that base. Require a new exact-head compatibility proof under
+   the successor controller and the private owner's live supported reader set.
+
+Review the first PR's changed paths and fixture diff to confirm it does not
+introduce the incompatible producer field or behavior early. If it cannot pass
+under the old controller, split out a compatible prerequisite at its existing
+owner; do not bypass the required status, execute candidate controller code
+with protected credentials, or temporarily relax private reader policy. A
+private reader prerequisite follows the existing consumer-first release order.
+The later production deployment still requires its separate exact-main
+admission; a bootstrap merge is not production authorization.
 
 ## Related References
 
