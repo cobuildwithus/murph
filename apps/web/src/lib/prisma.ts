@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { attachDatabasePool } from "@vercel/functions";
@@ -30,6 +32,21 @@ const DATABASE_RETRY_MIN_DELAY_MS = 50;
 const DATABASE_RETRY_MAX_DELAY_MS = 250;
 const POOL_PRESSURE_SAMPLE_INTERVAL_MS = 10_000;
 const SLOW_TRANSACTION_MS = 5_000;
+
+// A read in a batch or interactive transaction must keep that transaction's
+// snapshot and failure boundary. The public transaction wrapper owns the scope;
+// no Prisma-private request metadata is needed.
+const databaseTransactionScope = new AsyncLocalStorage<boolean>();
+const REPLAYABLE_MODEL_READS = new Set([
+  "findUnique",
+  "findUniqueOrThrow",
+  "findFirst",
+  "findFirstOrThrow",
+  "findMany",
+  "count",
+  "aggregate",
+  "groupBy",
+]);
 
 export type PrismaInteractiveTransactionOperation =
   | "account_deletion.database_delete"
@@ -122,6 +139,19 @@ const DATABASE_POOL_FAILURE_BY_SQLSTATE = new Map<
 >([
   ["53300", "connection_limit"],
 ]);
+
+// pg sometimes emits plain Errors without a code. Keep message-only fallbacks
+// together; a closed socket alone does not prove whether SQL ran.
+const DATABASE_POOL_FAILURE_BY_MESSAGE: readonly [RegExp, DatabasePoolFailureCategory][] = [
+  [/^Connection terminated unexpectedly$/, "connection_closed"],
+  [/timeout exceeded when trying to connect/, "pool_checkout_timeout"],
+  // P2028 covers every transaction-API fault; only this message means setup.
+  [/Unable to start a transaction in the given time/, "transaction_start_timeout"],
+  [/Connection terminated due to connection timeout/, "connection_establishment_timeout"],
+  [/remaining connection slots are reserved/, "connection_limit"],
+  [/too many connections for role/, "connection_limit"],
+  [/sorry, too many clients already/, "connection_limit"],
+];
 
 const PGBOUNCER_MAX_CLIENT_CONN_SQLSTATE = "08P01";
 const PGBOUNCER_MAX_CLIENT_CONN_MESSAGE =
@@ -252,17 +282,25 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
             Date.now() - startedAtMs,
           );
         };
-        // A checkout timeout means the statement never reached Postgres, so the
-        // operation can be replayed without duplicating an effect.
+        // Checkout/establishment timeouts precede SQL dispatch. A disconnect
+        // can follow dispatch, so only standalone model reads can replay it.
+        // Raw SQL can have effects even when exposed as a query.
+        const retryableCategories: DatabasePoolFailureCategory[] = [
+          "pool_checkout_timeout",
+          "connection_establishment_timeout",
+        ];
+        if (
+          model && REPLAYABLE_MODEL_READS.has(operation)
+          && !databaseTransactionScope.getStore()
+        ) {
+          retryableCategories.push("connection_closed");
+        }
         return runWithDatabaseRetry(
           pool,
           poolMax,
           {
             operation: model ? `${model}.${operation}` : operation,
-            retryableCategories: [
-              "pool_checkout_timeout",
-              "connection_establishment_timeout",
-            ],
+            retryableCategories,
             source: "operation",
           },
           () => query(args),
@@ -284,9 +322,9 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
 }
 
 /**
- * Retries one ambiguous connection-establishment failure when the caller proves
- * the operation never began. Local pool saturation is already backpressure, so
- * it is reported and returned immediately instead of rejoining the same queue.
+ * Retries once when the caller proves replay is safe: no effect began, or the
+ * operation is a standalone model read. Local pool saturation is already
+ * backpressure, so it returns immediately instead of rejoining the same queue.
  */
 async function runWithDatabaseRetry<T>(
   pool: PgPool,
@@ -398,7 +436,10 @@ function withTransactionStartRetry(
                 ],
                 source: "transaction",
               },
-              () => Reflect.apply(value, target, args) as Promise<unknown>,
+              () => databaseTransactionScope.run(
+                true,
+                () => Reflect.apply(value, target, args) as Promise<unknown>,
+              ),
             );
           } finally {
             reportSlowDatabaseBatchTransaction(
@@ -416,6 +457,7 @@ function withTransactionStartRetry(
           {
             operation: "transaction.interactive",
             retryableCategories: [
+              "connection_closed",
               "transaction_start_timeout",
               "pool_checkout_timeout",
               "connection_establishment_timeout",
@@ -454,11 +496,10 @@ function withTransactionStartRetry(
             const transactionArgs = [wrappedCallback, ...args.slice(1)];
 
             try {
-              return await Reflect.apply(
-                value,
-                target,
-                transactionArgs,
-              ) as unknown;
+              return await databaseTransactionScope.run(
+                true,
+                () => Reflect.apply(value, target, transactionArgs) as Promise<unknown>,
+              );
             } finally {
               if (!callbackStarted) {
                 reportSlowDatabaseTransactionAcquisition(
@@ -602,25 +643,11 @@ function resolveDatabasePoolFailureCategory(
     ) {
       return "connection_limit";
     }
-    if (message?.includes("timeout exceeded when trying to connect")) {
-      return "pool_checkout_timeout";
-    }
-    // Prisma reports every transaction-API fault as P2028, so only the message
-    // separates "never started" from a transaction that ran and then expired.
-    if (message?.includes("Unable to start a transaction in the given time")) {
-      return "transaction_start_timeout";
-    }
-    if (message?.includes("Connection terminated due to connection timeout")) {
-      return "connection_establishment_timeout";
-    }
-    // Postgres words a SQLSTATE 53300 rejection differently depending on which
-    // limit refused the connection, and some wrappers keep only the message.
-    if (
-      message?.includes("remaining connection slots are reserved")
-      || message?.includes("too many connections for role")
-      || message?.includes("sorry, too many clients already")
-    ) {
-      return "connection_limit";
+    const messageCategory = DATABASE_POOL_FAILURE_BY_MESSAGE.find(
+      ([pattern]) => pattern.test(message ?? ""),
+    )?.[1];
+    if (messageCategory) {
+      return messageCategory;
     }
 
     if (candidate.depth >= DATABASE_POOL_FAILURE_TRAVERSAL_MAX_DEPTH) {
