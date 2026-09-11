@@ -98,6 +98,7 @@ describe("durable system continuation evidence after provider start", () => {
 
   it("rejects absent attempts and stale or missing evidence", () => {
     expect(observe([{ ...validLog, attemptId: null }])).toBe(false);
+    expect(observe([{ ...validLog, attemptId: "" }])).toBe(false);
     expect(observe([{ ...validLog, at: "2026-01-01T00:00:00.999Z" }])).toBe(false);
     expect(observe([{ ...validLog, at: "invalid" }])).toBe(false);
     expect(observe([])).toBe(false);

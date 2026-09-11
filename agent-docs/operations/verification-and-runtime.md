@@ -476,6 +476,11 @@ if Garmin departs during that asynchronous sample, the current route wins over
 the stale pre-sample observation and the callback proof continues. After the
 persisted-state reload, the runner waits for the page load boundary before
 clicking Disconnect so server-rendered state cannot outrun its client handler.
+Authorization-click failures retain the fixed action and timeout category,
+plus allowlisted host-family and route categories sampled before and after the
+click. The runner captures the original stage and diagnostic message before
+browser cleanup; cleanup cannot replace that evidence with a closed-page
+location. These diagnostics contain no raw URL, provider page text, or screenshot.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual

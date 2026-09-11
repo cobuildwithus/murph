@@ -39,7 +39,8 @@ export function hasSuccessfulHostedSystemContinuation(input: {
   return input.logs.some((entry) => {
     const wakeKind = entry.redactedJson?.wakeKind;
     return entry.eventCode === "mailbox.system_processed"
-      && entry.attemptId !== null
+      && typeof entry.attemptId === "string"
+      && entry.attemptId.length > 0
       && Date.parse(entry.at) >= input.providerStartedAt.getTime()
       && typeof wakeKind === "string"
       && input.expectedWakeKinds.includes(wakeKind)

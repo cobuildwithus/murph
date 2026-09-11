@@ -405,8 +405,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         providerRequestBaseline + 1,
       );
 
-      // Background work remains durable after the foreground reply, including
-      // when normal invocation completion admits a successor for this user.
+      // After foreground delivery, durable system work must continue even if
+      // the original owner settles or completion events advance the frontier.
       await requireSystemWakeStormPreserved(
         systemMailboxProbe.userId,
         latestAppend.wake.seq,
@@ -2863,7 +2863,7 @@ async function requireSystemWakeStormPreserved(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but seeded system work did not continue durably.",
+    "Foreground reply succeeded, but seeded system work did not continue after provider start.",
     `expected imported sequence: ${expectedImportedSeq}`,
     `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
     `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,
