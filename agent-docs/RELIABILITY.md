@@ -3203,6 +3203,19 @@ the same member transaction, so an old reply capability cannot be
 re-registered. Deploy the database migration and Web contract before
 Cloudflare; roll back Cloudflare first.
 
+## Scheduled device wake transaction lifetime
+
+Scheduled device-sync wake admission prepares the active ingress root in the
+existing request-scoped crypto cache before taking the member admission and
+connection locks. The mailbox append requires that prepared root, revalidates
+its exact identity inside the transaction, and disables provider calls while
+appending. Root drift rolls back and permits one fresh preparation retry;
+KMS failure before admission creates neither a mailbox item nor a signal.
+Consent is rechecked after preparation under the existing member lock.
+Runtime signaling remains after commit. Scheduled v3 duplicate replay keeps
+its existing exact dedupe and retained runtime-continuation ownership checks;
+it does not decrypt a retired payload or create a second handoff owner.
+
 ## Deterministic member action delivery
 
 Direct editors reuse the existing encrypted system mailbox rather than adding a

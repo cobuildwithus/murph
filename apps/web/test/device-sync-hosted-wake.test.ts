@@ -202,6 +202,13 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedScheduledDeviceSyncWakeEnvelopeTx:
     mocks.appendHostedMailboxEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto: mocks.prepareHostedMailboxItemAppendCrypto,
+  runWithPreparedHostedMailboxItemAppendCrypto: async (input: {
+    append: (prepared: unknown) => Promise<unknown>;
+    prisma: unknown;
+    userId: string;
+  }) => input.append(await mocks.prepareHostedMailboxItemAppendCrypto({
+    userId: input.userId,
+  })),
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({

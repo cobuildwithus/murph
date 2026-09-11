@@ -812,6 +812,17 @@ The hard-cut architecture is accepted when:
   Clinical recovery does not create a second run, wake, receipt, or generation.
   There is no Vercel device-sync dirty-sweeper cron cadence and no
   Temporal dirty-row sweep replacement.
+- Background phase changes belong to the existing Temporal Schedule owner,
+  not sleeps inside Web commands or a second scheduler. A fixed interval
+  offset preserves cadence while moving the global recovery sweep away from
+  minute boundaries; it does not spread individual runtime wakes or reduce
+  total work. Review shared mailbox recovery latency, overlap/catch-up policy,
+  and schedule create/update convergence before deploying such a change.
+  Preserve canonical per-user deadlines: the shared `assistant` wake also
+  covers pending input and exact reminders, while device `nextReconcileAt`
+  can represent an earlier provider retry. Onboarding follow-ups already have
+  deterministic per-member staggering. No blanket jitter applies to these
+  aggregate wake timestamps.
 - Temporal stores only pointer fields, coalesced flags, counters, timestamps,
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code
