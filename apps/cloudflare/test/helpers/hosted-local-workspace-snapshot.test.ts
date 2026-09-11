@@ -10,6 +10,7 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import { HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH } from "@murphai/hosted-execution/routes";
+import { parseHostedExecutionSnapshotRef } from "@murphai/hosted-execution/parsers";
 import {
   encodeHostedWorkspaceSnapshotV2DataKey,
   unwrapHostedWorkspaceSnapshotV2DataKey,
@@ -38,6 +39,11 @@ const testkit = vi.hoisted(() => ({
   createDeps: vi.fn(),
   disconnect: vi.fn(),
   ensureWorkspace: vi.fn(),
+  randomBytes: vi.fn((length: number) => Buffer.alloc(length, 0xff)),
+}));
+vi.mock("node:crypto", async () => ({
+  ...await vi.importActual<typeof import("node:crypto")>("node:crypto"),
+  randomBytes: testkit.randomBytes,
 }));
 vi.mock("#hosted-web-testing", () => ({
   createHostedWebTestkitDeps: testkit.createDeps,
@@ -132,6 +138,9 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
     expect(calls).toEqual(["workspace", "crypto", "upload", "locator"]);
     expect(testkit.createDeps).toHaveBeenCalledWith(fixture.environment);
     expect(testkit.disconnect).toHaveBeenCalledOnce();
+    // These bytes contain '/' in ordinary base64; checkpoint publication requires base64url.
+    expect(parseHostedExecutionSnapshotRef(ref)).toEqual(ref);
+    expect(ref.encryption.ivBase64).toBe("________________");
     expect(ref.encryption.aad.objectKey).toBe(ref.objectKey);
     expect(ref.archive.encryptedByteSize).toBe(encryptedBytes.byteLength);
     const dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
