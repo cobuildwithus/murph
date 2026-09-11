@@ -248,6 +248,35 @@ reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
+The separate `.github/workflows/assistant-real-model.yml` acceptance lane runs
+only on protected `main` pushes or manual dispatch from protected `main`. Before
+enabling it, configure the `assistant-real-model-sandbox` GitHub Environment to
+allow only `main` and set its `ASSISTANT_REAL_MODEL_SANDBOX_OPENAI_API_KEY` to a
+dedicated budgeted test-project credential. Do not use a production credential.
+The runner `pnpm exec tsx scripts/run-assistant-real-model-gate.ts` pins
+`gpt-5.6-terra`, the production Responses websocket-enabled provider setting,
+three exact scenario names, serial execution, zero test retries, and a twelve
+minute outer deadline per scenario. Codex's ordinary bounded transport retries
+remain enabled. Missing configuration, missing selection, skipped assertions,
+and absent or invalid execution reports fail the lane. The retained artifact
+contains only commit/run/model/configured-transport and scenario status metadata;
+raw replies and Vitest reports are discarded.
+
+These journeys use production assistant planning and the shipped `vault-cli`
+against synthetic canonical vaults. They prove meal save and fresh-conversation
+readback after assistant process restart and vault snapshot restore; recurring
+reminder save, scheduler fire, outbox acknowledgement/reconciliation and cancel;
+and group privacy refusal, silence, and absence of unauthorized canonical effects.
+The Linq route metadata and delivery sink are synthetic external boundaries.
+The model-created reminder is not patched before execution. Native launch
+arguments add the named permission profiles from the production builder while
+preserving the selected Codex authentication home. This lane does not prove
+managed-container restart, private Worker egress, Temporal, or actual
+messaging-provider delivery.
+It is post-merge acceptance evidence, separate from PR checks and deploy gates.
+Local subscription runs prove the same owned effects but retain the selected
+local Codex configuration; they do not certify the protected provider transport.
+
 If the default subscription home cannot run the focused journey before any
 provider action because of authentication, quota, startup, or connection
 failure, this repository grants standing authorization to try every available
