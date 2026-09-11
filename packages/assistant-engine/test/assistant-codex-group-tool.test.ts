@@ -811,18 +811,21 @@ describe("murph.group dynamic tool", () => {
     expect(readGroupToolPayload(result)).toEqual(response);
   });
 
-  it.each([
-    ["no message ref", undefined],
-    ["a ref outside the accepted input set", EARLIER_ASSISTANT_INPUT_ID],
-  ])("rejects a group signup link with %s", async (_case, messageRef) => {
+  it.each(
+    ["create_signup_referral_link", "read_usage_referral"].flatMap((action) => [
+      { action, label: "no message ref", messageRef: undefined, authorizerCalls: 0 },
+      { action, label: "a ref outside the accepted input set", messageRef: EARLIER_ASSISTANT_INPUT_ID, authorizerCalls: 0 },
+      { action, label: "an accepted ref without participant authority", messageRef: FRESH_ASSISTANT_INPUT_ID, authorizerCalls: 1 },
+    ]),
+  )("rejects $action with $label", async ({ action, messageRef, authorizerCalls }) => {
     const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "create_signup_referral_link",
+      action,
       ...(messageRef ? { message_ref: messageRef } : {}),
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected signup referral request.");
     }
-    const authorizeAcceptedMessageTarget = vi.fn();
+    const authorizeAcceptedMessageTarget = vi.fn(async () => null);
     const groupRequest = vi.fn<GroupToolRequest>();
 
     const result = await executeMurphDynamicToolRequest({
@@ -848,7 +851,13 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
-    expect(authorizeAcceptedMessageTarget).not.toHaveBeenCalled();
+    expect(result.rpcResult.contentItems).toEqual([{
+      type: "inputText",
+      text: action === "create_signup_referral_link"
+        ? "group signup referral links require the exact accepted Message ref from the requesting participant"
+        : "group usage options require the exact accepted Message ref from the requesting participant",
+    }]);
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledTimes(authorizerCalls);
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
