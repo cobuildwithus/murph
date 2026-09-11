@@ -40,6 +40,32 @@ afterEach(async () => {
 });
 
 describe("importClinicalFhirSnapshot", () => {
+  it("imports a long inline note without losing its body and replays without duplicates", async () => {
+    const text = "Historical discharge instruction. ".repeat(600);
+    const resource = {
+      resourceType: "DocumentReference", id: "historical-long-note",
+      subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+      status: "current", docStatus: "final", date: "2004-03-12T12:00:00.000Z",
+      type: { text: "Discharge summary" },
+      content: [{ attachment: { contentType: "text/plain", data: Buffer.from(text).toString("base64") } }],
+    };
+    const input = await createSnapshotInput({
+      pages: [{ resourceType: "DocumentReference", content: fhirBundle([resource]) }],
+      resourceTypes: ["DocumentReference"],
+    });
+    const externalRef = {
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "document-reference", resourceId: resource.id, version: resource.meta.lastUpdated,
+    };
+    const upgrade = input;
+    expect((await importClinicalFhirSnapshot(upgrade)).canonical.createdCount).toBe(1);
+    const note = await findEventByExternalRef({ vaultRoot: input.vaultRoot, ...externalRef });
+    if (note?.kind !== "note") throw new Error("Clinical note is missing.");
+    expect(note.sections?.map((section) => section.text).join("")).toBe(text.trim());
+    expect(note.occurredAt).toBe(resource.date);
+    expect((await importClinicalFhirSnapshot(upgrade)).canonical.createdCount).toBe(0);
+  });
   it("keeps retrieval checkpoints private, run-bound, and terminally clearable", async () => {
     const input = await createSnapshotInput({
       pages: [],
@@ -219,6 +245,84 @@ describe("importClinicalFhirSnapshot", () => {
         externalRef: { version: "2026-07-10T12:00:00.000Z" },
       });
     }
+  });
+
+  it("deduplicates reordered hospital records within a snapshot and across retrieval jobs", async () => {
+    const procedure = {
+      resourceType: "Procedure", id: "same-procedure", subject: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" }, status: "completed",
+      code: { coding: [{ system: "http://example.test/procedures", code: "synthetic", display: "Synthetic procedure" }] },
+      performedDateTime: "2010-04-02T12:00:00.000Z", note: [{ text: "First" }, { text: "Second" }],
+    };
+    const reordered = Object.fromEntries(Object.entries({
+      ...procedure, code: { coding: [{ display: "Synthetic procedure", code: "synthetic", system: "http://example.test/procedures" }] },
+    }).reverse());
+    const base = await createSnapshotInput({ pages: [], resourceTypes: ["Procedure", "Observation"] });
+    const slices: ClinicalFhirRetrievalSlice[] = [
+      { resourceType: "Procedure", queryScopeId: "procedure-orders", sliceId: "whole", coverage: "whole-family", queryFingerprint: "1".repeat(64) },
+      { resourceType: "Procedure", queryScopeId: "procedure-surgeries", sliceId: "whole", coverage: "whole-family", queryFingerprint: "2".repeat(64) },
+      { resourceType: "Observation", queryScopeId: "observation", sliceId: "whole", coverage: "whole-family", queryFingerprint: "3".repeat(64) },
+    ];
+    const input: ClinicalFhirSnapshotImportInput = {
+      ...base, retrievalSlices: slices,
+      completedRetrievalSlices: slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+      pages: slices.map(({ resourceType, queryScopeId, sliceId }, index) => ({
+        resourceType, queryScopeId, sliceId,
+        content: fhirBundle([index === 0 ? procedure : index === 1 ? reordered : heartRateObservation("unrelated-vital")]),
+      })),
+    };
+    expect((await importClinicalFhirSnapshot(input)).canonical)
+      .toMatchObject({ createdCount: 2, skippedExistingCount: 1 });
+    const lookup = { vaultRoot: input.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "procedure", resourceId: procedure.id };
+    const saved = await findEventByExternalRef(lookup);
+    expect(saved?.note).toContain('"text": "First"');
+    expect(saved?.note?.indexOf('"text": "First"')).toBeLessThan(saved?.note?.indexOf('"text": "Second"') ?? -1);
+    const repeat = { ...input, retrievalJobId: "reordered-repeat", pages: input.pages.map((page, index) => index < 2 ? { ...page, content: fhirBundle([index === 0 ? reordered : procedure]) } : page) };
+    expect((await importClinicalFhirSnapshot(repeat)).canonical)
+      .toMatchObject({ createdCount: 0, skippedExistingCount: 3 });
+    expect(await findEventByExternalRef(lookup)).toEqual(saved);
+    for (const [index, changed] of [
+      { ...procedure, status: "not-done" },
+      { ...procedure, note: [...procedure.note].reverse() },
+    ].entries()) {
+      await expect(importClinicalFhirSnapshot({
+        ...input, retrievalJobId: `genuine-conflict-${index}`,
+        pages: input.pages.map((page, pageIndex) => pageIndex === 0 ? { ...page, content: fhirBundle([changed]) } : page),
+      })).rejects.toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+      expect(await findEventByExternalRef(lookup)).toEqual(saved);
+    }
+  });
+
+  it("keeps provider allergy history source-versioned across replay, correction and retraction", async () => {
+    const resource = {
+      resourceType: "AllergyIntolerance", id: "historical-allergy",
+      patient: { reference: `Patient/${PATIENT_ID}` },
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+      recordedDate: "2001-02-03",
+      code: { text: "Penicillin" },
+      clinicalStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }] },
+      verificationStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification", code: "confirmed" }] },
+      reaction: [{ manifestation: [{ text: "Hives" }] }],
+    };
+    const input = await createSnapshotInput({ pages: [{ resourceType: "AllergyIntolerance", content: fhirBundle([resource]) }], resourceTypes: ["AllergyIntolerance"] });
+    const lookup = { vaultRoot: input.vaultRoot, system: "epic-fhir-" + FHIR_BASE_URL_HASH + "-" + PATIENT_ID_HASH, resourceType: "allergy-intolerance", resourceId: resource.id };
+    expect((await importClinicalFhirSnapshot(input)).canonical.createdCount).toBe(1);
+    const original = await findEventByExternalRef(lookup);
+    expect(original).toMatchObject({ kind: "note", occurredAt: "2001-02-03T00:00:00.000Z" });
+    expect(original?.note).toContain("Hives");
+    expect((await importClinicalFhirSnapshot(input)).canonical.skippedExistingCount).toBe(1);
+    const corrected = { ...resource, meta: { lastUpdated: "2026-07-11T12:00:00.000Z" }, reaction: [{ manifestation: [{ text: "Rash" }] }] };
+    await importClinicalFhirSnapshot({ ...input, retrievalJobId: "allergy-correction", pages: [{ resourceType: "AllergyIntolerance", queryScopeId: "allergyintolerance", sliceId: "whole", content: fhirBundle([corrected]) }] });
+    const updated = await findEventByExternalRef(lookup);
+    expect(updated?.note).toContain("Rash");
+    expect(updated?.note).not.toContain("Hives");
+    await importClinicalFhirSnapshot(input);
+    expect((await findEventByExternalRef(lookup))?.note).toContain("Rash");
+    const retracted = { ...corrected, meta: { lastUpdated: "2026-07-12T12:00:00.000Z" }, verificationStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification", code: "entered-in-error" }] } };
+    await importClinicalFhirSnapshot({ ...input, retrievalJobId: "allergy-retraction", pages: [{ resourceType: "AllergyIntolerance", queryScopeId: "allergyintolerance", sliceId: "whole", content: fhirBundle([retracted]) }] });
+    expect(await findEventByExternalRef(lookup)).toBeNull();
+    await importClinicalFhirSnapshot(input);
+    expect(await findEventByExternalRef(lookup)).toBeNull();
   });
 
   it.each([
@@ -706,7 +810,6 @@ describe("importClinicalFhirSnapshot", () => {
         content: fhirBundle([{
           resourceType: "Condition",
           id: "condition-1",
-          meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
           subject: { reference: `Patient/${PATIENT_ID}` },
           code: { text: "Example condition" },
         }]),
@@ -746,7 +849,9 @@ describe("importClinicalFhirSnapshot", () => {
 
     const result = await importClinicalFhirSnapshot(input);
 
-    expect(result.executableDecisionCount).toBe(0);
+    // The individual source identity may be held/retracted; no absence assertion is created.
+    expect(result.executableDecisionCount).toBe(1);
+    expect(result.canonical.createdCount).toBe(0);
     expect(result.reviewDecisionCount).toBe(1);
   });
 

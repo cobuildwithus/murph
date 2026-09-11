@@ -31,6 +31,26 @@ Incompatible units, ambiguous values and missing comparable revisions retain
 their existing explicit review/retraction behavior. These mappings do not
 change provider acquisition windows; lifetime retrieval is a separate owner change.
 
+### Hospital history and source notes
+
+Supported allergies, conditions, medication requests/statements/dispenses,
+encounters, procedures, immunizations, family history, care plans/teams, goals,
+devices and service requests become dated, source-versioned notes. The notes
+retain readable labels, source statuses and selected structured clinical details
+with raw evidence links. Rendered object keys use deterministic recursive ordering;
+array order and field values remain meaningful for source-revision conflicts.
+These notes do not overwrite member-confirmed registries,
+activate provider goals or treat prescriptions/dispenses as doses taken.
+When an exact clinical date is unavailable, the note explicitly identifies its
+source-update date rather than presenting it as the clinical event date.
+
+Inline clinical note text beyond 4,000 characters uses existing ordered note
+sections (up to 50 sections of 12,000 characters) with Unicode-safe boundaries.
+Oversized or invalid evidence remains explicitly held. Provider withdrawals
+and conflicting revisions retain the existing revision checks.
+Linked Binary bodies and additional provider query variants remain acquisition
+work owned separately from these retained-snapshot mappings.
+
 ## Member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,
