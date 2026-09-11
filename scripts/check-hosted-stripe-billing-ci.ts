@@ -17,6 +17,7 @@ const REQUIRED_MATRIX_MARKERS = [
   "proveStarterUsageStartsPaidPulseThroughCheckout",
   "provePaidPulseUpgradesToEdgeThroughPortal",
   "proveEdgeSchedulesPulseAtRenewal",
+  "provePaidPulseRenewalAfterScheduledDowngrade",
   "proveIndividualStartsFamilyThroughCheckout",
   "proveFamilyInviteActivation",
   "provePaidIndividualConvertsToFamilyInPlace",
@@ -224,6 +225,11 @@ export function inspectHostedStripeBillingProviderBoundary(
     [sources.matrix, "assertHostedStripeListenerAlive", "live stripe listen ownership"],
     [sources.sandbox, "completeCheckoutSessionWithOfficialFixture", "exact Checkout completion"],
     [sources.sandbox, "this.stripe.subscriptions.update", "Portal-equivalent mutation"],
+    [sources.sandbox, "this.stripe.testHelpers.testClocks.advance", "real Stripe renewal clock"],
+    [sources.matrix, "useTestClock: true", "clock-backed subscription fixture"],
+    [sources.matrix, "await requireSandbox().advanceTestClock", "completed renewal advancement"],
+    [sources.matrix, "await readHostedBillingUsageGateForTest", "production usage admission after renewal"],
+    [sources.matrix, "at: stripeNow", "usage admission at the provider's renewed time"],
   ] as const) {
     requireSourceText(
       source,
