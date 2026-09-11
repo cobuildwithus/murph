@@ -8,9 +8,9 @@ on:
       - main
   workflow_dispatch:
 
-# One CI run per ref: a new push to a PR or main cancels the superseded run.
+# PR updates supersede their previous proof; main proof stays bound to its SHA.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:

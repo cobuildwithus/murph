@@ -7,10 +7,10 @@ on:
     branches:
       - main
 
-# One CI run per ref per workflow: a new push to a PR or main cancels the
-# superseded run immediately, freeing org-level concurrency slots.
+# PR updates supersede their previous proof. Main commits keep independent
+# proof so later merges cannot cancel a production candidate.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:

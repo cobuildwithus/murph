@@ -4015,6 +4015,9 @@ case "$*" in
   *".headRefOid"*) printf '%s\\n' "$TEST_HEAD_SHA" ;;
   *".body"*)
     printf 'ReviewGPT first-reviewed head: %s\\n' "$TEST_FIRST_SHA"
+    if [[ -n "\${TEST_PRIOR_INVALID_HEAD:-}" ]]; then
+      printf 'Invalid initial attempt: head %s; capture validation failed. No substantive review.\\n' "$TEST_PRIOR_INVALID_HEAD"
+    fi
     case "\${TEST_CONTEXT_SENSITIVITY:-routine}" in
       missing) ;;
       duplicate)
@@ -4260,6 +4263,41 @@ printf 'ZIP: %s (%s bytes)\n' \
         ),
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const firstValidAttempt = invokePackager('first-valid-attempt-new-head', currentHead, {
+        TEST_PRIOR_INVALID_HEAD: firstHead,
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: currentHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+        TEST_RECORDED_FIRST_HEAD: currentHead,
+      })
+      expect(firstValidAttempt.result.status, firstValidAttempt.result.stderr).toBe(0)
+      const firstValidMetadata = JSON.parse(execFileSync(
+        'unzip',
+        ['-p', firstValidAttempt.zipPath, 'review-gpt-pr-context/review-round.json'],
+        { encoding: 'utf8' },
+      )) as Record<string, unknown>
+      expect(firstValidMetadata).toMatchObject({
+        roundNumber: 1,
+        reviewScope: 'full',
+        contextMode: 'full_snapshot',
+        firstReviewedHead: currentHead,
+        contextAnchorHead: currentHead,
+        currentReviewedHead: currentHead,
+        previousReviewedHead: null,
+      })
+      expect(execFileSync(
+        'unzip',
+        ['-p', firstValidAttempt.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        { encoding: 'utf8' },
+      )).toContain(`Invalid initial attempt: head ${firstHead}; capture validation failed.`)
+      for (const delta of ['since-first-reviewed-head.diff', 'since-previous-reviewed-head.diff']) {
+        expect(execFileSync(
+          'unzip',
+          ['-p', firstValidAttempt.zipPath, `review-gpt-pr-context/${delta}`],
+          { encoding: 'utf8' },
+        )).toBe('')
+      }
 
       const roundTwo = invokePackager('round-two', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
@@ -4697,6 +4735,18 @@ printf 'ZIP: %s (%s bytes)\n' \
     try {
       const leanEntries = listZipEntries(leanBundle.zipPath)
       const fullEntries = listZipEntries(fullBundle.zipPath)
+
+      for (const relativePath of [
+        '.github/native-hosted-e2e-controller.json',
+        '.github/pull_request_template.md',
+        '.agents/skills/verify-murph-assistant/SKILL.md',
+      ]) {
+        for (const bundle of [leanBundle, fullBundle]) {
+          expect(listZipEntries(bundle.zipPath)).toContain(relativePath)
+          expect(execFileSync('unzip', ['-p', bundle.zipPath, relativePath]))
+            .toEqual(readFileSync(path.join(repoRoot, relativePath)))
+        }
+      }
 
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
       expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')

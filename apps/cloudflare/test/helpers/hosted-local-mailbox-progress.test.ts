@@ -50,14 +50,18 @@ describe("seeded system wake import proof", () => {
     })).toBe(false);
   });
 
-  it("keeps missing status, backlog, and retryable errors outside the log proof", () => {
+  it("accepts the imported seed while subsequently appended work is queued", () => {
+    const withFollowUp = {
+      ...ready,
+      systemLane: { ...ready.systemLane, lag: "1" },
+    };
+    expect(hasImportedHostedSystemWakeStorm(withFollowUp)).toBe(true);
+  });
+
+  it("keeps missing status and retryable errors outside the log proof", () => {
     expect(hasImportedHostedSystemWakeStorm({ ...ready, systemLane: undefined })).toBe(false);
     expect(hasImportedHostedSystemWakeStorm({ ...ready, redactedStatus: null })).toBe(false);
     expect(hasImportedHostedSystemWakeStorm({ ...ready, redactedStatus: {} })).toBe(false);
-    expect(hasImportedHostedSystemWakeStorm({
-      ...ready,
-      systemLane: { ...ready.systemLane, lag: "1" },
-    })).toBe(false);
     expect(hasImportedHostedSystemWakeStorm({
       ...ready,
       redactedStatus: { ...ready.redactedStatus, hostedMailboxRetryableBlockedCount: 1 },
