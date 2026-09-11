@@ -6695,6 +6695,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           // decision point so a just-claimed request is requeued and included in
           // the same checkpoint loop before the restored workspace is released.
           await closeDetachedAssistantAskBeforeWorkspaceRelease();
+          // A clean foreground pass may finish before independent system work.
+          // Settle its owned writes before choosing the checkpoint or return path.
+          await workspaceSystemWork.quiesce();
         }
       };
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
