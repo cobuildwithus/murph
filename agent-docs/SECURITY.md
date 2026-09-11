@@ -1431,8 +1431,11 @@ locally readable.
   unprivileged public CI. Separately, after a revision reaches protected public
   `main`, the existing deployment controller may request `release_admission`
   against exact private `main`. Only the unprivileged hosted jobs check out that
-  exact released public revision; they select the canonical foreground-priority
-  lane and force its standby mode to `allocate`. Credentialed Temporal setup
+  exact released public revision. The `production_core` scope requires the
+  canonical Linq delivery, scheduled reminder, hosted-web browser smoke,
+  foreground reply priority, and foreground checkpoint ordering lanes, with
+  foreground standby mode forced to `allocate`. Each lane must return a unique
+  successful receipt bound to the same release digest. Credentialed Temporal setup
   and attestation jobs remain isolated jobs that check out only private
   controller or immutable reader source. The final private release attestation
   consumes job results, independently re-reads both protected branches, and
@@ -1443,7 +1446,9 @@ locally readable.
   credentials, poller identities, or timestamps. Neither side may
   restore candidate-controlled caches beside credentials, read private logs or
   artifacts, expose reader revisions publicly, or accept workflow/check names
-  from the candidate.
+  from the candidate. Deploy private support for `production_core` before the
+  public controller requests it. Missing support blocks production admission;
+  the controller must not fall back to the older foreground-only scope.
 - Hosted Web production has one deployment authority: Vercel's Git integration
   creates a candidate for every exact `main` commit, and configured Deployment
   Checks alone admit it to production domains. Do not grant Full Production
@@ -1488,6 +1493,23 @@ locally readable.
   browser transport.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
+- The one-time Garmin secret migration is a narrow exception for transferring
+  the existing five sandbox Environment credentials to the private executor.
+  Its separate manual workflow admits current protected main before attaching
+  the source Environment, rechecks main immediately before sealing, and gives
+  credentials only to the standard PyNaCl SealedBox step. The recipient repo,
+  Environment, public key, key id, and five names are reviewed source constants;
+  no dispatch input may choose them. No cross-repository credential enters the
+  source runner. Plaintext, plaintext fingerprints, exception payloads, and
+  ciphertext must not enter logs. Only one bounded recipient-encrypted capsule
+  may enter its one-day artifact; the authorized operator validates exact
+  successful-run provenance and imports ciphertext through GitHub's existing
+  Environment-secret API. The artifact is sensitive transient transport, never
+  a secret store or reusable canary output. Delete it after confirmed import,
+  remove the migration workflow/script/proof, and retire the old source
+  credentials after private canary acceptance. Ordinary canary artifact
+  restrictions remain unchanged. The operator procedure and fixed limits live
+  in [verification and runtime](operations/verification-and-runtime.md#one-time-garmin-credential-migration).
 - Native iOS and Android public controllers are protected-main production
   canaries only. They run on staggered six-hour schedules and admit no PR or
   deployment-status event. Manual recovery must name `refs/heads/main` at the
