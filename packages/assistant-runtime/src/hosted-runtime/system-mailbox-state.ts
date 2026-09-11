@@ -660,11 +660,9 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
 function resolveHostedSystemMailboxItemExecutionClass(
   item: HostedSystemMailboxPendingItem,
 ): "default_owned" | "model_free" {
-  return (
-      item.mailboxLaneSeq !== null
-      || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
-    )
-      && isHostedModelFreeSystemMailboxItem(item)
+  // Local timers have no Web lane sequence, but use the same execution owner
+  // as imported work. Sequence numbers track handling, not execution class.
+  return isHostedModelFreeSystemMailboxItem(item)
     ? "model_free"
     : "default_owned";
 }

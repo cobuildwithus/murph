@@ -5,6 +5,7 @@ import { access, chmod, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utime
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { stripVTControlCharacters } from "node:util";
 
 import {
   removeHostedLocalWebAuthorityFromProcessEnvironment,
@@ -2817,11 +2818,12 @@ function appendStartupDiagnostics(
 }
 
 function childReportedPortBindCollision(child: BufferedNamedChildProcess): boolean {
-  return [child.stdoutText(), child.stderrText()].some((output) =>
-    /\bEADDRINUSE\b/u.test(output)
-    || /\baddress already in use\b/ui.test(output)
-    || /\bport \d+ is already in use\b/ui.test(output)
-  );
+  return [child.stdoutText(), child.stderrText()].some((output) => {
+    const plainOutput = stripVTControlCharacters(output);
+    return /\bEADDRINUSE\b/u.test(plainOutput)
+      || /\baddress already in use\b/ui.test(plainOutput)
+      || /\bport \d+ is already in use\b/ui.test(plainOutput);
+  });
 }
 
 function combineChildOutput(input: readonly BufferedNamedChildProcess[] | readonly string[]): string {
