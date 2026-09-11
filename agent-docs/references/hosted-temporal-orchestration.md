@@ -858,10 +858,16 @@ The hard-cut architecture is accepted when:
   production Deployment Check; with that external binding in place, production
   domains stay on the previous deployment until the current public commit,
   current private `main`, and current live readers produce one accepted proof.
-  That same private run selects the one canonical foreground-priority lane from
-  its integration manifest, forces and observes standby allocation, and emits a
-  second digest bound to both exact main SHAs, the fixed lane, and the public
-  protected environment's expected production Temporal target digest. Private
+  That same private run selects the `production_core` scope from its canonical
+  integration manifest: Linq delivery, scheduled reminder, hosted-web browser
+  smoke, foreground reply priority, and foreground checkpoint ordering. It
+  forces and observes standby allocation in the foreground proof and emits a
+  second digest bound to both exact main SHAs, the fixed scope, and the public
+  protected environment's expected production Temporal target digest. All five
+  lanes must have unique successful job receipts bound to that same digest;
+  missing, skipped, canceled, duplicated, malformed, or stale receipts block
+  admission. Deploy private scope support before the public controller; older
+  foreground-only proof cannot satisfy or downgrade the new request. Private
   setup and final attestation derive the live target from protected
   configuration and reject mismatch without exporting its component values.
   The release mode rejects an arbitrary public ref; public pull requests remain
@@ -871,7 +877,7 @@ The hard-cut architecture is accepted when:
   candidate, and no local production upload or historical promotion/rollback
   path may compete with that Git owner. Rollback uses a fresh revert commit so
   it receives current proof. This proves the reconciliation-facts wire boundary
-  and foreground/standby path; Murph Cloud release admission still owns full
+  and the composed core hosted journeys; Murph Cloud release admission still owns full
   worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.

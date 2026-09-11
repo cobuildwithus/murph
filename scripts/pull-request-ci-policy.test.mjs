@@ -213,11 +213,20 @@ function inspectHostSupportReleaseGraph(source) {
     /package_dirs="\$\(node scripts\/release-verification-plan\.mjs --package-dirs "\$\{\{ matrix\.shard \}\}"\)"/u,
   );
   assert.match(packageCoverage, /if \[\[ -z "\$package_dirs" \]\]/u);
-  assert.match(packageCoverage, /if: \$\{\{ matrix\.shard == 'cli' \}\}/u);
+  assert.match(
+    packageCoverage,
+    /if: \$\{\{ matrix\.shard == 'cli' \|\| matrix\.shard == 'assistant-engine' \}\}\n        run: pnpm build:test-runtime:prepared/u,
+    "CLI and assistant-engine shards must prepare the built runtime artifacts",
+  );
+  assert.match(
+    packageCoverage,
+    /if: \$\{\{ matrix\.shard == 'cli' \}\}\n        run: pnpm --dir packages\/cli exec tsx scripts\/verify-package-shape\.ts/u,
+    "only the singleton CLI shard may run the package-shape proof",
+  );
   assert.equal(
     countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' }}"),
-    2,
-    "only the singleton CLI shard may prepare the runtime and package-shape proof",
+    1,
+    "the package-shape proof must be the only CLI-only shard step",
   );
   assert.doesNotMatch(packageCoverage, /verify:package-boundary/u);
 
