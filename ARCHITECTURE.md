@@ -4095,6 +4095,11 @@ tool and its mandatory inspected-version fence.
 
 ## Current Verification Posture
 
+The hosted Web Prisma pool establishes UTC through PostgreSQL startup options
+before handing out any connection. URL options retain their other settings but
+cannot override this timestamp convention. This preserves Prisma timestamp
+interpretation without extra query round trips or a schema migration.
+
 The repository uses the current verification commands described in
 `agent-docs/operations/verification-and-runtime.md`. Their dispatcher is local
 by default and exposes one explicit, fail-closed, secret-free remote executor:

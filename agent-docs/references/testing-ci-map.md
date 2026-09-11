@@ -67,6 +67,11 @@ collection errors, interrupted runs, and an empty inventory fail the existing
 required `Release checks (ubuntu)` aggregator. Consent and supplement search
 retain their separate required database lanes below.
 
+`prisma-timezone-postgres.test.ts` is discovered by the same PostgreSQL owner.
+It creates and removes its own synthetic database with a non-UTC default, then
+proves UTC instants through fresh and reused Prisma pool connections, including
+URL startup overrides that retain other settings.
+
 For local proof, use an isolated loopback `murph_test_<slug>` database, run
 `pnpm --dir apps/web prisma:generate` and
 `pnpm --dir apps/web prisma:migrate:deploy` with that `DATABASE_URL`, then invoke
@@ -1691,3 +1696,25 @@ actual Stripe frozen time. No global application clock is replaced. Mutable run-
 Sessions, Schedules, Subscriptions, Customers, and PaymentMethods are cleaned
 up, while Stripe's immutable paid invoices, events, and terminal records remain
 as bounded provider audit history.
+
+## Verification selection integrity
+
+`workspace-verify.test.ts` composes the real diff classifier and shell dispatcher.
+An explicit CLI artifact requirement survives the internal fast path; root package,
+TypeScript and Vitest configuration selects workspace proof, and smoke fixtures
+select the existing fixture owner. Local acceptance includes repository-tool tests
+once. `node-test-inventory.test.ts` checks Node test ownership against executable
+package/workflow commands; Repo Hygiene owns the canary, review-base-fetch and
+container-resource-probe regressions.
+
+Hosted process filters use installed Vitest collection with the scenario's execution
+environment before test hooks can start the stack. A filtered process must select
+runnable tests. Multiple declared processes must cover the complete runnable file
+inventory exactly once; a selected shard still checks the complete partition.
+The real-collection regression covers dynamic titles, intentional skips, empty
+selection, overlap and omissions without starting a stack.
+
+`stale-deferred-replay` registers the existing cold stale-invocation recovery
+fixture and is required independently of warm restart by the cross-repository
+coverage guard. Murph Cloud's delivery/restart lane owns its automatic execution;
+its manifest companion must land before this public requirement.
