@@ -156,7 +156,6 @@ async function main(): Promise<void> {
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(config.timeoutMs);
 
-    stage = "murph_connect_intent";
     await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
     stage = "murph_vital_disclosure";
@@ -461,11 +460,28 @@ async function navigateToHostedLocalStart(
   config: BrowserConfig,
   tunnel: OwnedKernelTunnel | null,
 ): Promise<void> {
-  if (!tunnel) {
-    await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
-    return;
+  if (tunnel) {
+    stage = "kernel_tunnel_ready";
+    await waitForKernelTunnelReady(page, config, tunnel);
   }
 
+  stage = "murph_connect_intent";
+  try {
+    await page.goto(config.startUrl, {
+      timeout: config.timeoutMs,
+      waitUntil: "domcontentloaded",
+    });
+  } catch {
+    throw new Error("Hosted-local connect navigation did not complete.");
+  }
+}
+
+async function waitForKernelTunnelReady(
+  page: Page,
+  config: BrowserConfig,
+  tunnel: OwnedKernelTunnel,
+): Promise<void> {
+  const healthUrl = new URL("/api/internal/health", config.webBaseUrl).toString();
   const deadline = Date.now() + Math.min(
     config.timeoutMs,
     KERNEL_TUNNEL_SETUP_TIMEOUT_MS,
@@ -480,14 +496,15 @@ async function navigateToHostedLocalStart(
     }
     const remainingMs = deadline - Date.now();
     try {
-      await page.goto(config.startUrl, {
+      const response = await page.goto(healthUrl, {
         timeout: Math.min(5_000, remainingMs),
         waitUntil: "domcontentloaded",
       });
-      return;
+      if (response?.status() === 200 && response.url() === healthUrl) return;
     } catch {
-      await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
+      // Navigation errors can contain URLs. Keep readiness diagnostics fixed.
     }
+    await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
   }
   throw new Error("Kernel reverse tunnel did not reach hosted-local Web in time.");
 }
@@ -1288,6 +1305,7 @@ export {
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
   disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
+  navigateToHostedLocalStart as navigateToHostedLocalJunctionStartForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
@@ -1386,8 +1404,12 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main().catch((error: unknown) => {
+    const location = stage.startsWith("kernel_tunnel_ready")
+        || stage.startsWith("murph_connect_intent")
+      ? ""
+      : ` (${safePageLocation(activePage)})`;
     process.stderr.write(
-      `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
+      `Junction wearable browser E2E failed at ${stage}${location}: ${
         sanitizeFailure(error, activeConfig)
       }\n`,
     );

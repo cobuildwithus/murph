@@ -4,6 +4,10 @@ Last verified: 2026-09-11
 
 ## Purpose
 
+Local system-timer ownership and progress-based churn containment are owned by
+`agent-docs/RELIABILITY.md`; automatic restart, admission and replay regressions
+are indexed in `agent-docs/references/testing-ci-map.md`.
+
 Prepared device-webhook revision rebinding and content-free transport/replan
 diagnostics are owned by `agent-docs/RELIABILITY.md`; local PostgreSQL burst and
 cryptographic-binding proof is indexed in `agent-docs/references/testing-ci-map.md`.
@@ -23,6 +27,13 @@ reason in hosted failure events; Junction's progress keys remain provider-owned.
 Runtime progress diagnostics (aggregate alerts and code-only first-pending
 evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
+
+Automation edit schema discovery and attended progress guidance are owned by
+`ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and
+declaration preservation, independent schema/runtime structural admission parity,
+versioned edits, nutrition/personalization inputs, and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
+`agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
+tool-description transport and its existing byte/count bounds.
 
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
@@ -147,7 +158,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; GitHub dispatch, protected execution, exact receipts and cross-repository rollout. | Live provider proof | High | 2026-09-10 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, and Temporal integration build/process-shard proof. | Verification policy | High | 2026-09-11 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, and remote browser health readiness. | Verification policy | High | 2026-09-11 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Completion workflow and verified-base mergeability gate. | Completion workflow | High | 2026-09-11 |

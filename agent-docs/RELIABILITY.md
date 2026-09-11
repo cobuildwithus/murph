@@ -510,8 +510,14 @@ Last verified: 2026-09-04
   of preserving stale authority. Orchestration may delay repeated system-only
   processing for 30 seconds, two minutes, then ten minutes while the progress
   generation and handled-through frontier remain unchanged. Workspace-version,
-  attempt, signal, and selected-wake churn are not progress. Due foreground,
-  default-processing, provider-owned, and retention work bypasses the delay
+  attempt, signal, and selected-wake churn are not progress.
+  Local system timers use the same execution-class predicate as imported work;
+  a missing Web lane sequence changes handled-prefix accounting, never wake
+  ownership. Known device reconciliation wakes cannot acquire default-owner
+  bypass authority from the independent default-wake projection. The private
+  Temporal consumer versions that defensive admission correction for replay.
+  Due foreground, default-processing, provider-owned, and retention work bypasses
+  the delay
   without clearing it. When live runtime evaluation disproves an overdue
   default-processing projection and selects a due model-free frontier, the
   runtime checkpoints the corrected projections before releasing that pass.
@@ -2137,6 +2143,13 @@ Last verified: 2026-09-04
   requested checkpoint; only the finished event's `webCheckpointAccepted`
   establishes Web acceptance. Malformed timestamp values and raw wake reasons
   are never copied into these fields.
+- Attended progress guidance distinguishes quick work from a growing sequence.
+  Several edits, substantive checks, or repeated repairs warrant one brief update
+  before continuing; already-visible elapsed time can prompt an update around
+  twenty seconds without adding polling. Quick replies and routine setup stay
+  quiet. Groups retain their one-update limit, and unavailable/background routes
+  gain no progress delivery authority. This is model guidance, not an automatic
+  timer or a guaranteed first-response deadline.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

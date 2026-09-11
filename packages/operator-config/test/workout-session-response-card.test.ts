@@ -536,7 +536,8 @@ describe('workout session response cards', () => {
 
   it('keeps the model-facing schema bounded and exposes workout detail', () => {
     expect(JSON.stringify(assistantResponseCardJsonSchema).length)
-      .toBeLessThanOrEqual(5_500)
+      // Explicit metric schemas retain typed code-mode fields (proved in the engine).
+      .toBeLessThanOrEqual(6_500)
     expect(assistantResponseCardJsonSchema.anyOf).toHaveLength(3)
     expect(assistantResponseCardJsonSchema.anyOf[2]).toMatchObject({
       properties: {

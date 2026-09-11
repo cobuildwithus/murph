@@ -19,6 +19,13 @@ canonical HTTPS endpoint; local/custom upstream configuration stays Worker-owned
 because arbitrary local ports bypass Cloudflare outbound interception. The
 `provider-egress-token-bridge` hosted-local journey requires the synthetic upstream
 token, so a leaked runner sentinel can no longer count as successful delivery.
+The full-stack scenario normalizes the local Docker host alias to loopback for
+both host Web and Workerd before environment generation. Runner containers still
+receive canonical HTTPS provider URLs through their existing environment owner.
+`hosted-local-linq-host-upstream.test.ts` proves these host bindings reach the
+strict synthetic HTTP upstream through native Workerd without a mocked fetch;
+the scenario helper suite separately verifies generated Worker bindings, explicit
+Web overrides, and canonical container URL/sentinel projection.
 This validates the locally supported protocol boundary; provider receipt delivery,
 media downloading/rendering, and live service behavior still require hosted proof.
 
@@ -605,6 +612,45 @@ one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
 
+The tool-contract suite inventories all exported and route-only registrations
+(currently 56) across eager native, deferred native, and code mode. It compares
+complete canonical JSON from the actual provider boundary and separately checks
+generated automation, nutrition, and personalization declarations. A catalog-wide
+guard rejects empty named-property schemas; intentionally generic connected-app
+arguments and no-argument tools remain supported. The pinned Codex converter can
+still shorten deep automation native parameters and code-mode types, so the full
+JSON supplement remains required. The mixed-mode condition-reminder journeys check
+the complete discovered supplement and exact saved reference, not shortened native
+reference-item fields.
+The custom-inference adapter suite checks complete long descriptions for function,
+namespace, and custom tools through both top-level and additional-tool transport.
+
+Focused live personalization proof uses
+`-- --test 'saves sentence-case preference'`: one sparse saved tone update, no
+persona/voice rewrite, no progress chatter, and a truthful confirmation. Existing
+`-- --test 'uses one canonical nutrition context read for date-window'` covers
+one valid nutrition card from canonical saved data without Goal mutations.
+
+Automation editing has a focused real-App-Server regression in
+`assistant-codex-tool-input-contract.test.ts`: generated code-mode declarations
+must expose a required string `expectedUpdatedAt`, typed lookup/instructions,
+and the original canonical readback guidance. Schema tests retain the exact
+runtime document and reject a missing version before the automation port; the
+failure-boundary test proves the model receives an actionable inspect-and-copy
+repair. CLI automation coverage verifies compact inventory retains `updatedAt`
+without losing pagination or its payload reduction.
+
+Run each synthetic live journey independently through `pnpm test:assistant:live`
+with `-- --test 'quick single edit'` or
+`-- --test 'several edits.*uses inspected versions'`. They use production prompts,
+the automation tool, and versioned fixture ports; assert one inspect/patch pair
+per record, no invalid calls or duplicate writes, and zero versus one early
+progress update. `MURPH_MEASURE_AUTOMATION_INPUT=1` enables the focused
+`automation edit: complete first provider input` tests for identical direct/group
+fixtures through real mixed-mode Codex conversion. They report complete decoded
+request bytes with only `prompt_cache_key` excluded and explicitly mark missing
+exact-tokenizer evidence.
+
 `packages/assistant-engine/test/assistant-codex-tool-input-contract.test.ts` is a
 default-on, credential-free regression gate under the existing package
 `test/**/*.test.ts` inclusion and normal package/PR CI. It starts the REAL pinned
@@ -616,6 +662,16 @@ resolver variants (boolean capability gates and direct/group progress modes),
 including follow-up, maintenance memory, group configuration/challenge/progress
 and both shared-read variants. Route alternatives sharing an identity run in
 separate batches; admission is never broadened to make a test pass.
+
+Automation structural admission also runs the advertised JSON through Ajv 2020
+with standard format validation and compares accepted/rejected fixtures with the
+production argument parser. Every action needs an accepted fixture; cases cover inspected
+versions, nested references/schedules, types, enums, formats, uniqueness, and bounds.
+Personalization checks every advertised enum value and invalid field types against
+runtime admission; all 32 persona-pair/presence combinations also validate the
+complete advertised schema. Ajv and its format plugin are test-only dependencies
+at versions already present in the lockfile. These tests do not claim full
+schema/parser equivalence: runtime-only refinements retain their dedicated tests.
 
 The fixture covers small documents and documents above the current compaction
 threshold, reference scopes/definitions, nested arrays/objects, compositions and
@@ -871,6 +927,16 @@ limits, and local proof distinctions are owned by
   the failure modes and the explicit 100-Workflow reusable-V8 cache policy.
 - `.github/workflows/cloudflare-runner-base-image.yml` runs only on protected `main` pushes or manual dispatches from protected `main` and publishes stable and source-fingerprinted GHCR native runner base image tags through `pnpm --dir apps/cloudflare runner:docker:base -- --push`. The workflow grants `packages: write` and deliberately has no pull-request trigger.
 - Private `cobuildwithus/murph-cloud`'s `Public Murph Integration` workflow runs focused hosted-local E2E jobs on GitHub-hosted Ubuntu for every private pull request and `main` push. One private JSON manifest owns the thirteen scenario groups used by automatic full integration and by the public cross-repository coverage guard. A shared preparation job builds the hosted-local runner bundle, workspace `dist` outputs, and production hosted-web dist once per run with `MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY=4`; scenario-group jobs download those artifacts and use `--no-bundle`. Each group passes one or more named scenarios to a single `pnpm hosted-local e2e` suite invocation. The suite runs scenarios serially, keeps dedicated/test-control scenarios isolated, reuses generated artifacts plus the current-build runner image and smoke proof where isolation allows, and owns final image cleanup. This avoids rebuilding the same image and rerunning the same smoke proof between compatible scenarios. Before that expensive assembly boundary, `packages/device-syncd/test/package-boundary.test.ts` walks the runner runtime-config static source graph and fails if provider runtime modules, importer modules, or the Junction SDK enter the boot closure; bundle assembly keeps the final esbuild-metafile guard as the authoritative packed-artifact check. The routine Linq reminder/onboarding leg uses the explicit fast-gate profile on pull requests and `main` for the scheduled reminder's 90-second setup lead and 1ms idle checkpoint. The onboarding scenario uses the shared hosted-local harness checkpoint default to prove signup welcome seeding, foreground completion, and deterministic managed archival, while the sibling Linq reminder scenario retains the timed alarm-to-provider-to-Linq send proof. The protected deployment gate does not set the reminder fast profile; its full profile preserves the production-like 10-second idle checkpoint and uses the same 90-second setup lead so checkpoint/wake preservation work still leaves more than the enforced 5-second Temporal scheduling runway. The thirteen matrix legs preserve the established provider, messaging, checkpoint, webhook, device-connect, and Temporal scenarios while adding deterministic same-wake Linq batching, canonical-receipt recovery, snapshot-publication fallback, shutdown checkpoint ordering, retryable-outbox restart, usage-limit ambiguity, Linq group/home-line authority, Family sponsorship, unknown first-contact fallback, vault approval resume, Retell call results, computer handoff roundtrips, and the foreground reply priority gate. The Junction wearable direct-resource replay is a 35-minute leg in this shared-artifact workflow instead of rebuilding the runner bundle in a standalone workflow; its proof also covers signed-webhook retry semantics, historical-backfill evidence, and device-activity experiment adherence with a single non-nagging Linq nudge. The shared bundle includes the E2E parser toolchain; `linq-webhook-audio` proves the Worker-mediated Workers AI transcription path through the container parser drain, remote-transcription provider, and `murph-transcribe.worker` egress handler with the deterministic fake `AI` binding. Every leg provisions loopback `postgres:17` from `public.ecr.aws/docker/library/postgres:17` with an explicit `pg_isready` probe, installs the pinned Codex and Temporal CLIs, uses deterministic CI-only hosted-web placeholders, avoids GHCR authentication before PR-controlled code, uses anonymous public runner-base pulls, and always uploads its focused log plus redacted hosted-local `state.json` files. The always-run `Temporal orchestration E2E` job depends on the shared bundle and complete scenario matrix, including the Junction replay leg, and fails when either prerequisite fails, is canceled, or does not complete. It is the private repository's stable cross-repository integration gate. The separate `release_admission` dispatch accepts only current public and private `main`, selects the five canonical `production_core` lanes (Linq delivery, scheduled reminder, hosted-web browser smoke, foreground reply priority, and foreground checkpoint ordering), forces and observes standby allocation, runs the live-reader proof in isolated protected jobs, and emits five unique successful lane receipts plus the exact-pair hosted release digest consumed by public production admission. Every receipt binds the same requested digest; omitted, skipped, failed, duplicated, or stale lanes fail closed. Private scope support must deploy before the public controller, which never falls back to foreground-only proof. Public pull-request compatibility remains fixture-only. The local aggregate `pnpm --dir apps/cloudflare test:e2e:local` also runs the Workers-runtime lane through `test:e2e:workers:local`; CI keeps that narrower Workers proof inside `apps/cloudflare verify` / `test:workers` rather than duplicating it in every hosted-local leg.
+- Automatic churn regressions complement the fairness scenario below.
+  `hosted-runtime-mailbox-state.test.ts` and
+  `hosted-runtime-workspace-entrypoint-system-mailbox.test.ts` prove that
+  persisted local device timers retain system ownership and complete without
+  entering an assistant pass. Private Temporal package CI exercises a bad
+  default-device projection under repeated checkpoints, signals and
+  Continue-As-New, asserts the capped progress backoff and real foreground
+  bypasses, and runs that projection through its native quiescence E2E.
+  Its synthetic old-history fixture fails if the ownership patch is applied
+  unconditionally during replay.
 - The dedicated manual-only
   `linq-reminder-device-sync-non-starvation` hosted-local scenario is the
   cross-owner regression gate for recurring automation fairness during a
