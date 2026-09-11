@@ -1,6 +1,6 @@
 # Exercise real authentication through hosted browser persistence
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -67,5 +67,18 @@ Updated: 2026-09-10
   its five protected environment values are not provisioned in this local
   session. Required names and provider setup are documented in the verification
   owner. No production secrets or provider mutations were used.
-- Plan stays active for the original thread's candidate review, exact-head CI
-  and ReviewGPT ownership.
+
+## Implementation review closure
+
+- [ReviewGPT round 1](https://chatgpt.com/c/6aa34efd-9bd0-83ea-bbeb-13f55ec6a747)
+  passed with no findings at first-reviewed head
+  `043b062e3488335ed0c5c6bf5c11316857c8c91c`. The parent verified concrete
+  `gpt-6-pro` execution and all 20 reviewed diff-blob hashes.
+- This closure changes documentation only and preserves the reviewed code.
+  Required current-head CI remains pending; the original thread owns those
+  checks and the final PR completion decision.
+- Live sandbox browser execution remains unrun. Its five protected Privy
+  development-app values and prior test-account initialization remain required;
+  no production secrets or provider mutations were used. Closing the
+  implementation plan does not claim that external proof has passed.
+Completed: 2026-09-10
