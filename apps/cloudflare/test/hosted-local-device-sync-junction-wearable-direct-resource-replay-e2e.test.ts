@@ -142,7 +142,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
           ...new Set([...JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES, "sleep_cycle"]),
         ].join(","),
         JUNCTION_WEBHOOK_SECRET: junctionWebhookSecret,
-        LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+        LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",

@@ -98,7 +98,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
           ]),
         ].join(","),
         JUNCTION_WEBHOOK_SECRET: junctionWebhookSecret,
-        LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+        LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
@@ -166,7 +166,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       buildRecurringReminderSaveResponses(schedule),
       { matchInputContains: setupRequestText },
     );
-    const setupSendBaseline = activeLinqStub.countObservedSends(reminderPath);
+    const setupSendBaseline = activeLinqStub.countAcceptedSends(reminderPath);
     const setupResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       chatId,
@@ -182,7 +182,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       reason: "wake-appended-active-member",
     });
     await activeScenario.waitForLatestPendingWake(userId);
-    const setupSend = await activeLinqStub.waitForAdditionalSend({
+    const setupSend = await activeLinqStub.waitForAdditionalAcceptedSend({
       baselineCount: setupSendBaseline,
       expectedPath: reminderPath,
       scenario: activeScenario,
@@ -228,7 +228,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       matchInputContains: reminderInstructions,
     });
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
-    const matchingReminderSendBaseline = activeLinqStub.countObservedSends(
+    const matchingReminderSendBaseline = activeLinqStub.countAcceptedSends(
       reminderPath,
       (request) => activeLinqStub.readObservedMessageText(request) === reminderText,
     );
@@ -343,7 +343,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
 
       heldReminder.release();
       releaseHeldReminder = null;
-      const reminderSend = await activeLinqStub.waitForAdditionalSend({
+      const reminderSend = await activeLinqStub.waitForAdditionalAcceptedSend({
         baselineCount: matchingReminderSendBaseline,
         expectedPath: reminderPath,
         matchRequest: (request) =>

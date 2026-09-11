@@ -22,3 +22,5 @@ On a host where host.docker.internal resolves only inside Docker, start the cano
 ## Context
 
 The mismatch prevents local device and foreground scenarios from reaching the later assertions that Linux CI exercises. Mocked fetch routing tests do not verify hostname reachability.
+
+Resolved independently by the shared host-process environment correction in PR #3254. The integration-proof branch reconciles that main change and removes its temporary per-fixture workaround.

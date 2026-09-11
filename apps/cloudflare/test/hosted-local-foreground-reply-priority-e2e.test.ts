@@ -180,7 +180,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           [...allProbeIdentities, postEnrollmentConversationProbe]
             .map((identity) => identity.memberPhone)
             .join(","),
-        LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+        LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: "linq-local-test-token",
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
@@ -1247,7 +1247,7 @@ describe.sequential("hosted local foreground checkpoint ordering e2e", () => {
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           orderingProbeIdentities.map((identity) => identity.memberPhone).join(","),
-        LINQ_API_BASE_URL: requireOrderingLinqStub().baseUrl,
+        LINQ_API_BASE_URL: requireOrderingLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: "linq-local-ordering-token",
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
