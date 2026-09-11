@@ -730,23 +730,10 @@ test("only documented lightweight PR workflows retain synchronize", async () => 
   }
   assert.deepEqual(
     pullRequestWorkflows.sort(),
-    [
-      ...EXPENSIVE_WORKFLOWS.keys(),
-      "junction-wearable-secret-migration-check.yml",
-      "pr-evidence.yml",
-      "pr-head-change.yml",
-    ].sort(),
+    [...EXPENSIVE_WORKFLOWS.keys(), "pr-evidence.yml", "pr-head-change.yml"].sort(),
   );
   assert.deepEqual(triggerTypes(await workflow("pr-evidence.yml")), ["opened", "synchronize", "reopened", "edited"]);
   assert.deepEqual(triggerTypes(await workflow("pr-head-change.yml")), ["synchronize"]);
-  // The migration's synthetic proof keeps default PR events only within its owner paths.
-  const migrationProof = await workflow("junction-wearable-secret-migration-check.yml");
-  assert.equal(eventBlock(migrationProof, "pull_request"), [
-    "    paths:",
-    "      - '.github/workflows/junction-wearable-secret-migration*.yml'",
-    "      - 'scripts/junction-wearable-secret-migration*.py'",
-    "",
-  ].join("\n"));
 });
 
 test("complexity evidence and exact-candidate regression guards remain required", async () => {
