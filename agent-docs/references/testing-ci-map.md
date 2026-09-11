@@ -942,6 +942,11 @@ limits, and local proof distinctions are owned by
   broad contracts/vault-share source closures. Package tests separately lock
   the failure modes and the explicit 100-Workflow reusable-V8 cache policy.
 - `.github/workflows/cloudflare-runner-base-image.yml` runs only on protected `main` pushes or manual dispatches from protected `main` and publishes stable and source-fingerprinted GHCR native runner base image tags through `pnpm --dir apps/cloudflare runner:docker:base -- --push`. The workflow grants `packages: write` and deliberately has no pull-request trigger.
+- The Linq first-contact E2E sender redelivers an identical signed fixture once
+  only for the handler's HTTP 503 `HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED`
+  response with `retryable: true`. Its existing Linq support helper tests prove
+  that persistent, unrelated, malformed, and transport failures remain visible,
+  and that response bodies remain readable. Delivery assertions stay in the E2E.
 - The foreground-reply priority continuation observer treats imported mailbox
   sequences as monotonic frontiers. Its focused
   `apps/cloudflare/test/helpers/hosted-local-mailbox-progress.test.ts` proof
