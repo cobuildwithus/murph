@@ -815,7 +815,7 @@ Last verified: 2026-08-31
   when `Content-Length` is absent or underreported. Logs may include only a
   normalized error code/type and booleans/counts, never callback state/code,
   tokens, patient ids, URLs, or provider response bodies.
-- Hosted email ingress and delivery credentials must remain platform-managed, must not write raw authorization material to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. A signed group route is routing authority, not SMTP sender authentication, and must never authorize any assistant-style mutation, whether personal or room-owned.
+- Hosted email ingress and delivery credentials must remain platform-managed, must not write raw authorization material to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. Hosted ingress derives directness from the authorized personal or group route, never the number of SMTP header recipients; import preserves the supplied route fact and leaves missing legacy metadata unknown. This audience fact does not authenticate the sender or grant mutation authority. A signed group route is routing authority, not SMTP sender authentication, and must never authorize any assistant-style mutation, whether personal or room-owned.
 - The companion legal-consent route is shared by the iOS and Android apps. It
   records the generic server-owned `native-companion` audit source because
   member authentication does not attest the client platform; a request's
