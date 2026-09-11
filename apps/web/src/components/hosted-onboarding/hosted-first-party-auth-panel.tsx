@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Mail, Phone } from "lucide-react";
+import { Phone } from "lucide-react";
+import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 import { Button } from "@/src/components/ui/button";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
@@ -12,6 +13,7 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import { requestHostedOnboardingJson } from "./client-api";
 import { declineHostedLaunchConsent, logoutHostedAppSession, verifyHostedAppSession } from "./hosted-app-session-client";
 import { HostedAuthLegalNotice } from "./hosted-auth-shared";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedContactCodeForm } from "./hosted-contact-code-form";
 import { HostedTelegramProofButton } from "./hosted-telegram-proof-button";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
@@ -125,14 +127,24 @@ export function HostedFirstPartyAuthPanel({
           }}
           onVerify={(value, code, signal) => verify("/api/auth/otp/verify", { kind: method, value, code }, signal)}
         />}
-      {!active ? <div className="flex flex-wrap gap-2">
-        {methods.filter((entry) => entry !== method).map((entry) => <Button key={entry} type="button" variant="outline" className="flex-1" onClick={() => { setMethod(entry); setError(null); }}>
-          {entry === "phone" ? <Phone aria-hidden="true" data-icon="inline-start" />
-            : entry === "email" ? <Mail aria-hidden="true" data-icon="inline-start" />
-              : <TelegramIcon data-icon="inline-start" />}
-          {entry === "phone" ? "Use phone" : entry === "email" ? "Use email" : "Use Telegram"}
-        </Button>)}
-      </div> : null}
+      {!active && methods.some((entry) => entry !== method) ? <>
+        <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          OR
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
+          {(["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => <HostedInlineAuthButton
+            key={entry}
+            onClick={() => { setMethod(entry); setError(null); }}
+            icon={entry === "phone" ? <Phone aria-hidden="true" className="h-5 w-5" />
+              : entry === "email" ? <EmailIcon className="h-5 w-5" />
+                : <TelegramIcon className="h-5 w-5" />}
+          >
+            {entry === "phone" ? "Phone" : entry === "email" ? "Email" : "Telegram"}
+          </HostedInlineAuthButton>)}
+        </div>
+      </> : null}
       {showPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
     </>}
     {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}

@@ -42,7 +42,9 @@ for (const [method, width] of [["phone", 390], ["email", 1280]] as const) {
     await page.getByRole("button", { name: "Signup", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Log in or sign up" })).toBeVisible();
-    if (method === "email") await dialog.getByRole("button", { name: "Use email", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Telegram", exact: true })).toBeVisible();
+    await capture(page, dialog, `login-entry-${width}`);
+    if (method === "email") await dialog.getByRole("button", { name: "Email", exact: true }).click();
     const entry = dialog.getByLabel(method === "email" ? "Email" : "Your phone", { exact: true });
     await entry.fill(method === "email" ? "member@example.test" : "2025550152");
     await capture(page, dialog, `login-${method}-${width}`);
