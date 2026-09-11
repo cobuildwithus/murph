@@ -1,6 +1,6 @@
 # Recover safely from transient database disconnects
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -55,4 +55,6 @@ configuration, dependencies, schema, or durable state.
 - Parent review: no new pool, dependency, configuration, retry layer, or durable
   state; one async transaction scope preserves the public Prisma boundary.
   Existing operation timing, backpressure, retry delay, and attempt bounds remain.
-- PR review and CI: pending.
+- Implementation is committed in PR #3295. Final PR review and exact-head CI
+  remain separate completion gates; no production deployment was performed.
+Completed: 2026-09-11
