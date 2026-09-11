@@ -648,3 +648,30 @@ test('assistant self delivery targets treat iMessage as the linq route alias', a
     },
   )
 })
+
+
+for (const threadIsDirect of [true, false]) {
+  test(`self-target defaults preserve explicit audience ${threadIsDirect} only on unchanged routes`, async () => {
+    const homeDirectory = await createTempHome('operator-config-route-audience-')
+    const route = {
+      channel: 'telegram',
+      identityId: 'synthetic-identity',
+      participantId: 'synthetic-participant',
+      threadId: 'synthetic-thread',
+      deliveryTarget: 'synthetic-target',
+    }
+    const resolve = (input: Parameters<typeof applyAssistantSelfDeliveryTargetDefaults>[0]) =>
+      applyAssistantSelfDeliveryTargetDefaults(input, { allowSingleSavedTargetFallback: true }, homeDirectory)
+
+    assert.equal((await resolve({ channel: ' Telegram ', threadId: ' synthetic-thread ', threadIsDirect })).threadIsDirect, threadIsDirect)
+    assert.equal((await resolve({ channel: 'telegram', threadIsDirect })).threadIsDirect, undefined)
+    await saveAssistantSelfDeliveryTarget({ ...route, deliverySource: null }, homeDirectory)
+    assert.deepEqual(await resolve({ ...route, threadIsDirect }), { ...route, threadIsDirect })
+    for (const field of ['channel', 'identityId', 'participantId', 'threadId', 'deliveryTarget'] as const) {
+      assert.equal((await resolve({ ...route, [field]: ' ', threadIsDirect })).threadIsDirect, undefined, `defaulted ${field} must not inherit audience`)
+    }
+    assert.equal((await resolve({ threadIsDirect })).threadIsDirect, undefined)
+    assert.equal((await resolve(route)).threadIsDirect, undefined)
+    assert.equal((await resolve({ ...route, threadIsDirect: null })).threadIsDirect, undefined)
+  })
+}
