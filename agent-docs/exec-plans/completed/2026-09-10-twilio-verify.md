@@ -1,6 +1,6 @@
 # Switch hosted SMS sign-in to Twilio Verify
 
-Status: active
+Status: completed
 Created: 2026-09-10
 ## Outcome and invariants
 
@@ -76,12 +76,22 @@ expiry and generation. Ambiguous provider/network failures remain fail-closed.
 - Added only Verify verification/create and verification-check/create to the
   existing restricted application key, preserving its old Messaging permission
   through deployment. Readback confirms those three permissions and no others;
-  service-read/admin access was not added. The same application key then sent
-  successfully; positive verification of that second code is awaiting input.
+  service-read/admin access was not added. The unchanged restricted application
+  key completed a live send (HTTP 201), accepted the received code (HTTP 200),
+  and rejected its immediate replay (HTTP 404, provider code 20404). This proves
+  provider delivery and one-use verification, not canonical member/session login.
 - Synced only the four selected application Twilio variables to Vercel production
   using opaque local values, sensitive writes and metadata-only readback. The
-  diagnostic key stays local. No rollout flag has been enabled. Remaining work:
-  finish the application-key code check, final documentation/plan commit and
-  exact-head CI. The explanatory doc correction does not change reviewed code.
-- Held client-adoption credential-change owner needs the same preparation and
-  transaction-bound approval check before activation; recorded in rollout owner.
+  diagnostic key stays local. No rollout flag has been enabled.
+- The held client-adoption PR #3132 now prepares and consumes the same Verify
+  proof for phone credential changes. Its integration head
+  `62e5518073b6138f3f437acb1286fbc53f17917d` passed 92 focused tests, Web
+  typecheck, ReviewGPT round 4 and exact-head CI. Hosted login and installed-device
+  migration remain activation gates owned by the broader migration plan.
+- Parent final review confirms this closure changes explanatory evidence only;
+  reviewed authentication source and tests remain unchanged. Required CI passed
+  on `a13afffd963ac478d9a8bca779b20cfae67a3861`; the final plan-bearing head
+  must also pass required checks before merge. Backend preparation and provider
+  qualification are complete. No deployment or activation is claimed.
+Updated: 2026-09-10
+Completed: 2026-09-10

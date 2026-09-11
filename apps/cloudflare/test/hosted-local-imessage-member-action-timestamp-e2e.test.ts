@@ -14,7 +14,6 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   readHostedExecutionSnapshotBaseRef,
@@ -33,8 +32,6 @@ import {
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   restoreHostedWorkspaceWorkingDelta,
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
   type HostedBundleArtifactRestoreInput,
 } from "@murphai/runtime-state/node";
 import {
@@ -54,6 +51,7 @@ import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -286,31 +284,24 @@ async function seedWorkoutCheckpoint(): Promise<{
     throw new Error("The seeded workout did not return a canonical workout snapshot.");
   }
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId: memberId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
     environment: requireScenario().runtimeEnv,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: { seededMemberActionFixture: true },
-    snapshotRef: createSnapshotBundleRef(hash, snapshot.bundle.byteLength),
+    snapshotRef,
     userId: memberId,
   });
   expect(checkpoint.status).toBe("updated");
 
-  const upload = await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(memberId)}&sha256=${hash}`,
-    {
-      body: new Blob([new Uint8Array(snapshot.bundle)]),
-      headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: memberId },
-      method: "PUT",
-    },
-  );
-  expect(upload.status).toBe(200);
   return workout;
 }
 
@@ -482,18 +473,6 @@ function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-}
-
-function createSnapshotBundleRef(
-  hash: string,
-  size: number,
-): HostedExecutionSnapshotRef {
-  return {
-    hash,
-    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
-    size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(
