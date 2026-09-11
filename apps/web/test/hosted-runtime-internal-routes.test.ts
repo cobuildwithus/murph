@@ -504,6 +504,33 @@ describe("hosted runtime internal web routes", () => {
     },
   );
 
+  it.each([
+    { selected: true, revision: 3, expected: 3 },
+    { selected: true, revision: 4, expected: 4 },
+    { selected: false, revision: 4, expected: null },
+  ])("projects the saved custom revision on an empty mailbox: $expected", async ({ selected, revision, expected }) => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce({
+      ...buildRuntimeMailboxAccessRecord(),
+      inferenceConnection: { selected, revision },
+    });
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValueOnce({ items: [] });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValueOnce([]);
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [{ importedSeq: "0", lane: "conversation" }],
+        limitPerLane: 10,
+        requestId: "request_custom_route_identity",
+      },
+    ));
+    expect(response.status).toBe(200);
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+    expect(payload.assistantCustomInferenceRevision).toBe(expected);
+    expect(payload.items).toEqual([]);
+    expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledOnce();
+    expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
+  });
+
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
@@ -591,6 +618,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
     expect(payload.assistantProvider).toBe("venice");
+    expect(payload.assistantCustomInferenceRevision).toBeNull();
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledWith({
       select: expect.objectContaining({ assistantProviderPreference: true }),

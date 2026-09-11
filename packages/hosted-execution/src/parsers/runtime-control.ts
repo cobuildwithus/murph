@@ -7,7 +7,10 @@ import { parseHostedExecutionDailyMetricReportedPayload } from "../daily-metric.
 import { parseHostedExecutionGroupJournalFactPayload } from "../group-journal-fact.ts";
 import { parseHostedExecutionDeviceSyncExpectedConnectedAt } from "./device-sync.ts";
 import { parseAssistantUsageRecord } from "../assistant-usage.ts";
-import { parseHostedAssistantCustomInferenceOverride } from "../assistant-inference.ts";
+import {
+  parseHostedAssistantCustomInferenceOverride,
+  requireHostedInferenceRevision,
+} from "../assistant-inference.ts";
 import {
   isHostedAssistantProvider,
   parseHostedAssistantModelOverride,
@@ -550,6 +553,11 @@ export function parseHostedMailboxFetchResponse(
 
   return {
     assistantProvider: record.assistantProvider,
+    ...(record.assistantCustomInferenceRevision === undefined ? {} : {
+      assistantCustomInferenceRevision: record.assistantCustomInferenceRevision === null
+        ? null
+        : requireHostedInferenceRevision(record.assistantCustomInferenceRevision),
+    }),
     ...(record.conversationUsageStatus === undefined
       ? {}
       : {

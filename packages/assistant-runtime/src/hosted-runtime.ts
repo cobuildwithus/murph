@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  buildHostedCustomInferenceModelAlias,
+} from "@murphai/hosted-execution/assistant-inference";
+import {
   ensureHostedAssistantOperatorDefaults,
   type HostedAssistantBootstrapResult,
 } from "@murphai/operator-config/hosted-assistant-config";
@@ -68,9 +71,8 @@ import {
   AssistantActiveTurnInputUnavailableError,
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
-import {
-  isHostedAssistantProvider,
-  type HostedAssistantProvider,
+import type {
+  HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 import {
   createHostedAssistantTurnEnvironment,
@@ -2050,16 +2052,25 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let invocationRuntimeEnv = projectHostedRuntimeProcessEnvironment({
       runtimeEnv: baseRuntimeEnv,
     });
-    const observeInvocationAssistantProvider = (provider: HostedAssistantProvider): void => {
+    const observeInvocationAssistantProvider = (
+      provider: HostedAssistantProvider | typeof HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+    ): void => {
       const invocationProvider = invocationRuntimeEnv.HOSTED_ASSISTANT_PROVIDER;
-      if (isHostedAssistantProvider(invocationProvider) && provider !== invocationProvider) {
+      if (invocationProvider && provider !== invocationProvider) {
         runtimeOwnerHandoffRequested = true;
       }
     };
     const runnerMailboxPort: NonNullable<HostedRuntimePlatform["mailboxPort"]> = {
       async fetch(request, context) {
         const response = await guardedMailboxPort.fetch(request, context);
-        observeInvocationAssistantProvider(response.assistantProvider);
+        const customRevision = response.assistantCustomInferenceRevision;
+        observeInvocationAssistantProvider(customRevision == null
+          ? response.assistantProvider
+          : HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID);
+        if (customRevision != null && invocationRuntimeEnv.HOSTED_ASSISTANT_MODEL
+            !== buildHostedCustomInferenceModelAlias(customRevision)) {
+          runtimeOwnerHandoffRequested = true;
+        }
         return response;
       },
       fetchPayload: guardedMailboxPort.fetchPayload.bind(guardedMailboxPort),
@@ -4281,12 +4292,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     workspaceSystemWork.resume();
     committedWorkspace = checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace;
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
-    const invocationAssistantProvider = runtimeEnv.HOSTED_ASSISTANT_PROVIDER;
-    if (!isHostedAssistantProvider(invocationAssistantProvider)) {
-      throw new TypeError(
-        "Hosted runtime invocation assistant provider is not supported.",
-      );
-    }
     let browserVaultReplicaRefreshRequested = false;
     const recordBrowserVaultReplicaRefreshIntent = (
       passResult: HostedWorkspaceRunnerResult,
