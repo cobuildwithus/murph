@@ -1,6 +1,6 @@
-# Align scheduler integration proof with current runtime ownership
+# Align scheduler integration proof with bounded progress
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -56,3 +56,10 @@ Updated: 2026-09-11
 - Initial updated foreground run: six cases passed; the changed case passed reply and acknowledgment assertions, then failed recovery's exact lane snapshot because a follow-up wake was appended. Corrected that proved test assumption and retained actual post-provider processing evidence.
 - Reminder/device-sync E2E passed with the private scheduler candidate and corrected enclosing budget: one test, 704.63 seconds, one reminder during positive receipt-bounded progress followed by full drain.
 - Nine actual-observer probes reproduced the baseline follow-up-lag failure, accepted proved seeded progress, and rejected seven invalid recovery states.
+- Final foreground process 1/2 passed all seven selected tests in 505.21 seconds. The corrected system-mailbox case retained its exact fence and completed the reply in 7.323 seconds against the thirty-second limit. The four checkpoint-ordering cases belong to process 2/2 and were not selected; the earlier private full integration passed that unchanged lane.
+- Cloudflare typecheck, complexity guard, privacy scan, whitespace check, and parent candidate review passed after reconciling the base. Final diff changes no production source or configuration.
+
+## Completion handoff
+
+The implementation and focused proof are complete. PR #3303 still requires exact-head CI and merge. The original session retains completion ownership and will then rerun private PR #132 full integration against public main before merging the unchanged private candidate. No production deployment is included in this plan.
+Completed: 2026-09-11
