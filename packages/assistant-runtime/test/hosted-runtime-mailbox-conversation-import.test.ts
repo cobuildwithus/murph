@@ -50,6 +50,7 @@ import {
 } from "@murphai/runtime-state";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 
+import * as channelActivity from "../src/hosted-runtime/channel-activity.ts";
 import {
   createHostedConversationMailboxImportItem,
   importHostedConversationMailboxItem,
@@ -1546,7 +1547,9 @@ describe("hosted mailbox conversation import adapter", () => {
     });
   });
 
-  test("adds runtime latency and pending-admission milestones to Linq trace callbacks", async () => {
+  test.each([null, Date.parse("2026-04-26T00:00:00.050Z")])("inherits active typing (%s) with runtime latency on import", async (activeTypingAcceptedAt) => {
+    const activeTyping = vi.spyOn(channelActivity, "readHostedActiveLinqTypingAcceptedAt")
+      .mockReturnValue(activeTypingAcceptedAt);
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -1604,7 +1607,20 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    expect(latencyTraceRequests.map((request) => request.event)).toEqual([
+    if (activeTypingAcceptedAt !== null) {
+      await vi.waitFor(() => expect(latencyTraceRequests).toHaveLength(3));
+      expect(latencyTraceRequests).toContainEqual({ event: expect.objectContaining({
+        milestone: "linq_typing_accepted",
+        at: new Date(activeTypingAcceptedAt).toISOString(),
+        assistantInputIds: [expect.any(String)],
+        runtimeAttemptId: "attempt_latency_trace_1",
+      }) });
+      expect(activeTyping).toHaveBeenCalledWith("chat_latency");
+    }
+    activeTyping.mockRestore();
+    expect(latencyTraceRequests.map((request) => request.event).filter((event) =>
+      !(event.type === "assistant_milestone" && event.milestone === "linq_typing_accepted")
+    )).toEqual([
       expect.objectContaining({
         mailboxItemId: item.item.id,
         runnerJobAcceptedAt: "2026-04-26T00:00:00.100Z",

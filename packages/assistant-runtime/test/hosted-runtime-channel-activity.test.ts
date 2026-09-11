@@ -171,12 +171,13 @@ test("hosted Linq typing records exact request and acceptance milestones without
   mocks.startLinqTypingIndicator.mockResolvedValue({
     stop: vi.fn(async () => undefined),
   });
+  const assistantInputIds = ["input_typing_trace_1"];
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
     },
     latencyTraceContext: {
-      assistantInputIds: ["input_typing_trace_1"],
+      assistantInputIds,
       latencyTracePort: {
         record: latencyTraceRecord,
       },
@@ -223,6 +224,15 @@ test("hosted Linq typing records exact request and acceptance milestones without
   ]);
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("+15551234567");
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("msg_typing_trace_1");
+  const acceptedAt = latencyTraceRecord.mock.calls[1]?.[0].event.at;
+  assistantInputIds[0] = "input_typing_trace_2";
+  await typing.startLinqTyping?.({ target: "chat_typing_trace_1" });
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
+  expect(latencyTraceRecord).toHaveBeenLastCalledWith({ event: expect.objectContaining({
+    assistantInputIds: ["input_typing_trace_2"],
+    at: acceptedAt,
+    milestone: "linq_typing_accepted",
+  }) });
   await handle?.stop();
 });
 
@@ -1117,4 +1127,37 @@ test("hosted progress Linq delivery recovers the redacted routed same-wake chat"
     target: "linq_chat_current",
     targetKind: "thread",
   });
+});
+
+test("Telegram typing records acceptance only after the provider starts the indicator", async () => {
+  const record = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
+    matchedCount: 1, recorded: true, unmatchedCount: 0,
+  }));
+  const handle = { stop: vi.fn(async () => undefined) };
+  mocks.startTelegramTypingIndicator.mockResolvedValue(handle);
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {},
+    platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+    latencyTraceContext: {
+      assistantInputIds: ["synthetic-input"],
+      latencyTracePort: { record },
+      runtimeAttemptId: "synthetic-attempt",
+      source: "telegram",
+    },
+  });
+  expect(await typing.startTelegramTyping?.({ target: "synthetic-thread" })).toBe(handle);
+  expect(record).toHaveBeenCalledWith({ event: {
+    assistantInputIds: ["synthetic-input"],
+    at: expect.any(String),
+    milestone: "telegram_typing_accepted",
+    runtimeAttemptId: "synthetic-attempt",
+    source: "telegram",
+    type: "assistant_milestone",
+  } });
+  record.mockClear();
+  mocks.startTelegramTypingIndicator.mockResolvedValue(undefined);
+  await typing.startTelegramTyping?.({ target: "synthetic-thread" });
+  expect(record).not.toHaveBeenCalled();
 });

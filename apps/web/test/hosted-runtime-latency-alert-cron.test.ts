@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  runHostedRuntimeTypingAlertMonitor: vi.fn(),
   runHostedAiUsageOvershootAlertMonitor: vi.fn(),
   runHostedRuntimeLatencyAlertMonitor: vi.fn(),
   runHostedRuntimeProgressAlertMonitor: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-runtime-latency/typing-alert-monitor", () => ({
+  runHostedRuntimeTypingAlertMonitor: mocks.runHostedRuntimeTypingAlertMonitor,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-overshoot-alert-monitor", () => ({
@@ -27,6 +32,8 @@ const originalCronSecret = process.env.CRON_SECRET;
 
 describe("hosted runtime latency alert cron", () => {
   beforeEach(() => {
+    mocks.runHostedRuntimeTypingAlertMonitor.mockReset();
+    mocks.runHostedRuntimeTypingAlertMonitor.mockResolvedValue({ queuedCount: 0, scanTruncated: false });
     process.env.CRON_SECRET = "latency-cron-secret";
     mocks.runHostedAiUsageOvershootAlertMonitor.mockReset();
     mocks.runHostedAiUsageOvershootAlertMonitor.mockResolvedValue({
@@ -73,6 +80,7 @@ describe("hosted runtime latency alert cron", () => {
     ));
 
     expect(response.status).toBe(200);
+    expect(mocks.runHostedRuntimeTypingAlertMonitor).toHaveBeenCalledOnce();
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
@@ -90,6 +98,7 @@ describe("hosted runtime latency alert cron", () => {
     ));
 
     expect(response.status).toBe(401);
+    expect(mocks.runHostedRuntimeTypingAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeProgressAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedAiUsageOvershootAlertMonitor).not.toHaveBeenCalled();

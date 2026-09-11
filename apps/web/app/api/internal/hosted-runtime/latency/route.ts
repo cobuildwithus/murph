@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import {
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
@@ -20,6 +22,7 @@ import {
   recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { reportHostedRuntimeTypingAlerts } from "@/src/lib/hosted-runtime-latency/typing-alert-monitor";
 import { isRecord } from "@/src/lib/primitives";
 
 const LATENCY_EVENT_METADATA = {
@@ -118,6 +121,20 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
 
+    if (result.recorded && (
+      traceRequest.event.type === "assistant_input_staged"
+      || (traceRequest.event.type === "assistant_milestone" && (
+        traceRequest.event.milestone === "linq_typing_accepted"
+        || traceRequest.event.milestone === "telegram_typing_accepted"
+      ))
+    )) {
+      const event = traceRequest.event;
+      after(() => reportHostedRuntimeTypingAlerts({
+        userId: authenticatedUserId,
+        assistantInputIds: event.type === "assistant_input_staged"
+          ? [event.assistantInputId] : event.assistantInputIds,
+      }));
+    }
     return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
   } catch (error) {
     const codes = readLatencyPersistenceErrorCodes(error);

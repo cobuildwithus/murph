@@ -21,6 +21,7 @@ export { HOSTED_MAILBOX_RETENTION_MS };
 export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
+export const HOSTED_TYPING_ALERT_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 // Every batched retention category uses ordered work with an explicit per-run
@@ -66,6 +67,7 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredGroupParticipantObservationsDeleted: number;
   expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
+  expiredTypingAlertsDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
   expiredOperatorTaskResultsRetired: number;
@@ -119,6 +121,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     now,
     prisma,
   });
+  const expiredTypingAlertsDeleted = await deleteExpiredTypingAlerts({ now, prisma });
   const expiredAssistantRuntimeIssuesDeleted = await deleteExpiredAssistantRuntimeIssues({
     now,
     prisma,
@@ -152,6 +155,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     expiredGroupParticipantObservationsDeleted,
     expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
+    expiredTypingAlertsDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     expiredOperatorTaskResultsRetired,
@@ -861,6 +865,26 @@ export async function deleteExpiredIngressLatencyTraces(input: {
     DELETE FROM "hosted_ingress_latency_trace" AS trace
     USING doomed
     WHERE trace."id" = doomed."id"
+  `);
+}
+
+export async function deleteExpiredTypingAlerts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_TYPING_ALERT_RETENTION_MS);
+  // Keep unsent obligations. Sent identities outlive the seven-day trace scan,
+  // so retiring them cannot recreate an alert for an old message.
+  return runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT id FROM hosted_linq_alert
+      WHERE kind IN ('runtime_warm_typing_slow', 'runtime_cold_typing_slow')
+        AND status = 'sent' AND claimed_at < ${cutoff}
+      ORDER BY claimed_at, id
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM hosted_linq_alert AS alert USING doomed
+    WHERE alert.id = doomed.id
   `);
 }
 

@@ -804,4 +804,28 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
+
+  it("persists route receipt and early typing only after response without waiting for typing on handoff", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    const webhookReceivedAt = new Date("2026-09-10T12:00:00.000Z");
+    const typingAt = new Date("2026-09-10T12:00:00.800Z");
+    let finishTyping!: (at: Date) => void;
+    const ingressTypingAcceptedAt = new Promise<Date>((resolve) => { finishTyping = resolve; });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({ workflowId: "synthetic-workflow" });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.recordHostedIngressTemporalSignalAccepted.mockClear();
+    await maybeHandoffHostedExecutionWebhookWake({
+      response,
+      webhookReceivedAt,
+      ingressTypingAcceptedAt,
+      wakeHandoff: buildWakeHandoff(),
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+    });
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).not.toHaveBeenCalled();
+    finishTyping(typingAt);
+    for (const task of tasks) await task();
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(expect.objectContaining({
+      webhookReceivedAt, ingressTypingAcceptedAt: typingAt, mailboxItemId: "mailbox_123",
+    }));
+  });
 });

@@ -32,11 +32,17 @@ const HOSTED_LINQ_TYPING_REFRESH_MS = 45_000;
 const HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS = 10 * 60_000;
 
 type HostedLinqTypingTargetState = {
+  acceptedAtMs: number | null;
   activeUntilMs: number;
   cooldownUntilMs: number;
 };
 
 const hostedLinqTypingTargets = new Map<string, HostedLinqTypingTargetState>();
+
+export function readHostedActiveLinqTypingAcceptedAt(target: string): number | null {
+  const state = hostedLinqTypingTargets.get(target.trim());
+  return state && state.activeUntilMs > Date.now() ? state.acceptedAtMs : null;
+}
 
 export function buildHostedLinqChannelEnv(input: {
   forwardedEnv: Readonly<Record<string, string>>;
@@ -120,6 +126,16 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       if (!target) {
         return undefined;
       }
+      const activeTypingAcceptedAt = readHostedActiveLinqTypingAcceptedAt(target);
+      if (activeTypingAcceptedAt !== null) {
+        recordHostedAssistantMilestonesBestEffort({
+          context: input.latencyTraceContext,
+          milestones: [{
+            at: new Date(activeTypingAcceptedAt).toISOString(),
+            milestone: "linq_typing_accepted",
+          }],
+        });
+      }
       const typingTarget = claimHostedLinqTypingTarget(target);
       if (!typingTarget) {
         return undefined;
@@ -142,6 +158,8 @@ export function createHostedAssistantChannelTypingDependencies(input: {
           maxSessionMs: HOSTED_LINQ_TYPING_MAX_SESSION_MS,
           refreshMs: HOSTED_LINQ_TYPING_REFRESH_MS,
         });
+        const typingAcceptedAt = new Date();
+        typingTarget.state.acceptedAtMs = handle ? typingAcceptedAt.getTime() : null;
         recordHostedAssistantMilestonesBestEffort({
           context: input.latencyTraceContext,
           milestones: [
@@ -151,7 +169,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
             },
             ...(handle
               ? [{
-                  at: new Date().toISOString(),
+                  at: typingAcceptedAt.toISOString(),
                   milestone: "linq_typing_accepted" as const,
                 }]
               : []),
@@ -190,7 +208,17 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         fetchImplementation: input.providerFetch,
         signal: input.signal,
       }, "Hosted Telegram typing indicator");
-      return startTelegramTypingIndicator(request, dependencies);
+      const handle = await startTelegramTypingIndicator(request, dependencies);
+      if (handle) {
+        recordHostedAssistantMilestonesBestEffort({
+          context: input.latencyTraceContext,
+          milestones: [{
+            at: new Date().toISOString(),
+            milestone: "telegram_typing_accepted",
+          }],
+        });
+      }
+      return handle;
     },
   };
 }
@@ -218,7 +246,8 @@ function claimHostedLinqTypingTarget(target: string): HostedLinqTypingClaim | nu
     return null;
   }
 
-  const state = {
+  const state: HostedLinqTypingTargetState = {
+    acceptedAtMs: null,
     activeUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS,
     cooldownUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS
       + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS,

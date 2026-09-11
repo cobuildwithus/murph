@@ -59,6 +59,7 @@ import {
   inferDirectEmailThreadFromParticipants,
 } from "@murphai/inboxd/connectors/email/directness";
 
+import { readHostedActiveLinqTypingAcceptedAt } from "./channel-activity.ts";
 import type {
   HostedMailboxConversationImportTiming,
   HostedMailboxItemImportOutcome,
@@ -647,6 +648,9 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
     wake: input.wake,
   });
 
+  const activeTypingAcceptedAt = input.wake.message.channel === "linq"
+    ? readHostedActiveLinqTypingAcceptedAt(input.wake.message.linqMessage.chatId ?? "")
+    : null;
   try {
     void latencyTracePort.record({
       event: {
@@ -669,6 +673,23 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
           ? {}
           : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
+    }).then(() => {
+      // A message steered into an active turn may never start a new typing
+      // session. Preserve the actual indicator already present at import.
+      if (activeTypingAcceptedAt !== null && input.runtimeAttemptId) {
+        recordHostedAssistantMilestonesBestEffort({
+          context: {
+            assistantInputIds: [input.inputId],
+            latencyTracePort,
+            runtimeAttemptId: input.runtimeAttemptId,
+            source,
+          },
+          milestones: [{
+            at: new Date(activeTypingAcceptedAt).toISOString(),
+            milestone: "linq_typing_accepted",
+          }],
+        });
+      }
     }).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.
     });

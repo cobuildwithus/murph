@@ -2130,6 +2130,31 @@ Last verified: 2026-09-04
   requested checkpoint; only the finished event's `webCheckpointAccepted`
   establishes Web acceptance. Malformed timestamp values and raw wake reasons
   are never copied into these fields.
+- Per-message typing alerts independently measure the Web route's receipt instant
+  through the earliest accepted typing indicator: strictly over 3 seconds for a
+  warm workspace and over 10 seconds for a cold workspace. Mailbox acceptance
+  remains its existing timestamp; it never substitutes for webhook receipt.
+  A restore completed before the message arrived, or an explicit reused restore,
+  identifies warmth. This includes later messages within an invocation that
+  originally started cold. Missing warmth evidence uses the 10-second cutoff and
+  is labeled unconfirmed; deployment version, rollout convergence, canary identity,
+  access changes, other incidents, and quiet hours do not suppress these alerts.
+  Linq and Telegram acceptance milestones stay asynchronous. Linq's existing
+  active indicator carries its original acceptance into later messages; signup's
+  early Web typing hint is also retained, so neither produces a missing-typing
+  false positive. Callback arrival order cannot replace an earlier acceptance.
+  No acceptance observation after 30 seconds is eligible as missing evidence;
+  the existing five-minute alert cron provides fallback evaluation, while staged
+  and accepted-typing callbacks evaluate their exact inputs after responding.
+  Each read selects at most 1,001 violating rows, queues 1,000 with one
+  conflict-safe insert, and immediately attempts at most 50 sequential sends.
+  The existing operational alert recovery drains remaining/failed sends. A stable
+  trace-derived identity and immutable metadata-only body in `HostedLinqAlert`
+  deduplicate each message independently, without an incident-wide cooldown.
+  The scan covers the seven-day ingress-trace horizon; sent alert identities
+  expire after 30 days through bounded hourly retention. Unsent alerts remain
+  recovery obligations. Emails contain channel, timings, workspace class, and an
+  opaque alert reference, without member identity or message content.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating
