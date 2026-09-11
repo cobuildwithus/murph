@@ -161,13 +161,26 @@ Current providers:
   `temporal-*` facet set through existing authoritative event sets, so a
   successful empty or insufficient replacement retracts stale derived facts;
   failed or yielded work grants no authority.
-- The temporal horizon is clamped to 1–14 authoritative vault-local days. The
-  newest eligible day imports inline, while older resource/day coordinates use
-  the existing durable queue in newest-first order. Queued or running work
-  deduplicates across restarts, while succeeded rows remain history rather than
-  suppressing a later scheduled pull whose source roster or provider data may
-  have widened. At the failure/yield ceiling, 28 temporal rows plus one ordinary
-  reconcile follow-up remain serialized by the existing per-account fence.
+- The temporal horizon is clamped to 1–14 authoritative vault-local days. All
+  complete-day work uses the existing durable resource/day queue, newest first.
+  A hashed `junctionTemporalSweepV1` metadata marker records the scheduled scope:
+  newest eligible day, timezone, resources, horizon, and stable source roster and
+  capabilities. Matching hourly reconciles skip the broad sweep; a new day or
+  changed scope schedules it again. The marker and children commit atomically in
+  local SQLite. Hosted recovery checkpoints the marker with exact retained jobs
+  before publishing it to Web; SQLite itself is excluded from hosted snapshots.
+  The marker never proves an import completed. Ordinary reconciliation keeps its cadence.
+- Oxygen/stress data-event jobs also queue intersecting local days within that
+  rolling horizon, plus days still awaiting closure and the 24-hour arrival lag.
+  Future children become available only after the lag. Bursts share the existing
+  day key; the account fence ensures an event arriving during a fetch executes
+  afterward and can recreate its completed day job. Daily repair covers missing
+  events and late corrections. No source-authority check is cached or removed.
+- Queued/running children retain existing retries across restarts. Succeeded or
+  dead rows can be recreated; a daily sweep has at most 28 temporal children plus
+  one ordinary continuation. Targeted events add at most the configured horizon
+  plus three not-yet-eligible local days for one resource. All jobs stay serialized
+  by the existing account fence, with unchanged complete-source-day validation.
 - Temporal children never advance generic account completion. That watermark is
   account activity state rather than complete floor coverage, so every scheduled
   reconcile still refetches configured ordinary resources. Collection remains

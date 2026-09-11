@@ -61,6 +61,14 @@ function isDeviceSyncCredentialIndependentImportJob(input: {
 }
 
 describe("hosted continuation producer and reader compatibility", () => {
+  it("round-trips bounded sweep recovery hashes and rejects malformed markers", () => {
+    const hint = { jobs: [], junctionTemporalSweepKey: "a".repeat(64) };
+    expect(parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint)))).toEqual(hint);
+    for (const junctionTemporalSweepKey of [null, 123, "", "a".repeat(65), "not-a-hash"]) {
+      expect(() => parseHostedExecutionDeviceSyncWakeHint({ junctionTemporalSweepKey })).toThrow(/SHA-256/u);
+    }
+  });
+
   it.each([
     ["resource", "calendarRefreshDay", "2026-04-02"],
     ["resource", "companionAdmissionId", "admission_example"],
@@ -413,6 +421,26 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 });
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("preserves uncheckpointed local sweep scheduling but drops it when the epoch has no local state", () => {
+    const localKey = "a".repeat(64);
+    const hostedKey = "b".repeat(64);
+    const input = {
+      hostedMetadata: { junctionTemporalSweepV1: hostedKey, otherProgress: "remote" },
+      localConnectionStateUnpublished: false,
+    };
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionTemporalSweepV1: localKey },
+    })).toEqual({
+      metadata: { junctionTemporalSweepV1: localKey, otherProgress: "remote" },
+      preservedLocalProgress: true,
+    });
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionTemporalSweepV1: hostedKey },
+    }).preservedLocalProgress).toBe(false);
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input, localMetadata: undefined }).metadata)
+      .toEqual(input.hostedMetadata);
+  });
+
   it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
     const metadata = { junctionBloodPressureHistoryBackfillCoverage: "v3|withings" };
     const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({

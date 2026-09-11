@@ -745,6 +745,8 @@ test("device sync service records privacy-safe job phase timings", async () => {
       providerUnattributedElapsedMs: 1_500,
       resource: "sleep",
       snapshotImportCount: 1,
+      snapshotImportOutcomes: { applied: 1, noop: 0, failed: 0, unknown: 0 },
+      completeSourceDayImportOutcomes: { applied: 0, noop: 0, failed: 0, unknown: 0 },
       snapshotImportElapsedMs: 2_000,
       snapshotCanonicalCoreElapsedMs: 1_600,
       snapshotCanonicalWriteElapsedMs: 200,
@@ -752,6 +754,92 @@ test("device sync service records privacy-safe job phase timings", async () => {
       snapshotEventIdentityIndexElapsedMs: 1_200,
       snapshotNormalizationElapsedMs: 300,
     }]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync import outcomes distinguish no-ops, unknowns, and failures across complete source days", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-outcomes");
+  const now = "2026-08-25T10:00:00.000Z";
+  let importCount = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => new Date(now) },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: { warn() {} },
+    },
+    providers: [createFakeProvider({
+      async executeJob(context) {
+        for (let index = 0; index < 6; index += 1) {
+          await context.importSnapshot({}, index < 3 ? undefined : {
+            completeSourceDay: {
+              connectionId: "synthetic-connection",
+              dayKey: "2026-08-23",
+              resources: ["blood_oxygen"],
+              revisionAt: now,
+              timeZone: "UTC",
+            },
+          });
+        }
+        return {};
+      },
+    })],
+    importer: {
+      async importDeviceProviderSnapshot() {
+        importCount += 1;
+        if (importCount === 6) {
+          throw new Error("Synthetic import failure");
+        }
+        if (importCount === 3) {
+          return { ok: true };
+        }
+        return { applied: importCount === 1 || importCount === 4 };
+      },
+    },
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-import-outcomes",
+      scopes: ["read:data"],
+      tokens: {
+        accessToken: "synthetic-access",
+        accessTokenEncrypted: encryptStoredAccessToken(
+          "demo", "demo-import-outcomes", "synthetic-access",
+        ),
+        refreshToken: "synthetic-refresh",
+      },
+      connectedAt: now,
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "reconcile",
+      payload: {},
+      availableAt: now,
+    });
+    await service.runWorkerOnce();
+    const [diagnostic] = service.listJobTimingDiagnostics();
+    assert(diagnostic);
+    assert.equal(diagnostic?.outcome, "failed");
+    assert.equal(diagnostic?.snapshotImportCount, 6);
+    assert.equal(diagnostic?.canonicalProgressCommitted, true);
+    assert.deepEqual(diagnostic?.snapshotImportOutcomes, {
+      applied: 2, noop: 2, failed: 1, unknown: 1,
+    });
+    assert.deepEqual(diagnostic?.completeSourceDayImportOutcomes, {
+      applied: 1, noop: 1, failed: 1, unknown: 0,
+    });
+    // Returned diagnostics cannot mutate the service's retained counters.
+    diagnostic.snapshotImportOutcomes.noop = 999;
+    diagnostic.completeSourceDayImportOutcomes.noop = 999;
+    const [retained] = service.listJobTimingDiagnostics();
+    assert.equal(retained?.snapshotImportOutcomes.noop, 2);
+    assert.equal(retained?.completeSourceDayImportOutcomes.noop, 1);
   } finally {
     close();
   }
@@ -1654,7 +1742,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
 });
 
 test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
-  const now = new Date("2026-07-29T10:00:00.000Z");
+  let now = new Date("2026-07-29T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
   const importerInputs: unknown[] = [];
   const importerResults: unknown[] = [];
@@ -1687,6 +1775,7 @@ test("local Junction workers exclude a disconnected source from production-norma
         clientUserIdSecret: "junction-client-user-id-secret",
         environment: "sandbox",
         region: "us",
+        reconcileDays: 2,
         summaryResources: ["activity"],
         timeseriesResources: ["blood_oxygen"],
         fetchImpl: async (input) => {
@@ -1831,6 +1920,8 @@ test("local Junction workers exclude a disconnected source from production-norma
         ?.timeseriesResourceCursor,
       "blood_oxygen",
     );
+    now = new Date(now.getTime() + 1_000);
+    assert.equal((await service.runWorkerOnce())?.kind, "resource");
     assert.equal(await service.runWorkerOnce(), null);
     assert.equal(importerInputs.length, 4);
     const durableInput = JSON.stringify(importerInputs);
@@ -9688,12 +9779,10 @@ test("device sync service releases Junction backfill row when cooperative abort 
   }
 });
 
-test("Junction reconcile atomically replaces a yielded temporal continuation with durable jobs", async () => {
+test("Junction reconcile atomically queues a daily temporal sweep that survives restart", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-temporal-yield");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
-  const now = new Date("2026-08-12T12:00:00.000Z");
-  let yieldRequested = false;
-  let yieldAfterNewestBloodOxygen = true;
+  let now = new Date("2026-08-12T12:00:00.000Z");
   const requestedWindows: Array<{ end: string | null; resource: string; start: string | null }> = [];
   await initializeVault({ vaultRoot });
   const canonicalImporter = createImporters();
@@ -9747,27 +9836,8 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: databasePath,
-      shouldYieldJobExecution: () => yieldRequested,
     },
-    importer: {
-      async importDeviceProviderSnapshot(input) {
-        const result = await canonicalImporter.importDeviceProviderSnapshot(input);
-        const timeseries = (input.snapshot as { timeseries?: Record<string, unknown[]> })
-          .timeseries;
-        if (
-          yieldAfterNewestBloodOxygen
-          && timeseries
-          && Object.hasOwn(timeseries, "blood_oxygen")
-        ) {
-          yieldAfterNewestBloodOxygen = false;
-          yieldRequested = true;
-        }
-        return result;
-      },
-      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
-        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
-      },
-    },
+    importer: canonicalImporter,
     providers: [provider],
   });
   const fixture = openFixture();
@@ -9813,12 +9883,13 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
 
     assert.equal(fixture.store.getJobById(parent.id)?.status, "succeeded");
     assert.equal(fixture.store.getJobById(parent.id)?.lastErrorCode, null);
-    assert.equal(temporalJobs.length, 3);
+    assert.equal(temporalJobs.length, 4);
     assert.deepEqual(
       new Set(temporalJobs.map((job) =>
         `${String(job?.payload.windowStart).slice(0, 10)}:${String(job?.payload.resource)}`
       )),
       new Set([
+        "2026-08-10:blood_oxygen",
         "2026-08-10:stress_level",
         "2026-08-09:blood_oxygen",
         "2026-08-09:stress_level",
@@ -9834,15 +9905,19 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
     });
     assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
 
+    const sweepMarker = fixture.store.getAccountById(account.id)?.metadata.junctionTemporalSweepV1;
+    assert.equal(typeof sweepMarker, "string");
+    assert.deepEqual(requestedWindows, []);
     fixture.close();
     fixtureClosed = true;
     const restarted = openFixture();
     try {
+      assert.equal(restarted.store.getAccountById(account.id)?.metadata.junctionTemporalSweepV1, sweepMarker);
       const restartedJobs = readJobsForAccountForTesting(restarted.store, account.id);
-      assert.equal(restartedJobs.filter((job) => job.status === "queued").length, 4);
+      assert.equal(restartedJobs.filter((job) => job.status === "queued").length, 5);
       assert.equal(restartedJobs.find((job) => job.id === parent.id)?.status, "succeeded");
-      yieldRequested = false;
-      for (let temporalRun = 0; temporalRun < 3; temporalRun += 1) {
+      now = new Date(now.getTime() + 1_000);
+      for (let temporalRun = 0; temporalRun < 4; temporalRun += 1) {
         const processed = await restarted.service.runWorkerOnce();
         assert.equal(processed?.kind, "resource");
         assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
@@ -9888,6 +9963,131 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
     if (!fixtureClosed) {
       fixture.close();
     }
+  }
+});
+
+test("Junction events during a complete-day fetch survive the account fence and coalesce after restart", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-temporal-event-race");
+  const now = new Date("2026-08-12T12:00:00.000Z");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
+  const externalAccountId = "junction-temporal-event-race";
+  let completeDayRequests = 0;
+  let releaseFetch = () => {};
+  let announceFetch = () => {};
+  const fetchStarted = new Promise<void>((resolve) => { announceFetch = resolve; });
+  const fetchRelease = new Promise<void>((resolve) => { releaseFetch = resolve; });
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 1,
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname.startsWith("/v2/user/providers/")) {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-event-race", slug: "garmin", status: "connected",
+          resource_availability: { blood_oxygen: true },
+        }] });
+      }
+      if (url.pathname.startsWith("/v2/summary/")) {
+        return createJsonResponse({ data: [] });
+      }
+      if (url.pathname.endsWith("/blood_oxygen/grouped")) {
+        if (url.searchParams.get("start_date")?.includes("T")) {
+          completeDayRequests += 1;
+          if (completeDayRequests === 1) {
+            announceFetch();
+            await fetchRelease;
+          }
+        }
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected race fixture request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async resolveDeviceProviderSnapshotDefaultTimeZone() { return "UTC"; },
+      async importDeviceProviderSnapshot() { return { applied: false }; },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let pendingFetch: ReturnType<typeof fixture.service.runWorkerOnce> | undefined;
+  let closed = false;
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction", externalAccountId, displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: "2026-08-01T00:00:00.000Z", nextReconcileAt: null,
+    });
+    fixture.store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "reconcile", priority: 40,
+      availableAt: now.toISOString(),
+      payload: { windowStart: "2026-08-11T00:00:00.000Z", windowEnd: "2026-08-12T00:00:00.000Z" },
+    });
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.kind, "reconcile");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.kind, "reconcile");
+    const marker = fixture.store.getAccountById(account.id)?.metadata.junctionTemporalSweepV1;
+    assert.equal(typeof marker, "string");
+    pendingFetch = fixture.service.runWorkerOnce(account.id);
+    await fetchStarted;
+    for (const [index, messageId] of ["msg-event-race-first", "msg-event-race-second"].entries()) {
+      const webhook = createJunctionSvixWebhook({ messageId, body: {
+        event_type: "daily.data.blood_oxygen.updated", user_id: externalAccountId,
+        data: { start_date: `2026-08-10T0${index}:00:00.000Z`, end_date: "2026-08-10T03:00:00.000Z" },
+      } });
+      assert.equal((await fixture.service.handleWebhook("junction", webhook.headers, webhook.rawBody)).accepted, true);
+    }
+    const competing = openFixture();
+    try {
+      assert.equal(await competing.service.runWorkerOnce(account.id), null);
+    } finally {
+      competing.close();
+    }
+    releaseFetch();
+    const firstDay = await pendingFetch;
+    assert.equal(firstDay?.payload.temporalAuthorityTimeZone, "UTC");
+    fixture.close();
+    closed = true;
+    const restarted = openFixture();
+    try {
+      assert.equal(restarted.store.getAccountById(account.id)?.metadata.junctionTemporalSweepV1, marker);
+      for (let eventIndex = 0; eventIndex < 2; eventIndex += 1) {
+        const eventJob = await restarted.service.runWorkerOnce(account.id);
+        assert.equal(eventJob?.payload.eventType, "daily.data.blood_oxygen.updated");
+      }
+      const queuedDays = readJobsForAccountForTesting(restarted.store, account.id)
+        .filter((row) => row.status === "queued")
+        .map((row) => restarted.store.getJobById(row.id))
+        .filter((job) => job?.payload.temporalAuthorityTimeZone);
+      assert.equal(queuedDays.length, 1);
+      assert.equal(queuedDays[0]?.dedupeKey, firstDay?.dedupeKey);
+      assert.notEqual(queuedDays[0]?.id, firstDay?.id);
+      const refreshed = await restarted.service.runWorkerOnce(account.id);
+      assert.equal(refreshed?.id, queuedDays[0]?.id);
+      assert.equal(completeDayRequests, 2);
+      assert.equal(await restarted.service.runWorkerOnce(account.id), null);
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    releaseFetch();
+    await pendingFetch;
+    if (!closed) fixture.close();
+    vi.useRealTimers();
   }
 });
 
@@ -10013,6 +10213,7 @@ test("Junction scheduled temporal history refetches after a new source and late 
       nextReconcileAt: now.toISOString(),
     });
     const runUntilOlderTemporalDay = async (service: typeof fixture.service) => {
+      now = new Date(now.getTime() + 1_000);
       for (let workerRun = 0; workerRun < 40; workerRun += 1) {
         const processed = await service.runWorkerOnce(account.id);
         assert.ok(processed);
@@ -10960,7 +11161,7 @@ test("Junction maximum temporal catch-up yields to ordinary continuation before 
     const ordinaryContinuations = queuedAfterSeed.filter((job) =>
       job.kind === "reconcile" && job.payload.timeseriesResourceCursor !== undefined
     );
-    assert.equal(temporalChildren.length, 26);
+    assert.equal(temporalChildren.length, 28);
     assert.equal(ordinaryContinuations.length, 1);
     assert.ok(temporalChildren.every((job) => job.priority === 30));
     assert.equal(ordinaryContinuations[0]?.priority, 40);
@@ -10969,10 +11170,7 @@ test("Junction maximum temporal catch-up yields to ordinary continuation before 
         dayKey: request.start?.slice(0, 10),
         resource: request.resource,
       })),
-      [
-        { dayKey: "2026-08-13", resource: "blood_oxygen" },
-        { dayKey: "2026-08-13", resource: "stress_level" },
-      ],
+      [],
     );
 
     const ordinaryContinuation = await fixture.service.runWorkerOnce(account.id);
@@ -11014,8 +11212,8 @@ test("Junction maximum temporal catch-up yields to ordinary continuation before 
       }
     }
 
-    const expectedTemporalDays = Array.from({ length: 13 }, (_, offset) =>
-      new Date(Date.UTC(2026, 7, 12 - offset)).toISOString().slice(0, 10)
+    const expectedTemporalDays = Array.from({ length: 14 }, (_, offset) =>
+      new Date(Date.UTC(2026, 7, 13 - offset)).toISOString().slice(0, 10)
     );
     assert.deepEqual(
       temporalDaySequence,

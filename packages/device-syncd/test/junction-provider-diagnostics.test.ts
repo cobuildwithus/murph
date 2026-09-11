@@ -2215,7 +2215,9 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }),
   );
 
-  assert.deepEqual(initialResult.metadataPatch, {
+  const { junctionTemporalSweepV1, ...historicalProgress } = initialResult.metadataPatch ?? {};
+  assert.equal(typeof junctionTemporalSweepV1, "string");
+  assert.deepEqual(historicalProgress, {
     junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
@@ -2223,7 +2225,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(initialResult.nextReconcileAt, "2026-04-04T00:15:00.000Z");
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   await executeTemporalAuthorityChildren({ context, initialResult, provider });
   const result = await executeFullJobTimeseriesContinuations({
     context,
