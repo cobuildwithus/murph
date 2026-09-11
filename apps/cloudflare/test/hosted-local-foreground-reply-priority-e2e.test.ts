@@ -51,6 +51,7 @@ import {
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
 } from "@murphai/hosted-execution/clinical-records";
 import {
+  HOSTED_RUNTIME_CURRENT_WAIT_REASONS,
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -2171,7 +2172,10 @@ async function waitForAssistantProviderInputInScenario(input: {
 }
 
 interface RuntimeWakeObservation {
+  currentWaitReason: string | null;
+  currentWaitUntil: string | null;
   lastExecutionAt: string | null;
+  lastReconciliationNextWakeAt: string | null;
   signalVersion: number;
 }
 
@@ -2189,15 +2193,36 @@ async function readRuntimeWakeObservation(input: {
   }
   const lastExecutionAt: unknown = Reflect.get(value, "lastExecutionAt");
   const signalVersion: unknown = Reflect.get(value, "signalVersion");
+  const currentWaitReason: unknown = Reflect.get(value, "currentWaitReason");
+  const currentWaitUntil: unknown = Reflect.get(value, "currentWaitUntil");
+  const lastReconciliationNextWakeAt: unknown = Reflect.get(value, "lastReconciliationNextWakeAt");
   if (
     (lastExecutionAt !== null && typeof lastExecutionAt !== "string")
+    || (currentWaitReason !== null && (
+      typeof currentWaitReason !== "string"
+      || !HOSTED_RUNTIME_CURRENT_WAIT_REASONS.some((reason) => reason === currentWaitReason)
+    ))
+    || (currentWaitUntil !== null && (
+      typeof currentWaitUntil !== "string" || !Number.isFinite(Date.parse(currentWaitUntil))
+    ))
+    || (lastReconciliationNextWakeAt !== null && (
+      typeof lastReconciliationNextWakeAt !== "string"
+      || !Number.isFinite(Date.parse(lastReconciliationNextWakeAt))
+    ))
     || typeof signalVersion !== "number"
     || !Number.isSafeInteger(signalVersion)
     || signalVersion < 0
   ) {
     throw new TypeError("Hosted runtime workflow query returned an invalid state.");
   }
-  return { lastExecutionAt, signalVersion };
+  return {
+    currentWaitReason,
+    currentWaitUntil: currentWaitUntil === null ? null : new Date(currentWaitUntil).toISOString(),
+    lastExecutionAt,
+    lastReconciliationNextWakeAt: lastReconciliationNextWakeAt === null
+      ? null : new Date(lastReconciliationNextWakeAt).toISOString(),
+    signalVersion,
+  };
 }
 
 async function waitForRuntimeWakeExecution(input: {
