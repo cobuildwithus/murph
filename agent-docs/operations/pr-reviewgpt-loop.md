@@ -232,12 +232,24 @@ none apply. Missing, malformed, or duplicate declarations are packaged as
 `undeclared` and default to the full snapshot.
 
 At round 1, record the exact first-reviewed head in the PR body. Include the exact machine-readable line
-`ReviewGPT first-reviewed head: <full-sha>`. Keep that line and baseline
-immutable. The packager fails if its supplied first head differs from this
-persisted PR-body value. Later substantive rounds report the remediation delta
+`ReviewGPT first-reviewed head: <full-sha>`. Once the first substantive review
+validates, keep that line and baseline immutable. The packager fails if its
+supplied first head differs from this persisted PR-body value. Later substantive rounds report the remediation delta
 from that baseline without asking the author to maintain a manual line-count
 table. Here `<full-sha>` means exactly the 40-character lowercase hexadecimal
 value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
+
+If every initial attempt is invalid and an already-authorized candidate change
+produces a new pushed head, first preserve the old head, invalidity reason, and
+artifact references in a separate PR-body attempt-history entry. Confirm that
+no valid substantive review exists; an accepted prompt still awaiting capture
+is not an invalid result and must be recovered before this decision. Then
+replace the single machine-readable first-reviewed-head line with the new full
+head and retry round 1 with a fresh full snapshot. Leave previous-reviewed-head
+unset and use the new head as the context anchor. No extra commit is needed
+solely to restart review. Do not relabel a valid `PASS` or `FINDINGS` response as
+invalid, erase prior findings, reset a later round, or grant new edit authority
+through this recovery. Same-head tooling retries retain their existing baseline.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 runs in parallel with CI. Green CI on the final
@@ -474,7 +486,8 @@ the current user explicitly asks for it.
 
    A response with `ROUND_OUTCOME: INVALID` does not count as a substantive
    round. Correct its evidence or invocation gap and retry the same round number
-   against the same pushed head.
+   against the same pushed head. An authorized head change before any valid
+   initial review uses the round-one baseline recovery above.
 
    Require at least 3 minutes (180 seconds) for a marked concrete-model final
    response. The repository wrapper passes `--minimum-marked-response-time 180s`
