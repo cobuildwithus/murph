@@ -7,13 +7,14 @@
     "priority": 3,
     "title": "Wearable imports finish more reliably",
     "summary": "Repeated background notifications no longer delay the final step of a completed wearable import.",
-    "details": "Your messages still take priority while Murph finishes syncing your data.",
+    "details": "Interrupted imports resume from saved progress, and new messages still take priority while Murph finishes syncing your data.",
     "relevanceTags": [
       "devices",
       "reliability"
     ],
     "sourcePullRequests": [
-      3196
+      3196,
+      3207
     ]
   }
 }
