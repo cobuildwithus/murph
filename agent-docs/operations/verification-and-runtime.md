@@ -84,7 +84,10 @@ bound to the jobs that actually execute the proof.
 `PR Evidence` intentionally remains lightweight on `synchronize` so policy and
 rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
 `synchronize`, but owns only the event-time-ready read-only receipt consumed by
-the draft-reset controller. Main-branch push CI is unchanged.
+the draft-reset controller. `Garmin Secret Migration Proof` also keeps default
+pull-request events, restricted to its migration workflow and Python owner paths;
+it runs only synthetic proof and strict typechecking without an Environment or
+provider credentials. Main-branch push CI is unchanged.
 
 Eligible Markdown-only pull requests keep the same protected PR and required
 context owners while replacing runtime-heavy proof with narrowly scoped positive
