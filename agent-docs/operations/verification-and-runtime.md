@@ -55,6 +55,21 @@ should run `gh pr ready <number>` only after focused local proof and the parent
 candidate review are complete, the exact pushed head is the intended merge
 candidate, and no PR-specific edit is already known. That Ready event starts
 the expensive workflows automatically.
+
+Before pushing a new head to an existing owned PR, explicitly mark it Draft
+and make the push conditional on that command succeeding. From the PR's owned
+branch, use `gh pr ready <number> --undo && git push origin HEAD` (substitute the
+verified PR remote when it is not `origin`). This ordering applies to remediation,
+base reconciliation, and final plan-closeout commits as well as routine edits.
+After the push succeeds, verify the remote head and re-establish the candidate
+conditions above before running `gh pr ready <number>`.
+
+Do not rely on the delayed controller to mark Draft before calling Ready. If
+Ready is called while the PR still appears ready, it emits no new readiness
+event; the delayed reset can then leave the candidate Draft with no expensive
+CI run. If a head was already pushed while Ready, first allow its reset to
+complete, confirm the same head is Draft, and then mark it Ready after verification.
+
 The expensive pull-request workflows admit only non-draft `opened` or
 `reopened` events and `ready_for_review`; they do not run expensive proof on
 `synchronize`. A synchronize event that occurred while the PR was ready records
@@ -76,10 +91,8 @@ populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
 resolutions fail closed before the sole draft mutation. A
 synchronize event that occurred while the PR was already draft produces no
 consumable receipt, so delayed handling cannot undo a newer Ready action on the
-unchanged SHA. After a later push returns the PR to draft, re-establish the
-candidate conditions above before marking it Ready again to prove the new exact
-head. A skipped job is not exact-head success, and required check names remain
-bound to the jobs that actually execute the proof.
+unchanged SHA. A skipped job is not exact-head success, and required check names
+remain bound to the jobs that actually execute the proof.
 
 `PR Evidence` intentionally remains lightweight on `synchronize` so policy and
 rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
@@ -476,6 +489,11 @@ if Garmin departs during that asynchronous sample, the current route wins over
 the stale pre-sample observation and the callback proof continues. After the
 persisted-state reload, the runner waits for the page load boundary before
 clicking Disconnect so server-rendered state cannot outrun its client handler.
+Authorization-click failures retain the fixed action and timeout category,
+plus allowlisted host-family and route categories sampled before and after the
+click. The runner captures the original stage and diagnostic message before
+browser cleanup; cleanup cannot replace that evidence with a closed-page
+location. These diagnostics contain no raw URL, provider page text, or screenshot.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual

@@ -4052,7 +4052,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({ excludedRouteActions: [
-        "run-device-sync-wake", "run-clinical-records-sync", "run-environment-interview",
+        "run-device-sync-wake", "run-clinical-records-sync", "apply-clinical-enrichment", "run-environment-interview",
       ] }),
     );
     expect(result).toEqual(expect.objectContaining({

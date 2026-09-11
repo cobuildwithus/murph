@@ -347,7 +347,7 @@ export async function fetchClinicalRetrievalDocument(input: {
   if (!epicBinaryReadIsGranted(grantedScopes)) return unavailable("document-scope-unavailable", false);
   const prepared = await loadClinicalDocumentRequest({ input, run, grantedScopes });
   if ("unavailable" in prepared) return unavailable(prepared.unavailable, prepared.retryable);
-  const { ticket, url, fhirBaseUrl } = prepared;
+  const { ticket, url, fhirBaseUrl, patientIdHash } = prepared;
   // Ciphertext is randomized; the attested parent and URL own logical identity.
   const requestFingerprint = sha256Hex(["document", run.connection.id, String(run.generation), run.id,
     ticket.queryScopeId, ticket.sliceId, ticket.parentPageSha256, ticket.resourceType,
@@ -364,7 +364,7 @@ export async function fetchClinicalRetrievalDocument(input: {
     const response = await fetchFhirPage({ accessToken, fetchImpl: input.fetchImpl, pageUrl: url,
       accept: "application/fhir+json, application/json, */*;q=0.5" });
     const document = (ticket.sourceKind ?? "binary") === "media"
-      ? await fetchMediaDocument({ response, mediaUrl: url, fhirBaseUrl, accessToken, fetchImpl: input.fetchImpl, ticket })
+      ? await fetchMediaDocument({ response, mediaUrl: url, fhirBaseUrl, patientIdHash, accessToken, fetchImpl: input.fetchImpl, ticket })
       : await readClinicalDocumentResponse({ response, ticket, url,
       maxResponseBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
     const accounted = await completeRetrievalPageRequest({ bodyBytes: document.bytes.length,
@@ -400,14 +400,19 @@ async function loadClinicalDocumentRequest(input: {
   input: Parameters<typeof fetchClinicalRetrievalDocument>[0];
   run: RunnableClinicalRun;
   grantedScopes: readonly string[];
-}): Promise<{ ticket: ReturnType<typeof clinicalDocumentTicketSchema.parse>; url: URL; fhirBaseUrl: string } | { unavailable: string; retryable: boolean }> {
+}): Promise<{ ticket: ReturnType<typeof clinicalDocumentTicketSchema.parse>; url: URL; fhirBaseUrl: string; patientIdHash: string } | { unavailable: string; retryable: boolean }> {
   let openedTicket: string;
   let fhirBaseUrl: string;
+  let patientIdHash: string;
   try {
     openedTicket = await openClinicalDocumentTicket({ generation: input.run.generation, memberId: input.input.memberId,
       runId: input.run.id, value: input.input.request.ticket });
     fhirBaseUrl = await openClinicalConnectionFhirBaseUrl({ connectionId: input.run.connection.id,
       encrypted: input.run.connection.fhirBaseUrlEncrypted, memberId: input.input.memberId });
+    const patientId = await openClinicalConnectionSecret({ connectionId: input.run.connection.id,
+      encrypted: input.run.connection.patientIdEncrypted, field: "patientId", memberId: input.input.memberId,
+      tokenVersion: input.run.connection.tokenVersion });
+    patientIdHash = hashClinicalFhirPatientId(requireFhirPatientId(patientId));
   } catch (error) {
     const invalid = error instanceof TypeError || error instanceof SyntaxError
       || (error instanceof DOMException && error.name === "OperationError");
@@ -422,7 +427,7 @@ async function loadClinicalDocumentRequest(input: {
     if (!slice) return { unavailable: "document-ticket-invalid", retryable: false };
     const sourceKind = ticket.sourceKind ?? "binary";
     if (sourceKind === "media" && !epicMediaReadIsGranted(input.grantedScopes)) return { unavailable: "media-scope-unavailable", retryable: false };
-    return { ticket, url: resolveClinicalDocumentUrl(ticket.url, fhirBaseUrl, sourceKind), fhirBaseUrl };
+    return { ticket, url: resolveClinicalDocumentUrl(ticket.url, fhirBaseUrl, sourceKind), fhirBaseUrl, patientIdHash };
   } catch {
     return { unavailable: "document-ticket-invalid", retryable: false };
   }
@@ -495,15 +500,16 @@ async function fetchMediaDocument(input: {
   response: Response;
   mediaUrl: URL;
   fhirBaseUrl: string;
+  patientIdHash: string;
   accessToken: string;
   fetchImpl?: typeof fetch;
   ticket: ReturnType<typeof clinicalDocumentTicketSchema.parse>;
 }): Promise<{ bytes: Buffer; mediaType: string; receivedBytes: number }> {
   const media = await readClinicalMediaResponse({ response: input.response, mediaUrl: input.mediaUrl,
-    fhirBaseUrl: input.fhirBaseUrl, maxResponseBytes: DOCUMENT_MEDIA_RESPONSE_MAX_BYTES });
+    fhirBaseUrl: input.fhirBaseUrl, patientIdHash: input.patientIdHash, maxResponseBytes: DOCUMENT_MEDIA_RESPONSE_MAX_BYTES });
   const binaryResponse = await fetchFhirPage({ accessToken: input.accessToken, fetchImpl: input.fetchImpl,
     pageUrl: media.binaryUrl, accept: "application/fhir+json, application/json, */*;q=0.5" });
-  const document = await readClinicalDocumentResponse({ response: binaryResponse, ticket: input.ticket,
+  const document = await readClinicalDocumentResponse({ response: binaryResponse, ticket: input.ticket, attachmentIntegrity: media.attachmentIntegrity,
     url: media.binaryUrl, maxResponseBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
   return { ...document, receivedBytes: media.receivedBytes + document.receivedBytes };
 }

@@ -134,8 +134,13 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
 let stage = "configuration";
 let activePage: Page | null = null;
 let activeConfig: BrowserConfig | null = null;
+let failureDiagnostic: string | null = null;
 
 async function main(): Promise<void> {
+  stage = "configuration";
+  activePage = null;
+  activeConfig = null;
+  failureDiagnostic = null;
   const config = readBrowserConfig(process.env);
   activeConfig = config;
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
@@ -207,10 +212,11 @@ async function main(): Promise<void> {
   } catch (error) {
     failed = true;
     failure = error;
+    failureDiagnostic = formatBrowserFailure(error);
   }
 
   try {
-    stage = failed ? `${stage}_cleanup` : "browser_cleanup";
+    if (!failed) stage = "browser_cleanup";
     await closeBrowserSession(session, config);
   } catch (error) {
     if (!failed) {
@@ -736,7 +742,7 @@ async function completeGarminPartnerConsent(
   if (await readAuthorizationActionState(saveAction) !== "enabled") {
     throw new Error("Garmin consent did not expose one enabled Save action.");
   }
-  await clickAuthorizationControl(saveAction);
+  await clickAuthorizationControl(saveAction, page, "garmin_consent_save");
   return true;
 }
 
@@ -929,7 +935,7 @@ async function clickFirstVisibleAction(
         ) {
           continue;
         }
-        await clickAuthorizationControl(control);
+        await clickAuthorizationControl(control, page, `authorization_${role}`);
         return true;
       }
     }
@@ -989,7 +995,7 @@ async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
       ) {
         continue;
       }
-      await clickAuthorizationControl(candidate);
+      await clickAuthorizationControl(candidate, page, "whoop_grant");
       return true;
     }
     return false;
@@ -1002,14 +1008,19 @@ async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
 
 async function clickAuthorizationControl(
   control: Pick<Locator, "click">,
+  page: Pick<Page, "url">,
+  action: "garmin_consent_save" | "authorization_button" | "authorization_link" | "whoop_grant",
 ): Promise<void> {
+  const before = safePageLocation(page);
   try {
     await control.click();
   } catch (error) {
     const category = error instanceof Error && error.name === "TimeoutError"
       ? "timeout"
       : "other";
-    throw new Error(`Authorization action failed (${category}).`);
+    throw new Error(
+      `Authorization action failed (${category}); action=${action}; before=${before}; after=${safePageLocation(page)}.`,
+    );
   }
 }
 
@@ -1299,6 +1310,9 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
 }
 
 export {
+  main as runHostedLocalJunctionBrowserForTest,
+  formatBrowserFailure as formatHostedLocalJunctionBrowserFailureForTest,
+  safePageLocation as readHostedLocalJunctionDiagnosticLocationForTest,
   buildKernelCliEnvironment as buildKernelCliEnvironmentForTest,
   buildKernelTunnelArguments as buildKernelTunnelArgumentsForTest,
   closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
@@ -1365,13 +1379,36 @@ function readOrigin(value: string): string | null {
   }
 }
 
-function safePageLocation(page: Page | null): string {
+function safePageLocation(page: Pick<Page, "url"> | null): string {
   try {
     const url = new URL(page?.url() ?? "");
-    return `${url.origin}${url.pathname}`;
+    if (url.protocol === "chrome-error:") return "browser_error";
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "other";
+    const host = [
+      ...TRUSTED_AUTHORIZATION_DOMAINS,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.garmin,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.oura,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.whoop,
+    ].find((domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+    if (!host) return "other";
+    const route = host === "garmin.com" && url.pathname === "/partner/oauthConfirm"
+      ? "partner_consent"
+      : "other";
+    return `${host}/${route}`;
   } catch {
     return "unavailable";
   }
+}
+
+function formatBrowserFailure(error: unknown): string {
+  if (failureDiagnostic) return failureDiagnostic;
+  const location = stage.startsWith("kernel_tunnel_ready")
+      || stage.startsWith("murph_connect_intent")
+    ? ""
+    : ` (${safePageLocation(activePage)})`;
+  return `Junction wearable browser E2E failed at ${stage}${location}: ${
+    sanitizeFailure(error, activeConfig)
+  }`;
 }
 
 function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
@@ -1404,15 +1441,7 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main().catch((error: unknown) => {
-    const location = stage.startsWith("kernel_tunnel_ready")
-        || stage.startsWith("murph_connect_intent")
-      ? ""
-      : ` (${safePageLocation(activePage)})`;
-    process.stderr.write(
-      `Junction wearable browser E2E failed at ${stage}${location}: ${
-        sanitizeFailure(error, activeConfig)
-      }\n`,
-    );
+    process.stderr.write(`${formatBrowserFailure(error)}\n`);
     process.exitCode = 1;
   });
 }

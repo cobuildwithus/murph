@@ -24,6 +24,11 @@ invariants without replacement machinery. Minor refactoring, UX polish,
 disclosure gaps, and speculative edge cases are not blocking findings. The
 targeted exploratory presets remain available separately.
 
+Both lean and full guarded archives include the tracked native CI controller
+policy, PR evidence template, and assistant verification skill through the
+existing exact always-path manifest. These inputs remain available when they
+are unchanged by the candidate.
+
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context
 sensitivity and measures the complete current PR against its base. Sensitive or

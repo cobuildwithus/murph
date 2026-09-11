@@ -1742,18 +1742,25 @@ and database pressure. Connection failure logs expose only fixed
 operation/source labels, retry attempt and disposition, the configured pool
 limit, and numeric pre-attempt and post-failure pool counts.
 
-That module permits one jittered retry only for ambiguous transient failures
-that prove the database did no work. A `pool_checkout_timeout` means the
-statement never reached Postgres. A `connection_establishment_timeout` means
-the driver failed while opening the physical connection. A
-`transaction_start_timeout` is Prisma's
-`P2028` raised before it invokes the transaction callback. When the local pool
-is already full or has waiters, either failure is returned immediately as
-backpressure instead of re-entering the same queue. `P2028` also covers
-transactions that opened and later expired; the wrapper tracks callback entry
-and never replays a transaction that may have run. Failures that may have
-reached Postgres, such as closed connections, TLS faults, or an unreachable
-host, are reported and rethrown untouched.
+That module permits one jittered retry when replay cannot duplicate an effect.
+A `pool_checkout_timeout` means the statement never reached Postgres. A
+`connection_establishment_timeout` means the driver failed while opening the
+physical connection. A `transaction_start_timeout` is Prisma's `P2028` raised
+before it invokes the transaction callback. Closed connections, including pg's
+plain `Connection terminated unexpectedly` error, also permit one retry for
+standalone model reads or interactive transaction setup before callback entry.
+The model-read allowlist excludes raw SQL, which may have effects even through a
+query API. The existing public transaction wrapper carries an async scope so
+reads inside interactive or batch transactions do not independently retry a
+closed connection or escape their transaction's failure boundary. Batch
+transactions and potentially dispatched writes do not replay disconnects.
+
+When the local pool is already full or has waiters, failures return immediately
+as backpressure instead of re-entering the same queue. The wrapper tracks
+callback entry and never replays an interactive transaction that may have run,
+including a failure during commit. TLS faults, unreachable hosts, and unrelated
+errors remain terminal. Diagnostics use the existing bounded error traversal
+and fixed category labels without recording error messages or connection fields.
 
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full

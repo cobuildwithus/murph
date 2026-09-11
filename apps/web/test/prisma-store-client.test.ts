@@ -1208,6 +1208,171 @@ describe("prisma module", () => {
     }
   });
 
+  it.each(["findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany", "count", "aggregate", "groupBy"])(
+    "retries a disconnected standalone model %s once",
+    async (operation) => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      const { createPrismaClient } = await import("@/src/lib/prisma");
+      createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+      const extension = mocks.extensions[0]!;
+      const query = vi.fn()
+        .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+        .mockResolvedValueOnce("rows");
+
+      await expect(extension.query.$allOperations({
+        args: {}, model: "HostedWorkspace", operation, query,
+      })).resolves.toBe("rows");
+      expect(query).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany", "$queryRaw", "$executeRawUnsafe"])(
+    "classifies a plain disconnect without replaying %s",
+    async (operation) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const { createPrismaClient } = await import("@/src/lib/prisma");
+      createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+      const failure = new Error("Connection terminated unexpectedly");
+      const query = vi.fn().mockRejectedValue(failure);
+
+      await expect(mocks.extensions[0]!.query.$allOperations({
+        args: {}, model: operation.startsWith("$") ? undefined : "HostedWorkspace",
+        operation, query,
+      })).rejects.toBe(failure);
+      expect(query).toHaveBeenCalledOnce();
+      expect(failureCategories(warn)).toEqual(["connection_closed"]);
+      expect(failureDispositions(warn)).toEqual(["terminal"]);
+    },
+  );
+
+  it.each([
+    new Error("outer", { cause: new Error("Connection terminated unexpectedly") }),
+    Object.assign(new Error("closed"), { code: "P1017" }),
+    Object.assign(new Error("closed"), { code: "ECONNRESET" }),
+  ])("retries classified disconnect shapes for model reads", async (failure) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const query = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce("rows");
+    await expect(mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    })).resolves.toBe("rows");
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a disconnected read against a saturated pool", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db", poolMax: 1 });
+    mocks.poolInstances[0]!.totalCount = 1;
+    const failure = new Error("Connection terminated unexpectedly");
+    const query = vi.fn().mockRejectedValue(failure);
+    await expect(mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    })).rejects.toBe(failure);
+    expect(query).toHaveBeenCalledOnce();
+    expect(failureDispositions(warn)).toEqual(["terminal"]);
+  });
+
+  it("keeps transaction scope isolated from concurrent and subsequent standalone reads", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    let release!: () => void;
+    let markEntered!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+    mocks.transaction.mockImplementation(async (run: () => Promise<unknown>) => run());
+    const transaction = prisma.$transaction(async () => {
+      markEntered();
+      await held;
+    });
+    const read = async () => {
+      const query = vi.fn()
+        .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+        .mockResolvedValueOnce("rows");
+      await expect(mocks.extensions[0]!.query.$allOperations({
+        args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+      })).resolves.toBe("rows");
+      expect(query).toHaveBeenCalledTimes(2);
+    };
+    try {
+      await entered;
+      await read();
+    } finally {
+      release();
+      await transaction;
+    }
+    await read();
+  });
+
+  it("stops a disconnected read after its only retry", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const failure = new Error("Connection terminated unexpectedly");
+    const query = vi.fn().mockRejectedValue(failure);
+    await expect(mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    })).rejects.toBe(failure);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(failureDispositions(warn)).toEqual(["retrying", "terminal"]);
+  });
+
+  it("retries a disconnect before interactive callback entry only", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const callback = vi.fn().mockResolvedValue("committed");
+    mocks.transaction
+      .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+      .mockImplementationOnce(async (run: () => Promise<unknown>) => run());
+    await expect(prisma.$transaction(callback)).resolves.toBe("committed");
+    expect(callback).toHaveBeenCalledOnce();
+    expect(mocks.transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["callback", "commit"])("never replays a disconnect during %s", async (phase) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const failure = new Error("Connection terminated unexpectedly");
+    const effect = vi.fn();
+    mocks.transaction.mockImplementation(async (run: () => Promise<unknown>) => {
+      await run();
+      throw failure;
+    });
+    await expect(prisma.$transaction(async () => {
+      effect();
+      if (phase === "callback") throw failure;
+    })).rejects.toBe(failure);
+    expect(effect).toHaveBeenCalledOnce();
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+  });
+
+  it.each(["interactive", "batch"])("does not retry a disconnected read in %s transaction scope", async (kind) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+    const prisma = createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
+    const failure = new Error("Connection terminated unexpectedly");
+    const query = vi.fn().mockRejectedValue(failure);
+    const read = () => mocks.extensions[0]!.query.$allOperations({
+      args: {}, model: "HostedWorkspace", operation: "findUnique", query,
+    });
+    mocks.transaction.mockImplementation(async (run: unknown) => {
+      return typeof run === "function" ? run() : read();
+    });
+    await expect(kind === "interactive" ? prisma.$transaction(read) : prisma.$transaction([]))
+      .rejects.toBe(failure);
+    expect(query).toHaveBeenCalledOnce();
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+  });
+
   it("does not retry operation failures that may have reached Postgres", async () => {
     process.env = {
       ...process.env,

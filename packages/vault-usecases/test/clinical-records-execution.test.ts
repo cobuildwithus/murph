@@ -23,7 +23,7 @@ import {
   type ClinicalFhirSnapshotImportInput,
   writeClinicalFhirRetrievalCheckpoint,
 } from "@murphai/vault-usecases/clinical-records";
-import { rebuildQueryProjection, summarizeWearableBodyStateRuntime, summarizeWearableRecoveryRuntime } from "@murphai/query";
+import { listMetricPoints, rebuildQueryProjection, summarizeWearableBodyStateRuntime, summarizeWearableRecoveryRuntime } from "@murphai/query";
 import { afterEach, describe, expect, it } from "vitest";
 
 const FHIR_BASE_URL = "https://ehr.example.test/fhir";
@@ -90,7 +90,7 @@ describe("importClinicalFhirSnapshot", () => {
     expect((await importClinicalFhirSnapshot(input)).canonical.skippedExistingCount).toBe(1);
   });
 
-  it("preserves a DiagnosticReport study image unchanged while holding its unreadable body", async () => {
+  it("preserves a DiagnosticReport study image with a metadata-only source receipt", async () => {
     const original = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lZkAAAAASUVORK5CYII=", "base64");
     const sha256 = createHash("sha256").update(original).digest("hex");
     const resource = {
@@ -107,11 +107,18 @@ describe("importClinicalFhirSnapshot", () => {
       attachmentIndex: 0, status: "downloaded", relativePath: `attachments/${sha256}.bin`, sha256, byteLength: original.length, mediaType: "image/png" }];
     input.attachments = [{ relativePath: `attachments/${sha256}.bin`, contentBase64: original.toString("base64") }];
     const result = await importClinicalFhirSnapshot(input);
-    expect(result).toMatchObject({ incompleteRevisionCount: 1, rawFileCount: 3, canonical: { createdCount: 0, retractedCount: 0 } });
+    expect(result).toMatchObject({ incompleteRevisionCount: 0, labResultCount: 0, rawFileCount: 3, canonical: { createdCount: 1, retractedCount: 0 } });
     const snapshotRoot = path.join(input.vaultRoot, path.posix.dirname(result.manifestPath));
     expect(await readFile(path.join(snapshotRoot, `attachments/${sha256}.bin`))).toEqual(original);
     expect(await readFile(path.join(snapshotRoot, "diagnosticreport/whole/DiagnosticReport/page-0001.json"), "utf8")).toBe(content);
-    expect(await findEventByExternalRef({ vaultRoot: input.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "diagnostic-report", resourceId: resource.id })).toBeNull();
+    const receipt = await findEventByExternalRef({ vaultRoot: input.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "diagnostic-report", resourceId: resource.id });
+    expect(receipt).toMatchObject({
+      kind: "note", noteType: "clinical-document-receipt", title: "Cardiac study", occurredAt: resource.effectiveDateTime,
+      note: "FHIR DiagnosticReport source document.\nSource status: final.\nAttachment count: 1.",
+      externalRef: { version: resource.meta.lastUpdated },
+    });
+    expect(await listMetricPoints(input.vaultRoot, { limit: 10 })).toEqual([]);
+    expect((await importClinicalFhirSnapshot(input)).canonical).toMatchObject({ createdCount: 0, skippedExistingCount: 1 });
   });
 
   it("resumes from a validated immutable preceding page without claiming whole-family completion", async () => {
