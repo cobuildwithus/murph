@@ -4,6 +4,15 @@ Last verified: 2026-09-11
 
 ## Current Repo Checks
 
+A rejected live selector prints up to 20 exact matching names, an omitted count,
+and a read-only discovery command. Copy the rendered Vitest name, including
+parameterized values, into a sufficiently specific test pattern. Enumeration
+finishes before the runner checks login or starts a journey:
+
+```sh
+MURPH_RUN_REAL_CODEX_E2E=1 pnpm --dir packages/assistant-engine exec vitest list --config vitest.config.ts test/assistant-codex-real-e2e.test.ts --tagsFilter real-codex-live --json
+```
+
 The shared hosted-local Linq HTTP boundary requires its synthetic upstream bearer
 token and validates every supported message part. It preserves Linq's optional
 nested idempotency key: replay without one can duplicate acceptance, including
