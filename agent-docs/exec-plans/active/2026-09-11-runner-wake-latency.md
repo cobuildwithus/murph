@@ -72,8 +72,8 @@ Updated: 2026-09-11
   Cloudflare typecheck and the complexity guard pass with no hotspots above 20.
 - Private contract coverage accepts old/new capacities with enabled and retained
   profiles, while rejecting other capacities and resource changes. Full private
-  verification and required CI passed; final review passed at the original head.
-  The preliminary specialist review remains pending.
+  verification and required CI passed; final and preliminary specialist reviews
+  passed. The private compatibility change merged as PR #135.
 - Public final review round one identified invalid rollout-step arrays when a
   worker-only deployment retains the old smaller native capacity. The parent
   accepted the finding and the user resumed remediation. The existing retention
@@ -85,6 +85,24 @@ Updated: 2026-09-11
   Cloudflare typecheck and the complexity guard pass.
 - Required public CI exposed a fixed-date canary fixture aging past 24 hours.
   A focused run reproduced ten failures. The matching upstream fixture fix and
-  Frog entry already exist on main and will be incorporated by base reconciliation.
-- Public round two and final-head CI remain pending. Actual reply latency and
-  resource identity remain required protected-deployment evidence.
+  Frog entry already exist on main and were incorporated by base reconciliation.
+- Public round two passed with matching model evidence. All required final-head
+  CI passed, and public PR #3278 merged after the private compatibility change.
+- The protected deployment selected the exact merged public candidate. Its Node
+  shard failed three bundle fixtures because the private workflow did not build
+  runtime-state timing exports; public Host Support and release CI already do.
+  Private PR #136 adds that same prerequisite before each Node shard. The public
+  build plus all 17 bundle tests pass, along with private typecheck and 28 workflow
+  tests. Full private verification, exact-head CI, and both reviews passed; the
+  prerequisite fix merged. A fresh protected deployment is running with all
+  predeploy gates enabled.
+- Both protected attempts timed out in the synthetic image-reminder checkpoint-race
+  journey; every other gate passed in the second attempt. A local reproduction
+  read only the image tool result and proved that the default Starter seed lacks
+  the subscription required for image generation. The entitlement rejection is
+  correct; the positive image fixtures need an explicit paid seed. The scheduled
+  image reminder and generated-image delivery fixtures now use the existing seed's
+  paid plan and synthetic subscription fields. Focused replay is pending. No gate
+  is bypassed, and neither failed attempt changed production state.
+- Actual reply latency and resource identity remain required protected-deployment
+  evidence.
