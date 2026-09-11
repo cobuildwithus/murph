@@ -20,14 +20,18 @@ provider configuration and real-device qualification remain rollout gates.
 `apps/cloudflare/test/helpers/hosted-local-workspace-snapshot.test.ts` proves the
 shared hosted-local v2 snapshot seed with actual signed runtime-envelope
 verification, wrapped data keys, tar/zstd/AES-GCM construction, and the current
-encrypted restore owner. Only the Web envelope response and object-store HTTP
-transport are fixtures. It also proves local-only endpoint admission and no
-locator publication after upload failure. Run it through the Cloudflare Node
-Vitest config. The shared uploader completes the encrypted MinIO PUT and existing
+encrypted restore owner. Workspace provisioning, the Web envelope response and
+object-store HTTP transport are fixtures. It proves loopback and explicitly
+marked Docker bridge uploads through canonical R2 validation, rejection of
+unmarked/mismatched bridges and production settings, and no locator publication
+after upload failure. The Web endpoint remains loopback-only. Run it through the
+Cloudflare Node Vitest config. The shared uploader completes the encrypted MinIO PUT and existing
 Wrangler locator before each caller publishes its Web checkpoint. Foreground
 priority/checkpoint ordering and canonical-receipt, shutdown-checkpoint, and
 snapshot-publication recovery remain separate fullstack journey proof; unit
-roundtrip success does not replace those hosted gates.
+roundtrip success does not replace those hosted gates. Negative HTTP assertions
+use authenticated fetch directly because the shared harness request helper throws
+on non-success responses before returning them.
 
 Legacy phone-call deletion is covered by `hosted-ops-phone-call-deletion-route.test.ts`
 and `phone-calls-result-notification-store.test.ts`. With a dedicated loopback

@@ -63,7 +63,10 @@ afterEach(async () => {
 });
 
 describe("hosted-local v2 workspace snapshot fixture", () => {
-  it("verifies the runtime envelope, uploads real ciphertext, and restores canonical bytes", async () => {
+  it.each([
+    { endpoint: "http://127.0.0.1:9100", bridgeHost: undefined },
+    { endpoint: "http://172.17.0.1:9100", bridgeHost: "172.17.0.1" },
+  ])("verifies, uploads, and restores canonical bytes through $endpoint", async ({ endpoint, bridgeHost }) => {
     const fixture = await createFixture();
     const envelope = await createSignedRuntimeEnvelope();
     const calls: string[] = [];
@@ -101,6 +104,7 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
       }
       calls.push("upload");
       expect(outgoing.method).toBe("PUT");
+      expect(url.origin).toBe(endpoint);
       encryptedBytes = new Uint8Array(await outgoing.arrayBuffer());
       uploadedObjectKey = decodeURIComponent(url.pathname).replace(/^\/fixture-bucket\//u, "");
       const sha256 = createHash("sha256").update(encryptedBytes).digest("hex");
@@ -115,7 +119,14 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
 
     const ref = await uploadHostedLocalWorkspaceSnapshot({
       ...fixture,
-      harness: { request, workerRuntimeEnv: localEnvironment() },
+      harness: {
+        request,
+        workerRuntimeEnv: localEnvironment({
+          HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: endpoint,
+          HOSTED_R2_PRESIGN_ENDPOINT: endpoint,
+          MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: bridgeHost,
+        }),
+      },
       userId,
     });
     expect(calls).toEqual(["workspace", "crypto", "upload", "locator"]);
@@ -155,6 +166,17 @@ describe("hosted-local v2 workspace snapshot fixture", () => {
     { HOSTED_WEB_BASE_URL: "https://web.example.test" },
     { HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "0" },
     { HOSTED_CRYPTO_ENV: "production" },
+    { HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://172.17.0.1:9100" },
+    { HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "https://objects.example.test" },
+    {
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://172.17.0.1:9100",
+      MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: "172.17.0.2",
+    },
+    {
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://172.17.0.1:9100",
+      MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: "172.17.0.1",
+      HOSTED_CRYPTO_ENV: "production",
+    },
   ])("rejects non-local settings before reading keys or uploading", async (overrides) => {
     const fetchImpl = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchImpl);
