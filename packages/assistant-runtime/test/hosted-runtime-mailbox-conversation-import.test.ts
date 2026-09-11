@@ -1546,7 +1546,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
   });
 
-  test("adds runtime latency and pending-admission milestones to Linq trace callbacks", async () => {
+  test("records runtime latency on import without inferring typing", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");

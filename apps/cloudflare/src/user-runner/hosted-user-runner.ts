@@ -65,6 +65,8 @@ import {
 } from "../workspace-snapshot-store.ts";
 import {
   buildRunnerWriteFenceValidationRejectedDetails,
+  buildRuntimeProcessingSummaryEntry,
+  type RuntimeProcessingDiagnostics,
 } from "./diagnostics.js";
 import {
   createWorkspaceSnapshotSessionService,
@@ -342,16 +344,40 @@ export class HostedUserRunner {
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     // The route supplies its server-derived auth/request start so parsing and
     // Durable Object dispatch cannot grant this command a fresh budget.
-    const commandStartedAtEpochMs = input.commandStartedAtEpochMs ?? Date.now();
+    const enteredAtEpochMs = Date.now();
+    const commandStartedAtEpochMs = input.commandStartedAtEpochMs ?? enteredAtEpochMs;
+    const diagnostics: RuntimeProcessingDiagnostics = {
+      stage: "consent_queue",
+      details: {
+        commandStartedAtEpochMs,
+        userRunnerEnteredAtEpochMs: enteredAtEpochMs,
+      },
+    };
     const commandBudget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: input.commandTimeoutMs ?? null,
       startedAtMs: commandStartedAtEpochMs,
       webControlTimeoutMs: this.env.webControlTimeoutMs,
     });
+    diagnostics.details.runtimeProcessingDeadlineAtEpochMs = commandBudget.deadlineAtMs;
+    diagnostics.details.runtimeProcessingRequestedMode = input.processingMode ?? "default";
+    // Reuse only established numeric boundaries, not arbitrary orchestration
+    // JSON (which also contains request-specific context we do not need here).
+    for (const key of [
+      "temporalActivityStartedAtEpochMs", "temporalActivityRequestStartedAtEpochMs",
+      "runtimeControlAuthStartedAtEpochMs", "runtimeControlAuthFinishedAtEpochMs",
+      "cloudflareRouteReceivedAtEpochMs", "userRunnerRpcStartedAtEpochMs",
+      "userRunnerConstructorStartedAtEpochMs", "userRunnerConstructorFinishedAtEpochMs",
+    ] as const) {
+      const value = input.orchestration?.[key];
+      if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+        diagnostics.details[key] = value;
+      }
+    }
     let deadlineResponse: HostedRuntimeEnsureProcessingResponse | null = null;
     const readDeadlineResponse = (): HostedRuntimeEnsureProcessingResponse => {
       deadlineResponse ??= createRuntimeProcessingRetryLater({
         analytics: this.runtimeRetryAnalytics,
+        diagnostics,
         orchestrationAttemptId: input.orchestrationAttemptId,
         reason: "command_budget_exhausted",
         userId: input.userId,
@@ -372,17 +398,33 @@ export class HostedUserRunner {
         return readDeadlineResponse();
       }
       clearTimeout(queueTimeout);
+      diagnostics.details.runtimeConsentLockAcquiredAtEpochMs = Date.now();
       return await this.runtimeProcessing.ensureForUser({
         ...withRuntimeOrchestration(input, {
           runtimeConsentLockAcquiredAtEpochMs: Date.now(),
         }),
         commandStartedAtEpochMs,
-      });
+      }, diagnostics);
     });
+    let result: HostedRuntimeEnsureProcessingResponse | undefined;
     try {
-      return await Promise.race([lockedEnsure, deadline]);
+      result = await Promise.race([lockedEnsure, deadline]);
+      return result;
     } finally {
       clearTimeout(queueTimeout);
+      // Snapshot before scheduling: a timed-out RPC or queued lock callback may
+      // finish later. Telemetry must not extend admission or change the result.
+      const entry = buildRuntimeProcessingSummaryEntry(diagnostics, result, enteredAtEpochMs);
+      const telemetry = Promise.resolve().then(() =>
+        this.runtimeInvocation.recordRuntimeProcessingSummary({
+          entry, orchestrationAttemptId: input.orchestrationAttemptId, userId: input.userId,
+        }),
+      ).catch(() => undefined);
+      try {
+        this.state.waitUntil(telemetry);
+      } catch {
+        // The promise already owns rejection handling even if scheduling fails.
+      }
     }
   }
 

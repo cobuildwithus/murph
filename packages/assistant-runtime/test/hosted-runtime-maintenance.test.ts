@@ -3145,8 +3145,12 @@ describe("runHostedDeviceSyncPass", () => {
       listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
-    mocks.pruneWearableDenseRawTimeseries.mockImplementationOnce(async () => {
+    mocks.pruneWearableDenseRawTimeseries.mockImplementationOnce(async (input: {
+      shouldYield?: () => boolean;
+    }) => {
+      assert.equal(input.shouldYield?.(), false);
       shouldYieldNow = true;
+      assert.equal(input.shouldYield?.(), true);
       return {
         bytesAfter: 1_000,
         bytesBefore: 10_000,

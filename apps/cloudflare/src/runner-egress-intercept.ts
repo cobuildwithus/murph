@@ -114,8 +114,11 @@ import {
   type HostedCodexNativeMemoryKind,
 } from "./runner-egress-codex-memory.ts";
 import {
-  relayHostedCodexMemoryWebSocketUpgrade,
-} from "./runner-egress-codex-memory-websocket.ts";
+  relayHostedOpenAiResponsesWebSocketUpgrade,
+  type HostedCodexMemoryWebSocketCompletion,
+  type HostedOpenAiWebSocketFailurePhase,
+} from "./runner-egress-openai-responses-websocket.ts";
+import { readHostedOpenAiImageRequest } from "./runner-egress-openai-image-request.ts";
 import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
   HOSTED_ELEVENLABS_MAX_BODY_BYTES,
@@ -129,6 +132,7 @@ import {
   parseHostedXaiRequestBody,
   readHostedXaiResponseMetadata,
 } from "./runner-egress-xai.ts";
+import { fetchHostedWebControlPlaneJson } from "./runtime-platform/web-control-transport.ts";
 import {
   DEFAULT_GEMINI_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
@@ -1445,6 +1449,58 @@ function reportOpenAiAuthorizationFailureSafely(input: {
   }
 }
 
+async function readHostedOpenAiRequestBody(input: {
+  nativeMemory: boolean;
+  pathnameSuffix: string;
+  request: Request;
+}): Promise<Response | {
+  boundedBody: ArrayBuffer | undefined;
+  imageGenerationRequested: boolean;
+  memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null;
+}> {
+  let boundedBody: ArrayBuffer | undefined;
+  let imageGenerationRequested = false;
+  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
+  if (
+    input.request.method === "POST"
+    && input.pathnameSuffix === "/v1/responses"
+  ) {
+    const body = await readBoundedRequestBody(
+      input.request,
+      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+    );
+    if (body === null) {
+      return new Response("Payload Too Large", { status: 413 });
+    }
+    const imageRequest = readHostedOpenAiImageRequest(body);
+    if (imageRequest === "invalid") {
+      return new Response("Invalid Responses request.", { status: 400 });
+    }
+    imageGenerationRequested = imageRequest === "image";
+    if (input.nativeMemory) {
+      memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
+      if (!memoryRequestMetadata) {
+        return new Response("Invalid Codex memory request.", { status: 400 });
+      }
+    }
+    boundedBody = body;
+  } else if (
+    input.request.method === "POST"
+    && input.pathnameSuffix === "/v1/images/edits"
+  ) {
+    const body = await readBoundedRequestBody(
+      input.request,
+      HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES,
+    );
+    if (body === null) {
+      return new Response("Payload Too Large", { status: 413 });
+    }
+    boundedBody = body;
+  }
+
+  return { boundedBody, imageGenerationRequested, memoryRequestMetadata };
+}
+
 async function maybeHandleOpenAiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1495,37 +1551,17 @@ async function maybeHandleOpenAiRequest(input: {
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", "Bearer " + token);
-  let boundedBody: ArrayBuffer | undefined;
-  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
-  if (
-    nativeMemoryKind
-    && input.request.method === "POST"
-    && pathnameSuffix === "/v1/responses"
-  ) {
-    const body = await readBoundedRequestBody(
-      input.request,
-      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-    );
-    if (body === null) {
-      return new Response("Payload Too Large", { status: 413 });
-    }
-    memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
-    if (!memoryRequestMetadata) {
-      return new Response("Invalid Codex memory request.", { status: 400 });
-    }
-    boundedBody = body;
-  } else if (
-    input.request.method === "POST"
-    && pathnameSuffix === "/v1/images/edits"
-  ) {
-    const body = await readBoundedRequestBody(
-      input.request,
-      HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES,
-    );
-    if (body === null) {
-      return new Response("Payload Too Large", { status: 413 });
-    }
-    boundedBody = body;
+  const bodyRead = await readHostedOpenAiRequestBody({
+    nativeMemory: nativeMemoryKind !== null,
+    pathnameSuffix,
+    request: input.request,
+  });
+  if (bodyRead instanceof Response) return bodyRead;
+  const { boundedBody, imageGenerationRequested, memoryRequestMetadata } = bodyRead;
+
+  if (imageGenerationRequested || pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits") {
+    const denied = await checkHostedImageGenerationAccess({ authorization, env: input.env });
+    if (denied) return denied;
   }
 
   const upstreamRequest = await createHostedRunnerUpstreamRequest(
@@ -1578,11 +1614,22 @@ async function maybeHandleOpenAiRequest(input: {
   }
 
   if (
-    nativeMemoryKind
-    && input.request.method === "GET"
+    input.request.method === "GET"
     && pathnameSuffix === "/v1/responses"
   ) {
-    return relayHostedCodexMemoryWebSocketUpgrade({
+    return relayHostedOpenAiResponsesWebSocketUpgrade({
+      authorizeClientFrame: async (data) => {
+        const imageRequest = readHostedOpenAiImageRequest(data);
+        if (imageRequest === "invalid") {
+          return Response.json({ error: {
+            code: "MURPH_RESPONSES_REQUEST_INVALID",
+            message: "Invalid Responses request.",
+          } }, { status: 400 });
+        }
+        return imageRequest === "image"
+          ? await checkHostedImageGenerationAccess({ authorization, env: input.env })
+          : null;
+      },
       ...(typeof input.ctx?.waitUntil === "function"
         ? {
             defer: (promise) => {
@@ -1590,25 +1637,29 @@ async function maybeHandleOpenAiRequest(input: {
             },
           }
         : {}),
-      persistUsage: async (completion) => {
-        await recordHostedCodexMemoryUsage({
-          apiKeyEnv: "OPENAI_API_KEY",
-          authorization,
-          baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
-          env: input.env,
-          providerName: "hosted-openai",
-          providerRequestOutcome: completion.providerRequestOutcome,
-          requestMetadata: completion.requestMetadata,
-          usage: completion.usage,
-        });
-      },
-      reportFailure: ({ phase }) => {
-        reportHostedCodexMemoryUsageFailure({
-          memoryKind: nativeMemoryKind,
-          providerName: "hosted-openai",
-          reason: "websocket_" + phase,
-        });
-      },
+      ...(nativeMemoryKind
+        ? {
+            persistUsage: async (completion: HostedCodexMemoryWebSocketCompletion) => {
+              await recordHostedCodexMemoryUsage({
+                apiKeyEnv: "OPENAI_API_KEY",
+                authorization,
+                baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
+                env: input.env,
+                providerName: "hosted-openai",
+                providerRequestOutcome: completion.providerRequestOutcome,
+                requestMetadata: completion.requestMetadata,
+                usage: completion.usage,
+              });
+            },
+            reportFailure: ({ phase }: { phase: HostedOpenAiWebSocketFailurePhase }) => {
+              reportHostedCodexMemoryUsageFailure({
+                memoryKind: nativeMemoryKind,
+                providerName: "hosted-openai",
+                reason: "websocket_" + phase,
+              });
+            },
+          }
+        : {}),
       upstreamResponse: response,
     });
   }
@@ -4487,4 +4538,43 @@ async function authorizeNativeHostedProviderCredential(input: {
     request: input.request,
     userId: readHostedRunnerBoundUserId(input.request),
   });
+}
+
+async function checkHostedImageGenerationAccess(input: {
+  authorization: HostedProviderEgressAuthorization;
+  env: RunnerOutboundEnvironmentSource;
+}): Promise<Response | null> {
+  try {
+    const fence = requireHostedDirectUsageWriteFence(input.authorization);
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const result = await fetchHostedWebControlPlaneJson({
+      body: {},
+      boundUserId: fence.userId,
+      description: "Hosted image generation access",
+      fetchImpl: fetch,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.imageGenerationAccess,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+    if (result && typeof result === "object" && "allowed" in result && "reason" in result) {
+      if (result.allowed === true && result.reason === "allowed") return null;
+      if (result.allowed === false && result.reason === "subscription_required") {
+        return Response.json({ error: {
+          code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED",
+          message: "Image generation requires a subscription. Start Pulse or, if eligible, Group at https://www.withmurph.ai/settings#subscription, then ask for the image again.",
+        } }, { status: 403 });
+      }
+    }
+  } catch {
+    // An unavailable or old Web deployment cannot grant paid image access.
+  }
+  return Response.json({ error: {
+    code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
+    message: "Image generation access could not be confirmed. Try again later.",
+  } }, { status: 503 });
 }

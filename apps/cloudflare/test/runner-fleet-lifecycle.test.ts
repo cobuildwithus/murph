@@ -574,7 +574,10 @@ function allocationHarness(options: {
       return controller["resolveFreshRunnerContainer"]({
         commandBudget: { deadlineAtMs: Date.now() + timeoutMs },
         initialRecord: await store.readState(),
-        input: { orchestrationAttemptId: "background", userId: MEMBER, ...input },
+        input: {
+          orchestrationAttemptId: "background", userId: MEMBER, ...input,
+          diagnostics: { stage: "fresh_start", details: {} },
+        },
         timings: { runnerTargetReconcileElapsedMs: 0, standbyClaimElapsedMs: 0, runnerTargetBindElapsedMs: 0 },
       });
     },

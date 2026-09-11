@@ -8,18 +8,18 @@ import {
   type HostedCodexMemoryRequestMetadata,
 } from "./runner-egress-codex-memory.ts";
 
-export type HostedCodexMemoryWebSocketMessage = ArrayBuffer | string;
+export type HostedOpenAiWebSocketMessage = ArrayBuffer | string;
 
-export interface HostedCodexMemorySocketPort {
+export interface HostedOpenAiSocketPort {
   accept(): void;
   close(code?: number, reason?: string): void;
   onClose(listener: (event: { code: number; reason: string }) => void): void;
   onError(listener: () => void): void;
-  onMessage(listener: (data: HostedCodexMemoryWebSocketMessage) => void): void;
-  send(data: HostedCodexMemoryWebSocketMessage): void;
+  onMessage(listener: (data: HostedOpenAiWebSocketMessage) => void): void;
+  send(data: HostedOpenAiWebSocketMessage): void;
 }
 
-export interface HostedCodexMemoryWebSocketRelayController {
+export interface HostedOpenAiWebSocketRelayController {
   drain(): Promise<void>;
 }
 
@@ -29,37 +29,41 @@ export interface HostedCodexMemoryWebSocketCompletion {
   usage: HostedCodexMemoryUsage;
 }
 
-type HostedCodexMemoryWebSocketFailurePhase =
+export type HostedOpenAiWebSocketFailurePhase =
   | "persistence"
   | "protocol"
   | "transport";
 
-const CODEX_MEMORY_PROTOCOL_CLOSE_CODE = 1002;
-const CODEX_MEMORY_INTERNAL_CLOSE_CODE = 1011;
-const CODEX_MEMORY_TOO_LARGE_CLOSE_CODE = 1009;
-const CODEX_MEMORY_PROTOCOL_CLOSE_REASON = "Memory WebSocket protocol error";
-const CODEX_MEMORY_RELAY_CLOSE_REASON = "Memory WebSocket relay failed";
-const CODEX_MEMORY_TOO_LARGE_CLOSE_REASON = "Memory WebSocket frame too large";
+const RESPONSES_PROTOCOL_CLOSE_CODE = 1002;
+const RESPONSES_INTERNAL_CLOSE_CODE = 1011;
+const RESPONSES_TOO_LARGE_CLOSE_CODE = 1009;
+const RESPONSES_PROTOCOL_CLOSE_REASON = "Responses WebSocket protocol error";
+const RESPONSES_RELAY_CLOSE_REASON = "Responses WebSocket relay failed";
+const RESPONSES_TOO_LARGE_CLOSE_REASON = "Responses WebSocket frame too large";
 
-export function startHostedCodexMemoryWebSocketRelay(input: {
+export function startHostedOpenAiResponsesWebSocketRelay(input: {
+  authorizeClientFrame?: (
+    data: HostedOpenAiWebSocketMessage,
+  ) => Promise<Response | null>;
   defer?: (promise: Promise<void>) => void;
-  downstream: HostedCodexMemorySocketPort;
-  persistUsage(
+  downstream: HostedOpenAiSocketPort;
+  persistUsage?(
     completion: HostedCodexMemoryWebSocketCompletion,
   ): Promise<void>;
   reportFailure?: (failure: {
-    phase: HostedCodexMemoryWebSocketFailurePhase;
+    phase: HostedOpenAiWebSocketFailurePhase;
   }) => void;
-  upstream: HostedCodexMemorySocketPort;
-}): HostedCodexMemoryWebSocketRelayController {
+  upstream: HostedOpenAiSocketPort;
+}): HostedOpenAiWebSocketRelayController {
   let activeRequest: HostedCodexMemoryRequestMetadata | null = null;
   let downstreamClosed = false;
   let upstreamClosed = false;
   let stopped = false;
   let queue = Promise.resolve();
+  let pendingClientBytes = 0;
 
   const reportFailure = (
-    phase: HostedCodexMemoryWebSocketFailurePhase,
+    phase: HostedOpenAiWebSocketFailurePhase,
   ): void => {
     try {
       input.reportFailure?.({ phase });
@@ -79,7 +83,7 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
     safeClose(input.upstream, code, reason);
   };
   const fail = (
-    phase: HostedCodexMemoryWebSocketFailurePhase,
+    phase: HostedOpenAiWebSocketFailurePhase,
     code: number,
     reason: string,
   ): void => {
@@ -92,7 +96,7 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
   const enqueue = (
     work: () => Promise<void> | void,
     runAfterStop = false,
-  ): void => {
+  ): Promise<void> => {
     const next = queue.then(async () => {
       if (runAfterStop || !stopped) {
         await work();
@@ -101,18 +105,19 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
     queue = next.catch(() => {
       fail(
         "transport",
-        CODEX_MEMORY_INTERNAL_CLOSE_CODE,
-        CODEX_MEMORY_RELAY_CLOSE_REASON,
+        RESPONSES_INTERNAL_CLOSE_CODE,
+        RESPONSES_RELAY_CLOSE_REASON,
       );
     });
+    return queue;
   };
   const forwardToUpstream = (
-    data: HostedCodexMemoryWebSocketMessage,
+    data: HostedOpenAiWebSocketMessage,
   ): void => {
     if (!upstreamClosed) input.upstream.send(data);
   };
   const forwardToDownstream = (
-    data: HostedCodexMemoryWebSocketMessage,
+    data: HostedOpenAiWebSocketMessage,
   ): void => {
     if (!downstreamClosed) input.downstream.send(data);
   };
@@ -123,31 +128,44 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
   } catch {
     fail(
       "transport",
-      CODEX_MEMORY_INTERNAL_CLOSE_CODE,
-      CODEX_MEMORY_RELAY_CLOSE_REASON,
+      RESPONSES_INTERNAL_CLOSE_CODE,
+      RESPONSES_RELAY_CLOSE_REASON,
     );
   }
 
   input.downstream.onMessage((data) => {
-    enqueue(() => {
-      if (!hasAllowedFrameSize(data)) {
-        fail(
-          "protocol",
-          CODEX_MEMORY_TOO_LARGE_CLOSE_CODE,
-          CODEX_MEMORY_TOO_LARGE_CLOSE_REASON,
-        );
-        return;
+    if (stopped) return;
+    const bytes = frameByteLength(data);
+    if (bytes + pendingClientBytes > HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES) {
+      fail(
+        "protocol",
+        RESPONSES_TOO_LARGE_CLOSE_CODE,
+        RESPONSES_TOO_LARGE_CLOSE_REASON,
+      );
+      return;
+    }
+    pendingClientBytes += bytes;
+    void enqueue(async () => {
+      if (input.authorizeClientFrame) {
+        const denied = await input.authorizeClientFrame(data);
+        if (stopped) return;
+        if (denied) {
+          forwardToDownstream(await readDeniedClientFrame(denied));
+          fail("protocol", 1008, "Response request denied");
+          return;
+        }
       }
-      if (typeof data === "string") {
-        const frame = parseHostedCodexMemoryClientFrame(data);
+      if (input.persistUsage) {
+        const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+        const frame = parseHostedCodexMemoryClientFrame(text);
         if (
           frame.kind === "invalid-response-create"
           || (frame.kind === "response-create" && activeRequest !== null)
         ) {
           fail(
             "protocol",
-            CODEX_MEMORY_PROTOCOL_CLOSE_CODE,
-            CODEX_MEMORY_PROTOCOL_CLOSE_REASON,
+            RESPONSES_PROTOCOL_CLOSE_CODE,
+            RESPONSES_PROTOCOL_CLOSE_REASON,
           );
           return;
         }
@@ -156,6 +174,8 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
         }
       }
       forwardToUpstream(data);
+    }).then(() => {
+      pendingClientBytes -= bytes;
     });
   });
 
@@ -165,12 +185,12 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
       if (!hasAllowedFrameSize(data)) {
         fail(
           "protocol",
-          CODEX_MEMORY_TOO_LARGE_CLOSE_CODE,
-          CODEX_MEMORY_TOO_LARGE_CLOSE_REASON,
+          RESPONSES_TOO_LARGE_CLOSE_CODE,
+          RESPONSES_TOO_LARGE_CLOSE_REASON,
         );
         return;
       }
-      if (typeof data !== "string") {
+      if (!input.persistUsage || typeof data !== "string") {
         forwardToDownstream(data);
         return;
       }
@@ -179,8 +199,8 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
       if (frame.kind === "invalid-response-terminal") {
         fail(
           "protocol",
-          CODEX_MEMORY_PROTOCOL_CLOSE_CODE,
-          CODEX_MEMORY_PROTOCOL_CLOSE_REASON,
+          RESPONSES_PROTOCOL_CLOSE_CODE,
+          RESPONSES_PROTOCOL_CLOSE_REASON,
         );
         return;
       }
@@ -196,8 +216,8 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
       if (activeRequest === null) {
         fail(
           "protocol",
-          CODEX_MEMORY_PROTOCOL_CLOSE_CODE,
-          CODEX_MEMORY_PROTOCOL_CLOSE_REASON,
+          RESPONSES_PROTOCOL_CLOSE_CODE,
+          RESPONSES_PROTOCOL_CLOSE_REASON,
         );
         return;
       }
@@ -212,8 +232,8 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
         ) {
           fail(
             "protocol",
-            CODEX_MEMORY_PROTOCOL_CLOSE_CODE,
-            CODEX_MEMORY_PROTOCOL_CLOSE_REASON,
+            RESPONSES_PROTOCOL_CLOSE_CODE,
+            RESPONSES_PROTOCOL_CLOSE_REASON,
           );
           return;
         }
@@ -270,16 +290,16 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
   input.downstream.onError(() => {
     fail(
       "transport",
-      CODEX_MEMORY_INTERNAL_CLOSE_CODE,
-      CODEX_MEMORY_RELAY_CLOSE_REASON,
+      RESPONSES_INTERNAL_CLOSE_CODE,
+      RESPONSES_RELAY_CLOSE_REASON,
     );
   });
   input.upstream.onError(() => {
     enqueue(() => {
       fail(
         "transport",
-        CODEX_MEMORY_INTERNAL_CLOSE_CODE,
-        CODEX_MEMORY_RELAY_CLOSE_REASON,
+        RESPONSES_INTERNAL_CLOSE_CODE,
+        RESPONSES_RELAY_CLOSE_REASON,
       );
     });
   });
@@ -291,13 +311,16 @@ export function startHostedCodexMemoryWebSocketRelay(input: {
   };
 }
 
-export function relayHostedCodexMemoryWebSocketUpgrade(input: {
+export function relayHostedOpenAiResponsesWebSocketUpgrade(input: {
+  authorizeClientFrame?: (
+    data: HostedOpenAiWebSocketMessage,
+  ) => Promise<Response | null>;
   defer?: (promise: Promise<void>) => void;
-  persistUsage(
+  persistUsage?(
     completion: HostedCodexMemoryWebSocketCompletion,
   ): Promise<void>;
   reportFailure?: (failure: {
-    phase: HostedCodexMemoryWebSocketFailurePhase;
+    phase: HostedOpenAiWebSocketFailurePhase;
   }) => void;
   upstreamResponse: Response;
 }): Response {
@@ -309,10 +332,13 @@ export function relayHostedCodexMemoryWebSocketUpgrade(input: {
   const pair = new WebSocketPair();
   const downstreamClient = pair[0];
   const downstreamServer = pair[1];
-  startHostedCodexMemoryWebSocketRelay({
+  startHostedOpenAiResponsesWebSocketRelay({
+    ...(input.authorizeClientFrame
+      ? { authorizeClientFrame: input.authorizeClientFrame }
+      : {}),
     ...(input.defer ? { defer: input.defer } : {}),
     downstream: adaptCloudflareWebSocket(downstreamServer),
-    persistUsage: input.persistUsage,
+    ...(input.persistUsage ? { persistUsage: input.persistUsage } : {}),
     ...(input.reportFailure ? { reportFailure: input.reportFailure } : {}),
     upstream: adaptCloudflareWebSocket(upstreamSocket),
   });
@@ -326,7 +352,7 @@ export function relayHostedCodexMemoryWebSocketUpgrade(input: {
 
 function adaptCloudflareWebSocket(
   socket: WebSocket,
-): HostedCodexMemorySocketPort {
+): HostedOpenAiSocketPort {
   socket.binaryType = "arraybuffer";
   return {
     accept: () => {
@@ -345,7 +371,7 @@ function adaptCloudflareWebSocket(
     },
     onMessage: (listener) => {
       socket.addEventListener("message", (event) => {
-        listener(event.data as HostedCodexMemoryWebSocketMessage);
+        listener(event.data as HostedOpenAiWebSocketMessage);
       });
     },
     send: (data) => {
@@ -370,16 +396,27 @@ function copyWebSocketApplicationHeaders(headers: Headers): Headers {
 }
 
 function hasAllowedFrameSize(
-  data: HostedCodexMemoryWebSocketMessage,
+  data: HostedOpenAiWebSocketMessage,
 ): boolean {
+  return frameByteLength(data) <= HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES;
+}
+
+async function readDeniedClientFrame(response: Response): Promise<string> {
+  const body: unknown = await response.json();
+  if (body === null || typeof body !== "object" || !("error" in body)) {
+    throw new TypeError("Invalid Responses denial.");
+  }
+  return JSON.stringify({ type: "error", error: body.error });
+}
+
+function frameByteLength(data: HostedOpenAiWebSocketMessage): number {
   if (typeof data !== "string") {
-    return data.byteLength <= HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES;
+    return data.byteLength;
   }
   if (data.length > HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES) {
-    return false;
+    return data.length;
   }
-  return new TextEncoder().encode(data).byteLength
-    <= HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES;
+  return new TextEncoder().encode(data).byteLength;
 }
 
 function sanitizePeerClose(
@@ -388,7 +425,7 @@ function sanitizePeerClose(
 ): { code: number; reason: string } {
   const safeCode = isForwardableCloseCode(code)
     ? code
-    : CODEX_MEMORY_INTERNAL_CLOSE_CODE;
+    : RESPONSES_INTERNAL_CLOSE_CODE;
   const safeReason = truncateUtf8(reason, 123);
   return { code: safeCode, reason: safeReason };
 }
@@ -421,7 +458,7 @@ function truncateUtf8(value: string, maxBytes: number): string {
 }
 
 function safeClose(
-  socket: HostedCodexMemorySocketPort,
+  socket: HostedOpenAiSocketPort,
   code: number,
   reason: string,
 ): void {

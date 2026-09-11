@@ -7429,6 +7429,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ),
       ...requireOptionalNonNegativeInteger(
         assistant,
+        "telegramTypingAcceptedAtEpochMs",
+        assistantLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        assistant,
         "firstCodexOutputObservedAtEpochMs",
         assistantLabel,
       ),
