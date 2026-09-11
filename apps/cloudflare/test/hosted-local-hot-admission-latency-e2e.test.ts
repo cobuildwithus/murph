@@ -208,6 +208,7 @@ async function seedVault(active: HostedLocalFullStackScenario, userId: string): 
     await createIntegratedVaultServices().core.init({ requestId: "seed-hot-admission", timezone: "UTC", vault: vaultRoot });
   }
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: active.runtimeEnv,
     harness: active.harness,
     operatorHomeRoot,
     userId,

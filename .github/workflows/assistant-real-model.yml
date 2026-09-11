@@ -1,0 +1,114 @@
+name: Assistant Real Model
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assistant-real-model-sandbox
+  cancel-in-progress: false
+
+jobs:
+  admission:
+    name: Admit protected main candidate
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Reject ineligible events and refs without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *) echo "Real-model acceptance requires a main push or manual main run." >&2; exit 1 ;;
+          esac
+          if [[ "$GITHUB_REF" != refs/heads/main || "$GITHUB_REF_PROTECTED" != true ]]; then
+            echo "Real-model acceptance requires protected main." >&2
+            exit 1
+          fi
+
+  real-model:
+    name: Protected real-model assistant journeys
+    needs: admission
+    if: >-
+      github.ref == 'refs/heads/main' && github.ref_protected &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    environment: assistant-real-model-sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact protected candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          command -v timeout > /dev/null
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare canonical CLI runtime and generated catalogs
+        run: |
+          pnpm exercise-library:generate
+          pnpm health-commons:generate
+          pnpm build:test-runtime
+
+      # This Environment must allow only main and hold a dedicated, budgeted
+      # OpenAI test-project key. Never configure a production provider key here.
+      # Secrets enter only this step, after dependency installation and builds.
+      - name: Run three real-model journeys once
+        timeout-minutes: 38
+        env:
+          MURPH_ASSISTANT_REAL_MODEL_SANDBOX: "1"
+          OPENAI_API_KEY: ${{ secrets.ASSISTANT_REAL_MODEL_SANDBOX_OPENAI_API_KEY }}
+        run: pnpm exec tsx scripts/run-assistant-real-model-gate.ts
+
+      - name: Upload metadata without transcripts or raw reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: assistant-real-model-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tmp/assistant-real-model/metadata.json
+          if-no-files-found: error
+          retention-days: 7
+
+  required:
+    name: Required real-model assistant acceptance
+    needs: [admission, real-model]
+    if: ${{ always() }}
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require admission and executed live proof
+        env:
+          ADMISSION_RESULT: ${{ needs.admission.result }}
+          LIVE_RESULT: ${{ needs.real-model.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$ADMISSION_RESULT" != success || "$LIVE_RESULT" != success ]]; then
+            echo "Real-model acceptance requires successful admission and executed live journeys; skipped proof does not pass." >&2
+            exit 1
+          fi

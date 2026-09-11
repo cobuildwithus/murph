@@ -7141,7 +7141,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
-  it("write-fences exact external thread route authority through direct web-control", async () => {
+  it.each([undefined, true, false, "invalid", null])("write-fences external route authority and validates audience %s", async (threadIsDirect) => {
     const authority = {
       channel: "telegram" as const,
       containerMemberId: "member_123",
@@ -7153,7 +7153,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
       );
       await expect(request.json()).resolves.toEqual(authority);
-      return new Response(JSON.stringify({ authorized: true }), {
+      return new Response(JSON.stringify({ authorized: true, threadIsDirect }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
       });
@@ -7173,9 +7173,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     if (!assertExternalThreadRouteAuthority) {
       throw new Error("Expected external thread route authority effect.");
     }
-    await expect(
-      assertExternalThreadRouteAuthority(authority),
-    ).resolves.toBeUndefined();
+    if (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean") {
+      await expect(assertExternalThreadRouteAuthority(authority)).rejects.toThrow(
+        "Hosted external thread route authority response is invalid.",
+      );
+    } else {
+      await expect(assertExternalThreadRouteAuthority(authority)).resolves.toEqual(
+        threadIsDirect === undefined ? undefined : { threadIsDirect },
+      );
+    }
 
     const request = requireFetchRequest(
       fetchMock.mock.calls[0],

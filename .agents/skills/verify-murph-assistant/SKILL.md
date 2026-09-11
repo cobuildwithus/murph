@@ -71,6 +71,10 @@ the acceptance result.
 
 - Keep live journeys opt-in. Routine CI compiles them but must not call a paid
   provider or depend on a developer's subscription.
+- The separate `Assistant Real Model` protected-main workflow runs exactly three
+  canonical journeys with a dedicated budgeted sandbox provider credential. It
+  never runs untrusted PR code with secrets, and missing credentials or skipped
+  journeys fail the gate. See the verification owner for its scope and setup.
 - The local subscription mode uses the normal local Codex home by default and
   may try each available authenticated local home once under the owning retry
   contract, but it never copies auth into a temporary home. It is
