@@ -77,6 +77,12 @@ import type {
 } from "../src/hosted-local-test/foreground-priority-ordering.ts";
 import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
+  hasImportedHostedSystemWakeStorm,
+  hasSuccessfulHostedSystemContinuation,
+  type HostedSystemContinuationLog,
+  hostedOrderingSeqAtLeast,
+} from "./helpers/hosted-local-mailbox-progress.ts";
+import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -214,7 +220,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("continues the authorized system owner for a signed foreground reply after checkpoint acknowledgement", async () => {
+  it("retains the authorized foreground owner and preserves durable system continuation", async () => {
     // Production maintains the memberless standby before member traffic arrives.
     // Establish that real precondition before starting the deliberately heavy
     // system-mailbox runtime so the local machine does not provision both
@@ -2285,20 +2291,6 @@ async function waitForAcceptedReplyInScenario(input: {
   ]));
 }
 
-function hostedOrderingSeqAtLeast(
-  value: string | null | undefined,
-  floor: string,
-): boolean {
-  if (
-    typeof value !== "string"
-    || !/^(?:0|[1-9][0-9]*)$/u.test(value)
-    || !/^(?:0|[1-9][0-9]*)$/u.test(floor)
-  ) {
-    return false;
-  }
-  return BigInt(value) >= BigInt(floor);
-}
-
 async function sendInboundAndRequirePromptReply(input: {
   identity: ProbeIdentity;
   inboundText: string;
@@ -2832,22 +2824,18 @@ async function requireSystemWakeStormPreserved(
 ): Promise<void> {
   const deadlineAt = Date.now() + 60_000;
   let lastStatus = await requireScenario().harness.readUserStatus(userId);
-  let lastRecoveryLogs: Array<{
-    attemptId: string | null;
-    redactedJson: Record<string, unknown> | null;
-  }> = [];
+  let lastRecoveryLogs: HostedSystemContinuationLog[] = [];
 
   while (Date.now() < deadlineAt) {
     lastStatus = await requireScenario().harness.readUserStatus(userId);
     const systemLane = lastStatus.mailboxLag.find((lane) => lane.lane === "system");
     const redactedStatus = lastStatus.workspace?.redactedStatus;
     if (
-      systemLane !== undefined
-      && BigInt(systemLane.importedSeq) >= BigInt(expectedImportedSeq)
-      && systemLane.lag === "0"
-      && typeof redactedStatus?.hostedMailboxSystemImportedSeq === "string"
-      && BigInt(redactedStatus.hostedMailboxSystemImportedSeq) >= BigInt(expectedImportedSeq)
-      && redactedStatus.hostedMailboxRetryableBlockedCount === 0
+      hasImportedHostedSystemWakeStorm({
+        expectedImportedSeq,
+        redactedStatus,
+        systemLane,
+      })
     ) {
       lastRecoveryLogs = (await listHostedRuntimeLogsForTest({
         environment: requireScenario().runtimeEnv,
@@ -2857,20 +2845,15 @@ async function requireSystemWakeStormPreserved(
       }))
         .filter((entry) => entry.eventCode === "mailbox.system_processed")
         .map((entry) => ({
+          at: entry.at,
           attemptId: entry.attemptId,
+          eventCode: entry.eventCode,
           redactedJson: entry.redactedJson,
         }));
-      const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
-        const wakeKind = entry.redactedJson?.wakeKind;
-        return typeof entry.attemptId === "string"
-          && entry.attemptId.length > 0
-          && typeof wakeKind === "string"
-          && input.expectedWakeKinds.includes(wakeKind)
-          && (
-            entry.redactedJson?.status === "processed"
-            || entry.redactedJson?.status === "recorded"
-          )
-          && (entry.redactedJson?.recordFailed ?? 0) === 0;
+      const recoveredSystemContinuation = hasSuccessfulHostedSystemContinuation({
+        expectedWakeKinds: input.expectedWakeKinds,
+        logs: lastRecoveryLogs,
+        providerStartedAt: input.recoveryEvidenceStartedAt,
       });
       if (recoveredSystemContinuation) {
         return;
