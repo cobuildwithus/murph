@@ -59,6 +59,9 @@ const scheduledReminderLeadMs = 360_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
 const barrierTimeoutMs = 180_000;
 const observationTimeoutMs = 240_000;
+// Drain can cross the scheduler's 30-second, two-minute, and ten-minute
+// no-progress retries plus a bounded two-minute device pass.
+const backlogDrainTimeoutMs = 15 * 60_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
@@ -353,7 +356,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       });
       expect(activeLinqStub.readObservedMessageText(reminderSend)).toBe(reminderText);
 
-      await expectPendingDirtyResourceCount(seed.connectionId, 0);
+      await expectPendingDirtyResourceCount(seed.connectionId, 0, backlogDrainTimeoutMs);
       const finalStatus = await activeScenario.waitForHostedIdle(userId, {
         timeoutMs: observationTimeoutMs,
       });
@@ -397,7 +400,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       releaseHeldReminder = null;
     }
 
-  }, 900_000);
+  }, 900_000 + backlogDrainTimeoutMs);
 });
 
 function buildActivationWake() {
@@ -685,8 +688,9 @@ async function waitForDeviceSyncPassFinished(input: {
 async function expectPendingDirtyResourceCount(
   connectionId: string,
   expectedCount: number,
+  timeoutMs = observationTimeoutMs,
 ): Promise<void> {
-  const deadline = Date.now() + observationTimeoutMs;
+  const deadline = Date.now() + timeoutMs;
   const expectedPending = expectedCount > 0;
   let lastCount: number | null = null;
   let lastConnectionPending: boolean | null = null;

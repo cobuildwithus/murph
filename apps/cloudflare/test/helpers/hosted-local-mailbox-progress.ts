@@ -1,10 +1,9 @@
 export function hasImportedHostedSystemWakeStorm(input: {
   expectedImportedSeq: string;
   redactedStatus: Record<string, unknown> | null | undefined;
-  systemLane: { importedSeq: unknown; lag: unknown } | undefined;
+  systemLane: { importedSeq: unknown } | undefined;
 }): boolean {
   return hostedOrderingSeqAtLeast(input.systemLane?.importedSeq, input.expectedImportedSeq)
-    && input.systemLane?.lag === "0"
     && hostedOrderingSeqAtLeast(input.redactedStatus?.hostedMailboxSystemImportedSeq, input.expectedImportedSeq)
     && input.redactedStatus?.hostedMailboxRetryableBlockedCount === 0;
 }
