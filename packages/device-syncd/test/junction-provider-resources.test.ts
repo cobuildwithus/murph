@@ -3660,9 +3660,14 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
     windowEnd: ownerWindowEnd,
     windowStart: ownerWindowStart,
   });
+  const temporalChild = requireValue(firstResult.scheduledJobs?.find((job) =>
+    job.payload?.temporalAuthorityTimeZone
+  ));
+  assert.equal(firstRequests.some((url) => url.includes("/v2/timeseries/")), false);
+  await executeJunctionJob(provider, context, createJobFromInput(temporalChild));
   const temporalRequest = requireValue(
     firstRequests.find((url) => url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")),
-    "Mixed Junction backfill should import the newest authoritative temporal day inline.",
+    "Mixed Junction backfill should execute its queued newest authoritative temporal day.",
   );
   assertJunctionWindowQuery(
     temporalRequest,

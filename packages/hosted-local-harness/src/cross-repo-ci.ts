@@ -13,6 +13,10 @@ export interface HostedLocalCrossRepoCiRequirement {
  */
 export const hostedLocalCrossRepoCiRequirements = [
   {
+    reason: "Proves cold checkpoint restore preempts a stale invocation without fresh warm-runtime history.",
+    scenario: "stale-deferred-replay",
+  },
+  {
     reason: "Proves the complete Junction Link browser callback and persisted connection seam.",
     scenario: "junction-link-connect",
   },

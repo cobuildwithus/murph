@@ -81,6 +81,7 @@ import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   hydrateHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
+  publishHostedDeviceSyncCompletionFence,
   reconcileHostedDeviceSyncControlPlaneState,
   resolveHostedDeviceSyncSchedulerAccountId,
   resolveHostedDeviceSyncWakeRecovery,
@@ -312,6 +313,7 @@ function buildDeviceSyncWake(input: {
   eventId?: string;
   expectedConnectedAt?: string | null;
   hint?: {
+    junctionTemporalSweepKey?: string;
     jobs?: Array<{
       availableAt?: string;
       dedupeKey?: string;
@@ -15322,16 +15324,10 @@ describe("hosted device-sync runtime", () => {
 
       enqueueReconcile("junction-temporal-populated");
       assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
-      // The facet-only temporal import publishes facets immediately; the
-      // ordinary stress-level fact arrives through the ordinary continuation.
-      const inlinePopulated = await liveRecords();
-      assert.equal(inlinePopulated.some((record) => eventHasMetric(record, "stress-level")), false);
-      assert.equal(inlinePopulated.some((record) =>
-        record.kind === "observation"
-        && typeof record.metric === "string"
-        && record.metric.startsWith("stress-")
-        && record.metric !== "stress-level"
-      ), true);
+      // The root only queues day authority; ordinary facts arrive first.
+      await assert.rejects(readCanonicalEventRecords(vaultRoot), (error: unknown) =>
+        error instanceof VaultError && error.code === "VAULT_FILE_MISSING"
+      );
       for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
         const queuedContinuation = readJobsForAccount(service, localAccountId).find((job) =>
           job.kind === "reconcile" && job.status === "queued"
@@ -15344,9 +15340,10 @@ describe("hosted device-sync runtime", () => {
       }
       const ordinaryPopulated = await liveRecords();
       assert.equal(ordinaryPopulated.some((record) => eventHasMetric(record, "stress-level")), true);
-      assert.equal((await service.runWorkerOnce())?.kind, "resource");
-      currentNow = new Date(Date.parse(initialNow) + 1).toISOString();
-      assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      for (let day = 0; day < 3; day += 1) {
+        currentNow = new Date(Date.parse(initialNow) + day).toISOString();
+        assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      }
       const populated = await liveRecords();
       assert.equal(populated.some((record) => eventHasMetric(record, "stress-level")), true);
       await rebuildQueryProjection(vaultRoot);
@@ -15358,8 +15355,15 @@ describe("hosted device-sync runtime", () => {
 
       phase = "empty";
       currentNow = new Date(Date.parse(initialNow) + 30 * 60_000).toISOString();
-      enqueueReconcile("junction-temporal-empty");
-      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      // A targeted refresh owns empty-day retraction; an unchanged hourly root
+      // deliberately no longer re-fetches the entire temporal horizon.
+      getStore(service).enqueueJob({
+        accountId: localAccountId, availableAt: currentNow, kind: "resource", provider: "junction",
+        payload: { resource: "stress_level", resourceCategory: "timeseries",
+          temporalAuthorityTimeZone: timeZone, windowStart: dayStart, windowEnd: dayEnd },
+        priority: 45,
+      });
+      assert.equal((await service.runWorkerOnce())?.kind, "resource");
       const replaced = await liveRecords();
       assert.equal(replaced.some((record) => eventHasMetric(record, "stress-level")), true);
       assert.equal(replaced.some((record) =>
@@ -15393,6 +15397,232 @@ describe("hosted device-sync runtime", () => {
       await cleanup();
     }
   });
+
+  test("publishes a checkpointed sweep marker even without a cadence change and fences reconnects", async () => {
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const nextReconcileAt = "2026-04-24T13:00:00.000Z";
+    const connectionId = "hosted_conn_completed_sweep";
+    const marker = "a".repeat(64);
+    const snapshot = buildRuntimeSnapshot({
+      connectedAt, connectionId, externalAccountId: "completed-sweep", provider: "junction",
+      localState: { nextReconcileAt }, metadata: { unrelatedProgress: "preserved" },
+    });
+    const applied: ApplyUpdatesRequest[] = [];
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createSnapshotOnlyDeviceSyncPort(snapshot),
+      async applyUpdates(input) {
+        applied.push(input);
+        return { appliedAt: nextReconcileAt, userId: "member_123", updates: input.updates.map((update) => ({
+          connection: null, connectionId: update.connectionId, status: "updated" as const,
+          tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+        })) };
+      },
+    };
+    const wake = buildDeviceSyncWake({
+      connectionId, expectedConnectedAt: connectedAt, occurredAt: nextReconcileAt,
+      provider: "junction", reason: "reconcile_due",
+      hint: { jobs: [], reason: "retained_completion_fence", nextReconcileAt, junctionTemporalSweepKey: marker },
+    });
+    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port, wake });
+    assert.deepEqual(applied[0]?.updates[0]?.connection?.metadata, {
+      unrelatedProgress: "preserved", junctionTemporalSweepV1: marker,
+    });
+    await publishHostedDeviceSyncCompletionFence({
+      deviceSyncPort: port, wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" },
+    });
+    assert.equal(applied.length, 1);
+  });
+
+  test("checkpoints Junction sweep suppression with recoverable jobs across hosted cold restores", async () => {
+    const now = "2026-04-24T12:00:00.000Z";
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const connectionId = "hosted_conn_sweep_checkpoint";
+    const externalAccountId = "junction-sweep-checkpoint";
+    const workspaces = await Promise.all(["first", "replay", "retained", "hourly"].map(async (slug) => {
+      const workspace = await createHostedRuntimeWorkspace(`hosted-junction-sweep-${slug}-`);
+      await initializeVault({ createdAt: connectedAt, timezone: "UTC", vaultRoot: workspace.vaultRoot });
+      return workspace;
+    }));
+    const [first, replay, retained, hourly] = workspaces;
+    assert.ok(first && replay && retained && hourly);
+    let metadata: Record<string, unknown> = {
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillWindowStart: "2026-03-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: connectedAt,
+    };
+    let localState: NonNullable<Parameters<typeof buildRuntimeSnapshot>[0]["localState"]> = {
+      nextReconcileAt: "2026-04-24T13:00:00.000Z", lastSyncCompletedAt: "2026-04-24T11:00:00.000Z",
+    };
+    let crashAfterApply = true;
+    let unavailableOnWarmRetry = false;
+    let observedVersion = now;
+    let appliedVersion = 0;
+    const authoritativeDays: string[] = [];
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({ connectionId, sourceProviderSlug: "garmin" });
+    assert.ok(sourceInstanceKey);
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({
+          connectedAt, connectionId, externalAccountId, generatedAt: now, hostedUpdatedAt: observedVersion,
+          credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+          localState, metadata, provider: "junction",
+          sources: [{
+            displayName: "Garmin", firstSeenAt: connectedAt, lastDataAt: null,
+            lastErrorCode: null, lastErrorMessage: null, lastSeenAt: now, resourceCount: 1,
+            resourceAvailabilitySummary: { stress_level: true }, sourceInstanceKey,
+            sourceProviderSlug: "garmin", status: "connected",
+          }],
+        });
+      },
+      async applyUpdates(input) {
+        for (const update of input.updates) {
+          if (update.connection?.metadata) metadata = { ...update.connection.metadata };
+          localState = { ...localState, ...update.localState };
+        }
+        if (input.updates.length > 0) {
+          appliedVersion += 1;
+          observedVersion = new Date(Date.parse(now) + appliedVersion).toISOString();
+        }
+        if (crashAfterApply) throw new Error("simulated crash after control apply before checkpoint");
+        return {
+          appliedAt: now, userId: "member_123",
+          updates: input.updates.map((update) => ({
+            connection: null, connectionId: update.connectionId, status: "updated" as const,
+            tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+          })),
+        };
+      },
+      async createConnectLink() { throw new Error("Unexpected connection request"); },
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(readTestUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createTestJsonResponse({ providers: [{
+          id: "sweep-garmin", slug: "garmin", name: "Garmin", status: "connected",
+          resource_availability: { stress_level: true },
+        }] });
+      }
+      if (url.pathname.startsWith("/v2/summary/")) return createTestJsonResponse({ data: [] });
+      assert.ok(url.pathname.startsWith(`/v2/timeseries/${externalAccountId}/`));
+      if (unavailableOnWarmRetry) {
+        unavailableOnWarmRetry = false;
+        return createTestJsonResponse({ code: "resource_unavailable", detail: "Resource unavailable" }, 404);
+      }
+      const start = url.searchParams.get("start_date");
+      const end = url.searchParams.get("end_date");
+      if (start !== end) {
+        assert.ok(start);
+        if (url.pathname.endsWith("/stress_level/grouped")) authoritativeDays.push(start);
+        return createTestJsonResponse({ groups: {}, data: [] });
+      }
+      return createTestJsonResponse({ groups: {}, data: [] });
+    });
+    const config: NonNullable<Parameters<typeof runHostedDeviceSyncPass>[2]> = {
+      providerConfigs: { junction: {
+        environment: "sandbox", region: "us", reconcileDays: 7,
+        reconcileIntervalMs: 60 * 60_000, summaryResources: [],
+      } },
+      publicBaseUrl: "https://device-sync.example.test", secret: DEVICE_SYNC_SECRET,
+    };
+    const options = {
+      platformEnv: {
+        JUNCTION_API_KEY: "sk_us_test_123", JUNCTION_CLIENT_USER_ID_SECRET: "sweep-checkpoint-secret",
+        JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us",
+        JUNCTION_RECONCILE_DAYS: "7", JUNCTION_RECONCILE_INTERVAL_MS: "3600000",
+        JUNCTION_SUMMARY_RESOURCES: "sleep",
+      },
+      retainFollowUpWakeUntilCheckpoint: true,
+    };
+    const wake = buildDeviceSyncWake({ connectionId, expectedConnectedAt: connectedAt,
+      occurredAt: now, provider: "junction", reason: "reconcile_due",
+      hint: { jobs: [{ kind: "reconcile", priority: 80, dedupeKey: "sweep-root", payload: {
+        windowStart: "2026-04-17T12:00:00.000Z", windowEnd: now,
+      } }] },
+    });
+    const readTemporalJobs = (vaultRoot: string) => {
+      const database = openSqliteRuntimeDatabase(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"));
+      try {
+        return database.prepare("SELECT payload_json FROM device_job WHERE json_extract(payload_json, '$.temporalAuthorityTimeZone') IS NOT NULL AND json_extract(payload_json, '$.resource') = 'stress_level' ORDER BY payload_json")
+          .all().map((row) => JSON.parse(String(row.payload_json)) as { windowStart: string });
+      } finally { database.close(); }
+    };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(now));
+    try {
+      await withHostedCanonicalWritePort({ async persistCanonicalWrite() {}, async persistRuntimeState() {} }, async () => {
+        await assert.rejects(runHostedDeviceSyncPass(wake, first.vaultRoot, config, port, 120_000, options),
+          /simulated crash after control apply before checkpoint/u);
+        const initialDays = readTemporalJobs(first.vaultRoot).map((job) => job.windowStart).sort();
+        assert.equal(initialDays.length, 7, JSON.stringify(initialDays));
+        assert.equal(initialDays[0], "2026-04-16T00:00:00.000Z");
+        assert.equal(metadata.junctionTemporalSweepV1, undefined,
+          "Web cannot suppress work that exists only in excluded SQLite");
+        const importsBeforeCrash = authoritativeDays.length;
+        assert.ok(importsBeforeCrash < 7, "Staggered children must outlive this pass");
+
+        // The first response was lost after Web applied it. A warm mailbox retry
+        // hydrates that new server version while SQLite retains the local sweep.
+        // A real optional-resource result changes ordinary provider metadata.
+        unavailableOnWarmRetry = true;
+        await assert.rejects(runHostedDeviceSyncPass(wake, first.vaultRoot, config, port, 120_000, options),
+          /simulated crash after control apply before checkpoint/u);
+        assert.equal(unavailableOnWarmRetry, false);
+        assert.ok(Number(metadata.junctionSkippedResourceTotal) > 0);
+        assert.equal(metadata.junctionTemporalSweepV1, undefined,
+          "Warm hydration must not promote a local sweep into the published baseline");
+
+        // A second lost response is followed by cold restoration of the original
+        // checkpoint, whose root has no newly queued child hints or SQLite.
+        crashAfterApply = false;
+        const replayed = await runHostedDeviceSyncPass(wake, replay.vaultRoot, config, port, 120_000, options);
+        assert.ok(replayed.processedJobs > 0);
+        assert.deepEqual(readTemporalJobs(replay.vaultRoot).map((job) => job.windowStart).sort(), initialDays);
+        assert.equal(metadata.junctionTemporalSweepV1, undefined);
+        const record = replayed.postCheckpointRecord;
+        assert.equal(record?.kind, "device-sync.dirty-processed-batch");
+        assert.ok(record?.kind === "device-sync.dirty-processed-batch" && record.retainedWake);
+        const checkpointedWake = parseHostedExecutionWake(record.retainedWake);
+        assert.equal(checkpointedWake.kind, "device-sync.wake");
+        assert.ok(checkpointedWake.kind === "device-sync.wake");
+        assert.match(checkpointedWake.hint?.junctionTemporalSweepKey ?? "", /^[a-f0-9]{64}$/u);
+        const pendingTemporalJobs = checkpointedWake.hint?.jobs?.filter((job) => job.payload?.temporalAuthorityTimeZone) ?? [];
+        assert.ok(pendingTemporalJobs.length > 0);
+        assert.ok(pendingTemporalJobs.some((job) => job.payload?.windowStart === initialDays[0]));
+
+        // A checkpointed retained wake restores exact jobs and suppression together
+        // into a fresh runtime, then safely publishes the marker during this pass.
+        const importsBeforeRestore = authoritativeDays.length;
+        vi.setSystemTime(new Date("2026-04-24T12:01:00.000Z"));
+        let completed = await runHostedDeviceSyncPass(checkpointedWake, retained.vaultRoot, config, port, 120_000, options);
+        assert.equal(completed.skipped, false);
+        for (let pass = 0; pass < 4 && new Set(authoritativeDays).size < 7; pass += 1) {
+          const continuation = completed.postCheckpointRecord;
+          assert.ok(continuation?.kind === "device-sync.dirty-processed-batch" && continuation.retainedWake);
+          completed = await runHostedDeviceSyncPass(continuation.retainedWake,
+            retained.vaultRoot, config, port, 120_000, options);
+        }
+        assert.deepEqual([...new Set(authoritativeDays)].sort(), initialDays);
+        assert.equal(authoritativeDays.length - importsBeforeRestore, 7 - importsBeforeCrash);
+        assert.equal(metadata.junctionTemporalSweepV1, checkpointedWake.hint?.junctionTemporalSweepKey);
+
+        // An ordinary same-day cold start still coalesces the sweep.
+        localState.nextReconcileAt = "2026-04-24T15:00:00.000Z";
+        vi.setSystemTime(new Date("2026-04-24T14:00:00.000Z"));
+        const importsBeforeHourly = authoritativeDays.length;
+        await runHostedDeviceSyncPass({ ...wake, hint: { ...wake.hint, jobs: [{ kind: "reconcile", priority: 80, payload: {
+          windowStart: "2026-04-17T14:00:00.000Z", windowEnd: "2026-04-24T14:00:00.000Z",
+        } }] }, eventId: "sweep-hourly", occurredAt: "2026-04-24T14:00:00.000Z" },
+          hourly.vaultRoot, config, port, 120_000, options);
+        assert.equal(readTemporalJobs(hourly.vaultRoot).length, 0);
+        assert.equal(authoritativeDays.length, importsBeforeHourly);
+      });
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+      await Promise.all(workspaces.map((workspace) => workspace.cleanup()));
+    }
+  }, 120_000);
 
   test.each([
     { restoredTimeZone: "UTC", slug: "same-timezone" },
@@ -15912,6 +16142,16 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
       assert.equal(stressRequestCount, 0);
+      // Reach the ordinary stress resource through the queued day cursors.
+      for (let step = 0; step < 10; step += 1) {
+        const queued = readJobsForAccount(service, localAccountId).find((job) =>
+          job.kind === "reconcile" && job.status === "queued"
+        );
+        assert.ok(queued);
+        const payload = getStore(service).getJobById(queued.id)?.payload;
+        if (payload?.timeseriesResourceCursor === "stress_level") break;
+        assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      }
       const yieldingWorker = service.runWorkerOnce();
       await Promise.race([
         slowStressRequest,
@@ -15923,13 +16163,9 @@ describe("hosted device-sync runtime", () => {
       assert.equal((await yieldingWorker)?.kind, "reconcile");
       shouldYield = false;
 
-      // Facet-only temporal imports publish no ordinary facts, and a single
-      // sample is insufficient for a facet, so no canonical event exists yet.
-      await assert.rejects(
-        readCanonicalEventRecords(vaultRoot),
-        (error: unknown) =>
-          error instanceof VaultError && error.code === "VAULT_FILE_MISSING",
-      );
+      const beforeStressRecovery = await readCanonicalEventRecords(vaultRoot);
+      assert.equal(beforeStressRecovery.filter((record) => eventHasMetric(record, "spo2")).length, 1);
+      assert.equal(beforeStressRecovery.some((record) => eventHasMetric(record, "stress-level")), false);
       assert.equal(caffeineRequestCount, 0);
       assert.equal(waterRequestCount, 0);
       assert.equal(

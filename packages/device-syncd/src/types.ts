@@ -185,6 +185,14 @@ export type DeviceSyncJobTimingOutcome =
   | "failed"
   | "yielded";
 
+/** Importer persistence outcomes; applied can include evidence-only writes. */
+export type DeviceSyncImportOutcomeCounts = {
+  applied: number;
+  noop: number;
+  failed: number;
+  unknown: number;
+};
+
 /**
  * Bounded metadata for one claimed worker attempt. This intentionally omits
  * account/job ids, payloads, cursors, provider responses, and health values so
@@ -215,6 +223,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   providerUnattributedElapsedMs: number | null;
   resource?: string;
   snapshotImportCount: number;
+  snapshotImportOutcomes: DeviceSyncImportOutcomeCounts;
+  completeSourceDayImportOutcomes: DeviceSyncImportOutcomeCounts;
   snapshotImportElapsedMs: number;
   snapshotCanonicalCoreElapsedMs: number;
   snapshotCanonicalWriteElapsedMs: number;

@@ -984,9 +984,10 @@ describe.skipIf(!runPostgresProof)(
           suffix,
         });
 
+        // Prisma enforces UTC even when the connection URL requests another zone.
         await expect(observer.$queryRaw<Array<{ timeZone: string }>>`
           SELECT current_setting('TimeZone') AS "timeZone"
-        `).resolves.toEqual([{ timeZone: "Australia/Sydney" }]);
+        `).resolves.toEqual([{ timeZone: "UTC" }]);
 
         const requestedAssistantInputIds = [
           assistantInputIds[1],

@@ -63,6 +63,14 @@ describe("hosted-local cross-repository CI coverage", () => {
     );
   });
 
+  it("requires cold recovery independently of warm restart coverage", () => {
+    const workflowText = hostedLocalCrossRepoCiRequirements
+      .filter(({ scenario }) => scenario !== "stale-deferred-replay")
+      .map(({ scenario }) => `- scenarios: ${scenario}`).join("\n")
+      + "\n- scenarios: stuck-invocation-recovery retryable-outbox-foreground-restart";
+    expect(() => assertHostedLocalCrossRepoCiCoverage({ workflowText })).toThrow(/stale-deferred-replay/);
+  });
+
   it("fails on a workflow scenario that the public harness does not own", () => {
     expect(() => assertHostedLocalCrossRepoCiCoverage({
       workflowText: "          - scenarios: imaginary-production-journey",
