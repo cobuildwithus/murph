@@ -4698,6 +4698,18 @@ printf 'ZIP: %s (%s bytes)\n' \
       const leanEntries = listZipEntries(leanBundle.zipPath)
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
+      for (const relativePath of [
+        '.github/native-hosted-e2e-controller.json',
+        '.github/pull_request_template.md',
+        '.agents/skills/verify-murph-assistant/SKILL.md',
+      ]) {
+        for (const bundle of [leanBundle, fullBundle]) {
+          expect(listZipEntries(bundle.zipPath)).toContain(relativePath)
+          expect(execFileSync('unzip', ['-p', bundle.zipPath, relativePath]))
+            .toEqual(readFileSync(path.join(repoRoot, relativePath)))
+        }
+      }
+
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
       expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
