@@ -196,8 +196,37 @@ describe('assistant real Codex local runner', () => {
 
     expect(status).toBe(2)
     expect(errors.join('')).toContain(message)
+    expect(errors.join('')).toContain('MURPH_RUN_REAL_CODEX_E2E=1 pnpm --dir packages/assistant-engine exec vitest list')
+    for (const entry of listed) expect(errors.join('')).toContain(entry.name)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.stdio).toBe('capture')
+  })
+
+  it('bounds ambiguous selector diagnostics and reports omitted matches', () => {
+    const errors: string[] = []
+    const requests: AssistantRealCodexCommandRequest[] = []
+    const status = executeAssistantRealCodexRun(
+      parseAssistantRealCodexRunArgs(['synthetic']),
+      {
+        runCommand: (request) => {
+          requests.push(request)
+          return {
+            status: 0,
+            stdout: JSON.stringify(Array.from({ length: 25 }, (_, index) => ({
+              name: `synthetic journey ${index}`,
+            }))),
+          }
+        },
+        sourceEnv: {},
+        writeStderr: (message) => errors.push(message),
+        writeStdout: () => undefined,
+      },
+    )
+    expect(status).toBe(2)
+    expect(requests).toHaveLength(1)
+    expect(errors.join('')).toContain('synthetic journey 19')
+    expect(errors.join('')).not.toContain('synthetic journey 20')
+    expect(errors.join('')).toContain('5 more matches')
   })
 
   it('routes one explicit subscription home through preflight and the live journey', () => {
