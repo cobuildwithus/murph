@@ -37,7 +37,6 @@ type HostedLinqTypingTargetState = {
 };
 
 const hostedLinqTypingTargets = new Map<string, HostedLinqTypingTargetState>();
-
 export function buildHostedLinqChannelEnv(input: {
   forwardedEnv: Readonly<Record<string, string>>;
   userEnv: Readonly<Record<string, string>>;
@@ -102,6 +101,20 @@ export function createHostedAssistantChannelTypingDependencies(input: {
   userEnv: Readonly<Record<string, string>>;
 }): AssistantChannelTypingDependencies {
   return {
+    onTypingAccepted: ({ acceptedInputIds, at, channel }) => {
+      if ((channel !== "linq" && channel !== "telegram") || input.signal?.aborted) return;
+      recordHostedAssistantMilestonesBestEffort({
+        context: input.latencyTraceContext ? {
+          ...input.latencyTraceContext,
+          assistantInputIds: acceptedInputIds,
+          source: channel,
+        } : null,
+        milestones: [{
+          at,
+          milestone: channel === "telegram" ? "telegram_typing_accepted" : "linq_typing_accepted",
+        }],
+      });
+    },
     startLinqTyping: async (request) => {
       const linqDeliveryContexts = input.linqDeliveryContexts ?? [];
       const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
@@ -149,12 +162,6 @@ export function createHostedAssistantChannelTypingDependencies(input: {
               at: typingRequestStartedAt,
               milestone: "linq_typing_request_started",
             },
-            ...(handle
-              ? [{
-                  at: new Date().toISOString(),
-                  milestone: "linq_typing_accepted" as const,
-                }]
-              : []),
           ],
         });
         if (!handle) {
@@ -218,7 +225,7 @@ function claimHostedLinqTypingTarget(target: string): HostedLinqTypingClaim | nu
     return null;
   }
 
-  const state = {
+  const state: HostedLinqTypingTargetState = {
     activeUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS,
     cooldownUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS
       + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS,

@@ -16,6 +16,7 @@ const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
 const UNSAFE_SENTINEL = "UNSAFE_CONTENT_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  reportHostedRuntimeTypingAlerts: vi.fn(),
   after: vi.fn<(task: () => Promise<void> | void) => void>(),
   checkpointHostedWorkspace: vi.fn(),
   acknowledgeHostedWorkspaceRuntimeRecheck: vi.fn(),
@@ -50,6 +51,10 @@ const mocks = vi.hoisted(() => ({
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedRuntimeOwnerReleasedRuntime: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-runtime-latency/typing-alert-monitor", () => ({
+  reportHostedRuntimeTypingAlerts: mocks.reportHostedRuntimeTypingAlerts,
 }));
 
 vi.mock("next/server", async (importOriginal) => ({
@@ -3167,6 +3172,13 @@ describe("hosted runtime internal web routes", () => {
       workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
     });
 
+    expect(mocks.reportHostedRuntimeTypingAlerts).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledOnce();
+    await mocks.after.mock.calls[0]?.[0]();
+    expect(mocks.reportHostedRuntimeTypingAlerts).toHaveBeenCalledWith({
+      userId: "member_routes_1", assistantInputIds: ["input_1"],
+    });
+
     const providerResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",
       {
@@ -3391,6 +3403,32 @@ describe("hosted runtime internal web routes", () => {
       providerRequestOrdinal: 0,
       runtimeAttemptId: "attempt_routes_1",
       source: "linq",
+    });
+  });
+
+  it.each(["linq", "telegram"] as const)("evaluates %s typing alerts after persisting accepted typing", async (source) => {
+    mocks.recordHostedIngressAssistantMilestone.mockResolvedValue({
+      matchedCount: 1, recorded: true, unmatchedCount: 0,
+    });
+    const response = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency",
+      { event: {
+        assistantInputIds: ["input_1"],
+        at: FIXED_NOW,
+        milestone: source === "linq" ? "linq_typing_accepted" : "telegram_typing_accepted",
+        runtimeAttemptId: "attempt_routes_1",
+        source,
+        type: "assistant_milestone",
+      } },
+      runtimeWriteFenceHeaders(),
+    ));
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledOnce();
+    expect(mocks.reportHostedRuntimeTypingAlerts).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledOnce();
+    await mocks.after.mock.calls[0]?.[0]();
+    expect(mocks.reportHostedRuntimeTypingAlerts).toHaveBeenCalledWith({
+      userId: "member_routes_1", assistantInputIds: ["input_1"],
     });
   });
 

@@ -105,6 +105,57 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
     );
   });
 
+  it("records Telegram typing with its channel through the real workspace context", async () => {
+    const channelActivity = await vi.importActual<
+      typeof import("../src/hosted-runtime/channel-activity.ts")
+    >("../src/hosted-runtime/channel-activity.ts");
+    mocks.createHostedAssistantChannelTypingDependencies.mockImplementationOnce(
+      channelActivity.createHostedAssistantChannelTypingDependencies,
+    );
+    const traceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    const phase = createPhaseInput({
+      importedCount: 1,
+      runtimeForwardedEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
+      runtimeLatencyTraceRequests: traceRequests,
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ ok: true, result: true }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ));
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async ({ executionContext }) => {
+      const handle = await executionContext.hosted.channelTypingDependencies.startTelegramTyping({
+        target: "12345",
+      });
+      expect(handle).toBeDefined();
+      executionContext.hosted.channelTypingDependencies.onTypingAccepted({
+        acceptedInputIds: ["admitted-telegram-followup"], at: new Date().toISOString(), channel: "telegram",
+      });
+      await handle.stop();
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+    await runHostedWorkspaceAssistantPhase({
+      ...phase,
+      runtime: {
+        ...phase.runtime,
+        platform: { ...phase.runtime.platform, providerFetch },
+      },
+    });
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(traceRequests).toContainEqual({ event: {
+      assistantInputIds: ["admitted-telegram-followup"],
+      at: expect.any(String),
+      milestone: "telegram_typing_accepted",
+      runtimeAttemptId: "attempt_synthetic_phase",
+      source: "telegram",
+      type: "assistant_milestone",
+    } });
+  });
+
   it("passes foreground Linq delivery context into hosted outbox delivery", async () => {
     const linqDeliveryContext = {
       directRecipientPhoneNumber: "+15550000001",

@@ -24,8 +24,9 @@ Device-sync metadata priority within the existing bounded envelope is specified
 by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
 reason in hosted failure events; Junction's progress keys remain provider-owned.
 
-Runtime progress diagnostics (aggregate alerts and code-only first-pending
-evidence) are specified in
+Runtime progress diagnostics (aggregate alerts, per-message warm/cold typing
+alerts with turn-admission and provider-lifetime evidence, and code-only
+first-pending evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 
 Automation edit schema discovery and attended progress guidance are owned by

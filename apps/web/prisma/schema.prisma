@@ -1238,6 +1238,8 @@ model HostedIngressLatencyTrace {
   runtimeAttemptId         String?           @map("runtime_attempt_id")
   replyRuntimeAttemptId    String?           @map("reply_runtime_attempt_id")
   linqDeliveryId           String?           @map("linq_delivery_id")
+  webhookReceivedAt        DateTime?         @map("webhook_received_at")
+  ingressTypingAcceptedAt  DateTime?         @map("ingress_typing_accepted_at")
   acceptedAt               DateTime          @map("accepted_at")
   temporalSignalAcceptedAt DateTime?         @map("temporal_signal_accepted_at")
   runnerJobAcceptedAt      DateTime?         @map("runner_job_accepted_at")

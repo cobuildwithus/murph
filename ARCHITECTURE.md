@@ -1910,8 +1910,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   They share one generic compare-and-set email lifecycle and the existing
   `HostedLinqAlert` storage owner, but retain independent singleton rows so one
   active latency incident cannot suppress a later error-code-independent
-  progress stall. The progress read is observability only: it neither advances
-  mailbox state nor signals Temporal or Cloudflare.
+  progress stall. A separate per-message typing monitor reuses the existing
+  operational Resend sender and `HostedLinqAlert` retry ledger. It carries the
+  Web route receipt time and optional early ingress typing acceptance on the
+  existing ingress trace, compares first accepted typing against the warm
+  3-second or cold 10-second cutoff, and creates one immutable alert per trace.
+  Runtime typing/restore callbacks and the existing alert cron trigger bounded
+  asynchronous evaluation. The detailed classification, missing-evidence,
+  recovery, and retention rules live in `agent-docs/RELIABILITY.md`. The progress
+  read is observability only: it neither advances mailbox state nor signals
+  Temporal or Cloudflare.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
   `preview` target is a separate trust boundary, not a mode inside production:
