@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { Prisma } from "@prisma/client";
 import type { Message } from "@linqapp/sdk/resources/messages";
+import type { Response as OpenAiResponse } from "openai/resources/responses/responses";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,6 +17,9 @@ import {
   recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { buildHostedLinqInviteSignupEffectId } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
+import { completeHostedLinqInstantFirstTurn } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
+import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import { readHostedMailboxWakeByItemId } from "@/src/lib/hosted-mailbox/store";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq-webhook";
@@ -30,6 +34,7 @@ import {
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const provider = vi.hoisted(() => ({
+  firstTurnSend: vi.fn<typeof import("@/src/lib/hosted-onboarding/linq-client").sendHostedLinqChatMessage>(),
   log: vi.fn(),
   read: vi.fn<() => Promise<Message>>(),
   send: vi.fn<() => Promise<{ chatId: string; messageId: string }>>(),
@@ -38,6 +43,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-client")>(),
   readHostedLinqFailedMessage: provider.read,
   resendHostedLinqMessage: provider.send,
+  sendHostedLinqChatMessage: provider.firstTurnSend,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage", () => ({
+  recordHostedAiUsageRecords: vi.fn(async () => ({ recordedIds: [] })),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/logging", async (importOriginal) => ({
@@ -73,6 +83,7 @@ async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => P
 }
 
 async function seed() {
+  provider.firstTurnSend.mockReset();
   provider.log.mockReset();
   provider.read.mockReset();
   provider.send.mockReset();
@@ -161,7 +172,7 @@ async function seed() {
   });
   return {
     prisma, memberId, containerId, chatId, chatKey, lineKey, messageId, retryId,
-    deliveryId, accepted, at, ingest, original, receipt, retry, grantConsent, withdrawConsent,
+    deliveryId, accepted, at, ingest, original, receipt, retry, grantConsent, withdrawConsent, phoneNumber,
   };
 }
 
@@ -246,6 +257,117 @@ async function settleOrBlock(prisma: Awaited<ReturnType<typeof seed>>["prisma"],
 }
 
 describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boundary", () => {
+  it.each(["delivered", "failed", "no-receipt"] as const)("preserves %s through the exported first-turn completion transaction", async (outcome) => {
+    await withFixture(async (f) => {
+      // Let the real completion flow create its own unbound parent and payload.
+      await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
+      await f.prisma.hostedMemberRouting.update({ where: { memberId: f.memberId }, data:
+        await buildHostedMemberRoutingPrivateColumns({
+          linqChatId: f.chatId, linqRecipientPhone: f.phoneNumber, memberId: f.memberId,
+          pendingLinqChatId: null, pendingLinqRecipientPhone: null,
+          telegramThreadId: null, telegramUserId: null, prisma: f.prisma,
+        }),
+      });
+      const acceptedAt = f.at(1_000);
+      const event = outcome === "no-receipt" ? null : timingReceipt(f, {
+        eventAt: f.at(10_000), deliveredAt: f.at(2_000), status: outcome,
+      });
+      const sent = deferred();
+      const returnAcceptance = deferred();
+      provider.firstTurnSend.mockImplementationOnce(async () => {
+        sent.resolve();
+        await returnAcceptance.promise;
+        return { chatId: f.chatId, messageId: f.messageId, messageCreatedAt: acceptedAt.toISOString() };
+      });
+      const input = {
+        inboundMessageId: `inbound-${f.messageId}`,
+        participantContact: { kind: "phone" as const, lookupKey: f.lineKey, value: f.phoneNumber },
+        prisma: f.prisma, recipientPhoneNumber: f.phoneNumber, service: "iMessage",
+        wakeHandoff: {
+          eventId: `first-turn-${f.messageId}`, linqChatId: f.chatId,
+          mailboxItemId: `inbound-${f.messageId}`, source: "linq" as const, userId: f.memberId,
+          wakeMailboxCheckpoint: { lane: "conversation" as const, laneSeq: "1" },
+        },
+      };
+      const message = "Hey! What would you like help with?";
+      const completion = completeHostedLinqInstantFirstTurn({
+        ...input,
+        generation: { kind: "reply", message, usage: {
+          requestedModel: "gpt-5.6-luna",
+          // Same narrow accounting fixture as the first-turn unit tests.
+          response: { id: "resp_first_turn", model: "gpt-5.6-luna", service_tier: "default", usage: {
+            input_tokens: 90, input_tokens_details: { cached_tokens: 0 },
+            output_tokens: 22, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 112,
+          } } as OpenAiResponse,
+        } },
+      });
+      const readParent = () => f.prisma.hostedLinqDelivery.findFirstOrThrow({
+        where: { linqChatLookupKey: f.chatKey, source: "hosted_web_instant_first_turn" },
+      });
+      let paused: Awaited<ReturnType<typeof pauseLegacyReceipt>> | undefined;
+      try {
+        await Promise.race([sent.promise, completion.then(() => {
+          throw new Error("First-turn completion did not reach provider dispatch.");
+        })]);
+        // The dispatch transaction has committed before either the receipt or finalization starts.
+        const parent = await readParent();
+        expect(parent).toMatchObject({ acceptedAt: null, messageLookupKey: null, status: "provider_dispatch_started" });
+        expect(parent.payloadCiphertext).not.toBeNull();
+        expect(await f.prisma.hostedLinqDeliveryMessage.count({ where: { deliveryId: parent.id } })).toBe(0);
+        if (event) {
+          paused = await pauseLegacyReceipt(f, event);
+          expect(await f.prisma.hostedLinqProviderEvent.count({ where: { linqChatLookupKey: f.chatKey } })).toBe(0);
+        }
+        returnAcceptance.resolve();
+        if (event) await settleOrBlock(f.prisma, completion);
+        else await completion;
+        // No delivery/routing row lock from dispatch may survive into this receipt wait.
+        await f.prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM hosted_linq_delivery WHERE id = ${parent.id} FOR UPDATE NOWAIT`;
+          await tx.$queryRaw`SELECT 1 FROM hosted_member_routing WHERE member_id = ${f.memberId} FOR UPDATE NOWAIT`;
+        });
+      } finally {
+        returnAcceptance.resolve();
+        paused?.resume.resolve();
+        await Promise.allSettled([completion, paused?.pending]);
+      }
+      if (paused) expect(await paused.pending).toMatchObject({ duplicate: false });
+      const result = await completion;
+      expect(result.kind).toBe("accepted");
+      if (result.kind !== "accepted") throw new Error("First-turn acceptance must retain Web ownership.");
+      const parent = await readParent();
+      expect(parent).toMatchObject({
+        acceptedAt, status: outcome === "no-receipt" ? "accepted" : outcome,
+        lastReceiptAt: event ? f.at(10_000) : null,
+        deliveredAt: outcome === "delivered" ? f.at(2_000) : null,
+        failedAt: outcome === "failed" ? f.at(10_000) : null,
+        payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
+      });
+      expect(createHostedLinqMessageLookupKeyReadCandidates(f.messageId)).toContain(parent.messageLookupKey);
+      const items = await f.prisma.hostedMailboxItem.findMany({ where: { userId: f.memberId } });
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        id: result.wakeHandoff.mailboxItemId, kind: "conversation.message", lane: "conversation",
+        occurredAt: acceptedAt, consumedAt: null,
+      });
+      expect(result.wakeHandoff.wakeMailboxCheckpoint).toEqual({ lane: "conversation", laneSeq: items[0]!.laneSeq.toString() });
+      expect(await readHostedMailboxWakeByItemId({ mailboxItemId: items[0]!.id, prisma: f.prisma })).toMatchObject({
+        kind: "conversation.message", userId: f.memberId,
+        message: { channel: "linq", linqMessage: {
+          chatId: f.chatId, messageId: f.messageId, isFromMe: true,
+          replyToMessageId: input.inboundMessageId, parts: [{ type: "text", value: message }],
+        } },
+      });
+      await expect(completeHostedLinqInstantFirstTurn({ ...input, generation: { kind: "resume" } })).resolves.toEqual(result);
+      if (event) expect(await f.ingest(event)).toMatchObject({ duplicate: true });
+      expect(await readParent()).toEqual(parent);
+      expect(await f.prisma.hostedMailboxItem.findMany({ where: { userId: f.memberId } })).toEqual(items);
+      expect(provider.firstTurnSend).toHaveBeenCalledTimes(1);
+      expect(provider.read).not.toHaveBeenCalled();
+      expect(provider.send).not.toHaveBeenCalled();
+    });
+  });
+
   it.each(["scalar", "owned"])("keeps first %s delivery through duplicates, reordering, failure and callback replay", async (owner) => {
     await withFixture(async (f) => {
       const messageIds = owner === "owned" ? [f.messageId, `${f.messageId}-part-2`] : [f.messageId];
