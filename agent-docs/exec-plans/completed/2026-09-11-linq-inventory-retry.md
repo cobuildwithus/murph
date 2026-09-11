@@ -28,7 +28,7 @@ after rollback has released the transaction. No new state, queue, lock, or helpe
 - [x] Deterministic tests for both conflict shapes, spacing, three-attempt cap,
       unknown errors, cancellation, and unchanged one-time preprocessing.
 - [x] Full focused inventory unit and real PostgreSQL suites; Web typecheck.
-- [ ] Inspect diff/privacy/complexity, close plan, commit, and open draft PR.
+- [x] Inspect diff/privacy/complexity and prepare the scoped draft PR handoff.
 
 The parent session owns candidate review, ReviewGPT, required CI, and merge.
 No provider, production database, or production deployment is used locally.
@@ -48,4 +48,16 @@ read. All 12 real PostgreSQL inventory tests pass against a fresh fully migrated
 local database, including the concurrent 250-line replacements, revocation,
 freshness, atomicity, and key rotation cases. The owned database was removed.
 Web typecheck, complexity (maximum 15, no hotspots), and documentation checks pass.
-A narrow public changelog entry will describe background contact freshness only.
+Draft PR #3304 contains the narrow text-contact-refresh-recovery release note.
+The production cron route test passes (1 case), changelog archive rendering passes
+(10 cases), and the final Web typecheck passes. The changelog uses the existing
+production archive presentation without a new visual or interaction.
+
+## Final status
+
+Implementation and focused local proof are complete. The plan is closed with the
+final scoped commit. Draft PR #3304 remains unmerged; the parent completion owner
+will run final ReviewGPT, exact-head CI, and candidate review before admission.
+Status: completed
+Updated: 2026-09-11
+Completed: 2026-09-11
