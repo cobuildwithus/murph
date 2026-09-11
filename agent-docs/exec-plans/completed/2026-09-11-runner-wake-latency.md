@@ -1,6 +1,6 @@
 # Restore prompt hosted replies after runner wake timeouts
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -94,15 +94,46 @@ Updated: 2026-09-11
   Private PR #136 adds that same prerequisite before each Node shard. The public
   build plus all 17 bundle tests pass, along with private typecheck and 28 workflow
   tests. Full private verification, exact-head CI, and both reviews passed; the
-  prerequisite fix merged. A fresh protected deployment is running with all
-  predeploy gates enabled.
+  prerequisite fix merged. Subsequent protected attempts kept all predeploy
+  gates enabled.
 - Both protected attempts timed out in the synthetic image-reminder checkpoint-race
   journey; every other gate passed in the second attempt. A local reproduction
   read only the image tool result and proved that the default Starter seed lacks
   the subscription required for image generation. The entitlement rejection is
   correct; the positive image fixtures need an explicit paid seed. The scheduled
   image reminder and generated-image delivery fixtures now use the existing seed's
-  paid plan and synthetic subscription fields. Focused replay is pending. No gate
-  is bypassed, and neither failed attempt changed production state.
-- Actual reply latency and resource identity remain required protected-deployment
-  evidence.
+  paid plan and synthetic subscription fields. The corrected reminder replay passes
+  all three selected tests, and generated-image delivery passes all three tests.
+  Cloudflare typecheck and complexity checks pass. Public PR #3289 merged with
+  every required check green. No gate was bypassed, and neither failed attempt
+  changed production state.
+- The third protected deployment passed every predeployment gate against the
+  merged fixture correction, including all three selected image-reminder tests.
+  Protected run 34622940410 deployed public commit
+  d207c45d87f755a7c4c46e2ec304799812982ad6 with private commit
+  e71eae83887625cf337e7e8522148bfd34032ad2. Live smoke and release
+  convergence passed. The observed small application has a capacity ceiling
+  of ten and a completed rollout; 100% of Worker traffic serves this release.
+  The generated configuration passed the one-vCPU/three-GiB resource validator.
+- Authorized real-message proof shows initial post-deploy admission around eight
+  seconds and delivery around 25 seconds, compared with previous admission waits
+  of roughly 153–156 seconds. A warm follow-up delivered in roughly five seconds.
+  After ten minutes without a new message, a subsequent reply delivered in
+  roughly eight seconds on a different runner attempt. That attempt was admitted
+  shortly before message acceptance, so the trace does not yield a cold-admission
+  duration for this last message. The previous multi-minute admission stall did
+  not recur in either observed new attempt.
+
+## Outcome
+
+- Ready: the protected production rollout converged and real replies recovered.
+- Selected-account routing, the one-vCPU/three-GiB resource profile, disk, and
+  exact-attempt write fencing remain intact. The higher capacity ceiling admits
+  immutable replacements while the provider releases retired targets; it does
+  not prewarm ten runners.
+- Public PRs #3278 and #3289 and private PRs #135 and #136 are merged. Required
+  implementation reviews and exact-head checks passed. The final record-only
+  closure changes no runtime behavior and follows the docs-only review exemption.
+- These observations prove the tested recovery and subsequent new attempt, not
+  a latency guarantee for every future turn. No rollback was performed.
+Completed: 2026-09-11
