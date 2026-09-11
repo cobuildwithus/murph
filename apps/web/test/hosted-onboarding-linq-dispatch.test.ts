@@ -245,6 +245,7 @@ const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
 
 function expectHostedLinqPointerSignalAccepted(eventId = "evt_123", userId = "member_123"): void {
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    onSignalStarted: expect.any(Function),
     abortSignal: expect.any(AbortSignal),
     expectedUserId: userId,
     mailboxItemId: `mailbox_${eventId}`,
@@ -3665,6 +3666,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_thread_container_123",
       mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
@@ -3752,6 +3754,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     })).rejects.toThrow("Temporal unavailable");
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_direct_nudge_read_receipt",
@@ -5056,6 +5059,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(2, {
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_direct_group_transition",
@@ -6521,6 +6525,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(hostedLinqLine.updateMany).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_family",
       mailboxItemId: "mailbox_member_family_activation",
@@ -6649,6 +6654,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_access_restored",
