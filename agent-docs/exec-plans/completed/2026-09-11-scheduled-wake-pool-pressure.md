@@ -1,6 +1,6 @@
 # Shorten scheduled wake transactions and assess background staggering
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -92,7 +92,7 @@ Updated: 2026-09-11
 - Changelog not applicable: internal transaction lifetime hardening; no new
   member behavior, schedule, or measured production latency claim.
 - `pnpm docs:gardening` passed with zero issues.
-- ReviewGPT and final-head CI remain pending on the candidate PR.
+- ReviewGPT round 1 passed on the candidate; final-head CI is tracked on PR #3290.
 
 - Synthetic operation-timing capture: admission plus signal-row persistence
   used 15 Prisma operations normally and 22 with one root rotation (excluding
@@ -100,3 +100,17 @@ Updated: 2026-09-11
   consent revocation used four operations. These are measured fixture paths,
   not a wire-SQL maximum; unchanged Temporal signal resolution was mocked.
   The due sweep remains capped at 250 candidates and five concurrent workers.
+
+## Final review
+
+- ReviewGPT round 1: PASS on `500ec8443fa9786e5733362dbfd442b176810f8e`;
+  zero findings received, accepted, or rejected. Target, response marker,
+  response hash, and external model verification matched. The reviewer
+  inspected proof but did not independently execute the reported local tests.
+- Parent final review: no remediation required. Production source and test
+  behavior remain exactly as reviewed; the final commit only closes this plan.
+- Staggering investigation is complete. A global Schedule phase change remains
+  a separate private-owner rollout candidate; no timing mutation is included.
+- PR: https://github.com/cobuildwithus/murph/pull/3290. Required final-head CI
+  remains a merge gate. No merge, deployment, or production mutation performed.
+Completed: 2026-09-11
