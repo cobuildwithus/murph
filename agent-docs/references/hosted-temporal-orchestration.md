@@ -474,6 +474,25 @@ synthetic pre-patch replay fixture were removed. The workflow must keep the
 deprecatePatch-window histories have drained. Private replay and package
 coverage gates require that marker to remain present.
 
+## Checkpoint recheck suppression
+
+Web signals after a successful checkpoint with a workspace or retention wake.
+Intermediate checkpoints may suppress that signal only when a successful prior
+signal is acknowledged for the same scheduling facts, every persisted wake is
+future, and no mailbox progress changed. The existing workspace row holds a
+nullable `runtime_recheck_signaled_version` receipt. A callback records it only
+after Temporal accepts the signal and only if the exact checkpoint version still
+matches. The checkpoint CAS carries the receipt across equal wake timestamps,
+reasons, progress generation and complete redacted status; mailbox counter or
+consumption changes invalidate it in the same transaction. Missing receipts,
+legacy projections, due work and `idle_shutdown` retain rechecks. Signal or
+receipt failure leaves the next checkpoint eligible to retry. This receipt is
+operational acknowledgment, not scheduling authority, and never enters runtime
+responses or Temporal facts. It adds one bounded database write after an actual
+successful signal, no read and no extra round trip for a suppressed checkpoint.
+Apply the nullable-column migration before deploying Web; old Web ignores the
+receipt and its version movement conservatively invalidates suppression.
+
 ## Final Minimal Contract
 
 The per-user workflow reads source-less reconciliation facts from web:
