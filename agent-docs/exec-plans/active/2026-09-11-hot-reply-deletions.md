@@ -59,7 +59,9 @@ post-deploy measurement and is not claimed from synthetic tests.
   279 passed. New call-count regressions failed on the base implementation.
 - Web typecheck passed. Complexity diff passed; existing allowance-owner hotspots
   unchanged. Parent candidate review confirms no new authority or state owner.
-- Changelog, final ReviewGPT and exact-head CI pending.
+- Changelog archive tests: 10 passed. Release note reviewed under the content-only
+  presentation exception. Product UX: Ready.
+- Draft PR: #3316. Final ReviewGPT and exact-head CI pending.
 
 ## Composed hot-path audit
 
