@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import process from "node:process";
 
 import {
@@ -14,6 +15,8 @@ import {
   HOSTED_STRIPE_BILLING_LIVE_SCENARIO,
   partitionHostedStripeBillingLiveEnvironment,
 } from "./stripe-billing-live-config.ts";
+
+import { HOSTED_BROWSER_AUTH_SCENARIO, partitionHostedBrowserAuthEnvironment, removeHostedBrowserAuthEnvironment } from "./browser-auth-live-config.ts";
 
 const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
 const HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV =
@@ -86,6 +89,7 @@ export type HostedLocalE2eScenarioName =
   | "group-sleep-source-sharing"
   | "foreground-reply-priority"
   | "hosted-web-browser-smoke"
+  | "hosted-web-auth-journey"
   | "idle-checkpoint-deferred-progress"
   | "idle-checkpoint-runtime-handoff"
   | "imessage-member-action-timestamp"
@@ -151,6 +155,12 @@ export interface HostedLocalE2eScenario {
 }
 
 export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
+  {
+    dedicatedVitestProcess: true,
+    file: "apps/cloudflare/test/hosted-local-web-auth-journey-e2e.test.ts",
+    manualOnly: true,
+    name: "hosted-web-auth-journey",
+  },
   {
     file: "apps/cloudflare/test/hosted-local-hot-admission-latency-e2e.test.ts",
     manualOnly: true,
@@ -599,10 +609,15 @@ export async function runHostedLocalE2eSuite(
     environment: liveWearableEnvironment.genericEnv,
     selectedScenarioNames: scenarios.map((scenario) => scenario.name),
   });
+  const liveBrowserAuthEnvironment = partitionHostedBrowserAuthEnvironment({
+    environment: liveStripeEnvironment.genericEnvironment,
+    selectedScenarioNames: scenarios.map((scenario) => scenario.name),
+  });
+  removeHostedBrowserAuthEnvironment(process.env);
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
   const suiteEnv = buildHostedLocalE2eSuiteEnv({
-    env: liveStripeEnvironment.genericEnvironment,
+    env: liveBrowserAuthEnvironment.genericEnvironment,
     injectSkipRunnerBundleEnv,
   });
   let terminationSignal: NodeJS.Signals | null = null;
@@ -671,6 +686,9 @@ export async function runHostedLocalE2eSuite(
         });
       });
       await runAdmittedStep(async () => {
+        await prepareHostedBrowserAuthProductionWeb({ env: suiteEnv, scenarios });
+      });
+      await runAdmittedStep(async () => {
         await runHostedLocalVitest({
           assertWorkAdmission,
           env: suiteEnv,
@@ -678,6 +696,7 @@ export async function runHostedLocalE2eSuite(
           vitestEnvOverlay: {
             ...liveWearableEnvironment.vitestEnvOverlay,
             ...liveStripeEnvironment.scenarioEnvironment,
+            ...liveBrowserAuthEnvironment.scenarioEnvironment,
           },
         });
       });
@@ -761,6 +780,7 @@ async function prepareHostedLocalWebGeneratedArtifacts(input: {
   const sharesGeneratedArtifacts = input.scenarios.length > 1
     || input.scenarios.some((scenario) =>
       (scenario.vitestProcessTestNamePatterns?.length ?? 1) > 1
+      || scenario.name === HOSTED_BROWSER_AUTH_SCENARIO
     );
   if (!sharesGeneratedArtifacts) return;
 
@@ -787,6 +807,30 @@ async function prepareHostedLocalWebGeneratedArtifacts(input: {
     });
     input.env[HEALTH_COMMONS_GENERATED_PREPARED_ENV] = "1";
   }
+}
+
+async function prepareHostedBrowserAuthProductionWeb(input: {
+  env: NodeJS.ProcessEnv;
+  scenarios: readonly HostedLocalE2eScenario[];
+}): Promise<void> {
+  if (!input.scenarios.some((scenario) => scenario.name === HOSTED_BROWSER_AUTH_SCENARIO)) return;
+  if (input.env.NEXT_DIST_DIR_MODE !== "smoke") {
+    throw new Error("Browser auth requires an isolated production smoke build.");
+  }
+  await runForegroundCommand({
+    args: ["--dir", "apps/web", "typecheck:prepared"],
+    command: "pnpm", cwd: hostedLocalHarnessRepoRoot, env: input.env,
+    label: "Browser auth Web generated contracts and typecheck",
+  });
+  // Reuse the production compiler and the suite's exact unique dist suffix.
+  // Runtime secrets are unnecessary during compilation; only the public
+  // provider app id is compiled into the real client bundle.
+  await runForegroundCommand({
+    args: ["scripts/run-production-next-build.sh"],
+    command: "bash", cwd: path.join(hostedLocalHarnessRepoRoot, "apps/web"),
+    env: input.env,
+    label: "Browser auth production Web build",
+  });
 }
 
 async function runHostedLocalVitest(input: {

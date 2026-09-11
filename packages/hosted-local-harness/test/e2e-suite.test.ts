@@ -102,6 +102,45 @@ function emitCapturedSignal(
 }
 
 describe("hosted-local E2E suite preparation", () => {
+  const browserAuthEnv = {
+    MURPH_E2E_AUTH_PRIVY_APP_ID: "c".repeat(25),
+    MURPH_E2E_AUTH_PRIVY_APP_SECRET: "synthetic-secret",
+    MURPH_E2E_AUTH_PRIVY_VERIFICATION_KEY: "synthetic-public-key",
+    MURPH_E2E_AUTH_TEST_EMAIL: "browser@example.test",
+    MURPH_E2E_AUTH_TEST_OTP: "123456",
+  };
+
+  test("builds production Web with the same isolated suffix before admitting browser auth authority", async () => {
+    await runHostedLocalE2eSuite({ env: browserAuthEnv, prepareRunnerBundle: false, scenario: "hosted-web-auth-journey" });
+    const calls = runForegroundCommand.mock.calls.map(([call]) => call);
+    const buildIndex = calls.findIndex((call) => call.label === "Browser auth production Web build");
+    const vitestIndex = calls.findIndex((call) => call.args.includes("vitest"));
+    expect(buildIndex).toBeGreaterThan(0);
+    expect(vitestIndex).toBeGreaterThan(buildIndex);
+    expect(calls.some((call) => call.args.includes("prisma:generate"))).toBe(true);
+    expect(calls.some((call) => call.args.includes("health-commons:generate"))).toBe(true);
+    const builtEnv = calls[buildIndex].env;
+    const scenarioEnv = calls[vitestIndex].env;
+    expect(builtEnv?.NEXT_DIST_DIR_MODE).toBe("smoke");
+    expect(builtEnv?.NEXT_DIST_DIR_SUFFIX).toMatch(/^e2e-/u);
+    expect(scenarioEnv?.NEXT_DIST_DIR_SUFFIX).toBe(builtEnv?.NEXT_DIST_DIR_SUFFIX);
+    expect(builtEnv?.NEXT_PUBLIC_PRIVY_APP_ID).toBe(browserAuthEnv.MURPH_E2E_AUTH_PRIVY_APP_ID);
+    for (const key of Object.keys(browserAuthEnv)) {
+      for (const call of calls.slice(0, vitestIndex)) expect(call.env?.[key]).toBeUndefined();
+      expect(scenarioEnv?.[key]).toBe(browserAuthEnv[key as keyof typeof browserAuthEnv]);
+    }
+  });
+
+  test("does not launch browser auth after the production compiler fails", async () => {
+    runForegroundCommand.mockImplementation(async (input) => {
+      if (input.label === "Browser auth production Web build") throw new Error("production build failed");
+    });
+    await expect(runHostedLocalE2eSuite({
+      env: browserAuthEnv, prepareRunnerBundle: false, scenario: "hosted-web-auth-journey",
+    })).rejects.toThrow("production build failed");
+    expect(runForegroundCommand.mock.calls.some(([call]) => call.args.includes("vitest"))).toBe(false);
+  });
+
   test("prepares stale Worker imports once before every no-bundle scenario", async () => {
     const fixture = await fs.mkdtemp(path.join(tmpdir(), "hosted-local-workspace-artifacts-"));
     const packageDir = path.join(fixture, "packages", "hosted-execution");

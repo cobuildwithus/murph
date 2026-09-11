@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-09-05
+Last verified: 2026-09-10
 
 Read the delivery-path rules first, then only the changed owner's matrix row
 or runtime procedure. The detailed command descriptions below are reference
@@ -324,6 +324,66 @@ private Assistant Ask expiry, exact reviewed-text digest, same personal member,
 and current same-channel `direct-member` route, with expiry, revocation, text
 mismatch, and route drift all terminal and unable to fall back to the group.
 Exact-head CI owns the broad app and package suites.
+
+## Hosted Browser Authentication Proof
+
+Run the secret-free SDK contract first:
+
+```bash
+pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage \
+  apps/web/test/hosted-privy-sdk-contract.test.ts
+```
+
+With an isolated migrated loopback `murph_test_*` database, run
+`apps/web/test/hosted-privy-completion-postgres.test.ts` through the same command
+with `MURPH_TEST_POSTGRES_CONCURRENCY=1`. The real HTTP route composition owns
+fresh identity creation, encrypted storage, CSRF, consent and opaque session
+persistence/revocation. Its synthetic provider responses and local KMS do not
+prove an external provider connection or browser cookie enforcement.
+
+The separate live command is `pnpm hosted-local e2e hosted-web-auth-journey`.
+It uses the existing local stack and production Web build behind ephemeral
+loopback HTTPS at `https://localhost:3443`; that port must be free. Chromium
+accepts only the self-signed TLS trust exception, with initially empty storage.
+The journey uses actual login controls, provider verification, app completion,
+consent, a persisted Settings change, reload, logout and old-token denial.
+The fixture grants existing active entitlement to the dedicated provider
+principal but creates no session or consent. It does not cover purchase or
+new-member billing onboarding; the HTTP/PostgreSQL composition covers fresh
+member creation. The seeded rendering smoke remains a separate focused test.
+
+Provision a dedicated **development** Privy app in the protected GitHub
+Environment `hosted-browser-auth-sandbox`, restricted to main. Enable email
+login and identity tokens, allow `https://localhost:3443`, and configure a
+dashboard test email with a fixed six-digit code following
+[Privy's supported test-account recipe](https://docs.privy.io/recipes/using-test-accounts).
+Perform its first login once so the test user exists. The harness verifies
+the exact email/code against the real test-credentials API and checks the
+app verification key and linked user before seeding local entitlement.
+Configure these names; never copy production credentials into this lane:
+
+| Name | Environment storage | Consumer |
+| --- | --- | --- |
+| `MURPH_E2E_AUTH_PRIVY_APP_ID` | Variable | Public build identifier and provider preflight |
+| `MURPH_E2E_AUTH_PRIVY_APP_SECRET` | Secret | Preflight and Web auth process only |
+| `MURPH_E2E_AUTH_PRIVY_VERIFICATION_KEY` | Secret | Preflight and Web JWT verifier only |
+| `MURPH_E2E_AUTH_TEST_EMAIL` | Secret | Preflight, isolated fixture and browser driver |
+| `MURPH_E2E_AUTH_TEST_OTP` | Secret | Preflight and browser driver only |
+
+The workflow runs on main pushes, every six hours, and main-only manual
+dispatch. Fixed non-canceling concurrency serializes its test identity. It
+does not expose credentials to pull-request execution, installation or
+generic build/runner processes; missing inputs fail rather than skip.
+Chromium installation uses the shared `Install Playwright Chromium` step with
+its 14-minute ceiling. `scripts/install-playwright-chromium.test.ts` includes
+this workflow in its caller inventory and verifies that bound; subsequent
+tool qualification also runs without provider credentials.
+No screenshots, traces, storage state, provider payloads or raw browser errors
+are uploaded. Failure output is a fixed stage, never identity or credential
+content. Test OTPs exercise real Privy APIs and token issuance but do not prove
+email delivery. This lane covers the current Privy client and requires
+`HOSTED_BETTER_AUTH_ENABLED` to remain disabled until its client migration has
+a corresponding real-provider journey.
 
 ## Hosted Stripe Billing Verification
 

@@ -2754,3 +2754,5 @@ function isHostedComputerStaleStateConflictForTest(error: unknown): boolean {
     && record.httpStatus === 409
     && record.retryable === true;
 }
+
+export { readHostedBrowserAuthPrincipalForTest } from "./hosted-browser-auth-principal";

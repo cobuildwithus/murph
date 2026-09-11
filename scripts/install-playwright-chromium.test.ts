@@ -19,6 +19,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const scriptPath = path.join(repoRoot, "scripts", "install-playwright-chromium.sh");
 const workflowDirectory = path.join(repoRoot, ".github", "workflows");
 const WORKFLOWS_CALLING_SCRIPT = [
+  "hosted-browser-auth.yml",
   "hosted-stripe-billing.yml",
   "web-viewport-overflow.yml",
 ] as const;

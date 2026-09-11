@@ -1,0 +1,73 @@
+name: Hosted Browser Authentication
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '31 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The provider's dedicated test identity cannot own overlapping journeys.
+concurrency:
+  group: hosted-browser-auth-sandbox
+  cancel-in-progress: false
+
+jobs:
+  browser-auth:
+    name: Real browser authentication and persistence
+    environment: hosted-browser-auth-sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:17
+        env:
+          POSTGRES_DB: murph_test_browser_auth
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_test_browser_auth"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+        ports: ['5432:5432']
+    steps:
+      - name: Reject non-main or untrusted event
+        env:
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_EVENT: ${{ github.event_name }}
+        run: |
+          test "$SOURCE_REF" = refs/heads/main
+          case "$SOURCE_EVENT" in push|schedule|workflow_dispatch) ;; *) exit 1 ;; esac
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
+      - name: Qualify browser tools without provider authority
+        run: |
+          openssl version
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+          pnpm exec codex --version
+      - name: Prove the real browser journey on this source revision
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test_browser_auth
+          MURPH_E2E_AUTH_PRIVY_APP_ID: ${{ vars.MURPH_E2E_AUTH_PRIVY_APP_ID }}
+          MURPH_E2E_AUTH_PRIVY_APP_SECRET: ${{ secrets.MURPH_E2E_AUTH_PRIVY_APP_SECRET }}
+          MURPH_E2E_AUTH_PRIVY_VERIFICATION_KEY: ${{ secrets.MURPH_E2E_AUTH_PRIVY_VERIFICATION_KEY }}
+          MURPH_E2E_AUTH_TEST_EMAIL: ${{ secrets.MURPH_E2E_AUTH_TEST_EMAIL }}
+          MURPH_E2E_AUTH_TEST_OTP: ${{ secrets.MURPH_E2E_AUTH_TEST_OTP }}
+          MURPH_DEV_TEMPORAL: disabled
+          MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: '1'
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm hosted-local e2e hosted-web-auth-journey
+      # No browser artifacts: login screens, traces and provider payloads contain
+      # credentials or private identity. The driver emits fixed stages.
