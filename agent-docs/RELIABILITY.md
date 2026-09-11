@@ -104,9 +104,9 @@ Last verified: 2026-09-04
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
 - The Linq production canary runs from one staggered hourly schedule only after
-  the same exact Vercel production proof succeeds for the scheduled
-  protected-main revision. Manual dispatch remains available for recovery. One
-  fixed Photon identity starts a three-turn private iMessage conversation, and
+  the actual current Vercel alias passes exact deployment verification and
+  protected-main ancestry. Manual dispatch remains available for recovery. One
+  fixed Photon identity starts a five-turn private iMessage conversation, and
   every Murph reply must arrive in under twenty seconds. The canary member's
   existing assistant-model
   preference selects GPT-5.6 Luna for its runtime turns without changing the
@@ -114,23 +114,24 @@ Last verified: 2026-09-04
   latency owner: the Web reply-latency email monitor resolves the same configured
   identity through its canonical blind-index lookup and excludes its current
   member from both the initial health read and the pre-send recheck. The
-  workflow is non-canceling and serialized; a scheduled revision skips when the
-  production alias has not converged. Before the first send, a dedicated
+  workflow is non-canceling and serialized; it tests the actual deployed
+  revision even when main has advanced, then rechecks deployment identity. Before the first send, a dedicated
   fixed-target Web route clears only that identity's admission rows and fully
   pre-provider instant-reply claim, then invokes the canonical account-deletion owner.
   Completed delivery evidence is preserved, and any provider-entered or
   ambiguous claim blocks the reset. The route has no target input and accepts
   only its dedicated constant-time bearer secret. Provider, reset, target, and
   Vercel credentials are exposed only to their owning workflow steps, and the
-  journey emits counts and latency only.
+  journey emits counts and latency only. The final two turns save and read back
+  one fixed synthetic goal. A read-only observer requires the current checkpoint's
+  published replica and no pending conversation input, then checks canonical
+  goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
 - Protected native iOS and Android hosted E2E controllers run staggered every
-  six hours and admit paid work only when the current `main` SHA differs from
-  the latest completed successful scheduled outcome. A latest failure retries
-  at the next slot even when an older run passed the same SHA. Manual recovery
-  requires `refs/heads/main` and the exact current `main` SHA before protected
-  environment work; an explicit rerun of the same trusted controller attempt
-  bypasses the skip. Native source pins are committed with protected `main`, so
-  source rotation advances that checkpoint.
+  six hours and execute each admitted journey even when the same revision
+  previously passed. Provider behavior can change independently of source.
+  Manual recovery requires `refs/heads/main` and the exact current `main` SHA
+  before protected environment work. Native source pins are committed with
+  protected `main`, so source rotation advances that checkpoint.
   Fixed,
   non-canceling per-platform concurrency prevents overlap without admitting a
   waiter for every pull request or deployment event. The workflows are
