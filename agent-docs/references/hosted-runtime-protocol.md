@@ -131,9 +131,12 @@ provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 
 For admitted Linq and Telegram appends, Web starts its existing payloadless direct wake when
-its authorized Temporal signal request begins. Current member/participant access,
-exact mailbox ownership, and cancellation checks precede both requests. The hint
-uses the same validated callback whether checkpoint facts were cached or reread;
+its authorized Temporal signal request begins. The appending transaction proves
+member/participant access and workspace admission. Its known checkpoint skips
+post-commit database rediscovery; the signal still checks exact mailbox ownership
+and cancellation. Callers without append facts retain workspace admission.
+Current mailbox-fetch, new-session, and effect gates remain authoritative. The hint
+uses the same callback whether checkpoint facts were supplied or reread;
 provider and cache availability do not separately gate the wake. It
 overlaps acknowledgement, while webhook success still waits for Temporal. A
 failed acknowledgement keeps the provider retry path; durable mailbox input and
@@ -789,8 +792,10 @@ AI usage evaluation. Conversation batches still read current usage periods;
 denials are confirmed by the mutating allowance owner with a new member read.
 Group owner/participant authority and Family sponsorship keep their canonical
 readers. Read-only group allowance derives owner access from its supplied member
-state rather than reloading the same container. Locking and spend accounting are
-unchanged. The encrypted mailbox response and runtime contract are unchanged.
+state rather than reloading the same container. The read-only allowance owner
+uses ordinary reads without opening an interactive transaction: read-committed
+BEGIN/COMMIT added no shared snapshot or locks. Caller-owned report transactions
+remain intact. Denial confirmation, locking, and spend accounting are unchanged. The encrypted mailbox response and runtime contract are unchanged.
 
 ### Foreground Priority Rule
 
@@ -1795,12 +1800,11 @@ The relational latency phase records the final parsed direct result kind and,
 only for `runtime_processing_accepted`, its bounded action and runtime attempt
 id. Retry reasons and raw errors stay out of the trace; Cloudflare structured
 logs carry retry reasons under the direct orchestration attempt id.
-Linq first proves the committed known-checkpoint owner and
-canonical live active access; Assistant Ask first completes its normal
-server-bound append checks. Web always awaits the applicable Temporal
-`signalWithStart`; only after Temporal accepts that durable signal does Web
-start the direct ensure. An access failure or Temporal acceptance failure starts
-no direct wake. Linq instant start follows the same rule: enrollment returns the
+Linq reuses the appending transaction's admission and checks the committed
+known-checkpoint owner; its direct hint overlaps the Temporal request as described
+above. Assistant Ask first completes its normal server-bound append checks and
+awaits Temporal acceptance before its direct ensure. A signal failure preserves
+the existing provider retry path and never acknowledges the webhook as successful. Linq instant start follows the same rule: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Web sends no member-specific shell-prewarm request during
 enrollment, message routing, or typing. The retired `runtime/shell-prewarm`
