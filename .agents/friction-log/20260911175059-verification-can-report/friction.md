@@ -17,4 +17,6 @@ Run the diff classifier for scripts/build-test-runtime-prepared.mjs and compose 
 
 ## Context
 
+The newly registered cold fixture also retained a 35-second commit-timeout override that violates the current Web-control timeout relationship and fails container smoke before executing its assertion. Remove that obsolete override and use the existing runtime default.
+
 Found during the scheduler verification audit. The follow-up changes the existing selection, inventory, and verification owners and adds focused regression proof.
