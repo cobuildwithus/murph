@@ -179,6 +179,43 @@ provider payloads enter these new fields. Existing numeric exit code, saturated
 turn-local ordinal and finite family attribution are unchanged. Bare `rg` or
 `grep` exit 1 remains expected no-match; recovery remains family-level only.
 
+Shell completion details additionally carry optional `commandAttribution`:
+`recognized`, `missing_command`, `oversized_command`, `shell_syntax`,
+`unrecognized_executable` or `unrecognized_cli_path`. It explains the existing
+fallback instead of changing the family or failure predicate. `shell_syntax`
+means compound/unsupported shell syntax or malformed quoting, **not** which
+pipeline/subcommand failed. The existing 4,096-character lexical bound and
+single known-shell-wrapper rule still apply. `vaultCliCommand` is present only
+when literal leading command words match the existing runtime-state CLI timing
+catalog (including three-word paths). Quoted or option-first command paths
+remain unattributed; whitespace-split option values are never treated as argv.
+
+A recognized executable may also carry `vaultCliErrorAttribution`: `recognized`,
+`unknown_code`, `missing_output`, `oversized_output` or `unstructured_output`.
+This concerns the existing bounded JSON envelope, not arbitrary shell stderr.
+Optional `vaultCliErrorCode` and `vaultCliErrorStage` use the timing owner's exact
+code/stage vocabularies; each unknown scalar is omitted independently. A known
+coarse category can coexist with `unknown_code` when its code is outside that
+narrower catalog. No new provider-code catalog is introduced. The existing
+exercise codes distinguish `exercise_not_found` (missing item),
+`exercise_catalog_unavailable` (missing/unreadable artifacts), and
+`exercise_catalog_invalid` (invalid artifacts); validation remains invalid
+input. No source error, hint, tool result, RPC or canonical contract changes.
+
+For the next shell-failure aggregate, filter the existing
+`CODEX_COMMAND_EXIT_NONZERO` completion rows over one bounded deployment/time
+cohort. Group by the finite attribution reason first, then catalog-normalized
+`vaultCliCommand`, `vaultCliErrorAttribution`, `vaultCliErrorCode` and
+`vaultCliErrorStage`. This separates missing/compound/oversized commands from
+recognized CLI calls with missing, unstructured or unmapped error output, and
+separates input rejection, missing exercise items and missing artifacts without
+reading commands or outputs. Apply source-owned allowlists before grouping;
+map absent old fields to `missing_evidence`, never to success or `recognized`.
+These fields are optional metadata accepted by the existing issue parser and
+24-key sanitizer; older readers may ignore them. No issue schema bump or
+additional event is needed. Existing started/completed ordinal correlation,
+completion deduplication and search recovery remain unchanged.
+
 These are **classifications, not another call denominator**.
 `diagnosticRole=classification` marks dynamic-tool/branch/intake rows and
 `diagnosticRole=completion` marks generic failed-action rows. A failed dynamic

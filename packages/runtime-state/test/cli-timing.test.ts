@@ -477,3 +477,24 @@ test("optional normalization uses bounded indexed reads and never retains an unc
   assert.equal(countReads, 1);
   assert.equal(JSON.stringify(normalized).includes("PRIVATE_SENTINEL"), false);
 });
+
+test("exercise source codes are optional finite evidence; legacy and unknown-code reports retain counts", () => {
+  for (const code of ["exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid"] as const) {
+    const legacy = sample("exercise show");
+    legacy.commands[0]!.outcome = "error";
+    assert.deepEqual(normalizeCliTiming(legacy), legacy);
+    const report = structuredClone(legacy);
+    report.commands[0]!.failures = [{ code, stage: "unknown", count: 1 }];
+    assert.deepEqual(normalizeCliTiming(report), report);
+    // Exactly the mixed-version rule: an unknown/newer code never discards
+    // the command, outcome or count, and never admits its arbitrary string.
+    const future = { ...report, commands: [{ ...report.commands[0]!, failures: [
+      { code: `${code}_PRIVATE_SENTINEL`, stage: "unknown", count: 1 },
+    ] }] };
+    const normalized = normalizeCliTiming(future)!;
+    assert.equal(normalized.commands[0]!.outcome, "error");
+    assert.equal(normalized.commands[0]!.calls, 1);
+    assert.deepEqual(normalized.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1 }]);
+    assert.ok(!JSON.stringify(normalized).includes("PRIVATE_SENTINEL"));
+  }
+});
