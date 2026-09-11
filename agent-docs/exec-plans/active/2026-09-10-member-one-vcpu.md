@@ -92,7 +92,26 @@ Updated: 2026-09-10
 - The forward fix permits an exact observed image reference only in the
   namespace-only preservation path. New release admission remains digest-only;
   native before/after receipts, resource checks and routing-off ordering remain.
-  Live convergence is pending the focused correction and its review/CI gates.
+- The correction merged as PR #3216 after 100 focused tests, Cloudflare
+  typecheck, complexity checks and all required exact-head CI passed. Final
+  ReviewGPT round 1 passed with verified Pro metadata and a 366-second response
+  capture, including 27 independently executed checks. The first tooling
+  attempt was invalid because its archive was absent; the exact captured thread
+  was inspected before the successful same-round full-snapshot retry.
+- The protected full retry passed all predeployment gates and stopped before
+  Worker mutation: pinned Wrangler 4.90.0 rejects the bootstrap no-rollout flag.
+  An actual-CLI synthetic probe proves that omitting the flag can reconcile an
+  existing application when native fields differ, despite matching image and
+  resources. Preserve the migration-only boundary with native Wrangler 4.93.0
+  support, its matching Worker test tooling and the existing macOS compatibility
+  correction; add no deployment patch. Native convergence and cleanup remain
+  pending.
+- The native CLI regression and focused bootstrap/deployment tests pass (36
+  tests). The scoped lockfile installs with `--frozen-lockfile`; dependency
+  policy passes and lifecycle permissions are unchanged. The full dependency
+  audit reports 108 repository findings; after a narrow Miniflare Undici
+  override, none of its reported high/critical paths use the updated Cloudflare
+  toolchain. Worker-pool proof, final typecheck and exact-head gates remain.
 
 - Focused allocation, slot lifecycle, namespace, configuration, staging and
   deployment tests; Cloudflare typecheck and complexity diff.

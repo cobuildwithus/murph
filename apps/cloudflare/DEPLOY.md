@@ -51,8 +51,10 @@ Merge the public runtime and matching private environment mappings before the
 first protected full deployment. That deployment alone requires
 `CF_BOOTSTRAP_SMALL_RUNNER=true`: migration `v9` creates the SQLite namespace
 using a full Worker deploy with selection off and every existing application
-pinned to its live image, resources and capacity. Native before/after receipts
-must remain unchanged. Existing native image tags are preserved exactly in this
+pinned to its live image, resources and capacity. This step uses Wrangler
+4.93.0 or later and its native `--containers-rollout=none` support to prevent
+container application reconciliation during the namespace migration. Native
+before/after receipts must remain unchanged. Existing native image tags are preserved exactly in this
 namespace-only step; newly admitted release images still require immutable
 digests. This is the bounded namespace-bootstrap exception to
 the ordinary version-only release flow; no application image rollout belongs

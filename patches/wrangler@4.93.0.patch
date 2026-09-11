@@ -2,7 +2,7 @@ diff --git a/wrangler-dist/cli.js b/wrangler-dist/cli.js
 index 0ad38e88742bd1998704b9740c6e2c5b37a14ec4..23af74b24d2585cc39da521096008961d05e82c2 100644
 --- a/wrangler-dist/cli.js
 +++ b/wrangler-dist/cli.js
-@@ -45444,7 +45444,9 @@ function getEgressInterceptorImage() {
+@@ -45496,7 +45496,9 @@ function getEgressInterceptorImage() {
  }
  async function pullEgressInterceptorImage(dockerPath) {
    const image = getEgressInterceptorImage();
