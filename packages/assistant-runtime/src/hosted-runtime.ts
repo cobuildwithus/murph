@@ -109,6 +109,9 @@ import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import { createHostedWorkspaceSystemWork, HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./hosted-runtime/workspace-system-work.ts";
+import { createHostedClinicalEnrichmentController, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
+import { runOneHostedClinicalEnrichment } from "./hosted-runtime/clinical-enrichment.ts";
+import { makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
 import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
@@ -1640,6 +1643,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let systemWork: ReturnType<typeof createHostedWorkspaceSystemWork> | null = null;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
+  let clinicalEnrichmentController: HostedClinicalEnrichmentController | null = null;
   let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
   let startExactDetachedAssistantAsk: (() => Promise<void>) | null = null;
   let ordinaryConsentedAssistantAskSelected = false;
@@ -1650,6 +1654,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
   const pauseDetachedAssistantAskOnRuntimeAbort = () => {
     detachedAssistantAskController?.requestPauseAndRequeue();
+    clinicalEnrichmentController?.requestPauseAndRequeue();
   };
   runtimeAbortController.signal.addEventListener(
     "abort",
@@ -3027,6 +3032,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       runnerInput: baseRunnerInput,
       onCompleted(completion, notify) {
+        clinicalEnrichmentController?.kick();
         runtimeStateDirty = true;
         ensureIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
         if (completion.afterDurableCheckpoint) {
@@ -4748,8 +4754,44 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       userEnvKeys: Object.keys(runtime.userEnv),
       vaultRoot: restored.vaultRoot,
     });
+    const clinicalEnrichmentCodexRuntime = hostedCodexRuntime;
+    clinicalEnrichmentController = createHostedClinicalEnrichmentController({
+      runOne: (abortSignal, onExtractionStarted) => runOneHostedClinicalEnrichment({
+        abortSignal,
+        onExtractionStarted,
+        codexHome: clinicalEnrichmentCodexRuntime.codexHome,
+        env: clinicalEnrichmentCodexRuntime.runtimeEnv,
+        memberId: input.request.userId,
+        model: clinicalEnrichmentCodexRuntime.runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+        modelProvider: clinicalEnrichmentCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+        vaultRoot: restored.vaultRoot,
+        userEnvKeys: Object.keys(runtime.userEnv),
+        usageRecordPort: runtime.platform.usageRecordPort ?? null,
+        deferUsageUntilAfterDurableCheckpoint(effect) {
+          pendingDurableCheckpointEffects.push(effect);
+        },
+        resolveProviderAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
+        async onWorkUpdated(jobId, nextAttemptAt) {
+          const job = { vaultRoot: restored.vaultRoot, jobId };
+          if (nextAttemptAt) await setHostedClinicalEnrichmentWakeNextAttempt({ ...job, nextAttemptAt });
+          else await makeHostedClinicalEnrichmentWakeDue(job);
+          workspaceSystemWork.kick();
+        },
+        onStateMutation() {
+          runtimeStateDirty = true;
+          markIdleCheckpointTimerAfterDirtyWork();
+          options.runtimeWakeSignal?.notify();
+        },
+      }),
+      onError(error) {
+        emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
+      },
+    });
     pauseDetachedAssistantAskBeforeWorkspaceBoundary = async () => {
-      await detachedAssistantAskController?.pauseAndRequeue();
+      await Promise.all([
+        detachedAssistantAskController?.pauseAndRequeue(),
+        clinicalEnrichmentController?.pauseAndRequeue(),
+      ]);
     };
     resumeDetachedAssistantAskAfterWorkspaceBoundary = () => {
       if (
@@ -4757,11 +4799,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         && options.shutdownSignal?.aborted !== true
       ) {
         detachedAssistantAskController?.resume();
+        clinicalEnrichmentController?.resume();
       }
     };
     closeDetachedAssistantAskBeforeWorkspaceRelease = async () => {
-      await detachedAssistantAskController?.closeAndRequeue();
+      await Promise.all([
+        detachedAssistantAskController?.closeAndRequeue(),
+        clinicalEnrichmentController?.closeAndRequeue(),
+      ]);
     };
+    clinicalEnrichmentController.kick();
     if (
       ordinaryConsentedAssistantAskSelected
       && selectedSystemMailboxOwnerItem !== null
@@ -6758,7 +6805,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const deferIdleCheckpointForBackgroundWork = (): boolean => {
         if (options.shutdownSignal?.aborted) return false;
-        const diagnosticDeadline = detachedAssistantAskController?.activeDiagnosticDeadline() ?? null;
+        const diagnosticDeadline = resolveHostedBackgroundReadCheckpointDeadline({
+          diagnosticDeadline: detachedAssistantAskController?.activeDiagnosticDeadline() ?? null,
+          clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
+          canonicalReceiptCount: pendingCanonicalReceiptCount,
+          durableEffectCount: pendingDurableCheckpointEffects.length + readyDurableCheckpointEffects.length,
+          durableFollowUpPending: durableCheckpointFollowUpPending,
+        });
         if (
           !runtimeOwnerHandoffRequested
           && !runtimeAbortController.signal.aborted

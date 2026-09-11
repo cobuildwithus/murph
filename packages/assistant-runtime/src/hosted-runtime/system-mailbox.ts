@@ -506,7 +506,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   }
 
   try {
-    if (shouldPreemptHostedDeviceSyncSystemMailboxItem(input, prepared)) {
+    if (shouldPreemptHostedBackgroundSystemMailboxItem(input, prepared)) {
       return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
         prepared,
         vaultRoot: input.vaultRoot,
@@ -524,7 +524,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       vaultRoot: input.vaultRoot,
     });
     if (
-      prepared.routeAction === "run-device-sync-wake"
+      isHostedResumableBackgroundSystemAction(prepared.routeAction)
       && metrics.backgroundMaintenanceYielded === true
       && metrics.postCheckpointRecord == null
       && metrics.nextWakeAt !== null
@@ -742,11 +742,20 @@ function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
     : null;
 }
 
-function shouldPreemptHostedDeviceSyncSystemMailboxItem(
+const HOSTED_RESUMABLE_BACKGROUND_SYSTEM_ACTIONS: ReadonlySet<HostedSystemMailboxRouteAction> = new Set([
+  "run-device-sync-wake",
+  "apply-clinical-enrichment",
+]);
+
+function isHostedResumableBackgroundSystemAction(action: HostedSystemMailboxRouteAction): boolean {
+  return HOSTED_RESUMABLE_BACKGROUND_SYSTEM_ACTIONS.has(action);
+}
+
+function shouldPreemptHostedBackgroundSystemMailboxItem(
   input: { shouldYieldBackgroundMaintenance?: (() => boolean) | null },
   item: HostedSystemMailboxPendingItem,
 ): boolean {
-  return item.routeAction === "run-device-sync-wake"
+  return isHostedResumableBackgroundSystemAction(item.routeAction)
     && input.shouldYieldBackgroundMaintenance?.() === true;
 }
 
@@ -1532,6 +1541,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "run-assistant-ask"
     || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"
+    || item.route.action === "apply-clinical-enrichment"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "run-environment-interview"
     || item.route.action === "run-environment-voice"
