@@ -126,7 +126,9 @@ export function buildHostedWranglerDeployConfig(
       }),
       buildRunnerContainerConfig({
         className: "SmallRunnerContainer",
-        maxInstances: 1,
+        // Immutable replacement targets need admission headroom while the
+        // provider releases previous capacity. This is a ceiling, not prewarm.
+        maxInstances: 10,
         rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
     ],

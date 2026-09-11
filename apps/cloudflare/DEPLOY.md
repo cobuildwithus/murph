@@ -34,10 +34,17 @@ to `NextRunnerContainer` when the live release selects that namespace.
 
 ### Selected-account size experiment
 
-`SmallRunnerContainer` reserves one additional slot outside the regular fleet
-budget: 1 vCPU, 3,072 MiB memory and 6,000 MB disk. It uses the serving runner
-image, release identity, egress policy and member lifecycle. Include this slot
-in account quota accounting. It never supplies shared standby inventory.
+`SmallRunnerContainer` has a ten-instance ceiling outside the regular fleet
+budget; each instance has 1 vCPU, 3,072 MiB memory and 6,000 MB disk. The ceiling
+leaves room for immutable replacement targets while the provider releases
+previous capacity. It does not create or prewarm ten instances. The exact-member
+write fence remains the execution owner. A one-instance application ceiling
+must not be used as a substitute for that fence.
+
+It uses the serving runner image, release identity, egress policy and member
+lifecycle. Include all ten slots in account quota accounting; the protected
+full deploy checks the desired budget before increasing existing small capacity.
+It never supplies shared standby inventory.
 
 The protected Worker secret `HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256` holds
 the lowercase SHA-256 of the selected member ID. Keep both the ID and digest
