@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedLinqInboundEvent,
+  HOSTED_LOCAL_LINQ_API_TOKEN,
   startHostedLocalLinqStub,
   type HostedLocalLinqWaitScenario,
 } from "./hosted-local-linq-support.js";
@@ -14,6 +15,7 @@ const passiveWaitScenario = {
   buildFailureMessage: async (_userId: string, summaryLines: readonly string[]) =>
     summaryLines.join("\n"),
 } satisfies HostedLocalLinqWaitScenario;
+const providerHeaders = { authorization: `Bearer ${HOSTED_LOCAL_LINQ_API_TOKEN}` };
 
 describe("hosted local Linq provider stub", () => {
   it("serves canonical direct-chat summaries through its shared runtime URL", async () => {
@@ -21,7 +23,7 @@ describe("hosted local Linq provider stub", () => {
 
     try {
       expect(new URL(stub.runnerBaseUrl).hostname).toBe("host.docker.internal");
-      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`);
+      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`, { headers: providerHeaders });
 
       expect(response.status).toBe(200);
       expect(Number.isSafeInteger(stub.observedRequests[0]?.observedAtEpochMs)).toBe(
@@ -60,7 +62,7 @@ describe("hosted local Linq provider stub", () => {
     });
 
     try {
-      const response = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const response = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
@@ -102,7 +104,7 @@ describe("hosted local Linq provider stub", () => {
           size_bytes: 128,
         }),
         headers: {
-          authorization: "Bearer hosted-local",
+          ...providerHeaders,
           "content-type": "application/json",
         },
         method: "POST",
@@ -145,7 +147,7 @@ describe("hosted local Linq provider stub", () => {
           },
         }),
         headers: {
-          authorization: "Bearer hosted-local",
+          ...providerHeaders,
           "content-type": "application/json",
         },
         method: "POST",
@@ -307,14 +309,14 @@ describe("hosted local Linq provider stub", () => {
 
     try {
       stub.setChatIsGroup("chat_group", true);
-      const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
       await expect(groupResponse.json()).resolves.toMatchObject({
         id: "chat_group",
         is_group: true,
       });
 
       stub.setChatIsGroup("chat_group", false);
-      const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
       await expect(directResponse.json()).resolves.toMatchObject({
         id: "chat_group",
         is_group: false,
@@ -380,6 +382,7 @@ async function postLinqStubMessage(input: {
       },
     }),
     headers: {
+      ...providerHeaders,
       "content-type": "application/json",
     },
     method: "POST",
