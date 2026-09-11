@@ -16,6 +16,10 @@ uses.
 - Managed inference remains the default.
 - A member may save one custom inference connection in authenticated Settings.
 - Saving a connection does not select it automatically.
+- Inference settings changes save to Postgres without waking a runner.
+  Normal mailbox fetches carry the selected custom revision (or null for
+  managed inference). A provider or revision mismatch uses the existing
+  invocation handoff before admitting the next turn.
 - Selecting **Your endpoint** affects the next bounded provider turn. A turn
   already admitted under another provider may finish under that provider.
 - Updating or removing the saved connection first returns the member to managed

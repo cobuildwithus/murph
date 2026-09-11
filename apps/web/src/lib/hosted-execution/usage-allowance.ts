@@ -1553,80 +1553,80 @@ export async function readHostedAiUsageGate(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
-  return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    const memberState = input.memberState ?? await tx.hostedMember.findUnique({
-      where: {
-        id: input.memberId,
-      },
-      select: hostedAiUsageMemberSelect,
-    });
+  // A read-committed wrapper adds no shared snapshot or lock to these reads.
+  // Caller-owned transactions remain intact; denial confirmation owns writes.
+  const memberState = input.memberState ?? await prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: hostedAiUsageMemberSelect,
+  });
 
-    if (!memberState) {
-      throw new TypeError("Hosted AI usage allowance member does not exist.");
-    }
-    const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
+  if (!memberState) {
+    throw new TypeError("Hosted AI usage allowance member does not exist.");
+  }
+  const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
-    const allowanceAccess = memberState.suspendedAt === null
-      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-          billingRef: memberState.billingRef,
-          billingStatus: memberState.billingStatus,
-          memberId: input.memberId,
-          tx,
-        })
-      : {
-          billingRef: memberState.billingRef,
-          familyAccessActive: false,
-        };
-    const allowanceBillingRef = allowanceAccess.billingRef;
-    const familyAccessActive = allowanceAccess.familyAccessActive;
-    const threadContainerAccessActive = memberState.threadContainer
-      ? await hasActiveHostedThreadContainerAccessWithParticipants({
-          container: memberState,
-          containerMemberId: input.memberId,
-          now,
-          owner: memberState.threadContainer.owner,
-          prisma: tx,
-        })
-      : null;
-
-    // Thread-container members are synthetic (`not_started` own billing):
-    // their access is decided by the container branch of the allowance-period
-    // resolver below. Only non-container members are denied on their own
-    // billing here; suspension always fails closed.
-    if (
-      memberState.suspendedAt !== null ||
-      (
-        !memberState.threadContainer &&
-        memberState.billingStatus !== HostedBillingStatus.active &&
-        !familyAccessActive
-      )
-    ) {
-      return resolveHostedAiUsageInactiveGateDecision({
-        at: now,
-        billingRef: allowanceBillingRef,
+  const allowanceAccess = memberState.suspendedAt === null
+    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+        billingRef: memberState.billingRef,
         billingStatus: memberState.billingStatus,
         memberId: input.memberId,
-        suspendedAt: memberState.suspendedAt,
-        threadContainer: memberState.threadContainer,
-        threadContainerAccessActive,
-        ...usageCreditProjection,
-      });
-    }
+        tx: prisma,
+      })
+    : {
+        billingRef: memberState.billingRef,
+        familyAccessActive: false,
+      };
+  const allowanceBillingRef = allowanceAccess.billingRef;
+  const familyAccessActive = allowanceAccess.familyAccessActive;
+  const threadContainerAccessActive = memberState.threadContainer
+    ? await hasActiveHostedThreadContainerAccessWithParticipants({
+        container: memberState,
+        containerMemberId: input.memberId,
+        now,
+        owner: memberState.threadContainer.owner,
+        prisma,
+      })
+    : null;
 
-    const period = await readHostedAiUsageAllowancePeriodTx({
+  // Thread-container members are synthetic (`not_started` own billing):
+  // their access is decided by the container branch of the allowance-period
+  // resolver below. Only non-container members are denied on their own
+  // billing here; suspension always fails closed.
+  if (
+    memberState.suspendedAt !== null ||
+    (
+      !memberState.threadContainer &&
+      memberState.billingStatus !== HostedBillingStatus.active &&
+      !familyAccessActive
+    )
+  ) {
+    return resolveHostedAiUsageInactiveGateDecision({
       at: now,
       billingRef: allowanceBillingRef,
+      billingStatus: memberState.billingStatus,
       memberId: input.memberId,
+      suspendedAt: memberState.suspendedAt,
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
-      tx,
       ...usageCreditProjection,
     });
+  }
 
-    return buildHostedAiUsageGateDecision({
-      memberId: input.memberId,
-      period,
-    });
+  const period = await readHostedAiUsageAllowancePeriodTx({
+    at: now,
+    billingRef: allowanceBillingRef,
+    memberId: input.memberId,
+    threadContainer: memberState.threadContainer,
+    threadContainerAccessActive,
+    tx: prisma,
+    ...usageCreditProjection,
+  });
+
+  return buildHostedAiUsageGateDecision({
+    memberId: input.memberId,
+    period,
   });
 }
 

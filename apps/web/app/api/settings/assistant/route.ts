@@ -10,9 +10,6 @@ import {
   mapHostedInferenceConnectionError,
 } from "@/src/lib/hosted-inference/route-helpers";
 import {
-  scheduleHostedInferenceRuntimeWake,
-} from "@/src/lib/hosted-inference/runtime-wake";
-import {
   requireActiveHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import {
@@ -79,9 +76,6 @@ export const POST = withJsonError(async (request: Request) => {
       selected,
     });
     const updated = current?.selected !== connection.selected;
-    if (updated) {
-      scheduleHostedInferenceRuntimeWake(auth.member.id);
-    }
     return jsonOk({
       mode: connection.selected ? "custom" : "managed",
       updated,

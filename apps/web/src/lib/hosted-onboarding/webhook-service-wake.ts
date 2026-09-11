@@ -101,8 +101,8 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         expectedUserId: userId,
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,
-        // The signal owner validates the durable checkpoint and active access
-        // before this callback, whether the checkpoint was cached or reread.
+        // Committed planner facts already prove admission; a reread checkpoint
+        // uses the signal owner's workspace admission before this callback.
         onSignalStarted: () => {
           directEnsureWake = startHostedDirectRuntimeWakeBestEffort({
             onTiming: async (timing) => {

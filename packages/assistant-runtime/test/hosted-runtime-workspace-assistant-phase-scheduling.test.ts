@@ -1432,7 +1432,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("keeps browser-vault refresh control work behind fresh conversation input", async () => {
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null).mockResolvedValueOnce({
       item: createBrowserVaultRefreshSystemMailboxItem(),
       itemId: "system_mailbox_item_browser_vault_refresh",
       metrics: {
@@ -1447,7 +1447,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(result).not.toHaveProperty("browserVaultReplicaRefreshRequested");
     expectAssistantLaneCallWithoutDeviceSyncOptions({
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
