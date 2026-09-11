@@ -3,13 +3,21 @@ import {
 } from "@murphai/clinical-records/retrieval-limits";
 
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
-// A JSON string can expand one UTF-16 code unit to six ASCII bytes (`\uXXXX`).
-// Keep the transport envelope broad enough for every body accepted here so
-// assistant-runtime remains the single owner of exact FHIR and raw-byte limits.
-export const HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES =
-  (6 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) + (64 * 1024);
 export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;
+export const HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+export const HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS = 4_096;
+export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS = 2_000;
+// JSON may encode each UTF-16 code unit as six ASCII bytes. Descriptor ids,
+// hashes and codes are restricted ASCII; 1 KiB covers their fields and syntax.
+export const HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES =
+  (6 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS) + (64 * 1024)
+  + HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS
+    * (6 * HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS + 1_024);
+export const HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES =
+  Math.ceil(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES / 3) * 4 + 64 * 1024;
+export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH =
+  "/api/internal/clinical-records/runtime/fetch-document";
 export const HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS = 2_048;
 export const HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS = 120;
 export const HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN = /^[A-Za-z0-9._-]+$/u;

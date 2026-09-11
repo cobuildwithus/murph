@@ -351,6 +351,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     name: "linq-scheduled-reminder",
     dedicatedVitestProcess: true,
+    vitestProcessTestNamePatterns: [
+      "^hosted local Linq scheduled reminder (e2e preserves the scheduled image reminder|timing helpers)",
+      "^hosted local Linq scheduled reminder e2e delivers a due reminder",
+      "^hosted local Linq scheduled reminder e2e delivers a scheduled nutrition card",
+    ],
   },
   {
     dedicatedVitestProcess: true,
