@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedRunnerContainerEnv } from "../../src/hosted-env-policy.js";
+import { HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../../src/runner-injected-credential.js";
+
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 import { resolveHostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/config";
 
@@ -87,7 +90,7 @@ vi.mock("./hosted-local-wake.js", () => ({
 import {
   assertHostedRunNoProviderEgressAuthFailures,
   buildHostedLocalRuntimeLogDatabaseNameForTest,
-  buildHostedLocalFullStackWebProcessEnvOverrides,
+  buildHostedLocalFullStackHostProcessEnvOverrides,
   cleanupActiveHostedLocalFullStackScenarioSetups,
   shouldReuseExplicitHostedLocalScenarioDatabaseUrl,
 } from "./hosted-local-full-stack-scenario.js";
@@ -99,9 +102,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("hosted local full-stack web process environment", () => {
-  it("gives the host web process loopback access to the shared Linq stub", () => {
-    expect(buildHostedLocalFullStackWebProcessEnvOverrides({
+describe("hosted local full-stack host process environment", () => {
+  it("gives host processes loopback access to the shared Linq stub", () => {
+    expect(buildHostedLocalFullStackHostProcessEnvOverrides({
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/api/partner/v3",
     })).toEqual({
       LINQ_API_BASE_URL: "http://127.0.0.1:4011/api/partner/v3",
@@ -109,13 +112,13 @@ describe("hosted local full-stack web process environment", () => {
   });
 
   it("does not replace a non-stub Linq origin", () => {
-    expect(buildHostedLocalFullStackWebProcessEnvOverrides({
+    expect(buildHostedLocalFullStackHostProcessEnvOverrides({
       LINQ_API_BASE_URL: "https://api.linqapp.com/api/partner/v3",
     })).toEqual({});
   });
 
   it("passes the dedicated runtime-log database to the web process", () => {
-    expect(buildHostedLocalFullStackWebProcessEnvOverrides({
+    expect(buildHostedLocalFullStackHostProcessEnvOverrides({
       HOSTED_RUNTIME_LOG_DATABASE_URL:
         "postgresql://127.0.0.1:5432/murph_e2e_runtime_logs",
     })).toEqual({
@@ -185,6 +188,34 @@ it("derives and authoritatively injects a stable runtime-log database for explic
         }),
       }),
     );
+  } finally {
+    await scenario.stop();
+  }
+});
+
+it.each([
+  ["http://host.docker.internal:4011/api/partner/v3", "http://127.0.0.1:4011/api/partner/v3"],
+  ["https://api.linqapp.com/api/partner/v3", "https://api.linqapp.com/api/partner/v3"],
+])("projects the host Linq upstream independently of container authority (%s)", async (sourceUrl, hostUrl) => {
+  mocks.startHostedLocalDevHarness.mockResolvedValue(createScenarioHarness());
+  const scenario = await startScenario({
+    additionalEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      LINQ_API_BASE_URL: sourceUrl,
+      LINQ_API_TOKEN: "synthetic-worker-linq-token",
+    },
+    requiredRunnerEnvProfile: "linq",
+    webProcessEnvOverrides: { LINQ_API_BASE_URL: "http://127.0.0.1:4012" },
+  });
+  try {
+    const input = mocks.startHostedLocalDevHarness.mock.calls.at(-1)?.[0];
+    expect(input.env.LINQ_API_BASE_URL).toBe(hostUrl);
+    expect(input.env.LINQ_API_TOKEN).toBe("synthetic-worker-linq-token");
+    expect(input.webProcessEnvOverrides.LINQ_API_BASE_URL).toBe("http://127.0.0.1:4012");
+    expect(buildHostedRunnerContainerEnv(input.env)).toMatchObject({
+      LINQ_API_BASE_URL: "https://api.linqapp.com/api/partner/v3",
+      LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+    });
   } finally {
     await scenario.stop();
   }
@@ -422,10 +453,14 @@ it("keeps Wrangler inspector traffic out of streamed hosted E2E logs", async () 
   }
 });
 
-it("retries startup with fresh port reservations after an address-in-use race", async () => {
+it.each([
+  "Address already in use (0.0.0.0:4300).",
+  "cloudflare dev process exited before the hosted local stack became healthy. "
+    + "Address already in use was reported by the exited process.",
+])("retries startup with fresh port reservations after an address-in-use race (%s)", async (message) => {
   const harness = createScenarioHarness();
   mocks.startHostedLocalDevHarness
-    .mockRejectedValueOnce(new Error("Address already in use (0.0.0.0:4300)."))
+    .mockRejectedValueOnce(new Error(message))
     .mockResolvedValueOnce(harness);
 
   const scenario = await startScenario();
@@ -436,6 +471,23 @@ it("retries startup with fresh port reservations after an address-in-use race", 
     expect(mocks.startHostedLocalOidcFixture).toHaveBeenCalledTimes(2);
   } finally {
     await scenario.stop();
+  }
+});
+
+it("stops after three attempts when the child keeps reporting a port collision", async () => {
+  const error = new Error(
+    "cloudflare dev process exited before the hosted local stack became healthy. "
+    + "Address already in use was reported by the exited process.",
+  );
+  mocks.startHostedLocalDevHarness.mockRejectedValue(error);
+
+  await expect(startScenario()).rejects.toBe(error);
+  expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledTimes(3);
+  expect(mocks.reserveLocalTcpPort).toHaveBeenCalledTimes(6);
+  expect(mocks.reserveLocalTemporalTcpPort).toHaveBeenCalledTimes(3);
+  for (const result of mocks.startHostedLocalOidcFixture.mock.results) {
+    const fixture = await result.value;
+    expect(fixture.stop).toHaveBeenCalledOnce();
   }
 });
 
@@ -630,6 +682,7 @@ function createScenarioHarness(input: {
 async function startScenario(input: {
   additionalEnv?: NodeJS.ProcessEnv;
   faultInjection?: boolean;
+  requiredRunnerEnvProfile?: string;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
 } = {}) {
   const { startHostedLocalFullStackScenario } = await import(
@@ -642,7 +695,7 @@ async function startScenario(input: {
     faultInjection: input.faultInjection,
     localDatabaseUrl: "postgresql://127.0.0.1:5432/murph_test",
     persistDirPrefix: "murph-hosted-local-oracle-test-",
-    requiredRunnerEnvProfile: "default",
+    requiredRunnerEnvProfile: input.requiredRunnerEnvProfile ?? "default",
     reuseLocalDatabase: true,
     scenarioLabel: "Hosted local passive oracle helper test",
     webProcessEnvOverrides: input.webProcessEnvOverrides,

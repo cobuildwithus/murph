@@ -6,7 +6,7 @@ import {
   wrapHostedBrowserSessionKey,
   type HostedUserRecipientPublicKeyJwk,
 } from "@murphai/runtime-state";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authority: vi.fn(), control: vi.fn(), memberId: vi.fn(), pending: vi.fn(), session: vi.fn(), workspace: vi.fn(),
@@ -33,17 +33,12 @@ const notReady = { ready: false, totalGoalCount: 0, matchingGoalCount: 0, matchi
 
 describe("production canary canonical outcome observer", () => {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(generatedAt));
     vi.clearAllMocks();
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt));
     mocks.memberId.mockResolvedValue(memberId);
     mocks.authority.mockResolvedValue(undefined);
     mocks.pending.mockResolvedValue(null);
     mocks.control.mockReturnValue({ createBrowserVaultSession: mocks.session });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it.each([
@@ -87,9 +82,9 @@ describe("production canary canonical outcome observer", () => {
     expect(mocks.session).not.toHaveBeenCalled();
   });
 
-  it("refuses an expired replica even when it contains the expected goal", async () => {
+  it("refuses a replica older than 24 hours even when its source is current", async () => {
     await installEncryptedReplica([goal()]);
-    vi.setSystemTime(Date.parse(generatedAt) + 24 * 60 * 60 * 1_000 + 1);
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt) + 24 * 60 * 60 * 1_000 + 1);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
     expect(mocks.session).not.toHaveBeenCalled();
   });
