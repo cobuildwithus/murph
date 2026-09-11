@@ -888,7 +888,7 @@ describe("runtime invocation transport failure fence handling", () => {
     expect(harness.ownerReleaseCallCount()).toBe(1);
   });
 
-  it("keeps a recovered future mailbox retry on its authoritative timer", async () => {
+  it("releases the recovered owner while preserving its future mailbox retry", async () => {
     const futureRetryAt = "2026-06-11T00:00:15.000Z";
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async () => ({
@@ -928,7 +928,7 @@ describe("runtime invocation transport failure fence handling", () => {
       status: "idle",
     });
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
-    expect(harness.ownerReleaseCallCount()).toBe(0);
+    expect(harness.ownerReleaseCallCount()).toBe(1);
   });
 });
 

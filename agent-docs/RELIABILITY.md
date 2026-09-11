@@ -480,10 +480,13 @@ Last verified: 2026-09-04
   database-only transaction, and strict mailbox payload-conflict checks remain
   unchanged. Each serial candidate adds one exact source-row lock and at most
   one unique mailbox read, with no new external calls or pooled concurrency.
-- Exact Cloudflare runtime completion sends `runtime_owner_released` only when
-  Web observes actionable work. Its opaque runtime-attempt pointer may clear the
-  accepted-processing horizon only for that same owner; stale callbacks cannot
-  release a newer owner. The signal creates no work and normal reconciliation
+- Exact Cloudflare runtime completion makes the existing bounded owner-release
+  callback after clearing the matching fence, including when a mailbox retry
+  remains in the future. Without an explicit immediate-recheck edge, Web sends
+  `runtime_owner_released` only when it observes actionable work; a live system
+  item beyond handled-through still qualifies. Its opaque runtime-attempt pointer
+  may clear the accepted-processing horizon only for that same owner; stale
+  callbacks cannot release a newer owner. The signal creates no work and normal reconciliation
   facts still choose the processing mode. Callback or signal failure retains
   the existing durable owner horizon.
 - A completed hosted runtime does not depend on the originating
@@ -514,9 +517,12 @@ Last verified: 2026-09-04
   runtime checkpoints the corrected projections before releasing that pass.
   This projection-only checkpoint re-reads every default-work source, preserves
   handled-through and the progress generation, and therefore cannot hide
-  genuinely due default work or claim system progress. This reuses the workspace
-  CAS and Temporal timer owners; it adds no queue, scheduler, per-member state
-  table, or second wake authority.
+  genuinely due default work or claim system progress. A no-progress phase that
+  requests only this correction preserves an active checkpoint quiet window and
+  does not start another 180-second window after the preceding checkpoint has
+  completed. Progressing foreground work still restarts the ordinary floor.
+  This reuses the workspace CAS and Temporal timer owners; it adds no queue,
+  scheduler, per-member state table, or second wake authority.
 - A hosted-group projection grant that needs its first private projection and
   one generation-stable `runtime.maintenance-requested` control row commit in
   the same Web transaction. An append failure therefore rolls back the grant
