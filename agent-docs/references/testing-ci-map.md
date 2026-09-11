@@ -623,6 +623,12 @@ silently replace the existing isolated provider-key mode. Live scenarios print
 only synthetic reply evidence for human UX review; routine CI keeps the live
 gate unset and makes no paid request.
 
+The deterministic canonical journey fixture contract invokes the shipped CLI.
+Host Support prepares built runtime artifacts before its `cli` and
+`assistant-engine` package coverage shards. Tag release uses the root
+`test:packages:coverage` entrypoint, which already prepares those artifacts
+before every shard.
+
 The separate `Assistant Real Model` workflow runs three bounded canonical
 journeys on protected `main` only, using a dedicated sandbox Environment key and
 fixed `gpt-5.6-terra` with the production Responses websocket-enabled setting.
