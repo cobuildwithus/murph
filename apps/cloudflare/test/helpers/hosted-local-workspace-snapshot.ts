@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { createHostedWebTestkitDeps } from "#hosted-web-testing";
+
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -29,6 +31,7 @@ import type { HostedLocalDevHarness } from "./hosted-local-dev-harness.js";
 
 /** Seed bytes before the caller publishes its Web checkpoint, without starting a runtime lease. */
 export async function uploadHostedLocalWorkspaceSnapshot(input: {
+  environment: NodeJS.ProcessEnv;
   harness: Pick<HostedLocalDevHarness, "request" | "workerRuntimeEnv">;
   operatorHomeRoot: string;
   userId: string;
@@ -44,7 +47,17 @@ export async function uploadHostedLocalWorkspaceSnapshot(input: {
   }
   const environment = readHostedExecutionEnvironment(source);
   assertLoopbackUrl(environment.hostedWebBaseUrl);
-  assertLoopbackUrl(r2Environment.controlEndpoint);
+  // The runtime crypto route requires a workspace, but the checkpoint must
+  // remain unpublished until its encrypted bytes and locator exist.
+  const deps = await createHostedWebTestkitDeps(input.environment);
+  try {
+    await deps.hostedWorkspaceStore.ensureHostedWorkspace({
+      prisma: deps.prisma,
+      userId: input.userId,
+    });
+  } finally {
+    await deps.prisma.$disconnect();
+  }
   const cryptoContext = await requireHostedUserCryptoContextFromEnvironment({
     domain: "runtime",
     environment,
@@ -169,7 +182,7 @@ function assertLoopbackUrl(value: string): void {
     || url.username
     || url.password
   ) {
-    throw new Error("Snapshot fixture requires loopback Web and object-store endpoints.");
+    throw new Error("Snapshot fixture requires a loopback Web endpoint.");
   }
 }
 

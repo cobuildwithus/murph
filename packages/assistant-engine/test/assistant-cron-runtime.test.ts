@@ -37,6 +37,10 @@ import {
   executeMemberMemoryDynamicTool,
 } from '../src/assistant-codex/dynamic-tools/member-memory.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
+import {
+  resolveAssistantConversationPolicy,
+  resolveAssistantConversationScope,
+} from '../src/assistant/conversation-policy.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
 import {
   onboardingFollowupPredecessorDefinitions,
@@ -4923,6 +4927,7 @@ describe('assistant cron runtime orchestration', () => {
             channel: 'telegram' as const,
             containerMemberId: 'member-group-runtime',
             threadId: 'retained-group-room',
+            threadIsDirect: false,
           })),
           userEnvKeys: [],
         },
@@ -6197,7 +6202,14 @@ describe('assistant cron runtime orchestration', () => {
     const automationId = MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
     addManagedBackgroundAutomation(vaultRoot, automationId)
     const executionContext: AssistantExecutionContext = {
-      hosted: { memberId: 'member-patterns-fixture', userEnvKeys: [] },
+      hosted: {
+        memberId: 'member-patterns-fixture',
+        resolveScheduledExternalThreadRoute: async ({ target }) => ({
+          channel: 'telegram', containerMemberId: 'member-patterns-fixture',
+          threadId: target, threadIsDirect: true,
+        }),
+        userEnvKeys: [],
+      },
     }
     cronMocks.canSkipManagedPersonalPatterns.mockResolvedValueOnce(true)
     expect(await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot }))
@@ -6266,6 +6278,10 @@ describe('assistant cron runtime orchestration', () => {
       executionContext: {
         hosted: {
           memberId: 'member-flex-tier',
+          resolveScheduledExternalThreadRoute: async ({ target }) => ({
+            channel: 'telegram', containerMemberId: 'member-flex-tier',
+            threadId: target, threadIsDirect: true,
+          }),
           userEnvKeys: [],
         },
       },
@@ -6310,6 +6326,10 @@ describe('assistant cron runtime orchestration', () => {
     const executionContext: AssistantExecutionContext = {
       hosted: {
         memberId: 'member-managed-flex',
+        resolveScheduledExternalThreadRoute: async ({ target }) => ({
+          channel: 'telegram', containerMemberId: 'member-managed-flex',
+          threadId: target, threadIsDirect: true,
+        }),
         userEnvKeys: [],
       },
     }
@@ -6429,6 +6449,10 @@ describe('assistant cron runtime orchestration', () => {
         hosted: {
           connectedApps: { request },
           memberId: 'member-journal-eligibility',
+          resolveScheduledExternalThreadRoute: async ({ target }) => ({
+            channel: 'telegram', containerMemberId: 'member-journal-eligibility',
+            threadId: target, threadIsDirect: true,
+          }),
           userEnvKeys: [],
         },
       },
@@ -7235,6 +7259,10 @@ describe('assistant cron runtime orchestration', () => {
       executionContext: {
         hosted: {
           memberId: 'member-flex-retry',
+          resolveScheduledExternalThreadRoute: async ({ target }) => ({
+            channel: 'telegram', containerMemberId: 'member-flex-retry',
+            threadId: target, threadIsDirect: true,
+          }),
           userEnvKeys: [],
         },
       },
@@ -11065,6 +11093,65 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('resolves a legacy Telegram audience before the real notification policy', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('cron-telegram-audience-')
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-audience',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the scheduled reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'telegram-private-target',
+        identityId: null,
+        participantId: null,
+        threadId: 'opaque-conversation',
+      },
+      schedule: { at: '2026-04-08T10:00:00.000Z', kind: 'at' },
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Scheduled reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const resolveScheduledExternalThreadRoute = vi.fn(async () => ({
+      channel: 'telegram' as const,
+      containerMemberId: 'member-telegram-audience',
+      threadId: 'telegram-private-target',
+      threadIsDirect: true,
+    }))
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (message) => {
+      const { audience } = resolveAssistantConversationPolicy({
+        message,
+        session: { binding: {
+          conversationKey: null, channel: 'telegram', identityId: null,
+          actorId: null, threadId: 'opaque-conversation', threadIsDirect: null,
+          delivery: { kind: 'thread', target: 'telegram-private-target' },
+        } },
+      })
+      expect(resolveAssistantConversationScope(audience)).toBe('direct')
+      return { response: 'Your scheduled reminder.', session: { sessionId: 'session-default' } }
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: { hosted: {
+        memberId: 'member-telegram-audience',
+        resolveScheduledExternalThreadRoute,
+        userEnvKeys: [],
+      } },
+      job: claimed, paths, trigger: 'scheduled', vault: vaultRoot,
+    })
+    expect(result.run.status).toBe('succeeded')
+    expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({ threadIsDirect: true }),
+    )
+  })
+
   it('scopes scheduled shared reads to canonical Telegram group routes', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -11115,7 +11202,7 @@ describe('assistant cron runtime orchestration', () => {
       containerMemberId: 'member-telegram-group-tools',
       threadId: '-100123456789',
     }
-    const resolveScheduledExternalThreadRoute = vi.fn(async () => routeAuthority)
+    const resolveScheduledExternalThreadRoute = vi.fn(async () => ({ ...routeAuthority, threadIsDirect: false }))
     const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
 
     const result = await executeClaimedAssistantCronJob({
@@ -11182,6 +11269,7 @@ describe('assistant cron runtime orchestration', () => {
       channel: 'telegram' as const,
       containerMemberId: 'member-telegram-untrusted-cron',
       threadId: input.target,
+      threadIsDirect: false,
     }))
     const executionContext = {
       hosted: {

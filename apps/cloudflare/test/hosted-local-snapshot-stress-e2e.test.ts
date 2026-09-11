@@ -276,6 +276,7 @@ async function createSnapshotStressFixture(): Promise<HostedWorkspaceSnapshotV2R
   await writeSyntheticCodexContinuity(operatorHomeRoot);
 
   return await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
     harness: requireScenario().harness,
     operatorHomeRoot,
     userId,

@@ -9,6 +9,7 @@ export {
 export {
   issueHostedWebInviteForTest,
   readHostedBillingProjectionForTest,
+  readHostedBillingUsageGateForTest,
   readHostedFamilyProjectionForTest,
   seedHostedBillingMemberForTest,
   waitForHostedBillingProjectionForTest,

@@ -784,6 +784,8 @@ describe("hosted-local E2E suite preparation", () => {
       MURPH_E2E_JUNCTION_GARMIN_MEMBER_ID: "member-garmin",
       MURPH_E2E_JUNCTION_OURA_MEMBER_ID: "member-oura",
       MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1",
+      MURPH_E2E_JUNCTION_WEARABLE_DATA: "1",
+      MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT: "/tmp/garmin-data-receipt.json",
       MURPH_E2E_JUNCTION_WEARABLE_SOURCES: "garmin",
       MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: "member-whoop",
       MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",

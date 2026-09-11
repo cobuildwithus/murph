@@ -286,6 +286,8 @@ export function createCloudflareEffectsPort(input: {
             const assistantAskFallbackRequired =
               (payload as { assistantAskFallbackRequired?: unknown } | null)
                 ?.assistantAskFallbackRequired;
+            const threadIsDirect =
+              (payload as { threadIsDirect?: unknown } | null)?.threadIsDirect;
             if (
               !payload
               || typeof payload !== "object"
@@ -295,14 +297,21 @@ export function createCloudflareEffectsPort(input: {
                 assistantAskFallbackRequired !== undefined
                 && typeof assistantAskFallbackRequired !== "boolean"
               )
+              || (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean")
             ) {
               throw new TypeError(
                 "Hosted external thread route authority response is invalid.",
               );
             }
-            return typeof assistantAskFallbackRequired === "boolean"
-              ? { assistantAskFallbackRequired }
-              : undefined;
+            if (threadIsDirect === undefined && assistantAskFallbackRequired === undefined) {
+              return;
+            }
+            return {
+              ...(typeof assistantAskFallbackRequired === "boolean"
+                ? { assistantAskFallbackRequired }
+                : {}),
+              ...(typeof threadIsDirect === "boolean" ? { threadIsDirect } : {}),
+            };
           },
           async controlOperatorTask(request, context) {
             return parseHostedOperatorTaskControlResponse(
