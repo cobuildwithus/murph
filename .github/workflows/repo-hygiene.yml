@@ -156,7 +156,7 @@ jobs:
 
       - name: Test private wearable canary control contract
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
-        run: node --test scripts/junction-wearable-canary.test.mjs
+        run: node --test scripts/github-wearable-canary.test.mjs
 
       - name: Test Temporal compatibility control contract
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}

@@ -52,4 +52,4 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
           WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN: ${{ steps.private-app-token.outputs.token }}
-        run: node scripts/junction-wearable-canary.mjs
+        run: node scripts/github-wearable-canary.mjs

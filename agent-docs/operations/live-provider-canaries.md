@@ -88,7 +88,7 @@ remain external acceptance steps, distinct from hermetic PR checks.
 
 ## Focused verification
 
-Controller proof: `node --test scripts/junction-wearable-canary.test.mjs
+Controller proof: `node --test scripts/github-wearable-canary.test.mjs
 scripts/linq-production-canary-ci.test.mjs scripts/native-ios-hosted-e2e.test.mjs
 scripts/native-android-hosted-e2e.test.mjs`.
 

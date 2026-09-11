@@ -51,7 +51,7 @@ describe("live Junction wearable canary workflow", () => {
   });
 
   it("requires the exact private canonical-data receipt with pinned controller actions", () => {
-    expect(workflow).toContain("run: node scripts/junction-wearable-canary.mjs");
+    expect(workflow).toContain("run: node scripts/github-wearable-canary.mjs");
     expect(workflow).toContain("ref: ${{ github.sha }}");
     expect(workflow).toContain("persist-credentials: false");
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];

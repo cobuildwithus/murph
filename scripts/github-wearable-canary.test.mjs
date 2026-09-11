@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { inspectWearableCanaryProof, inspectWearableCanaryRun, runWearableCanary, wearableCanaryProofDigest } from "./junction-wearable-canary.mjs";
+import { inspectWearableCanaryProof, inspectWearableCanaryRun, runWearableCanary, wearableCanaryProofDigest } from "./github-wearable-canary.mjs";
 
 const publicSha = "a".repeat(40);
 const privateSha = "b".repeat(40);
@@ -32,6 +32,8 @@ function harness(overrides = {}) {
   return {
     calls,
     fetchImpl: async (url, init) => {
+      assert.equal(new URL(url).origin, "https://api.github.com");
+      assert.match(new URL(url).pathname, /^\/repos\/cobuildwithus\/murph(?:-cloud)?\//u);
       calls.push({ endpoint: url.replace("https://api.github.com/repos/", ""), method: init.method });
       assert.equal(init.redirect, "error");
       let body;

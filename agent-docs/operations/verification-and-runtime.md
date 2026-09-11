@@ -390,7 +390,7 @@ credential-provisioning, and safe migration contract.
 Its focused controller and browser boundary proof is:
 
 ```bash
-node --test scripts/junction-wearable-canary.test.mjs
+node --test scripts/github-wearable-canary.test.mjs
 pnpm --dir packages/hosted-local-harness exec vitest run \
   --config vitest.config.ts --no-coverage \
   test/junction-wearable-canary-workflow.test.ts
