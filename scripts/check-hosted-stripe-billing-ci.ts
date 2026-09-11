@@ -77,6 +77,16 @@ export function inspectHostedStripeBillingWorkflow(
     "Hermetic proof must retain browser and provider-boundary support tests.",
   );
   requireText(
+    "missing-hydration-proof",
+    "apps/web/test/hosted-billing-browser-hydration.test.ts",
+    "Hermetic proof must exercise real React control hydration in Chromium.",
+  );
+  requireText(
+    "disabled-hydration-proof",
+    'MURPH_E2E_BILLING_BROWSER_SMOKE: "1"',
+    "Hermetic browser proof must run rather than skip behind its local opt-in.",
+  );
+  requireText(
     "missing-web-test-client-setup",
     "pnpm --dir apps/web prisma:generate",
     "Hermetic web billing proof must generate Prisma Client in a fresh checkout.",
