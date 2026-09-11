@@ -1,6 +1,6 @@
 # Prove and fix recurring retention maintenance wakeups
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -60,4 +60,8 @@ Prevent non-progressing retention maintenance from repeatedly scheduling a conta
 - `pnpm complexity:diff`: passed; idle-maintenance maximum complexity 44 to 43; other changed-file hotspots unchanged. Larger runtime decomposition is outside this bounded scheduling correction.
 - Parent review: canonical deletion unchanged; no new retry state; no provider-input change; diagnostics buffer through the existing info-log queue to preserve foreground preemption.
 - Product UX Patch: Ready for candidate review. Outcome: fewer futile maintenance invocations. Reaches: failed cleanup, unmigratable legacy state, actionable batches, and foreground arrivals. Proof: synthetic loop counts, real legacy ledger preservation, restored-vault checkpoint, and existing interruption/protection journeys.
-- Remaining: ReviewGPT and applicable remote checks. No deployment or private production-data repair has occurred.
+- ReviewGPT round 1: PASS on `292cd2f0d597bd16b95676525fe52f61e1f991a9`; no qualifying findings. Capture metadata verified `gpt-6-pro`; response SHA-256 `dcdbdf35ad1963b568e52f8fd2ea3485c613c6c761271d01c16f89ab1618d415`.
+- Review: https://chatgpt.com/c/6aa473df-a3c8-83ea-8f56-4080446b5198 . The reviewer ran 11 isolated source-level scenario groups with stubbed I/O and inspected the real-ledger/composed tests; it did not run Vitest or package typechecks.
+- Parent final review: zero unresolved findings; source and tests unchanged after review. Plan archival only follows the explanatory-doc exemption.
+- Delivery: https://github.com/cobuildwithus/murph/pull/3328 . Exact final-head CI remains a merge gate. No deployment or private production-data repair has occurred.
+Completed: 2026-09-11
