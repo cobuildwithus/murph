@@ -79,6 +79,7 @@ describe("Clinical Records provider directory", () => {
         "patient/Goal.s",
         "patient/ServiceRequest.s",
         "patient/Binary.r",
+        "patient/Media.r",
       ],
     });
     expect(buildEpicBetaRetrievalPlan({
