@@ -355,7 +355,7 @@ jobs:
         run: pnpm health-commons:generate
 
       - name: Prepare built CLI runtime artifacts
-        if: ${{ matrix.shard == 'cli' }}
+        if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}
         run: pnpm build:test-runtime:prepared
 
       - name: Verify CLI package shape

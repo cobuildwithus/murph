@@ -104,9 +104,9 @@ Last verified: 2026-09-04
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
 - The Linq production canary runs from one staggered hourly schedule only after
-  the same exact Vercel production proof succeeds for the scheduled
-  protected-main revision. Manual dispatch remains available for recovery. One
-  fixed Photon identity starts a three-turn private iMessage conversation, and
+  the actual current Vercel alias passes exact deployment verification and
+  protected-main ancestry. Manual dispatch remains available for recovery. One
+  fixed Photon identity starts a five-turn private iMessage conversation, and
   every Murph reply must arrive in under twenty seconds. The canary member's
   existing assistant-model
   preference selects GPT-5.6 Luna for its runtime turns without changing the
@@ -114,23 +114,24 @@ Last verified: 2026-09-04
   latency owner: the Web reply-latency email monitor resolves the same configured
   identity through its canonical blind-index lookup and excludes its current
   member from both the initial health read and the pre-send recheck. The
-  workflow is non-canceling and serialized; a scheduled revision skips when the
-  production alias has not converged. Before the first send, a dedicated
+  workflow is non-canceling and serialized; it tests the actual deployed
+  revision even when main has advanced, then rechecks deployment identity. Before the first send, a dedicated
   fixed-target Web route clears only that identity's admission rows and fully
   pre-provider instant-reply claim, then invokes the canonical account-deletion owner.
   Completed delivery evidence is preserved, and any provider-entered or
   ambiguous claim blocks the reset. The route has no target input and accepts
   only its dedicated constant-time bearer secret. Provider, reset, target, and
   Vercel credentials are exposed only to their owning workflow steps, and the
-  journey emits counts and latency only.
+  journey emits counts and latency only. The final two turns save and read back
+  one fixed synthetic goal. A read-only observer requires the current checkpoint's
+  published replica and no pending conversation input, then checks canonical
+  goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
 - Protected native iOS and Android hosted E2E controllers run staggered every
-  six hours and admit paid work only when the current `main` SHA differs from
-  the latest completed successful scheduled outcome. A latest failure retries
-  at the next slot even when an older run passed the same SHA. Manual recovery
-  requires `refs/heads/main` and the exact current `main` SHA before protected
-  environment work; an explicit rerun of the same trusted controller attempt
-  bypasses the skip. Native source pins are committed with protected `main`, so
-  source rotation advances that checkpoint.
+  six hours and execute each admitted journey even when the same revision
+  previously passed. Provider behavior can change independently of source.
+  Manual recovery requires `refs/heads/main` and the exact current `main` SHA
+  before protected environment work. Native source pins are committed with
+  protected `main`, so source rotation advances that checkpoint.
   Fixed,
   non-canceling per-platform concurrency prevents overlap without admitting a
   waiter for every pull request or deployment event. The workflows are
@@ -2257,7 +2258,7 @@ Last verified: 2026-09-04
 - The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed event-ledger and integration-ingest months compact only in the abortable hosted idle-shutdown lane and share its existing 30-second archive budget. Core publishes a fully validated deterministic gzip before deleting raw bytes, and normal readers and amendments stream bounded gzip output. A foreground wake aborts archive work before later maintenance, while a timeout, malformed shard, or ordinary archive failure leaves that source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, so no cursor, repair queue, or second maintenance owner exists. Integration-ingest startup repair removes only an independently valid, newline-terminated, byte-identical raw/gzip pair; every mismatch remains a fail-closed representation conflict.
 - Closed event-ledger months retain the reader-first gzip rollback floor. Core and query resolve one bounded plain-or-gzip representation through the logical `.jsonl` path, reject ambiguous pairs, and preserve decompressed base receipts across local writes, hosted receipt replay, retry, and rollback. Event append operations and receipts remain representation-neutral; the canonical write owner selects plain versus gzip from the logical path while holding the existing write lock. Backdated writes atomically replace and verify the archive; the current UTC month remains plain. The deployed reader-compatible core/query/CLI/runner release must drain before hosted idle maintenance creates its first event archive. Once any event `.jsonl.gz` exists, that reader-compatible release is the rollback floor; use a forward fix or losslessly restore plain JSONL with a compatible binary before downgrading.
-- Ordinary group automations reuse canonical cron occurrence state for both conversation and optional group-email effects. Current-chat output finishes through the ordinary conversation outbox and route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. When a turn uses `send_email`, the accepted generic group-email parent enters the same canonical pending-delivery field used by ordinary queued notifications, even when later turn work fails. A restart before that cron write derives the parent from its automation-id and occurrence-scoped outbox key before admitting the provider. Web marks the parent sent only after live authorization revalidation and durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. An automation that never calls the email effect has no email settlement expectation. No newsletter recognition, injected contract, migration queue, repair state, or second scheduler exists.
+- Ordinary group automations reuse canonical cron occurrence state for both conversation and optional group-email effects. Current-chat output finishes through the ordinary conversation outbox and route retry policy. Every hosted scheduled Telegram occurrence resolves its exact destination and direct/group audience through the existing Web route assertion before tools or model work, including saved routes without directness. It persists that route authority with the outbox intent and rechecks it before delivery-provider entry. Missing route or audience authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. When a turn uses `send_email`, the accepted generic group-email parent enters the same canonical pending-delivery field used by ordinary queued notifications, even when later turn work fails. A restart before that cron write derives the parent from its automation-id and occurrence-scoped outbox key before admitting the provider. Web marks the parent sent only after live authorization revalidation and durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. An automation that never calls the email effect has no email settlement expectation. No newsletter recognition, injected contract, migration queue, repair state, or second scheduler exists.
 - Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively. Direct turns close admission at the first completed response. An ordinary interactive Linq/iMessage or Telegram group auto-reply instead pauses steering into provider request 0 and keeps admission open for one four-second in-memory draft window. A genuinely quiet window closes atomically. Input accepted during the window selects provider request 1 in the same thread; input already live-steered and committed during request 0 also selects request 1 and keeps admission open through its first completed response. Request 1 is final; rejected steering, overflow, and input after that cutoff remain durable and pending for the next ordinary turn. Only the selected group turn crosses `commit-started`: provisional response segments, reactions superseded by final text, provisional no-reply evidence, and canonical user-transcript appends stay absent before that boundary. Source events and the accepted-input journal are the sole recovery authority before that boundary; after selection, the runtime materializes the initial and accepted input transcript references exactly once. Failure of request 1 therefore leaves the source inputs retryable without transcript duplication and never delivers request 0. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
 - Reviewed Assistant Ask completions enter the existing foreground-causal,
   output-only continuation immediately; they do not wait for the routine idle

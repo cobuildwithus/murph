@@ -22,3 +22,7 @@ Create a synthetic initialized vault with the foreground-priority fixture seed. 
 ## Context
 
 This is a repository test-protocol mismatch found while checking cleanup rollout admission. The correction should preserve the existing priority and ordering assertions and prove a real encrypted archive restore.
+
+The first v2 repair also requested runtime keys before a fresh member had an empty hosted workspace. The crypto-context route correctly returns 403 until that prerequisite exists. The follow-up provisions it through the existing testkit and workspace store before requesting keys; checkpoint publication still follows the encrypted upload and locator.
+
+The Linux harness intentionally exposes MinIO on its explicitly marked Docker bridge gateway. The canonical R2 parser validates that endpoint, but a redundant fixture-only literal-loopback check rejected it. Reuse the canonical validation and retain the separate Web loopback requirement. The retired shell-prewarm route's negative test also used the harness helper that throws on HTTP errors, preventing its expected 404 assertion; use the same authenticated fetch directly for this negative response.

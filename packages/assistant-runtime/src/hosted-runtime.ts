@@ -281,6 +281,7 @@ import {
 } from "./hosted-runtime/wake-candidates.ts";
 import {
   consumePendingRuntimeWakeUnlessShuttingDown,
+  createCoalescingRuntimeWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -3059,6 +3060,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         || restoredSystemMailboxProgressNeedsCheckpoint;
       let checkpointed = false;
       let foregroundWakeObserved = false;
+      let systemMailboxWakeSignal = options.runtimeWakeSignal ?? null;
       let checkpointReportedConversationInputAhead = false;
       let defaultOwnerWakeObserved = false;
       let assistantCronDeadlineMs: number | null = null;
@@ -3076,7 +3078,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const consumeForegroundWake = (): boolean => {
         const pendingWakeObserved = observeForegroundWake(
           consumePendingRuntimeWakeUnlessShuttingDown({
-            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            runtimeWakeSignal: systemMailboxWakeSignal,
             shutdownSignal: options.shutdownSignal ?? null,
           }),
         );
@@ -3157,7 +3159,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const workSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
-        const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+        const runtimeWakeSignal = systemMailboxWakeSignal;
         const waitForOwnedProjectionStage = async <T,>(
           runStage: (signal: AbortSignal) => Promise<T>,
           preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
@@ -3393,49 +3395,39 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       const finishIndependentSystemWorkAfterCheckpoint = async (): Promise<void> => {
         if (systemMailboxForegroundWakePrefetch || readyDurableCheckpointEffects.length === 0) return;
-        const projection = await offerVaultShareProjectionBeforeRecording();
-        if (projection.outcome !== "completed") return;
-        if (projection.result.outcome !== "error") {
-          const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
-            attempt: "initial",
-            deadlineMs: assistantCronDeadlineMs,
-            force: false,
-            generatedAt: new Date().toISOString(),
-            platform: foregroundRuntime.platform,
-            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-            signal: runtimeAbortController.signal,
-            timeoutMs: null,
-            vaultRoot: restored.vaultRoot,
-            workspace: activeWorkspace,
+        const completionWakeSignal = createCoalescingRuntimeWakeSignal();
+        const prefetchCompletionForeground = async (): Promise<boolean> => {
+          // Blocked invocations cannot inspect conversation input. Preserve an
+          // already-observed owner handoff instead of treating it as an empty read.
+          if (assistantExecutionBlocked) return foregroundWakeObserved;
+          if (checkpointReportedConversationInputAhead) return true;
+          const prefetch = await createHostedForegroundMailboxPrefetch({
+            lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+            limitPerLane: mailboxBudget.fetchLimitPerLane,
+            requestId: `${requestId}:independent-completion-foreground-check`,
+            runnerInput: baseRunnerInput,
+            signal: backgroundWorkSignal,
           });
-          const disposition = classifyHostedBrowserVaultReplicaRefresh(refresh);
-          if (disposition.action === "preempt") {
-            if (refresh.status === "deferred_runtime_wake") foregroundWakeObserved = true;
-            return;
+          if ((await prefetch.response).items.some((item) => item.lane === "conversation")) {
+            systemMailboxForegroundWakePrefetch = prefetch;
           }
-        }
-        if (shouldYieldSystemMailboxWork()) return;
-        let recordingComplete = false;
+          // A checkpoint can report newer input while the mailbox read is in flight.
+          foregroundWakeObserved = checkpointReportedConversationInputAhead
+            || systemMailboxForegroundWakePrefetch !== null;
+          defaultOwnerWakeObserved = foregroundWakeObserved;
+          return foregroundWakeObserved;
+        };
+        // A hint may already have been consumed during the preceding checkpoint.
+        // Confirm that authority too, while retaining checkpoint-reported input.
+        if (foregroundWakeObserved && await prefetchCompletionForeground()) return;
+        systemMailboxWakeSignal = completionWakeSignal;
         const interruption = createHostedRuntimeCheckpointWakeInterruption({
           enabled: true, runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-          // A scheduler nudge can arrive with an empty conversation mailbox.
-          // Only real foreground input may discard this completion snapshot.
-          async shouldInterrupt() {
-            if (!recordingComplete) return true;
-            if (assistantExecutionBlocked) return false;
-            const prefetch = await createHostedForegroundMailboxPrefetch({
-              lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
-              limitPerLane: mailboxBudget.fetchLimitPerLane,
-              requestId: `${requestId}:independent-completion-foreground-check`,
-              runnerInput: baseRunnerInput,
-              signal: backgroundWorkSignal,
-            });
-            if (!(await prefetch.response).items.some((item) => item.lane === "conversation")) {
-              return false;
-            }
-            systemMailboxForegroundWakePrefetch = prefetch;
-            foregroundWakeObserved = true;
-            defaultOwnerWakeObserved = true;
+          // Qualify wakes throughout projection, recording, and checkpointing.
+          // Scheduler hints alone must not restart already-checkpointed work.
+          async shouldInterrupt(notification) {
+            if (!await prefetchCompletionForeground()) return false;
+            completionWakeSignal.notify(notification);
             return true;
           },
         });
@@ -3443,6 +3435,27 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           ? AbortSignal.any([backgroundWorkSignal, interruption.signal])
           : backgroundWorkSignal;
         try {
+          const projection = await offerVaultShareProjectionBeforeRecording();
+          if (projection.outcome !== "completed") return;
+          if (projection.result.outcome !== "error") {
+            const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+              attempt: "initial",
+              deadlineMs: assistantCronDeadlineMs,
+              force: false,
+              generatedAt: new Date().toISOString(),
+              platform: foregroundRuntime.platform,
+              runtimeWakeSignal: systemMailboxWakeSignal,
+              signal: runtimeAbortController.signal,
+              timeoutMs: null,
+              vaultRoot: restored.vaultRoot,
+              workspace: activeWorkspace,
+            });
+            const disposition = classifyHostedBrowserVaultReplicaRefresh(refresh);
+            if (disposition.action === "preempt") {
+              return;
+            }
+          }
+          if (shouldYieldSystemMailboxWork()) return;
           for (const effect of readyDurableCheckpointEffects.slice()) {
             const completion = await effect({
               signal: recordSignal,
@@ -3455,7 +3468,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               completion?.nextWakeReason ?? null,
             ));
           }
-          recordingComplete = true;
           await checkpointSystemMailboxMode(
             "system_mailbox.checkpoint.independent_completion", [], interruption.signal,
           );
@@ -3463,6 +3475,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           if (!interruption.signal?.aborted) throw error;
         } finally {
           await interruption.dispose();
+          systemMailboxWakeSignal = options.runtimeWakeSignal ?? null;
           observeForegroundWake(interruption.takeNotification());
         }
       };
