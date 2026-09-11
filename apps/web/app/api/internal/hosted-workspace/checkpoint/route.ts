@@ -12,7 +12,10 @@ import {
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { checkpointHostedWorkspace } from "@/src/lib/hosted-workspace/store";
+import {
+  acknowledgeHostedWorkspaceRuntimeRecheck,
+  checkpointHostedWorkspace,
+} from "@/src/lib/hosted-workspace/store";
 
 const HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
 
@@ -54,12 +57,14 @@ export const POST = withJsonError(async (request: Request) => {
 
   if (
     result.status === "updated"
+    && !result.canSkipRuntimeRecheck
     && (
       result.workspace.nextWakeAt !== null
       || result.workspace.inboxMediaRetentionWakeAt !== null
     )
   ) {
-    const signalWake = () => signalWorkspaceWakeBestEffort(userId);
+    const version = result.workspace.version;
+    const signalWake = () => signalWorkspaceWakeBestEffort(userId, version);
     try {
       after(signalWake);
     } catch {
@@ -100,11 +105,12 @@ export const POST = withJsonError(async (request: Request) => {
   }));
 });
 
-async function signalWorkspaceWakeBestEffort(userId: string): Promise<void> {
+async function signalWorkspaceWakeBestEffort(userId: string, version: string): Promise<void> {
   try {
     await signalHostedRuntimeRecheckRuntime({
       userId,
     });
+    await acknowledgeHostedWorkspaceRuntimeRecheck({ userId, version });
   } catch (error) {
     console.warn("Hosted workspace wake recheck signal failed after checkpoint.", {
       errorName: error instanceof Error ? error.name : typeof error,
