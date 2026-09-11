@@ -935,12 +935,10 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       );
       const retainedState = await readHostedSystemMailboxState(vaultRoot);
       const retained = retainedState.pending.find((item) => item.itemId === deviceItem.id);
-      assert.equal(retained?.status, "recording");
-      assert.deepEqual(retained?.postCheckpointRecord, {
-        kind: "device-sync.dirty-processed-batch",
-        nextWakeAt: "2026-04-27T00:05:00.000Z",
-        records: [],
-      });
+      // No dirty record or job deadline exists; the abort retains a retry owner.
+      assert.equal(retained?.status, "pending");
+      assert.equal(retained?.nextAttemptAt, "2026-04-27T00:00:30.000Z");
+      assert.equal(retained?.postCheckpointRecord, null);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
