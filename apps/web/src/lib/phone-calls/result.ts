@@ -1,5 +1,5 @@
 import {
-  Prisma,
+  type Prisma,
   type HostedPhoneCall,
   type HostedPhoneCallResultDeliveryStatus,
   type HostedPhoneCallStatus,
@@ -76,7 +76,6 @@ interface HostedPhoneCallWebhookDatabase {
         providerCallId?: string;
         resultDeliveryStatus?: HostedPhoneCallResultDeliveryStatus;
         resultEncrypted?: string;
-        resultJson?: Prisma.NullTypes.DbNull;
         status: HostedPhoneCallStatus;
       };
       where: HostedPhoneCallWebhookUpdateWhere;
@@ -91,7 +90,6 @@ interface HostedPhoneCallWebhookUpdateWhere {
   provider: "retell";
   providerCallId?: string | null;
   resultEncrypted?: null;
-  resultJson?: Prisma.JsonNullableFilter<"HostedPhoneCall">;
   resultDeliveryGeneration?: number;
   resultDeliveryStatus?: HostedPhoneCallResultDeliveryStatus;
   status?: { in: HostedPhoneCallStatus[] };
@@ -262,7 +260,6 @@ export async function handleRetellCallAnalyzed(input: {
           readRetellCallEndAt(input.call) ?? target.call.endedAt ?? analyzedAt,
         ...(resultDeliveryStatus ? { resultDeliveryStatus } : {}),
         resultEncrypted,
-        resultJson: Prisma.DbNull,
         status: mapPhoneCallStatus(result.outcome),
       },
       where: {
@@ -270,9 +267,6 @@ export async function handleRetellCallAnalyzed(input: {
         id: target.call.id,
         provider: "retell",
         resultEncrypted: null,
-        resultJson: {
-          equals: Prisma.DbNull,
-        },
         ...authorityWhere,
       },
     });
@@ -317,7 +311,6 @@ export async function handleRetellCallAnalyzed(input: {
         analyzedAt,
         resultDeliveryStatus,
         resultEncrypted,
-        resultJson: null,
         status: mapPhoneCallStatus(result.outcome),
       },
       prisma,
@@ -489,7 +482,6 @@ async function persistHostedPhoneCallFallbackResult(input: {
       ...(analyzedAt ? { analyzedAt } : {}),
       ...(resultDeliveryStatus ? { resultDeliveryStatus } : {}),
       resultEncrypted,
-      resultJson: Prisma.DbNull,
     },
     where: {
       analyzedAt: null,
@@ -498,9 +490,6 @@ async function persistHostedPhoneCallFallbackResult(input: {
       provider: "retell",
       providerCallId: input.call.providerCallId,
       resultEncrypted: null,
-      resultJson: {
-        equals: Prisma.DbNull,
-      },
       status: "failed",
     },
   });
@@ -511,7 +500,6 @@ async function persistHostedPhoneCallFallbackResult(input: {
         analyzedAt,
         resultDeliveryStatus,
         resultEncrypted,
-        resultJson: null,
       },
       result: input.result,
     };
@@ -1114,7 +1102,7 @@ function buildPhoneCallStopSettlementNotificationEventId(
 }
 
 function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
-  return call.resultEncrypted !== null || call.resultJson !== null;
+  return call.resultEncrypted !== null;
 }
 
 function emptyRetellCallAnalyzedHandlingResult(): RetellCallAnalyzedHandlingResult {
@@ -1194,7 +1182,6 @@ function buildHostedPhoneCallWebhookDatabase(
           provider: args.where.provider,
           providerCallId: args.where.providerCallId,
           resultEncrypted: args.where.resultEncrypted,
-          resultJson: args.where.resultJson,
           resultDeliveryGeneration: args.where.resultDeliveryGeneration,
           resultDeliveryStatus: args.where.resultDeliveryStatus,
           status: args.where.status,

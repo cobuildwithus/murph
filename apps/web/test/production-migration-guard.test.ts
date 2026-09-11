@@ -116,30 +116,11 @@ describe("hosted web production migration guard", () => {
       /### Hosted phone-call private-content migration\n(?<section>[\s\S]*?)(?=\n#{1,3} )/u,
     )?.groups?.section;
     assert.ok(phoneCallMigration, "the phone-call migration guide must remain present");
-    assert.match(
-      phoneCallMigration,
-      /no approved local execution path/u,
-    );
-    assert.match(
-      phoneCallMigration,
-      /discuss the required\s+operation and execution owner with the user/u,
-    );
-    const phoneCallStopIndex = phoneCallMigration.search(
-      /Stop before any\s+production migration/u,
-    );
-    assert.ok(phoneCallStopIndex >= 0, "the phone-call guide must contain its stop gate");
-    for (const productionAction of [
-      /Any later user-authorized path must deploy the additive migration/u,
-      /freeze production deploys and rollbacks/u,
-      /count-only dry runs/u,
-      /`HOSTED_WEB_VERCEL_\*` operator environment/u,
-    ]) {
-      const productionActionIndex = phoneCallMigration.search(productionAction);
-      assert.ok(
-        productionActionIndex > phoneCallStopIndex,
-        `the phone-call stop gate must precede ${productionAction}`,
-      );
-    }
+    assert.match(phoneCallMigration, /no approved local execution path/u);
+    assert.match(phoneCallMigration, /20260910210000_require_hosted_phone_call_encrypted_private_content/u);
+    assert.match(phoneCallMigration, /before[^.]*merge[^.]*deploy/iu);
+    assert.match(phoneCallMigration, /deployment-pinned[^.]*Workflows/iu);
+    assert.doesNotMatch(phoneCallMigration, /privacy:backfill-phone-calls/u);
 
     const linqGuide = await readFile(
       path.join(repoRoot, "docs", "hosted-linq-db-home-lines-migration.md"),
@@ -170,11 +151,6 @@ describe("hosted web production migration guard", () => {
   test("renders the production-secret boundary in changed script help", () => {
     const repoRoot = path.resolve(appRoot, "..", "..");
     const helpExpectations = [
-      {
-        path: "apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
-        productionOwner: /no approved local production execution path/u,
-        requiresDiscussion: true,
-      },
       {
         path: "apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
         productionOwner: /no approved local production execution path/u,

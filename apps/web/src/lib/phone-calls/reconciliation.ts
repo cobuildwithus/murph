@@ -390,7 +390,7 @@ function isHostedPhoneCallTrackedResultOutstanding(
 
 function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
   return call.analyzedAt !== null
-    && (call.resultEncrypted !== null || call.resultJson !== null);
+    && call.resultEncrypted !== null;
 }
 
 export async function stopHostedPhoneCallRequestedAuthority(input: {

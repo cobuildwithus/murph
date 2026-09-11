@@ -125,22 +125,19 @@ export async function readHostedPhoneCallBrief(input: {
   prisma?: HostedSecureBoxPrismaClient;
   signal?: AbortSignal;
 }): Promise<HostedPhoneCallBrief> {
-  if (input.call.briefEncrypted !== null) {
-    return (input.crypto ?? hostedPhoneCallCrypto).decryptBrief({
-      callId: input.call.id,
-      memberId: input.call.memberId,
-      prisma: input.prisma,
-      signal: input.signal,
-      value: input.call.briefEncrypted,
-    });
-  }
-  return hostedPhoneCallBriefSchema.parse(input.call.briefJson);
+  return (input.crypto ?? hostedPhoneCallCrypto).decryptBrief({
+    callId: input.call.id,
+    memberId: input.call.memberId,
+    prisma: input.prisma,
+    signal: input.signal,
+    value: input.call.briefEncrypted,
+  });
 }
 
 export async function readHostedPhoneCallResult(input: {
   call: Pick<
     HostedPhoneCall,
-    "id" | "memberId" | "resultEncrypted" | "resultJson"
+    "id" | "memberId" | "resultEncrypted"
   >;
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedSecureBoxPrismaClient;
@@ -155,16 +152,13 @@ export async function readHostedPhoneCallResult(input: {
       value: input.call.resultEncrypted,
     });
   }
-  if (input.call.resultJson === null) {
-    return null;
-  }
-  return hostedPhoneCallResultSchema.parse(input.call.resultJson);
+  return null;
 }
 
 export async function readHostedPhoneCallResults(input: {
   calls: readonly Pick<
     HostedPhoneCall,
-    "id" | "memberId" | "resultEncrypted" | "resultJson"
+    "id" | "memberId" | "resultEncrypted"
   >[];
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedSecureBoxPrismaClient;
@@ -210,10 +204,7 @@ export async function readHostedPhoneCallResults(input: {
         parseHostedPhoneCallPrivateJson(plaintext),
       );
     }
-    if (call.resultJson === null) {
-      return null;
-    }
-    return hostedPhoneCallResultSchema.parse(call.resultJson);
+    return null;
   });
 }
 

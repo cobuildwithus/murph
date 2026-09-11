@@ -1,4 +1,4 @@
-import { Prisma, type HostedPhoneCall } from "@prisma/client";
+import type { HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
   HostedPhoneCallResult,
@@ -546,7 +546,6 @@ describe("default phone-call result notification store", () => {
     expect(storedCall).toMatchObject({
       analyzedAt: providerCallId ? null : expect.any(Date),
       resultEncrypted: "encrypted-fallback-result",
-      resultJson: null,
     });
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(1, {
       dedupeKey: LEGACY_NOTIFICATION_DEDUPE_KEY,
@@ -594,7 +593,6 @@ describe("default phone-call result notification store", () => {
       where: { id: call.id },
     })).toMatchObject({
       resultEncrypted: "encrypted-fallback-result",
-      resultJson: null,
     });
     expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
@@ -693,9 +691,6 @@ describe("default phone-call result notification store", () => {
       }),
       where: expect.objectContaining({
         resultEncrypted: null,
-        resultJson: {
-          equals: Prisma.DbNull,
-        },
       }),
     });
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledOnce();
@@ -728,7 +723,6 @@ describe("default phone-call result notification store", () => {
     })).toMatchObject({
       analyzedAt: null,
       resultEncrypted: "encrypted-fallback-result",
-      resultJson: null,
     });
     });
 
@@ -1159,7 +1153,7 @@ function buildPrisma(input: {
         return input.missing ? null : call;
       }),
       updateMany: vi.fn(async (update: {
-        data: Partial<HostedPhoneCall> & { resultJson?: unknown };
+        data: Partial<HostedPhoneCall>;
       }) => {
         if (update.data.resultEncrypted) {
           if (input.onResultUpdate) {
@@ -1167,11 +1161,10 @@ function buildPrisma(input: {
             call = result.call;
             return { count: result.count };
           }
-          if (call.resultEncrypted === null && call.resultJson === null) {
+          if (call.resultEncrypted === null) {
             call = {
               ...call,
               ...update.data,
-              resultJson: null,
             };
             return { count: 1 };
           }
@@ -1190,7 +1183,6 @@ function buildStoredAnalyzedCall(
   return {
     analyzedAt: now,
     briefEncrypted: "encrypted-brief",
-    briefJson: null,
     createdAt: now,
     endedAt: now,
     id: CALL_ID,
@@ -1203,7 +1195,6 @@ function buildStoredAnalyzedCall(
     resultDeliveryStatus: null,
     resultDeliveryTerminalAt: null,
     resultEncrypted: "encrypted-result",
-    resultJson: null,
     resultNotificationChannel: "linq",
     status: "completed",
     stopRequestedAt: null,
