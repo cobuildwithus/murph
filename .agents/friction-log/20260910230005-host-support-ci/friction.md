@@ -24,3 +24,9 @@ Bind each step's guard to its command in the policy assertions. Require the shar
 ## Context
 
 A workflow prerequisite correction left its static policy assertion stale. Unrelated pull requests inherit the failure after reconciling main. Update the workflow and its executable policy proof together.
+
+The same policy suite's exhaustive pull-request workflow inventory briefly
+omitted the path-scoped Garmin synthetic proof. A subsequent main revision
+retired that completed migration workflow. Reconciled branches must remove any
+interim inventory exception along with the workflow, preserving the remaining
+lightweight and expensive Ready-only owners.
