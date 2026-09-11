@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   hashClinicalFhirBaseUrl,
+  hashClinicalFhirPatientId,
   listClinicalFhirAttachments,
   normalizeClinicalFhirPatientReference,
 } from "@murphai/clinical-records";
@@ -36,6 +37,8 @@ export const clinicalDocumentTicketSchema = z.object({
   hash: z.string().max(128).optional(),
 }).strict();
 export type ClinicalDocumentTicket = z.infer<typeof clinicalDocumentTicketSchema>;
+const documentIntegritySchema = clinicalDocumentTicketSchema.pick({ mediaType: true, size: true, hash: true });
+type ClinicalDocumentIntegrity = z.infer<typeof documentIntegritySchema>;
 
 /** A dependency URL cannot confer arbitrary provider or network authority. */
 export function resolveClinicalDocumentUrl(value: string, fhirBaseUrl: string, sourceKind: "binary" | "media" = "binary"): URL {
@@ -181,6 +184,7 @@ function isCanonicalClinicalBase64(value: string): boolean {
 export async function readClinicalDocumentResponse(input: {
   response: Response;
   ticket: ClinicalDocumentTicket;
+  attachmentIntegrity?: ClinicalDocumentIntegrity;
   url: URL;
   maxResponseBytes: number;
 }): Promise<{ bytes: Buffer; mediaType: string; receivedBytes: number }> {
@@ -196,14 +200,17 @@ export async function readClinicalDocumentResponse(input: {
     throw clinicalRecordsError({ code: "CLINICAL_RECORD_FHIR_FETCH_FAILED", httpStatus: 503,
       message: "The Clinical Records document response stream failed.", retryable: true });
   }
-  const decoded = isBinaryJson ? decodeDocumentBody(received, input.url, input.ticket.mediaType) : { bytes: Buffer.from(received), mediaType };
+  const decoded = isBinaryJson ? decodeDocumentBody(received, input.url, input.ticket.mediaType ?? input.attachmentIntegrity?.mediaType) : { bytes: Buffer.from(received), mediaType };
   const bytes = decoded.bytes;
   mediaType = decoded.mediaType;
   if (bytes.length === 0 || bytes.length > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES) throw new TypeError("Invalid document size.");
-  if (input.ticket.mediaType && normalizeMediaType(input.ticket.mediaType) !== normalizeMediaType(mediaType)) throw new TypeError("Document media type changed.");
-  if (input.ticket.size !== undefined && input.ticket.size !== bytes.length) throw new TypeError("Document size changed.");
-  if (input.ticket.hash !== undefined && createHash("sha1").update(bytes).digest("base64") !== input.ticket.hash) {
-    throw new TypeError("Document hash changed.");
+  for (const integrity of [input.ticket, input.attachmentIntegrity]) {
+    if (!integrity) continue;
+    if (integrity.mediaType && normalizeMediaType(integrity.mediaType) !== normalizeMediaType(mediaType)) throw new TypeError("Document media type changed.");
+    if (integrity.size !== undefined && integrity.size !== bytes.length) throw new TypeError("Document size changed.");
+    if (integrity.hash !== undefined && createHash("sha1").update(bytes).digest("base64") !== integrity.hash) {
+      throw new TypeError("Document hash changed.");
+    }
   }
   return { bytes, mediaType, receivedBytes: received.byteLength };
 }
@@ -228,22 +235,52 @@ export async function readClinicalMediaResponse(input: {
   response: Response;
   mediaUrl: URL;
   fhirBaseUrl: string;
+  patientIdHash: string;
   maxResponseBytes: number;
-}): Promise<{ binaryUrl: URL; receivedBytes: number }> {
+}): Promise<{ binaryUrl: URL; attachmentIntegrity: ClinicalDocumentIntegrity; receivedBytes: number }> {
   const contentType = normalizeMediaType((input.response.headers.get("content-type") ?? "application/fhir+json").split(";", 1)[0] ?? "");
   if (contentType !== "application/fhir+json" && contentType !== "application/json") {
     throw new TypeError("Invalid FHIR Media response content type.");
   }
-  const received = await readClinicalResponseBytes(input.response, input.maxResponseBytes);
+  let received: Uint8Array;
+  try {
+    received = await readClinicalResponseBytes(input.response, input.maxResponseBytes);
+  } catch (error) {
+    if (error instanceof ClinicalResponseBodyLimitError) throw error;
+    throw clinicalRecordsError({ code: "CLINICAL_RECORD_FHIR_FETCH_FAILED", httpStatus: 503,
+      message: "The Clinical Records document response stream failed.", retryable: true });
+  }
   const value = JSON.parse(decodeClinicalResponseUtf8(received));
   if (!isObject(value) || value.resourceType !== "Media" || value.id !== input.mediaUrl.pathname.split("/Media/")[1]?.split("/")[0]
     || !isObject(value.content) || typeof value.content.url !== "string") {
     throw new TypeError("Invalid FHIR Media response.");
   }
+  validateClinicalMediaPatient({ subject: value.subject, fhirBaseUrl: input.fhirBaseUrl, patientIdHash: input.patientIdHash });
+  const parsedIntegrity = documentIntegritySchema.safeParse({
+    mediaType: value.content.contentType, size: value.content.size, hash: value.content.hash,
+  });
+  if (!parsedIntegrity.success) throw new TypeError("Invalid FHIR Media attachment integrity.");
+  const attachmentIntegrity = parsedIntegrity.data;
+  if (attachmentIntegrity.mediaType !== undefined) boundedMediaType(attachmentIntegrity.mediaType);
+  if (attachmentIntegrity.size !== undefined && attachmentIntegrity.size > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES) {
+    throw new TypeError("Invalid document size.");
+  }
   return {
     binaryUrl: resolveClinicalDocumentUrl(value.content.url, input.fhirBaseUrl, "binary"),
+    attachmentIntegrity,
     receivedBytes: received.byteLength,
   };
+}
+
+function validateClinicalMediaPatient(input: { subject: unknown; fhirBaseUrl: string; patientIdHash: string }): void {
+  if (input.subject === undefined) return;
+  const reference = isObject(input.subject) ? input.subject.reference : undefined;
+  const patientId = typeof reference === "string" ? normalizeClinicalFhirPatientReference({
+    fhirBaseUrlHash: hashClinicalFhirBaseUrl(input.fhirBaseUrl), reference,
+  }) : null;
+  if (!patientId || hashClinicalFhirPatientId(patientId) !== input.patientIdHash) {
+    throw new TypeError("FHIR Media patient does not match its attested parent.");
+  }
 }
 
 function boundedMediaType(value: string): string {

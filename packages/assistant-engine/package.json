@@ -23,6 +23,10 @@
       "types": "./dist/assistant-ask.d.ts",
       "default": "./dist/assistant-ask.js"
     },
+    "./clinical-document-extraction": {
+      "types": "./dist/clinical-document-extraction.d.ts",
+      "default": "./dist/clinical-document-extraction.js"
+    },
     "./assistant-codex": {
       "types": "./dist/assistant-codex.d.ts",
       "default": "./dist/assistant-codex.js"
@@ -112,6 +116,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/gateway-core": "workspace:*",

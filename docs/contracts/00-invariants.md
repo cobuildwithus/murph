@@ -205,8 +205,12 @@ it has been explicitly elevated to a cross-cutting invariant.
 - A detached assistant read may overlap foreground work only in a separate
   one-shot process with OS-enforced read-only roots and no write, tool-network,
   route, delivery, or recursion authority. The resident foreground assistant
-  remains the sole model-authored canonical-content writer and sender. The
-  runtime must abort, await, and prove exit of the exact owned child before
+  remains the sole model with direct canonical-write and sender authority.
+  The host's deterministic clinical enrichment apply may persist schema-validated,
+  frozen read-only proposals through the canonical writer with host-derived
+  source identity and provenance, bounded overlap checks, and readback before
+  progress. This grants no mutation or effect authority to the read-only child.
+  The runtime must abort, await, and prove exit of the exact owned child before
   checkpoint release, workspace replacement, fence loss, shutdown, or
   invocation return.
 - A foreground prerequisite is a named current fact, not a generic lane or

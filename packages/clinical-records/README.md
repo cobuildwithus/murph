@@ -10,6 +10,7 @@ The package boundary is intentionally small:
 - clinical raw FHIR retrieval manifest and bounded attachment-batch contracts
 - deterministic FHIR external-reference helpers namespaced by FHIR base and patient hashes
 - clinical `upsert | retract | review` import-plan decision contracts
+- bounded document-extraction proposal schemas for labs, measurements and history
 
 FHIR/MyChart data remains raw evidence. Canonical Murph records stay in the
 vault and must be written through the existing core/import surfaces.
@@ -19,7 +20,8 @@ immutable evidence. Inline bytes are validated directly; linked Binary bodies
 use a Web-issued, run-bound ticket. DiagnosticReport study images may use the
 single patient-bound Media-to-Binary hop documented by the Epic adapter. Text
 and clinical XML can become source notes, while PDFs use the existing Poppler
-parser and images remain raw evidence when no text is available. An unresolved
+parser. Original images remain raw evidence. Separate document enrichment can
+extract facts from text and rendered PDF/image pages. An unresolved
 attachment produces explicit incomplete coverage and never a partial same-
 revision canonical note.
 
@@ -27,6 +29,22 @@ Large charts are imported one page batch at a time. A successor batch must prove
 the previous immutable manifest and outgoing FHIR link, so a middle page cannot
 be injected as a new root. Batch checkpoints retain accepted bytes, pending
 document tickets, cursors, and cumulative outcomes across preemption.
+
+## Document enrichment contracts
+
+Each imported batch with downloaded documents admits enrichment for its own
+manifest before the retrieval checkpoint advances. The runtime extracts one
+document page at a time with up to three read-only family leaves and a shared
+120-second provider timeout. The pure schemas bound each family's proposals;
+model output cannot choose canonical identities or source paths.
+
+Vault use cases freeze proposals in private operational state. A separate
+bounded canonical apply derives source identity and raw/page evidence, checks
+existing facts, and reads back accepted writes before progress. Replay reuses
+the frozen proposals. Unsupported or missing documents before extraction and
+ambiguous facts remain explicit holds while later documents can progress.
+Invalid manifests or changed prepared source bytes fail closed.
+These contracts do not assert that every fact in a document was recovered.
 
 ## Raw retrieval contract
 

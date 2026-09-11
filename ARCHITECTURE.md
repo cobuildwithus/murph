@@ -702,10 +702,11 @@ no classifier turn, service, queue, workflow, grant, route selector, or
 reconciliation owner. Its one clarification table reuses existing retention and
 account-deletion owners.
 
-The target runtime keeps its resident foreground Murph as the sole
-model-authored canonical-content writer and outbound sender. Beside it, at most
-one detached read-only child may start a separate one-shot Codex App Server
-process. Group/member asks keep `executeReadOnlyAssistantAsk` and
+The target runtime keeps its resident foreground Murph as the sole model with
+direct canonical-write and outbound-sender authority. Beside it, at most one
+detached ask or diagnostic child may start a separate one-shot Codex App Server
+process; clinical document extraction has its separate bounded contract below.
+Group/member asks keep `executeReadOnlyAssistantAsk` and
 `murph-group-read`, which hides private runtime state. Authenticated operator
 tasks instead call `executeOperatorDiagnostic` with
 `murph-operator-diagnostic-read`, the bound workspace including `.runtime`, and
@@ -994,6 +995,31 @@ and canonical mutation. Repeated authorization uses the same source/patient
 binding and a new generation, with eight authorizations per source and twenty
 sources per member. The detailed limits, official API registrations and launch
 requirements are owned by `agent-docs/product-specs/clinical-records-intake.md`.
+
+Each imported page batch containing downloaded documents admits a vault-owned
+enrichment job and local `clinical-records.enrichment-requested` mailbox pointer
+before advancing the retrieval checkpoint. The job scans only its own immutable
+manifest, never predecessor batches. Its pending pointer supplies the next wake
+through the existing `default_owned` execution path, including cold resume.
+
+A detached controller extracts one document page at a time, with at most three
+confined read-only model leaves for labs, measurements and history and a shared
+120-second provider timeout. Text and rendered PDF/image pages are untrusted
+source evidence. Foreground replies can proceed during extraction. The controller
+aborts and joins its exact owned children before snapshots, workspace release,
+fence loss or shutdown; cancellation leaves durable work available to retry.
+Active extraction may defer an idle checkpoint for one finite 125-second window,
+but cannot defer pending canonical receipts or durable effects.
+
+`@murphai/vault-usecases/clinical-enrichment` freezes validated proposals in
+private operational state. A separate short `apply-clinical-enrichment` action
+uses the canonical writer, attaches host-derived source identity and evidence,
+checks existing facts and reads back accepted writes before advancing the page.
+It performs no model call. Missing or unsupported documents before extraction,
+exhausted document retries and ambiguous facts remain explicit holds while later
+documents can progress. Invalid manifests or changed prepared sources fail closed.
+Enrichment does not establish complete chart coverage or overwrite structured
+FHIR facts through a model decision.
 
 Member-scoped hosted runner operations validate the existing active runtime write fence at the Cloudflare route that owns the read or effect. The fence binds the claimed member, attempt, and lease generation before private-content decryption, artifact access, signed web callbacks, or durable mutation. Runtime clients attach the current lease through their existing transport boundary; member-scoped identity and authority are never derived from Cloudflare container ids. The pre-binding container-fatal sink is the sole log-only exception.
 
@@ -2042,9 +2068,10 @@ Query-aware page
 requests, opaque cursors, durable request claims, and terminal outcomes bind
 the frozen query-scope and slice identities so they cannot be swapped across
 the same resource type. Epic's active policy expands 40 primary query scopes
-from 17 unique granted FHIR resource permissions. Fifteen scopes use one
-whole-family slice and nine freeze one newest-first 90- or 365-day initial
-window at run creation. Supporting dependency reads remain registration-only;
+from 17 unique granted FHIR resource permissions. New plans use whole-family
+slices without client date cutoffs; already-frozen bounded plans retain their
+original windows. Supporting document reads use run-bound Binary tickets and
+the bounded patient-bound Media bridge, without general dependency traversal;
 resource families without a canonical mapper still enter the patient-bound raw
 evidence and explicit-review path. Then
 `@murphai/vault-usecases/clinical-records` revalidates the web-owned current run
@@ -2055,6 +2082,12 @@ bodies live only in the user vault's bounded operational checkpoint, final raw
 evidence, and encrypted hosted workspace snapshot; they never enter assistant
 session state, Postgres, Temporal state, the mailbox pointer, hosted logs, or
 model context.
+
+Downloaded document evidence has a separate enrichment boundary: the runtime
+supplies bounded text or one rendered page to confined read-only extraction,
+then the canonical owner applies frozen proposals as described in Hosted
+Clinical Records. Raw FHIR retrieval and document model extraction therefore
+retain separate data and mutation contracts.
 
 Current hosted external-data lookup boundary: `apps/web` owns read-only product label lookup on `/api/foods` and `/api/supplements`, authenticated by the shared server-to-server `MURPH_DATA_API_KEY`. The shared labels database is configured by `MURPH_LABELS_DB_URL`, and both `/api/foods` and `/api/supplements` require it; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback. Deployments must configure `MURPH_LABELS_DB_URL` before serving label lookup routes. The `foods` table stores USDA/FDC rows, and the `supplements` table stores DSLD, DailyMed, and official brand-site label rows; each row carries `data_origin`, `data_origin_id`, `data_origin_url`, `data_origin_priority`, optional `serving_grams`, and a `canonical_key` used to dedupe alternate records for the same label/product at query time. `data_origin` is the source type, such as `usda_branded`, `dsld`, `dailymed`, or `brand_site`, not a brand name. Query results use source-qualified ids such as `fdc:<id>`, `dailymed:<id>`, or `blueprint:<handle>` when a source prefix is needed, while API payloads expose provenance through `dataOrigin` and `dataOriginId` and include the stored source label JSON for search and exact lookup results. Product contaminant observations from sources such as PlasticList, NYC DOHMH, King County, and Pure Earth live in `product_tests`, with concentration limits and broad screening guidance in `contaminant_thresholds`; source-only observations keep source product identity without creating label rows, and label responses attach contaminant summaries only for rows linked to the exact selected `food_id` or `supplement_id`, including bounded raw observations plus threshold-exceedance alerts where comparable. Daily-exposure guidance can be scored at read time from the selected label's `serving_grams`, but the lookup layer never infers contaminants from names, brands, ingredients, tags, categories, or fuzzy matches. Hosted runtime callers reach label lookup through the fixed internal `murph-data-api.worker` host; `apps/cloudflare` injects the data API key during allowed `/api/foods` and `/api/supplements` `GET` egress and bounded batch-search `POST` egress, and `packages/cli` exposes those paths through `food search-labels`, `food search-labels-batch`, `supplement search-labels`, and `supplement search-labels-batch` without local key access.
 
