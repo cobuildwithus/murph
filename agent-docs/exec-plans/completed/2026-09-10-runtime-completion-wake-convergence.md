@@ -1,6 +1,6 @@
 # Durable device completion under scheduler wakes
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -38,7 +38,7 @@ A consumed wake can race with stage completion. Preserve the qualified notificat
 
 The correction reuses the existing wake and prefetch owners without changing persisted schemas. Completed work must survive empty hints at all seven boundaries; real inputs retain prompt handoff. Blocked assistant invocations preserve observed owner authority because they cannot inspect conversation input. Tests now enqueue actual foreground rows in projection/acknowledgment preemption fixtures.
 
-Runtime and Web typechecks, the changelog page tests (10 cases), and the complexity guard pass. Final focused runtime verification passes: 72 tests across five files, including all 15 new convergence/preemption cases. Required CI and ReviewGPT remain pending on the pushed candidate.
+Runtime and Web typechecks, the changelog page tests (10 cases), and the complexity guard pass. Final focused runtime verification passes: 72 tests across five files, including all 15 new convergence/preemption cases. Final ReviewGPT passed on the pushed candidate; required CI remains the final merge gate.
 
 ## Product UX
 
@@ -46,4 +46,9 @@ Patch; local journeys Ready. No member action or prompt changes. Quiet completio
 
 ## Delivery
 
-Draft PR #3226 contains the candidate. Its existing wearable-import changelog item now includes this PR. Required exact-head CI and final ReviewGPT remain open completion gates.
+PR #3226 contains the reviewed candidate. Its existing wearable-import changelog item now includes this PR. Final ReviewGPT passed at 12f416e1064b3629e55471707ac1aef18cd74a00. The managed Pro model and exact-turn response hash were verified; the approximately seven-minute full-snapshot review found no qualifying serious bugs or complexity findings. Required CI owns final-head merge admission.
+
+## Final parent review
+
+All authored changes are scoped to completion wake qualification, its regression proof, owner documentation, and existing changelog provenance. Runtime tests: 72 passed across five focused files. Changelog rendering: 10 passed. Runtime and Web typechecks passed. Complexity debt is unchanged (547), with no increase in the maximum function metric (252); the completion function remains at or below 20. Production rollout/recovery is not represented by local or review results.
+Completed: 2026-09-10
