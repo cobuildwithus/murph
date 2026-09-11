@@ -8,7 +8,7 @@ import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
 } from "@murphai/clinical-records";
-import { initializeVault } from "@murphai/core";
+import { findEventByExternalRef, initializeVault } from "@murphai/core";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
   type HostedClinicalRecordsRunDescriptor,
@@ -322,11 +322,36 @@ describe("hosted clinical records maintenance", () => {
     await initializeVault({ vaultRoot, timezone: "UTC" });
     const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     await expect(run(port, importSnapshot)).rejects.toMatchObject({ code: "CLINICAL_RECORDS_DOCUMENT_RETRYABLE" });
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(await checkpoint()).toMatchObject({ checkpoint: {
+      pages: [{ content: fixture.page.body }],
+      pendingDocuments: [{ ticket: "opaque-document-ticket" }],
+      attachments: [{ contentBase64: Buffer.from("inline clinical document").toString("base64") }],
+    } });
     authorized = false;
     const result = await run(port, importSnapshot);
-    expect(result).toMatchObject({ status: "partial", counts: { createdCount: 0 }, outcome: { errorCode: "authorization-required" } });
+    expect(result).toMatchObject({ status: "partial", counts: { createdCount: 1, labResultCount: 0, fetchedResourceFamilyCount: 0 }, outcome: { errorCode: "authorization-required" } });
+    expect(importSnapshot).toHaveBeenCalledOnce();
     expect(importSnapshot.mock.calls[0]?.[0].pages.map((page) => page.content)).toEqual([fixture.page.body]);
     expect(importSnapshot.mock.calls[0]?.[0].attachments).toHaveLength(1);
+    expect(importSnapshot.mock.calls[0]?.[0].documentAttachments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ resourceId: "document-1", attachmentIndex: 0, status: "downloaded" }),
+      expect.objectContaining({ resourceId: "document-1", attachmentIndex: 1, status: "unavailable" }),
+    ]));
+    const imported = await importSnapshot.mock.results[0]!.value;
+    const rawRoot = path.posix.dirname(imported.manifestPath);
+    const rawPage = `${rawRoot}/documents/whole/DocumentReference/page-0001.json`;
+    expect(await readFile(path.join(vaultRoot, rawPage), "utf8")).toBe(fixture.page.body);
+    expect(await readFile(path.join(vaultRoot, rawRoot, "attachments", `${hash("inline clinical document")}.bin`), "utf8")).toBe("inline clinical document");
+    // The canonical result is source metadata, not a prematurely complete document body.
+    expect(await findEventByExternalRef({
+      vaultRoot, system: `epic-fhir-${RUN.fhirBaseUrlHash}-${RUN.patientIdHash}`,
+      resourceType: "document-reference", resourceId: "document-1",
+    })).toMatchObject({
+      kind: "note", source: "import", noteType: "clinical-document-receipt",
+      note: "FHIR DocumentReference source document.\nSource status: current.\nAttachment count: 2.",
+      evidence: [{ rawRef: rawPage, sourceLabel: "DocumentReference/document-1" }],
+    });
     expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ status: "extract" });
     expect(port.fetchPage).toHaveBeenCalledOnce();
     expect(port.fetchDocument).toHaveBeenCalledOnce();

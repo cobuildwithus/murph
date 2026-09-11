@@ -15,7 +15,7 @@ const roots: string[] = [];
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-async function fixture(options: { resourceType?: "DocumentReference" | "DiagnosticReport"; status?: string; docStatus?: string; duplicate?: boolean; subject?: string } = {}) {
+async function fixture(options: { resourceType?: "DocumentReference" | "DiagnosticReport"; status?: string; docStatus?: string; duplicate?: boolean; subject?: string; revision?: unknown } = {}) {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-enrichment-parent-"));
   roots.push(vaultRoot);
   await initializeVault({ vaultRoot, timezone: "UTC", createdAt: "2026-07-10T12:00:00Z" });
@@ -23,7 +23,7 @@ async function fixture(options: { resourceType?: "DocumentReference" | "Diagnost
   const attachment = { contentType: "application/pdf", url: "Binary/synthetic-document" };
   const parent = { resourceType, id: "synthetic-document", status: options.status ?? "current",
     ...(options.docStatus ? { docStatus: options.docStatus } : {}),
-    meta: { lastUpdated: "2026-07-10T12:00:00Z" }, subject: { reference: options.subject ?? "Patient/synthetic-patient" },
+    meta: { lastUpdated: "revision" in options ? options.revision : "2026-07-10T12:00:00Z" }, subject: { reference: options.subject ?? "Patient/synthetic-patient" },
     ...(resourceType === "DocumentReference" ? { content: [{ attachment }] } : { presentedForm: [attachment] }),
   };
   const content = JSON.stringify({ resourceType: "Bundle", entry: (options.duplicate ? [parent, parent] : [parent]).map((resource) => ({ resource })) });
@@ -71,6 +71,20 @@ describe("clinical enrichment attested parent eligibility", () => {
   ])("uses shared parent policy for $resourceType $status $docStatus without requiring a readable canonical note", async (options) => {
     const input = await fixture(options);
     expect(await readClinicalEnrichmentParentEligibility(input)).toMatchObject({ eligible: options.eligible });
+  });
+
+  it.each([
+    { resourceType: "DocumentReference" as const, status: "current", revision: "2026-07-10T12:00:00.123456Z" },
+    { resourceType: "DocumentReference" as const, status: "current", revision: "2026-07-10T12:00:00.123456789Z" },
+    { resourceType: "DiagnosticReport" as const, status: "final", revision: "2026-07-10T08:00:00.123456-04:00" },
+    { resourceType: "DiagnosticReport" as const, status: "final", revision: "2026-07-10T12:00:00.123456789Z" },
+  ])("preserves the exact writable revision for $resourceType $revision", async (options) => {
+    const parent = await readClinicalEnrichmentParentEligibility(await fixture(options));
+    expect(parent).toMatchObject({ eligible: true, parentRevision: options.revision, parentExternalRef: { version: options.revision } });
+  });
+
+  it.each([undefined, "not-a-timestamp", "2026-07-10", "2026-02-30T12:00:00.123456789Z"])("rejects invalid parent revisions: %s", async (revision) => {
+    await expect(readClinicalEnrichmentParentEligibility(await fixture({ revision }))).rejects.toThrow("source attestation");
   });
 
   it("holds already prepared proposals for a withdrawn origin without altering raw evidence or publishing facts", async () => {

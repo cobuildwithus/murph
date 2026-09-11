@@ -5,7 +5,6 @@ import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   clinicalDocumentAttachmentKey,
   clinicalDocumentParentEligibility,
-  clinicalIsoDateTimeSchema,
   clinicalRawManifestSchema,
   decodeClinicalDocumentBase64,
   externalRefForFhir,
@@ -17,6 +16,7 @@ import {
   type ClinicalDocumentAttachment,
   type ClinicalRawManifest,
 } from "@murphai/clinical-records";
+import { isWritableIsoDateTime } from "@murphai/contracts";
 import { resolveVaultPathOnDisk } from "@murphai/core";
 
 const MAX_PARENT_PAGE_BYTES = 5 * 1024 * 1024;
@@ -39,15 +39,15 @@ export async function readClinicalEnrichmentParentEligibility(input: {
   const parent = await readAttestedParent({ ...input, manifest, attachment });
   validateParentPatient(parent, manifest);
   validateParentAttachment(parent, attachment);
-  const revision = clinicalIsoDateTimeSchema.safeParse(isRecord(parent.meta) ? parent.meta.lastUpdated : undefined);
-  if (!revision.success) throw invalidParent();
+  const revision = isRecord(parent.meta) ? parent.meta.lastUpdated : undefined;
+  if (typeof revision !== "string" || revision.length > 200 || !isWritableIsoDateTime(revision)) throw invalidParent();
   const parentExternalRef = externalRefForFhir({ fhirBaseUrlHash: manifest.fhirBaseUrlHash,
     patientIdHash: manifest.patientIdHash, sourceSystem: manifest.sourceSystem,
-    resourceType: attachment.resourceType, resourceId: attachment.resourceId, version: revision.data });
+    resourceType: attachment.resourceType, resourceId: attachment.resourceId, version: revision });
   const eligibility = clinicalDocumentParentEligibility({ resourceType: attachment.resourceType,
     status: parent.status, docStatus: parent.docStatus });
   return { eligible: eligibility.action === "eligible", ...("reason" in eligibility ? { reason: eligibility.reason } : {}),
-    parentExternalRef, parentRevision: revision.data };
+    parentExternalRef, parentRevision: revision };
 }
 
 async function readAttestedParent(input: {
