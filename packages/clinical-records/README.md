@@ -7,12 +7,26 @@ assistant behavior, raw-file writes, or canonical vault mutation.
 The package boundary is intentionally small:
 
 - source-system and FHIR resource constants
-- clinical raw FHIR retrieval manifest contracts
+- clinical raw FHIR retrieval manifest and bounded attachment-batch contracts
 - deterministic FHIR external-reference helpers namespaced by FHIR base and patient hashes
 - clinical `upsert | retract | review` import-plan decision contracts
 
 FHIR/MyChart data remains raw evidence. Canonical Murph records stay in the
 vault and must be written through the existing core/import surfaces.
+
+DocumentReference and DiagnosticReport attachments are preserved as separate
+immutable evidence. Inline bytes are validated directly; linked Binary bodies
+use a Web-issued, run-bound ticket. DiagnosticReport study images may use the
+single patient-bound Media-to-Binary hop documented by the Epic adapter. Text
+and clinical XML can become source notes, while PDFs use the existing Poppler
+parser and images remain raw evidence when no text is available. An unresolved
+attachment produces explicit incomplete coverage and never a partial same-
+revision canonical note.
+
+Large charts are imported one page batch at a time. A successor batch must prove
+the previous immutable manifest and outgoing FHIR link, so a middle page cannot
+be injected as a new root. Batch checkpoints retain accepted bytes, pending
+document tickets, cursors, and cumulative outcomes across preemption.
 
 ## Raw retrieval contract
 
@@ -38,11 +52,12 @@ preceding page's `next` link and `nextPageUrlHash`. Raw Bundle navigation links
 remain immutable evidence, while hashes give the manifest a URL-free chain
 identity.
 
-Raw snapshot limits are part of the retrieval contract: at most 1,000
-resources may appear in one page and at most 5,000 across the manifest. Runtime
-producers must use the package-owned page counter and stop before import when a
-provider page would cross either limit, rather than relying on manifest
-validation to fail after retrieval.
+Raw page limits are part of the retrieval contract: at most 1,000 resources may
+appear in one page. Runtime producers import each validated page as its own
+batch, so a chart may continue beyond the former 5,000-resource aggregate
+snapshot limit without discarding earlier batches. Per-page bytes, attachment
+bytes and descriptor counts remain bounded; a bound yields explicit incomplete
+coverage for the affected batch.
 
 The clinical importer reads each raw page once, then validates its hash, count,
 resource family, patient binding, and pagination links before mapping any

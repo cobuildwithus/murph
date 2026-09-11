@@ -115,9 +115,6 @@ afterAll(async () => {
 describe("hosted local Linq scheduled reminder e2e", () => {
   beforeAll(async () => {
     await startScenario();
-  }, 600_000);
-
-  it("creates a reminder from the hosted assistant turn, wakes from the scheduled alarm, and sends it", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
@@ -149,7 +146,9 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const welcomeStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(welcomeStatus.lastErrorCode ?? null).toBeNull();
     await welcomeSendPromise;
+  }, 600_000);
 
+  it("preserves the scheduled image reminder through a checkpoint race and bills its delivery", async () => {
     const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
@@ -351,7 +350,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       memberId: userId,
       notBeforeIso: reminderCronUsageNotBeforeIso,
     });
+  }, 720_000);
 
+  it("delivers a due reminder after the overlapping foreground reply", async () => {
+    const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
+    const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const overlapSetupTimes = resolveScheduledReminderTimes();
     const overlapSetupBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     requireScenario().queueAssistantResponses(
@@ -495,7 +498,12 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     } finally {
       heldOverlapReminderResponse.release();
     }
+  }, 720_000);
 
+  it("delivers a scheduled nutrition card through the native iMessage capability", async () => {
+    const memberPhone = buildLinqRecipientPhoneNumber(userId);
+    const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
+    const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const scheduledCardSetupTimes = resolveScheduledReminderTimes();
     const scheduledCardSetupBaselineCount =
       requireLinqStub().countObservedSends(reminderPath);

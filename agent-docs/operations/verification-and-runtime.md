@@ -137,6 +137,16 @@ the loaded APT policy, one-shot Playwright status, Ubuntu caller inventory, and
 overall step-timeout contract; exact-head Actions then prove the wrapper on the
 GitHub-hosted Ubuntu runner.
 
+Before checking mergeability, refresh the remote-tracking base with an explicit
+destination refspec: `git fetch origin refs/heads/main:refs/remotes/origin/main`.
+Verify that `git rev-parse origin/main` matches the SHA returned by
+`git ls-remote origin refs/heads/main`; if the base advanced, refresh and check
+again. For another base branch, substitute its name in all three commands.
+A bare `git fetch origin main` can update only `FETCH_HEAD` when another task
+has narrowed the shared fetch mapping, leaving `origin/main` stale. Preserve
+the shared `remote.origin.fetch` configuration and use the verified base for
+the merge-tree proof.
+
 For readiness, the exact PR head is the commit that contains the PR-authored
 change; it does not need to be repeatedly merged with a moving base. Keep green
 required CI on that head and prove current-base mergeability with
@@ -165,11 +175,9 @@ statuses. The trusted default-branch controllers run on staggered six-hour
 schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
 dispatch is the scheduler-drop recovery path, but its event ref must be
 `refs/heads/main` and its exact event SHA must still equal current `main` when
-the selection job runs. Each cheap selection job reads the latest completed
-scheduled outcome for its own workflow and skips the native job only when that
-outcome succeeded at the selected protected-`main` SHA. Missing history, a
-newer SHA, or a latest failure admits the canary. An explicit rerun of the same
-trusted controller attempt bypasses the no-change skip. Reviewed native source pins live in
+the selection job runs. Every scheduled admission executes the actual native
+journey, including unchanged revisions; a prior successful scheduling result is
+never reused as provider evidence. Reviewed native source pins live in
 `.github/native-hosted-e2e-controller.json`, so a source rotation advances the
 protected-main checkpoint.
 
@@ -247,6 +255,35 @@ keeps the existing isolated provider-key route. Read every printed synthetic
 reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
+
+The separate `.github/workflows/assistant-real-model.yml` acceptance lane runs
+only on protected `main` pushes or manual dispatch from protected `main`. Before
+enabling it, configure the `assistant-real-model-sandbox` GitHub Environment to
+allow only `main` and set its `ASSISTANT_REAL_MODEL_SANDBOX_OPENAI_API_KEY` to a
+dedicated budgeted test-project credential. Do not use a production credential.
+The runner `pnpm exec tsx scripts/run-assistant-real-model-gate.ts` pins
+`gpt-5.6-terra`, the production Responses websocket-enabled provider setting,
+three exact scenario names, serial execution, zero test retries, and a twelve
+minute outer deadline per scenario. Codex's ordinary bounded transport retries
+remain enabled. Missing configuration, missing selection, skipped assertions,
+and absent or invalid execution reports fail the lane. The retained artifact
+contains only commit/run/model/configured-transport and scenario status metadata;
+raw replies and Vitest reports are discarded.
+
+These journeys use production assistant planning and the shipped `vault-cli`
+against synthetic canonical vaults. They prove meal save and fresh-conversation
+readback after assistant process restart and vault snapshot restore; recurring
+reminder save, scheduler fire, outbox acknowledgement/reconciliation and cancel;
+and group privacy refusal, silence, and absence of unauthorized canonical effects.
+The Linq route metadata and delivery sink are synthetic external boundaries.
+The model-created reminder is not patched before execution. Native launch
+arguments add the named permission profiles from the production builder while
+preserving the selected Codex authentication home. This lane does not prove
+managed-container restart, private Worker egress, Temporal, or actual
+messaging-provider delivery.
+It is post-merge acceptance evidence, separate from PR checks and deploy gates.
+Local subscription runs prove the same owned effects but retain the selected
+local Codex configuration; they do not certify the protected provider transport.
 
 If the default subscription home cannot run the focused journey before any
 provider action because of authentication, quota, startup, or connection
@@ -382,16 +419,23 @@ remain external to the checkout.
 
 ## Live Junction Garmin Canary Verification
 
-The public live wearable canary is a protected-main external-provider proof,
-not a pull-request check. Its focused hermetic owner proof is:
+The public live wearable workflow dispatches protected-main source to the
+private hosted-runtime executor. It runs after main pushes, daily, and on manual
+recovery; it accepts only an exact completed canonical-data receipt. The public
+controller has no provider credentials, private checkout, or artifact access.
+See [Live provider canaries](live-provider-canaries.md) for the execution,
+credential-provisioning, and safe migration contract.
+
+Its focused controller and browser boundary proof is:
 
 ```bash
+node --test scripts/github-wearable-canary.test.mjs
 pnpm --dir packages/hosted-local-harness exec vitest run \
   --config vitest.config.ts --no-coverage \
   test/junction-wearable-canary-workflow.test.ts
 ```
 
-The workflow must expose and smoke-check the exact workspace Codex CLI installed
+The private executor must expose and smoke-check the exact workspace Codex CLI installed
 by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned
 `Dockerfile.cloudflare-hosted-runner-base` pin; both owners remain visible in
@@ -433,7 +477,7 @@ falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
 [CDP](https://www.kernel.sh/docs/browsers/cdp), and
 [stealth](https://www.kernel.sh/docs/browsers/bot-detection/stealth) contracts.
-Keep those setup steps free of Environment secrets; only the final
+Keep those setup steps free of Environment secrets; only the private executor
 browser-canary step may receive Kernel authority, Junction sandbox authority,
 and the dedicated Garmin login. A real authorization proof remains available
 only after the exact workflow reaches protected `main`, where non-canceling

@@ -1602,11 +1602,13 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("exact wake interrupts dirty acknowledgement and a later system pass resumes it", async () => {
+  test("conversation input interrupts dirty acknowledgement and a later system pass resumes it", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const conversationItems: ReturnType<typeof createMailboxItem>[] = [];
+    const foregroundReached = new Error("Synthetic foreground phase reached.");
     const acknowledgementStarted = createDeferred<void>();
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:interrupt-recording",
@@ -1700,7 +1702,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         platform: createPlatform({
           artifactBytesByHash,
           deviceSyncPort,
-          mailboxPort: createMailboxPort({ events, items: [] }),
+          mailboxPort: createMailboxPort({ events, items: conversationItems }),
           workspacePort: createWorkspacePort({
             checkpointRequests,
             events,
@@ -1709,7 +1711,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         }),
         runtimeWakeSignal: wakeSignal,
         async runAssistantPhase() {
-          throw new Error("System mailbox recording must not enter assistant phase.");
+          throw foregroundReached;
         },
         vaultRoot,
       });
@@ -1735,15 +1737,16 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createRunOptions(runtimeWakeSignal, initialWorkspace),
       );
       await acknowledgementStarted.promise;
+      conversationItems.push(createMailboxItem({
+        id: "mailbox_item_recording_foreground", lane: "conversation", laneSeq: "1",
+      }));
       runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-      const interruptedResult = await withRealTimeout(
-        interruptedRun,
+      await withRealTimeout(
+        assert.rejects(interruptedRun, (error) => error === foregroundReached),
         1_000,
         () => "System mailbox did not release promptly after an exact wake interrupted dirty acknowledgement.",
       );
 
-      assert.equal(interruptedResult.immediateRecheckRequested, true);
-      assert.equal(interruptedResult.nextWakeReason, "assistant");
       assert.equal(dirtyAckCalls, 1);
       const interruptedState = await readHostedSystemMailboxState(vaultRoot);
       const retainedItem = interruptedState.pending.find((item) => item.itemId === deviceItem.id);
@@ -1753,6 +1756,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(checkpointRequests.length, 1);
       const durableRecordingCheckpoint = checkpointRequests[0];
       assert.ok(durableRecordingCheckpoint);
+      // The foreground owner consumes its input before the system retry.
+      conversationItems.length = 0;
       const resumedWorkspace = createWorkspaceState({
         inboxMediaRetentionWakeAt:
           durableRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,
@@ -1788,6 +1793,9 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const conversationItems: ReturnType<typeof createMailboxItem>[] = [];
+    const foregroundReached = new Error("Synthetic foreground phase reached.");
+    const foregroundStarted = createDeferred<void>();
     const projectionStarted = createDeferred<void>();
     const projectionRelease = createDeferred<void>();
     const deviceItem = createMailboxItem({
@@ -1882,7 +1890,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         platform: createPlatform({
           artifactBytesByHash,
           deviceSyncPort,
-          mailboxPort: createMailboxPort({ events, fetchRequests, items: [] }),
+          mailboxPort: createMailboxPort({ events, fetchRequests, items: conversationItems }),
           vaultSharePort: {
             async listActiveProjectionScopes() {
               return {
@@ -1936,7 +1944,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         }),
         runtimeWakeSignal: wakeSignal,
         async runAssistantPhase() {
-          throw new Error("An empty system-mailbox wake must not enter assistant phase.");
+          foregroundStarted.resolve();
+          throw foregroundReached;
         },
         vaultRoot,
       });
@@ -1971,8 +1980,12 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           interruptedRunSettled = true;
         },
       );
+      conversationItems.push(createMailboxItem({
+        id: "mailbox_item_recording_foreground", lane: "conversation", laneSeq: "1",
+      }));
       runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-      await Promise.resolve();
+      await withRealTimeout(foregroundStarted.promise, 2_000,
+        () => "Conversation handoff waited for projection delivery.");
       assert.equal(interruptedRunSettled, false);
       assert.equal(projectionCalls, 1);
       assert.equal(activeProjectionCalls, 1);
@@ -1983,13 +1996,12 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         false,
       );
       projectionRelease.resolve();
-      const interruptedResult = await withRealTimeout(
-        interruptedRun,
+      await withRealTimeout(
+        assert.rejects(interruptedRun, (error) => error === foregroundReached),
         5_000,
         () => "System mailbox did not release after its owned projection completed.",
       );
 
-      assert.equal(interruptedResult.immediateRecheckRequested, true);
       assert.equal(dirtyAckCalls, 0);
       assert.equal(events.includes("device-sync.dirty-ack"), false);
       const interruptedState = await readHostedSystemMailboxState(vaultRoot);
@@ -2005,6 +2017,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       );
       const durableRecordingCheckpoint = checkpointRequests[0];
       assert.ok(durableRecordingCheckpoint);
+      // The foreground owner consumes its input before the system retry.
+      conversationItems.length = 0;
       const resumedWorkspace = createWorkspaceState({
         inboxMediaRetentionWakeAt:
           durableRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,

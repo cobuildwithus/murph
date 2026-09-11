@@ -14,6 +14,14 @@ export const TEMPORAL_COMPATIBILITY_MODE = "temporal_compatibility";
 export const HOSTED_RELEASE_ADMISSION_MODE = "release_admission";
 export const HOSTED_RELEASE_SCOPE_NONE = "none";
 export const HOSTED_RELEASE_SCOPE_FOREGROUND = "foreground_priority";
+export const HOSTED_RELEASE_SCOPE_PRODUCTION_CORE = "production_core";
+const PRODUCTION_CORE_LANES = [
+  "linq-delivery",
+  "linq-scheduled-reminder",
+  "hosted-web-browser-smoke",
+  "foreground-reply-priority",
+  "foreground-checkpoint-ordering",
+];
 
 const GITHUB_API_VERSION = "2026-03-10";
 const HTTP_TIMEOUT_MS = 30_000;
@@ -404,6 +412,7 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
     ["reader", /^Temporal compatibility reader \[sha=([0-9a-f]{40})\]$/u],
     ["attestation", /^Temporal compatibility attestation \[proof=([0-9a-f]{64})\]$/u],
     ["hosted-release", /^Hosted release attestation \[proof=([0-9a-f]{64})\]$/u],
+    ["hosted-core", /^Hosted production core proof \/ ([a-z-]+) \/ ([0-9a-f]{64})$/u],
   ];
   for (const [kind, pattern] of patterns) {
     const match = pattern.exec(name);
@@ -411,9 +420,15 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
     if (raw.status !== "completed" || raw.conclusion !== "success") {
       throw new Error("Private compatibility proof job did not complete successfully.");
     }
-    return { kind, value: match[1] };
+    return kind === "hosted-core"
+      ? { kind, lane: match[1], value: match[2] }
+      : { kind, value: match[1] };
   }
-  if (name.startsWith("Temporal compatibility") || name.startsWith("Hosted release")) {
+  if (
+    name.startsWith("Temporal compatibility")
+    || name.startsWith("Hosted release")
+    || name.startsWith("Hosted production core")
+  ) {
     throw new Error("Private compatibility run returned a malformed proof job.");
   }
   return null;
@@ -421,13 +436,14 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
 
 function verifyHostedReleaseAttestation({
   attestations,
+  coreProofs,
   expectedTemporalTargetDigest,
   privateSha,
   publicSha,
   releaseScope,
 }) {
   if (releaseScope === HOSTED_RELEASE_SCOPE_NONE) {
-    if (attestations.length !== 0) {
+    if (attestations.length !== 0 || coreProofs.length !== 0) {
       throw new Error("Unexpected hosted release attestation was returned.");
     }
     return;
@@ -443,6 +459,25 @@ function verifyHostedReleaseAttestation({
   });
   if (attestations[0] !== expected) {
     throw new Error("Hosted release attestation does not bind the requested proof.");
+  }
+  verifyProductionCoreProofs(coreProofs, { expectedDigest: expected, releaseScope });
+}
+
+function verifyProductionCoreProofs(proofs, { expectedDigest, releaseScope }) {
+  if (releaseScope !== HOSTED_RELEASE_SCOPE_PRODUCTION_CORE) {
+    if (proofs.length !== 0) {
+      throw new Error("Unexpected hosted production core proof was returned.");
+    }
+    return;
+  }
+  const remaining = new Set(PRODUCTION_CORE_LANES);
+  for (const proof of proofs) {
+    if (!remaining.delete(proof.lane) || proof.value !== expectedDigest) {
+      throw new Error("Hosted production core proof has a duplicate, unknown, or mismatched lane.");
+    }
+  }
+  if (remaining.size !== 0) {
+    throw new Error("Hosted production core proof omitted a required lane.");
   }
 }
 
@@ -463,11 +498,13 @@ export function inspectAttestationJobs(jobs, {
   const readers = [];
   const attestations = [];
   const hostedReleaseAttestations = [];
+  const coreProofs = [];
   for (const raw of jobs) {
     const job = inspectPrivateProofJob(raw, { ids, privateSha, runId });
     if (job?.kind === "reader") readers.push(job.value);
     if (job?.kind === "attestation") attestations.push(job.value);
     if (job?.kind === "hosted-release") hostedReleaseAttestations.push(job.value);
+    if (job?.kind === "hosted-core") coreProofs.push(job);
   }
   if (attestations.length !== 1) {
     throw new Error("Private compatibility run must return exactly one attestation job.");
@@ -490,6 +527,7 @@ export function inspectAttestationJobs(jobs, {
   }
   verifyHostedReleaseAttestation({
     attestations: hostedReleaseAttestations,
+    coreProofs,
     expectedTemporalTargetDigest,
     privateSha,
     publicSha,
@@ -873,7 +911,7 @@ async function runMainCompatibilityCommand(args) {
     dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
     expectedBaseRef: requiredEnv("EXPECTED_BASE_REF"),
     expectedTemporalTargetDigest: requiredEnv("TEMPORAL_PRODUCTION_TARGET_DIGEST"),
-    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
     privateToken,
     producerDigest: producer.digest,
     producerFixtures: producer.serialized,
@@ -964,8 +1002,9 @@ function assertHostedReleaseScope(value, { allowNone = true } = {}) {
     ? [
         HOSTED_RELEASE_SCOPE_NONE,
         HOSTED_RELEASE_SCOPE_FOREGROUND,
+        HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
       ]
-    : [HOSTED_RELEASE_SCOPE_FOREGROUND];
+    : [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE];
   if (!allowed.includes(value)) {
     throw new Error("Hosted release scope is invalid.");
   }
@@ -978,7 +1017,7 @@ function assertDispatchMode(mode, releaseScope) {
     && releaseScope === HOSTED_RELEASE_SCOPE_NONE
   ) || (
     mode === HOSTED_RELEASE_ADMISSION_MODE
-    && releaseScope === HOSTED_RELEASE_SCOPE_FOREGROUND
+    && releaseScope !== HOSTED_RELEASE_SCOPE_NONE
   );
   if (!valid) {
     throw new Error("Compatibility dispatch mode and hosted release scope do not match.");

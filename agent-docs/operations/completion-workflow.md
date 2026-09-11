@@ -51,7 +51,8 @@ alone does not authorize a narrower product or another state owner.
    Include every public-safe Frog entry created or modified during the task in that same scoped commit.
    A behavior-changing final edit needs the applicable checks and next review;
    explanatory docs and isolated proof additions follow the review loop's exemptions.
-8. Fetch the current base and prove mergeability with
+8. Refresh and verify the remote-tracking base using the explicit-refspec
+   procedure in `verification-and-runtime.md`, then prove mergeability with
    `git merge-tree --write-tree HEAD origin/<base>`. Keep green required CI on
    the PR-authored head. Reconcile the base when the authorized merge path
    needs it, following the review loop's Base-Update-Only Exception.

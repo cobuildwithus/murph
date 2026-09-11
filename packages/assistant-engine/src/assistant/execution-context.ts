@@ -619,7 +619,7 @@ export interface AssistantHostedExecutionContext {
     channel: 'telegram'
     signal?: AbortSignal | null
     target: string
-  }): Promise<HostedExecutionExternalThreadRouteAuthority>
+  }): Promise<HostedExecutionExternalThreadRouteAuthority & { threadIsDirect: boolean }>
   runtimeAttemptId?: string | null
   runtimeName?: string | null
   usageRecorder?: AssistantUsageRecorder | null

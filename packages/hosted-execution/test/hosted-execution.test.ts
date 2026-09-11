@@ -1044,6 +1044,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",
       "isHostedRuntimeVaultShareDeliverContinuation",
+      "parseHostedExecutionResolvedLinqDeliveryRoute",
       "parseHostedRuntimeOwnerReleaseSearch",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
