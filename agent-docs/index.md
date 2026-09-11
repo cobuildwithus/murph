@@ -45,6 +45,11 @@ Generated-image retirement after hosted media expiry is owned by
 `agent-docs/RELIABILITY.md`; implementation and verification are tracked in
 `agent-docs/exec-plans/completed/2026-09-10-generated-image-retention-expiry-fix.md`.
 
+Public production candidates retain SHA-scoped required checks and protected-main
+ancestry admission as documented in `operations/verification-and-runtime.md`,
+`references/hosted-temporal-orchestration.md`, `SECURITY.md`, and
+`../apps/web/README.md`. Vercel remains the managed Git promotion owner.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
@@ -181,6 +186,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/exec-plans/completed/2026-09-10-billing-browser-hydration.md` | Real React and Chromium proof for billing control replacement during hydration; provider outcome checks remain owned by the protected live matrix. | Historical implementation evidence | Low | 2026-09-10 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-09-10-linq-acceptance-receipt-lock.md` | PR #3262: first-turn receipt serialization, composed PostgreSQL proof and final review; final-head CI tracked on the PR. | Historical implementation evidence | Low | 2026-09-11 |
+| `agent-docs/exec-plans/completed/2026-09-11-pinned-release.md` | Candidate-preserving release checks and public ancestry admission; paired PRs track final CI and private-first rollout. | Historical implementation evidence | Low | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-10-testing-linq-wire-contract.md` | Strict Linq HTTP contract proof, canonical container egress, and recorded bundle-budget verification gap. | Historical testing evidence | Low | 2026-09-10 |
 | `agent-docs/exec-plans/completed/2026-09-09-runtime-mailbox-hardening.md` | PR #3102: shared runnable admission and device-hint coverage, producer-reader contracts, and cold-restore regression proof. | Historical implementation evidence | Low | 2026-09-09 |
 | `agent-docs/exec-plans/completed/2026-09-09-runtime-mailbox-recovery-rollout.md` | Reviewed runtime-mailbox fixes, protected rollout convergence, and verified recovery of the original incident cohort. | Historical implementation evidence | Low | 2026-09-09 |
