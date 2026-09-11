@@ -10,6 +10,7 @@ import { cn } from "@/src/lib/utils";
 
 import { ApprovalPasskeyStatus, ApprovalPasskeyUpdate } from "./approval-passkey-status";
 import { SettingsStatusLine } from "./connected-account-card";
+import { SettingsRow } from "./settings-row";
 import { HostedApprovalRecoverySettings } from "./hosted-approval-recovery-settings";
 
 export function HostedPasskeySettings({
@@ -34,19 +35,26 @@ export function HostedPasskeySettings({
 
 function InitialPasskeySetup({ enrollmentEnabled }: { enrollmentEnabled: boolean }) {
   const enrollment = useApprovalPasskeyEnrollment();
-  return (
-    <div className="flex flex-col gap-3 py-4">
-      <p className="text-sm leading-relaxed text-muted-foreground">
-        Add a passkey to approve account changes and other protected actions.
-      </p>
-      {enrollment.registered ? <SettingsStatusLine message="Your passkey is ready." tone="success" /> : (
-        <Button className="self-start" disabled={!enrollmentEnabled || enrollment.pending} type="button" onClick={() => void enrollment.enroll()}>
-          {enrollment.pending ? "Setting up…" : "Set up passkey"}
-        </Button>
-      )}
-      {enrollment.error ? <SettingsStatusLine message={enrollment.error} tone="destructive" /> : null}
-    </div>
-  );
+  return <InitialPasskeySetupView enrollmentEnabled={enrollmentEnabled} {...enrollment} onEnroll={() => void enrollment.enroll()} />;
+}
+
+export function InitialPasskeySetupView({ enrollmentEnabled, pending, registered, error, onEnroll }: {
+  enrollmentEnabled: boolean;
+  pending: boolean;
+  registered: boolean;
+  error: string | null;
+  onEnroll: () => void;
+}) {
+  return <div className="flex flex-col gap-2">
+    {registered ? <ApprovalPasskeyStatus /> : <SettingsRow
+      icon={<Fingerprint className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+      label="Passkey" value={pending ? "Setting up…" : "Not set up"} empty
+      action={<Button aria-label="Set up passkey" aria-busy={pending} disabled={!enrollmentEnabled || pending} type="button" onClick={onEnroll}>
+        {pending ? "Setting up…" : "Set up"}
+      </Button>}
+    />}
+    {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}
+  </div>;
 }
 
 function PasskeySetup({

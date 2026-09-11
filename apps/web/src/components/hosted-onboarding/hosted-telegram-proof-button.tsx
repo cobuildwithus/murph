@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
+import { Spinner } from "@/src/components/ui/spinner";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { Button } from "@/src/components/ui/button";
 import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
 import { requestHostedOnboardingJson } from "./client-api";
@@ -109,10 +112,11 @@ export function HostedTelegramProofButton({ purpose, onProof, label = "Continue 
   return <div className="flex flex-col gap-3">
     {error ? <>
       <SettingsStatusLine message={error} tone="destructive" />
-      <Button type="button" variant="outline" onClick={retry}>Try Telegram again</Button>
-    </> : <Button type="button" variant="secondary" disabled={!ready || pending} onClick={open}>
+      <HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={retry}>Try Telegram again</HostedInlineAuthButton>
+    </> : <HostedInlineAuthButton busy={!ready || pending} disabled={!ready || pending} onClick={open}
+      icon={!ready || pending ? <Spinner aria-hidden="true" /> : <TelegramIcon className="h-5 w-5" />}>
       {pending ? "Waiting for Telegram..." : ready ? label : "Preparing Telegram..."}
-    </Button>}
-    {pending && !error ? <Button type="button" variant="ghost" onClick={retry}>Cancel</Button> : null}
+    </HostedInlineAuthButton>}
+    {pending && !error ? <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" onClick={retry}>Cancel</Button> : null}
   </div>;
 }

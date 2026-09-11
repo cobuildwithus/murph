@@ -6,6 +6,8 @@ import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { HostedContactCodeForm } from "@/src/components/hosted-onboarding/hosted-contact-code-form";
 import { HostedTelegramProofButton } from "@/src/components/hosted-onboarding/hosted-telegram-proof-button";
+import { useApprovalPasskeyEnrollment } from "@/src/components/sensitive-actions/use-approval-passkey-enrollment";
+import { InitialPasskeySetupView } from "./hosted-passkey-settings";
 import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
 import { Button } from "@/src/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/src/components/ui/dialog";
@@ -17,14 +19,16 @@ import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 type Methods = Record<HostedCredentialChange["method"], string | null>;
 type MethodResponse = { ok: true; methods: Methods; requiresLogin?: false } | { ok: true; requiresLogin: true };
 
-export function HostedLoginMethodDialog({ method, operation, onOpenChange }: {
+export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSaved }: {
   method: HostedCredentialChange["method"];
   operation: HostedCredentialChange["operation"];
   onOpenChange: (open: boolean) => void;
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const { openAuthDialog } = useAuth();
   const approval = useSensitiveActionAuthorization();
+  const enrollment = useApprovalPasskeyEnrollment();
   const [current, setCurrent] = useState<MethodResponse | null>(null);
   const [initialPasskeyNeeded, setInitialPasskeyNeeded] = useState(false);
   const [pending, setPending] = useState(false);
@@ -51,7 +55,7 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange }: {
       if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Settings could not load. Try again.");
     });
     return () => { mounted.current = false; controller.abort(); };
-  }, [attempt]);
+  }, [attempt, enrollment.registered]);
 
   function change(value: string | null): HostedCredentialChange {
     return { method, operation, expectedIdentity: previous, value };
@@ -73,7 +77,7 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange }: {
           url: `/api/settings/login-methods/${suffix}`, payload: { change: selected, authorization, ...extra }, signal,
         });
         if (result.ok !== true) throw new Error("The account change could not be confirmed. Refresh Settings.");
-        if (mounted.current) setSaved(true);
+        if (mounted.current) { setSaved(true); onSaved?.(); }
       } finally {
         // A lost response can follow a committed change. Always refresh the
         // canonical page; never replay a destructive request automatically.
@@ -101,8 +105,8 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange }: {
       <Button type="button" onClick={() => { onOpenChange(false); openAuthDialog(); }}>Sign in to continue</Button>
     </>;
     else if (initialPasskeyNeeded) content = <>
-      <p className="text-sm text-muted-foreground">Set up a passkey in Security to approve account changes.</p>
-      <Button type="button" onClick={() => { onOpenChange(false); window.location.hash = "security"; }}>Set up passkey</Button>
+      <p className="text-sm text-muted-foreground">Set up a passkey to protect changes to your connected accounts.</p>
+      <InitialPasskeySetupView enrollmentEnabled {...enrollment} onEnroll={() => void enrollment.enroll()} />
     </>;
     else if (!methods) content = error ? <Button type="button" variant="outline" onClick={() => { setError(null); setAttempt((value) => value + 1); }}>Try again</Button>
       : <p role="status" className="text-sm text-muted-foreground">Checking your login methods...</p>;
@@ -135,10 +139,10 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange }: {
   }
 
   return <Dialog open onOpenChange={onOpenChange}>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>{operation === "remove" ? "Remove" : previous ? "Change" : "Add"} {label}</DialogTitle>
-        <DialogDescription>{operation === "remove" || previous
+    <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
+      <DialogHeader className="gap-2 pr-10">
+        <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">{operation === "remove" ? "Remove" : previous ? "Change" : "Add"} {label}</DialogTitle>
+        <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">{operation === "remove" || previous
           ? "This changes where you can sign in and message Murph. Other sessions will be signed out; this browser stays signed in."
           : "Add a way to sign in and message Murph. Your existing sessions stay signed in."}</DialogDescription>
       </DialogHeader>

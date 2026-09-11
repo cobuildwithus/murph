@@ -490,3 +490,78 @@ rerun. The hosted Preview database used the complete migration chain separately.
 No application auth code changed; this test correction uses the low-risk final
 review exemption. Exact-head CI and the independently owned WHOOP diagnostic
 fixture correction remain pending.
+
+
+### Production UI parity audit
+
+Reference: live production Web commit b2a559812972d70644cffb2bf43923fc9211047d,
+compared with adoption candidate c08a130c739e049eb6ba97dcc9756f4d2799e5a8.
+Audit all changed Web presentation owners and their consumers before final
+rendered proof. Preserve the canonical authentication, credential approval,
+session revocation and recovery contracts; restore unintended presentation drift.
+
+| Surface | Source finding and selected correction |
+| --- | --- |
+| Public sign-in and landing-page auth | Shared theme, dialog shell and phone-entry primitives match production. Restore email entry label, placeholder, field and button sizing, background, spacing, pending feedback and submit copy. |
+| Code verification and invite auth | Preserve the shared six-digit input and focus logic. Restore method-specific copy, phone/email secondary controls and compact invite sizing. |
+| Completion retry and consent | Preserve retry without another OTP and the unchanged legal card. Restore full-sized actions, pending feedback and production auth error presentation. |
+| Telegram proof | Preserve nonce preparation, explicit popup click, cancellation and proof ownership. Reuse production Telegram button presentation and icon for ready/retry/pending states. |
+| Messaging settings and credential dialogs | Preserve canonical verified-only display and last-method removal protection. Restore Telegram display names, existing action copy/colors/wrapping, destructive Remove affordance and identity-dialog frame. |
+| Passkeys and recovery | Preserve new enrollment and recovery states. Use the existing Passkey settings row for initial enrollment; retain established enabled, unavailable and legacy migration presentations. |
+| Privacy, approvals, navigation, root/join providers | Inspect provider/session substitutions and confirm existing rendered content is retained. |
+| Other production-to-branch differences | Trace inherited main changes separately, including retired browser-route redirects and updated CLI examples, before considering any restoration. |
+
+Proof will cover loaded and empty email/phone entry, send/verification failure,
+code entry, resend/change-method, compact invite verification, completion retry,
+Telegram ready/cancel/error, connected/unconnected settings and new passkey and
+recovery states at phone and desktop widths. Use synthetic data only. Record
+remaining intentional differences and exact-head hosted status in the PR.
+
+
+The onboarding walkthrough found an unnecessary account-settings handoff after
+email signup. Replace it with Phone and Telegram connection actions in the
+existing join card. Reuse the credential dialog and approval endpoints in place;
+initial passkey enrollment also stays in that dialog. Successful credential
+readback refreshes the invite automatically. Existing invite-status polling and
+server messaging/activation gates decide the next screen, including connections
+completed elsewhere. Preserve legacy approval context for legacy identities.
+Do not reinstate the old Privy linking path or skip canonical credential approval.
+
+Read-only Preview checks confirmed email and phone verification records, while
+Linq line inventory is empty. This is a separate activation configuration gap;
+a verified contact alone does not prove working messaging or completed setup.
+
+The broader rendered audit also reproduced a server-rendering failure in the
+sidebar chat action. The server passes a streamed React child to the client;
+cloning that unresolved child loses its component type. Normalize the supplied
+trigger with React Children before cloning. The existing button, contact routing
+and login dialog remain unchanged. Real Next browser proof now rejects both
+server fallback templates and uncaught page errors, and opens the sidebar login
+control. Removing the custom server trigger eliminated the failure during
+isolation; restoring it with normalization passes the same page checks.
+
+Current presentation evidence: eight Chromium auth/study/failure journeys pass
+at 390px/1280px; public Experiments, Goals and Home rendering passes at
+412px/1440px, with the sidebar sign-in action replayed at desktop width.
+The auth, credential and join follow-up passes 66 focused cases; sidebar/contact
+routing passes 11. Initial-passkey completion reloads canonical factors directly
+from the enrollment state; only the credential dialog owns the successful save
+refresh. Focused tests cover canceled/failed approval and lost commit responses
+without false success. Inspect synthetic screenshots before PR attachment.
+
+The source comparison retains intentionally new first-party credential approval,
+passkey/recovery controls, verified-only identity display, and explicit contact
+proof for invite authentication. Inherited main changes to retired route redirects
+and CLI examples are independent work and remain intact. Shared theme and base
+controls match the production reference. The existing sign-in-and-approval-recovery
+changelog item covers this unshipped feature; these corrections restore its UI
+and completion behavior rather than announcing another shipped feature.
+
+Product UX remains Hold for full activation: Preview email and phone verification
+succeeded on separate accounts, and the Preview Linq inventory is empty. No
+account merge or production messaging configuration was performed. The setup
+screen now explains messaging unavailability without exposing internal database
+instructions. Live account linking, Telegram, passkeys/recovery and full hosted
+activation still need qualification. Current corrections change presentation and
+client interaction only; canonical authorization and provider protocols are
+unchanged, so the frontend final-review exemption applies to this follow-up.

@@ -41,6 +41,7 @@ export type JoinInviteLaunchConsentState =
 
 export interface JoinInvitePageModel {
   awaitingInviteSessionResolution: boolean;
+  messagingSetupLegacyApprovalRequired?: boolean;
   familyBillingRecovery: HostedFamilyBillingRecoveryState | null;
   inviteCode: string;
   launchConsent: JoinInviteLaunchConsentState;
@@ -120,6 +121,7 @@ export async function buildJoinInvitePageModel(input: {
 
   return {
     awaitingInviteSessionResolution: !hasResolvedHostedInviteVerification(status),
+    messagingSetupLegacyApprovalRequired: Boolean(authSnapshot.session?.privyUserId),
     familyBillingRecovery,
     inviteCode: input.inviteCode,
     launchConsent,

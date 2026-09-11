@@ -2,7 +2,11 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import dynamic from "next/dynamic";
+import { Phone } from "lucide-react";
+import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
+import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { ArrowRightIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -168,15 +172,23 @@ export function JoinInviteSignOutButtonIsland({
   );
 }
 
+const HostedLoginMethodDialog = dynamic(() => import("../settings/hosted-login-method-dialog").then((module) => module.HostedLoginMethodDialog), { ssr: false });
+
 export function JoinInviteMessagingSetupIsland() {
-  const router = useRouter();
-  return <div className="flex flex-col gap-4">
-    <p className="text-sm leading-relaxed text-muted-foreground">
-      Add a phone number or connect Telegram in your account settings. Your current sign-in stays active.
-    </p>
-    <Button nativeButton={false} render={<Link href="/settings/accounts" />}>Connect a messaging account</Button>
-    <Button type="button" variant="outline" onClick={() => router.refresh()}>I’ve connected my account</Button>
-  </div>;
+  const [method, setMethod] = useState<"phone" | "telegram" | null>(null);
+  return <>
+    <JoinInviteMessagingSetupView onSelect={setMethod} />
+    {method ? <HostedLoginMethodDialog method={method} operation="set"
+      onOpenChange={(open) => { if (!open) setMethod(null); }}
+      onSaved={() => setMethod(null)} /> : null}
+  </>;
+}
+
+export function JoinInviteMessagingSetupView({ onSelect }: { onSelect: (method: "phone" | "telegram") => void }) {
+  return <HostedContactChannelChoice
+    phone={<Button type="button" size="xl" className="w-full" onClick={() => onSelect("phone")}><Phone aria-hidden="true" />Connect phone</Button>}
+    telegram={<HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={() => onSelect("telegram")}>Connect Telegram</HostedInlineAuthButton>}
+  />;
 }
 
 export function JoinInviteLegalConsentIsland({

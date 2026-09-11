@@ -7,6 +7,8 @@ import { expect, test } from "@playwright/test";
 for (const width of [412, 1440]) {
   test(`public auth loading at ${width}px`, async ({ page }) => {
     test.setTimeout(180_000);
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => { pageErrors.push(error.message); });
     await page.setViewportSize({ width, height: 900 });
     await page.route("**/*", (route) => {
       const host = new URL(route.request().url()).hostname;
@@ -21,7 +23,16 @@ for (const width of [412, 1440]) {
     for (const route of ["/experiments", "/goals", "/"]) {
       scripts.length = 0;
       expect((await page.goto(route, { waitUntil: "load", timeout: 90_000 }))?.status()).toBe(200);
+      const failures = await page.locator("template[data-msg]").evaluateAll((nodes) => nodes.map((node) => ({ message: node.getAttribute("data-msg"), component: node.getAttribute("data-cst") })));
+      expect(failures).toEqual([]);
       await page.waitForTimeout(5_000);
+      expect(pageErrors).toEqual([]);
+      if (route === "/experiments" && width === 1440) {
+        await page.getByRole("button", { name: "Chat with Murph", exact: true }).click();
+        const authDialog = page.getByRole("dialog");
+        await expect(authDialog.getByRole("heading", { name: "Log in or sign up" })).toBeVisible();
+        await authDialog.getByRole("button", { name: "Close", exact: true }).click();
+      }
       expect(scripts.filter((url) => /@privy-io|@walletconnect|@reown/i.test(url))).toEqual([]);
     }
     const signup = page.getByRole("button", { name: "Signup", exact: true });

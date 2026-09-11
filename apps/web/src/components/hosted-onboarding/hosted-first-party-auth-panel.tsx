@@ -6,7 +6,8 @@ import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 import { Button } from "@/src/components/ui/button";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
-import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Spinner } from "@/src/components/ui/spinner";
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
@@ -37,7 +38,7 @@ export interface HostedFirstPartyAuthPanelProps {
 export function HostedFirstPartyAuthPanel({
   methods, inviteCode, initialEmailAddress, onCompleted, onSignOut, onViewChange,
   requireLaunchConsentOnCompletion = false, showPassiveLegalNotice = false,
-  autoSendPastedPhoneNumber = false, phoneInputAutoFocus = false,
+  autoSendPastedPhoneNumber = false, phoneInputAutoFocus = false, size = "default",
 }: HostedFirstPartyAuthPanelProps) {
   const [method, setMethod] = useState<Method>(methods[0] ?? "phone");
   const [step, setStep] = useState<"entry" | "resume" | "consent">("entry");
@@ -111,14 +112,10 @@ export function HostedFirstPartyAuthPanel({
       onAccepted={() => complete()} onDecline={() => void endSession(true)}
       onRequirementChange={(required) => { if (!required) void complete(); }}
       preferredScope="launch.legal" source="homepage-auth-dialog"
-    /> : step === "resume" ? <>
-      <p className="text-sm text-muted-foreground">You’re signed in. Continue to your account.</p>
-      <Button type="button" disabled={pending} onClick={() => void complete()}>{pending ? "Loading your account..." : "Continue"}</Button>
-      <Button type="button" variant="ghost" disabled={pending} onClick={() => void endSession(false)}>Use a different account</Button>
-    </> : <>
+    /> : step === "resume" ? <HostedAuthCompletionRetry pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <>
       {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose="login"
         onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)} />
-        : <HostedContactCodeForm key={method} method={method} autoFocus={phoneInputAutoFocus}
+        : <HostedContactCodeForm key={method} method={method} size={size} autoFocus={method === "email" || phoneInputAutoFocus}
           initialValue={method === "email" ? initialEmailAddress : undefined}
           autoSendPastedPhoneNumber={autoSendPastedPhoneNumber} onActiveChange={setActive}
           onSend={async (value, signal) => {
@@ -147,7 +144,7 @@ export function HostedFirstPartyAuthPanel({
       </> : null}
       {showPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
     </>}
-    {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}
+    {error ? <Alert variant="destructive"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
   </div>;
 }
 
@@ -155,4 +152,16 @@ function signupContext(inviteCode?: string | null) {
   let timeZone: string | undefined;
   try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* The server owns the fallback. */ }
   return { ...(inviteCode ? { inviteCode } : {}), ...(timeZone ? { timeZone } : {}) };
+}
+
+export function HostedAuthCompletionRetry({ pending, onContinue, onSignOut }: {
+  pending: boolean;
+  onContinue: () => void;
+  onSignOut: () => void;
+}) {
+  return <>
+      <p className="text-sm text-muted-foreground">You’re signed in. Continue to your account.</p>
+      <Button type="button" size="xl" className="w-full" aria-busy={pending} disabled={pending} onClick={onContinue}>{pending ? <><Spinner aria-hidden="true" />Loading your account...</> : "Continue"}</Button>
+      <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" disabled={pending} onClick={onSignOut}>Use a different account</Button>
+  </>;
 }

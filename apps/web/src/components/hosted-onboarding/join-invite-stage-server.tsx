@@ -32,6 +32,7 @@ import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
+import { HostedPrivyBoundary } from "./hosted-privy-boundary";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JoinInviteStarterUsageIsland } from "./join-invite-starter-usage-island";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
@@ -125,7 +126,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       && model.familyBillingRecovery !== "syncing"
       && !starterUsageReady
       && status.messagingSetupRequired ? (
-        <JoinInvitePanelCard><JoinInviteMessagingSetupIsland /></JoinInvitePanelCard>
+        <JoinInvitePanelCard><HostedPrivyBoundary legacyApprovalRequired={model.messagingSetupLegacyApprovalRequired === true}><JoinInviteMessagingSetupIsland /></HostedPrivyBoundary></JoinInvitePanelCard>
       ) : null}
 
       {!model.launchConsent.gateActive
