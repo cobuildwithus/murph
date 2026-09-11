@@ -23,25 +23,25 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Default to no progress update',
+      'Keep quick answers and one or two straightforward actions quiet',
     )
     expect(prompt).toContain(
-      'Send one only when the member is likely to wait noticeably',
+      'For several record edits, 3+ substantive checks/actions',
     )
     expect(prompt).toContain(
-      '3+ substantive evidence checks/actions beyond setup',
+      'send one update before starting',
     )
     expect(prompt).toContain(
-      "an active skill's required receipt or start acknowledgement",
+      'Honor required skill receipts',
     )
     expect(prompt).toContain(
-      'Routine onboarding/setup never qualifies by itself, even when it uses tools or the runtime is slow',
+      'Routine onboarding/setup needs no preamble',
     )
     expect(prompt).toContain(
-      'goal capture, policy/resume/status/context reads, device checks, saves, connection choices, one or two quick calls, and the next setup question go straight to the final reply',
+      'goal capture, context reads, device checks, a save, or the next question',
     )
     expect(prompt).toContain(
-      'send before its first qualifying action',
+      'If a quick task expands into repeated repairs, additional edits, or a noticeable wait, update then',
     )
     expect(prompt).toContain(
       'send a required child-start acknowledgement after spawning',
