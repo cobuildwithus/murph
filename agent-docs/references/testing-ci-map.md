@@ -19,6 +19,13 @@ canonical HTTPS endpoint; local/custom upstream configuration stays Worker-owned
 because arbitrary local ports bypass Cloudflare outbound interception. The
 `provider-egress-token-bridge` hosted-local journey requires the synthetic upstream
 token, so a leaked runner sentinel can no longer count as successful delivery.
+The full-stack scenario normalizes the local Docker host alias to loopback for
+both host Web and Workerd before environment generation. Runner containers still
+receive canonical HTTPS provider URLs through their existing environment owner.
+`hosted-local-linq-host-upstream.test.ts` proves these host bindings reach the
+strict synthetic HTTP upstream through native Workerd without a mocked fetch;
+the scenario helper suite separately verifies generated Worker bindings, explicit
+Web overrides, and canonical container URL/sentinel projection.
 This validates the locally supported protocol boundary; provider receipt delivery,
 media downloading/rendering, and live service behavior still require hosted proof.
 
