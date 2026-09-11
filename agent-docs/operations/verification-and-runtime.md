@@ -165,11 +165,9 @@ statuses. The trusted default-branch controllers run on staggered six-hour
 schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
 dispatch is the scheduler-drop recovery path, but its event ref must be
 `refs/heads/main` and its exact event SHA must still equal current `main` when
-the selection job runs. Each cheap selection job reads the latest completed
-scheduled outcome for its own workflow and skips the native job only when that
-outcome succeeded at the selected protected-`main` SHA. Missing history, a
-newer SHA, or a latest failure admits the canary. An explicit rerun of the same
-trusted controller attempt bypasses the no-change skip. Reviewed native source pins live in
+the selection job runs. Every scheduled admission executes the actual native
+journey, including unchanged revisions; a prior successful scheduling result is
+never reused as provider evidence. Reviewed native source pins live in
 `.github/native-hosted-e2e-controller.json`, so a source rotation advances the
 protected-main checkpoint.
 
@@ -411,16 +409,23 @@ remain external to the checkout.
 
 ## Live Junction Garmin Canary Verification
 
-The public live wearable canary is a protected-main external-provider proof,
-not a pull-request check. Its focused hermetic owner proof is:
+The public live wearable workflow dispatches protected-main source to the
+private hosted-runtime executor. It runs after main pushes, daily, and on manual
+recovery; it accepts only an exact completed canonical-data receipt. The public
+controller has no provider credentials, private checkout, or artifact access.
+See [Live provider canaries](live-provider-canaries.md) for the execution,
+credential-provisioning, and safe migration contract.
+
+Its focused controller and browser boundary proof is:
 
 ```bash
+node --test scripts/github-wearable-canary.test.mjs
 pnpm --dir packages/hosted-local-harness exec vitest run \
   --config vitest.config.ts --no-coverage \
   test/junction-wearable-canary-workflow.test.ts
 ```
 
-The workflow must expose and smoke-check the exact workspace Codex CLI installed
+The private executor must expose and smoke-check the exact workspace Codex CLI installed
 by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned
 `Dockerfile.cloudflare-hosted-runner-base` pin; both owners remain visible in
@@ -462,7 +467,7 @@ falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
 [CDP](https://www.kernel.sh/docs/browsers/cdp), and
 [stealth](https://www.kernel.sh/docs/browsers/bot-detection/stealth) contracts.
-Keep those setup steps free of Environment secrets; only the final
+Keep those setup steps free of Environment secrets; only the private executor
 browser-canary step may receive Kernel authority, Junction sandbox authority,
 and the dedicated Garmin login. A real authorization proof remains available
 only after the exact workflow reaches protected `main`, where non-canceling
