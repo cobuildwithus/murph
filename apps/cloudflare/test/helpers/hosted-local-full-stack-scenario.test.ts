@@ -422,10 +422,14 @@ it("keeps Wrangler inspector traffic out of streamed hosted E2E logs", async () 
   }
 });
 
-it("retries startup with fresh port reservations after an address-in-use race", async () => {
+it.each([
+  "Address already in use (0.0.0.0:4300).",
+  "cloudflare dev process exited before the hosted local stack became healthy. "
+    + "Address already in use was reported by the exited process.",
+])("retries startup with fresh port reservations after an address-in-use race (%s)", async (message) => {
   const harness = createScenarioHarness();
   mocks.startHostedLocalDevHarness
-    .mockRejectedValueOnce(new Error("Address already in use (0.0.0.0:4300)."))
+    .mockRejectedValueOnce(new Error(message))
     .mockResolvedValueOnce(harness);
 
   const scenario = await startScenario();
@@ -436,6 +440,23 @@ it("retries startup with fresh port reservations after an address-in-use race", 
     expect(mocks.startHostedLocalOidcFixture).toHaveBeenCalledTimes(2);
   } finally {
     await scenario.stop();
+  }
+});
+
+it("stops after three attempts when the child keeps reporting a port collision", async () => {
+  const error = new Error(
+    "cloudflare dev process exited before the hosted local stack became healthy. "
+    + "Address already in use was reported by the exited process.",
+  );
+  mocks.startHostedLocalDevHarness.mockRejectedValue(error);
+
+  await expect(startScenario()).rejects.toBe(error);
+  expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledTimes(3);
+  expect(mocks.reserveLocalTcpPort).toHaveBeenCalledTimes(6);
+  expect(mocks.reserveLocalTemporalTcpPort).toHaveBeenCalledTimes(3);
+  for (const result of mocks.startHostedLocalOidcFixture.mock.results) {
+    const fixture = await result.value;
+    expect(fixture.stop).toHaveBeenCalledOnce();
   }
 });
 

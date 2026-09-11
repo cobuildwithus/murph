@@ -5896,6 +5896,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           if (
             !runtimeOwnerHandoffRequested
             && !foregroundWorkPending
+            && pendingDurableCheckpointEffects.length === 0
+            && readyDurableCheckpointEffects.length === 0
             && (input.request.processingMode ?? "default") === "default"
             && hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
               assistantProgressed:
