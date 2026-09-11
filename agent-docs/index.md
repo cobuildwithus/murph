@@ -154,7 +154,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/research/2026-08-05-ios-android-companion-parity-audit.md` | Mobile companion parity audit. | Mobile companion parity audit | Medium | 2026-08-05 |
 | `agent-docs/research/2026-07-16-codex-session-architecture-audit.md` | Point-in-time aggregate evidence from the frozen 30-day Codex session audit. | Architecture audit research artifact | Medium | 2026-07-18 |
 | `agent-docs/research/2026-07-10-junction-labs-commerce-and-fulfillment.md` | Point-in-time Junction lab-ordering research and phased product, commerce, fulfillment, result-import, and launch-gate proposal. | Research and future planning artifact | Medium | 2026-07-10 |
-| `agent-docs/research/2026-09-11-junction-historical-sweep-efficiency.md` | Official Junction webhook and history contracts, sweep rationale, and proposed lower-cost recovery cadence. | Research and future planning artifact | Medium | 2026-09-11 |
+| `agent-docs/research/2026-09-11-junction-historical-sweep-efficiency.md` | Official Junction webhook/history contracts, daily safety-sweep rationale, targeted refreshes, and validation gaps. | Research and future planning artifact | Medium | 2026-09-11 |
 | `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-11 |
@@ -169,7 +169,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle and guarded partial-retirement recovery. | Local rebuildable-storage lifecycle | High | 2026-09-06 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, no base-update limit, response timing and evidence requirements, and same-session waiting or paced polling by default. | Final PR ReviewGPT loop | Medium | 2026-09-10 |
-| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants. | Device-sync ingestion contract | High | 2026-08-20 |
+| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion and bounded daily temporal recovery invariants. | Device-sync ingestion contract | High | 2026-09-11 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
 | `agent-docs/exec-plans/completed/2026-09-11-runner-wake-latency.md` | Small-runner admission capacity recovery, protected rollout convergence, and live reply verification. | Historical implementation evidence | Low | 2026-09-11 |

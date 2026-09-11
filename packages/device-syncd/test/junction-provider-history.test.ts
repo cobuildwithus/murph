@@ -10,6 +10,7 @@ import {
   executeFullJobTimeseriesContinuations,
   executeJunctionFullJob,
   executeJunctionJob,
+  executeTemporalAuthorityChildren,
   requireJunctionConnectionHandler,
   sha256ForTest,
 } from "./junction-provider.harness.ts";
@@ -53,6 +54,24 @@ import type {
   ProviderJobContext,
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
+
+// Window/authority tests execute the queued newest day explicitly; queue breadth
+// and persistence are exercised separately below and through the service tests.
+async function executeReconcileWithNewestTemporalDay(
+  ...[provider, context, job]: Parameters<typeof executeJunctionJob>
+) {
+  const result = await executeJunctionJob(provider, context, job);
+  const children = result.scheduledJobs?.filter((child) => child.payload?.temporalAuthorityTimeZone) ?? [];
+  await executeTemporalAuthorityChildren({
+    context,
+    initialResult: {
+      ...result,
+      scheduledJobs: children.filter((child) => child.payload?.windowStart === children[0]?.payload?.windowStart),
+    },
+    provider,
+  });
+  return result;
+}
 
 test("Junction beginConnection resolves or creates a namespaced user, returns Link URL, and seeds provider-config credentials", async () => {
   const requests: Array<{ body: unknown; headers: Headers; url: string }> = [];
@@ -1452,7 +1471,7 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
   });
   const importedSnapshots: unknown[] = [];
 
-  await executeJunctionJob(
+  await executeReconcileWithNewestTemporalDay(
     provider,
     {
       account: createAccount(),
@@ -1519,7 +1538,7 @@ test("Junction one-day reconcile still imports the newest lag-complete temporal 
     timeseriesResources: ["blood_oxygen"],
   });
 
-  await executeJunctionJob(
+  await executeReconcileWithNewestTemporalDay(
     provider,
     createJunctionJobContext({
       now: "2026-04-03T00:00:00.000Z",
@@ -1552,7 +1571,7 @@ test("Junction one-day reconcile still imports the newest lag-complete temporal 
   );
 });
 
-test("Junction reconcile schedules the remaining temporal horizon newest-first as stable day jobs", async () => {
+test("Junction reconcile queues the whole temporal horizon newest-first as stable day jobs", async () => {
   const requestedWindows: Array<[string, string | null, string | null]> = [];
   const imports: Array<{ options: unknown; snapshot: unknown }> = [];
   const provider = createJunctionProvider(async (input) => {
@@ -1596,12 +1615,9 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
     }),
   );
 
-  assert.deepEqual(requestedWindows, [
-    ["blood_oxygen", "2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z"],
-    ["stress_level", "2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z"],
-  ]);
+  assert.deepEqual(requestedWindows, []);
   const catchUpJobs = result.scheduledJobs ?? [];
-  assert.equal(catchUpJobs.length, 5);
+  assert.equal(catchUpJobs.length, 7);
   const ordinaryContinuation = requireValue(
     catchUpJobs.at(-1),
     "Expected the ordinary timeseries continuation after temporal catch-up jobs.",
@@ -1609,7 +1625,7 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
   assert.equal(ordinaryContinuation.payload?.temporalAuthorityTimeZone, undefined);
   assert.equal(ordinaryContinuation.payload?.timeseriesResourceCursor, "blood_oxygen");
   assert.deepEqual(
-    catchUpJobs.slice(0, 4).map((job) => ({
+    catchUpJobs.slice(0, 6).map((job) => ({
       availableAt: job.availableAt,
       dayKey: String(job.payload?.windowStart ?? "").slice(0, 10),
       priority: job.priority,
@@ -1617,42 +1633,18 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
       windowEnd: job.payload?.windowEnd,
       windowStart: job.payload?.windowStart,
     })),
-    [
-      {
-        availableAt: "2026-04-06T00:00:00.000Z",
-        dayKey: "2026-04-03",
+    ["2026-04-04", "2026-04-03", "2026-04-02"].flatMap((dayKey, index) =>
+      ["blood_oxygen", "stress_level"].map((resource) => ({
+        availableAt: new Date(Date.parse(context.now) + index).toISOString(),
+        dayKey,
         priority: 30,
-        resource: "blood_oxygen",
-        windowEnd: "2026-04-04T00:00:00.000Z",
-        windowStart: "2026-04-03T00:00:00.000Z",
-      },
-      {
-        availableAt: "2026-04-06T00:00:00.000Z",
-        dayKey: "2026-04-03",
-        priority: 30,
-        resource: "stress_level",
-        windowEnd: "2026-04-04T00:00:00.000Z",
-        windowStart: "2026-04-03T00:00:00.000Z",
-      },
-      {
-        availableAt: "2026-04-06T00:00:00.001Z",
-        dayKey: "2026-04-02",
-        priority: 30,
-        resource: "blood_oxygen",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-        windowStart: "2026-04-02T00:00:00.000Z",
-      },
-      {
-        availableAt: "2026-04-06T00:00:00.001Z",
-        dayKey: "2026-04-02",
-        priority: 30,
-        resource: "stress_level",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-        windowStart: "2026-04-02T00:00:00.000Z",
-      },
-    ],
+        resource,
+        windowEnd: new Date(Date.parse(dayKey) + 86_400_000).toISOString(),
+        windowStart: `${dayKey}T00:00:00.000Z`,
+      }))
+    ),
   );
-  assert.equal(new Set(catchUpJobs.map((job) => job.dedupeKey)).size, 5);
+  assert.equal(new Set(catchUpJobs.map((job) => job.dedupeKey)).size, 7);
 
   const firstCatchUp = requireValue(catchUpJobs[0], "Expected the newest blood-oxygen catch-up job.");
   const firstCatchUpPayload = requireValue(
@@ -1670,14 +1662,14 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
   );
   assert.deepEqual(requestedWindows.at(-1), [
     "blood_oxygen",
-    "2026-04-03T00:00:00.000Z",
     "2026-04-04T00:00:00.000Z",
+    "2026-04-05T00:00:00.000Z",
   ]);
   assert.deepEqual(
     (imports.at(-1)?.options as { completeSourceDay?: unknown })?.completeSourceDay,
     {
       connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
-      dayKey: "2026-04-03",
+      dayKey: "2026-04-04",
       resources: ["blood_oxygen"],
       revisionAt: "2026-04-06T00:00:00.000Z",
       timeZone: "UTC",
@@ -1689,135 +1681,108 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
   );
 });
 
-test("Junction reconcile preserves healthy temporal work and the older backlog when one newest fetch fails", async () => {
-  const requestedResources: string[] = [];
-  const importedAuthority: unknown[] = [];
+test("Junction repeats the full temporal sweep only when its daily scope changes", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
-    if (url.pathname === "/v2/user/providers/junction-user-1") {
+    if (url.pathname.startsWith("/v2/user/providers/")) {
       return createJsonResponse({ providers: [] });
     }
-    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+    if (url.pathname.startsWith("/v2/summary/")) {
       return createJsonResponse({ data: [] });
     }
-    const resource = url.pathname.match(
-      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
-    )?.[1];
-    if (resource) {
-      requestedResources.push(resource);
-      return resource === "blood_oxygen"
-        ? createJsonResponse({ code: "upstream_unavailable" }, 503)
-        : createJsonResponse({ groups: {} });
-    }
-    throw new Error(`Unexpected request: ${url.toString()}`);
-  }, {
-    reconcileDays: 3,
-    timeseriesResources: ["blood_oxygen", "stress_level"],
-  });
-
-  const result = await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      now: "2026-04-06T00:00:00.000Z",
-      importSnapshot: async (_snapshot, options) => {
-        if (options) {
-          importedAuthority.push(options);
-        }
-        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
-      },
-    }),
-    createJob("reconcile", {
-      windowStart: "2026-04-03T00:00:00.000Z",
-      windowEnd: "2026-04-06T00:00:00.000Z",
-    }),
-  );
-
-  assert.equal(requestedResources.filter((resource) => resource === "blood_oxygen").length, 3);
-  assert.equal(requestedResources.filter((resource) => resource === "stress_level").length, 1);
-  assert.deepEqual(
-    (importedAuthority[0] as { completeSourceDay?: unknown })?.completeSourceDay,
-    {
-      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
-      dayKey: "2026-04-04",
-      resources: ["stress_level"],
-      revisionAt: "2026-04-06T00:00:00.000Z",
-      timeZone: "UTC",
-    },
-  );
-  assert.deepEqual(
-    (result.scheduledJobs ?? []).map((job) => [
-      job.payload?.temporalAuthorityTimeZone === undefined
-        ? undefined
-        : String(job.payload?.windowStart ?? "").slice(0, 10),
-      job.payload?.temporalAuthorityTimeZone === undefined
-        ? undefined
-        : job.payload?.resource,
-    ]),
-    [
-      ["2026-04-04", "blood_oxygen"],
-      ["2026-04-03", "blood_oxygen"],
-      ["2026-04-03", "stress_level"],
-      ["2026-04-02", "blood_oxygen"],
-      ["2026-04-02", "stress_level"],
-      [undefined, undefined],
-    ],
-  );
-  assert.equal(new Set((result.scheduledJobs ?? []).map((job) => job.dedupeKey)).size, 6);
+    throw new Error(`Unexpected inline collection: ${url.pathname}`);
+  }, { reconcileDays: 3, timeseriesResources: ["blood_oxygen", "stress_level"] });
+  const context = createJunctionJobContext({ now: "2026-04-06T00:00:00.000Z" });
+  const job = createJob("reconcile", {});
+  const first = await executeJunctionJob(provider, context, job);
+  const temporalJobs = (result: typeof first) => result.scheduledJobs?.filter((child) =>
+    child.payload?.temporalAuthorityTimeZone
+  ) ?? [];
+  assert.equal(temporalJobs(first).length, 6);
+  assert.equal(typeof first.metadataPatch?.junctionTemporalSweepV1, "string");
+  context.account.metadata = { ...context.account.metadata, ...first.metadataPatch };
+  context.now = "2026-04-06T23:59:59.000Z";
+  const repeat = await executeJunctionJob(provider, context, job);
+  assert.equal(temporalJobs(repeat).length, 0);
+  assert.ok(repeat.scheduledJobs?.some((child) => child.payload?.timeseriesResourceCursor));
+  context.now = "2026-04-07T00:00:00.000Z";
+  const nextDay = await executeJunctionJob(provider, context, job);
+  assert.equal(temporalJobs(nextDay).length, 6);
+  assert.notEqual(nextDay.metadataPatch?.junctionTemporalSweepV1, first.metadataPatch?.junctionTemporalSweepV1);
+  context.now = "2026-04-06T23:59:59.000Z";
+  context.vaultTimeZone = "America/Los_Angeles";
+  assert.equal(temporalJobs(await executeJunctionJob(provider, context, job)).length, 6);
 });
 
-test("Junction reconcile durably schedules yielded temporal work and the older backlog", async () => {
-  const requestedResources: string[] = [];
-  let yieldChecks = 0;
+test.each([
+  {
+    timeZone: "UTC",
+    now: "2026-04-06T12:00:00.000Z",
+    start: "2026-04-04T10:00:00.000Z",
+    end: "2026-04-04T11:00:00.000Z",
+    expected: [["2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z", "2026-04-06T12:00:00.000Z"]],
+  },
+  {
+    timeZone: "UTC",
+    now: "2026-04-06T12:00:00.000Z",
+    start: "2026-04-06T10:00:00.000Z",
+    end: "2026-04-06T11:00:00.000Z",
+    expected: [["2026-04-06T00:00:00.000Z", "2026-04-07T00:00:00.000Z", "2026-04-08T00:00:00.000Z"]],
+  },
+  {
+    timeZone: "America/Los_Angeles",
+    now: "2026-03-09T12:00:00.000Z",
+    start: "2026-03-08T10:00:00.000Z",
+    end: "2026-03-08T11:00:00.000Z",
+    expected: [["2026-03-08T08:00:00.000Z", "2026-03-09T07:00:00.000Z", "2026-03-10T07:00:00.000Z"]],
+  },
+  {
+    timeZone: "America/Los_Angeles",
+    now: "2026-04-06T12:00:00.000Z",
+    start: "2026-04-03T23:00:00.000Z",
+    end: "2026-04-04T08:00:00.000Z",
+    expected: [
+      ["2026-04-04T07:00:00.000Z", "2026-04-05T07:00:00.000Z", "2026-04-06T12:00:00.000Z"],
+      ["2026-04-03T07:00:00.000Z", "2026-04-04T07:00:00.000Z", "2026-04-06T12:00:00.001Z"],
+    ],
+  },
+  {
+    timeZone: "UTC",
+    now: "2026-04-06T12:00:00.000Z",
+    start: "2026-03-01T10:00:00.000Z",
+    end: "2026-03-01T11:00:00.000Z",
+    expected: [],
+  },
+])("Junction data events queue only affected local days with the completeness lag ($timeZone, $start)", async ({
+  timeZone, now, start, end, expected,
+}) => {
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
-    if (url.pathname === "/v2/user/providers/junction-user-1") {
+    if (url.pathname.startsWith("/v2/user/providers/")) {
       return createJsonResponse({ providers: [] });
     }
-    if (url.pathname === "/v2/summary/activity/junction-user-1") {
-      return createJsonResponse({ data: [] });
-    }
-    const resource = url.pathname.match(
-      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
-    )?.[1];
-    if (resource) {
-      requestedResources.push(resource);
+    if (url.pathname.endsWith("/blood_oxygen/grouped")) {
       return createJsonResponse({ groups: {} });
     }
-    throw new Error(`Unexpected request: ${url.toString()}`);
-  }, {
-    reconcileDays: 3,
-    timeseriesResources: ["blood_oxygen", "stress_level"],
+    throw new Error(`Unexpected resource request: ${url.pathname}`);
+  }, { reconcileDays: 3, timeseriesResources: ["blood_oxygen"] });
+  const context = createJunctionJobContext({ now, vaultTimeZone: timeZone });
+  const job = createJob("resource", {
+    eventType: "daily.data.blood_oxygen.created",
+    resource: "blood_oxygen",
+    resourceCategory: "timeseries",
+    windowStart: start,
+    windowEnd: end,
   });
-
-  const result = await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      now: "2026-04-06T00:00:00.000Z",
-      shouldYield: () => {
-        yieldChecks += 1;
-        return yieldChecks > 1;
-      },
-    }),
-    createJob("reconcile", {
-      summaryPhaseComplete: true,
-      windowStart: "2026-04-03T00:00:00.000Z",
-      windowEnd: "2026-04-06T00:00:00.000Z",
-    }),
-  );
-
-  assert.deepEqual(requestedResources, ["blood_oxygen"]);
+  const first = await executeJunctionJob(provider, context, job);
+  const children = (first.scheduledJobs ?? []).filter((child) => child.payload?.temporalAuthorityTimeZone);
+  assert.deepEqual(children.map((child) => [child.payload?.windowStart, child.payload?.windowEnd, child.availableAt]), expected);
+  const repeat = await executeJunctionJob(provider, context, job);
   assert.deepEqual(
-    (result.scheduledJobs ?? [])
-      .filter((job) => job.payload?.temporalAuthorityTimeZone)
-      .map((job) => [String(job.payload?.windowStart ?? "").slice(0, 10), job.payload?.resource]),
-    [
-      ["2026-04-04", "stress_level"],
-      ["2026-04-03", "blood_oxygen"],
-      ["2026-04-03", "stress_level"],
-      ["2026-04-02", "blood_oxygen"],
-      ["2026-04-02", "stress_level"],
-    ],
+    repeat.scheduledJobs?.filter((child) => child.payload?.temporalAuthorityTimeZone).map((child) => child.dedupeKey) ?? [],
+    children.map((child) => child.dedupeKey),
   );
+  assert.equal(first.metadataPatch?.junctionTemporalSweepV1, undefined);
 });
 
 test("Junction reconcile keeps provider-date and vault-local daily windows separate", async () => {
@@ -1873,7 +1838,7 @@ test("Junction reconcile keeps provider-date and vault-local daily windows separ
       });
       const windowStart = new Date(Date.parse(windowEnd) - horizonDays * dayMs).toISOString();
 
-      const initialResult = await executeJunctionJob(
+      const initialResult = await executeReconcileWithNewestTemporalDay(
         provider,
         createJunctionJobContext({
           now: "2026-04-20T12:00:00.000Z",
@@ -1938,11 +1903,11 @@ test("Junction temporal recovery clamps its composed horizon to fourteen days", 
     }),
   );
 
-  assert.equal(temporalRequests, 2);
-  assert.equal(result.scheduledJobs?.length, 27);
+  assert.equal(temporalRequests, 0);
+  assert.equal(result.scheduledJobs?.length, 29);
   assert.deepEqual(
     result.scheduledJobs?.slice(0, 2).map((job) => String(job.payload?.windowStart ?? "").slice(0, 10)),
-    ["2026-04-17", "2026-04-17"],
+    ["2026-04-18", "2026-04-18"],
   );
   assert.deepEqual(
     result.scheduledJobs?.slice(-3).map((job) =>
@@ -2111,7 +2076,7 @@ test("Junction closed daily timeseries imports carry the exclusive temporal sour
   const importedSnapshots: unknown[] = [];
   const importOptions: unknown[] = [];
 
-  await executeJunctionJob(
+  await executeReconcileWithNewestTemporalDay(
     provider,
     createJunctionJobContext({
       now: "2026-04-24T12:00:00.000Z",
@@ -2336,7 +2301,7 @@ test("Junction successful-empty temporal days still carry authoritative replacem
   }, { timeseriesResources: ["stress_level"] });
   const imports: Array<{ options: unknown; snapshot: unknown }> = [];
 
-  await executeJunctionJob(
+  await executeReconcileWithNewestTemporalDay(
     provider,
     createJunctionJobContext({
       now: "2026-04-24T12:00:00.000Z",
@@ -2457,7 +2422,7 @@ test.each([
       }, { timeseriesResources: ["stress_level"] });
       const imported: string[] = [];
 
-      await executeJunctionJob(
+      await executeReconcileWithNewestTemporalDay(
         provider,
         createJunctionJobContext({
           now,
@@ -2532,7 +2497,7 @@ test("Junction temporal authority waits for a closed vault-local day plus the sa
   }, { timeseriesResources: ["stress_level"] });
   const imports: Array<{ options: unknown; snapshot: unknown }> = [];
 
-  await executeJunctionJob(
+  await executeReconcileWithNewestTemporalDay(
     provider,
     createJunctionJobContext({
       now: "2026-04-25T06:00:00.000Z",
@@ -3509,7 +3474,7 @@ test("Junction temporal reconcile ignores generic job success and stays bounded 
     throw new Error(`Unexpected request: ${url.toString()}`);
   }, { timeseriesResources: ["blood_oxygen", "stress_level"] });
   const authorityProofs: unknown[] = [];
-  const executeAfterGenericSuccess = () => executeJunctionJob(
+  const executeAfterGenericSuccess = () => executeReconcileWithNewestTemporalDay(
     provider,
     createJunctionJobContext({
       account: createAccount({ lastSyncCompletedAt: "2026-04-04T11:59:00.000Z" }),

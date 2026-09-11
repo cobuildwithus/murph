@@ -1,7 +1,8 @@
 # Junction historical sweep efficiency
 
-Research date: 2026-09-11. Recommendation only; no cadence or authorization
-change is part of the accompanying telemetry work.
+Research date: 2026-09-11. The follow-up implementation uses daily queued safety
+sweeps and event-targeted local days alongside whole-pass no-op telemetry.
+Production traffic reduction still requires rollout and measurement.
 
 ## Recommendation
 
