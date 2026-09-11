@@ -4,6 +4,12 @@ Last verified: 2026-09-11
 
 ## Current Repo Checks
 
+The canary outcome suite controls Date.now relative to its replica fixture
+timestamp and restores it after each case. An explicit clock advance proves the production
+24-hour expiry check still rejects a matching but expired replica. Run this
+decryption and authority proof with
+`pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-production-canary-outcome.test.ts`.
+
 The shared hosted-local Linq HTTP boundary requires its synthetic upstream bearer
 token and validates every supported message part. It preserves Linq's optional
 nested idempotency key: replay without one can duplicate acceptance, including
