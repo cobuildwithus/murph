@@ -284,8 +284,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const inboundText = "Reply while the full system mailbox is active.";
     const replyText = "Foreground reply continued on the authorized runtime.";
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
-    const recoveryEvidenceStartedAt = new Date();
     const providerStartObservations: Array<{
+      providerStartedAt: Date;
       activeFence: Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>;
       deviceMailboxItem: Awaited<ReturnType<typeof readHostedMailboxItemForTest>>;
       systemLane: {
@@ -302,6 +302,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         inboundText,
         label: "system mailbox foreground continuation",
         onAssistantProviderStart: async () => {
+          const providerStartedAt = new Date();
           const [activeFence, status, deviceMailboxItem] =
             await Promise.all([
               readActiveRuntimeFenceForTest(systemMailboxProbe.userId),
@@ -318,6 +319,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
             lane.lane === "system"
           );
           providerStartObservations.push({
+            providerStartedAt,
             activeFence,
             deviceMailboxItem,
             systemLane: systemLane
@@ -405,7 +407,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         {
           expectedWakeKinds: systemWakes.map((wake) => wake.kind),
           expectedAttemptId: systemFence.attemptId,
-          recoveryEvidenceStartedAt,
+          recoveryEvidenceStartedAt: providerStart.providerStartedAt,
         },
       );
     } finally {
