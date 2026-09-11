@@ -1342,18 +1342,33 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("clears the fence without owner release for a future mailbox continuation", async () => {
+  it("releases the exact owner after a future Environment recording continuation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { runner, sql } = createRunnerHarness({
+    let callbackFenceAttemptId: string | null | undefined;
+    let callbackSql!: TestSqlStorageLike;
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
       invocationResults: [{
-        nextWakeAt: "2026-04-27T00:00:15.000Z",
+        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        nextWakeReason: "mailbox",
         redactedStatus: {
-          hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemImportedSeq: "1",
+          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemFirstPendingSeq: "1",
+          hostedMailboxSystemFirstPendingDiagnostics: [
+            "headDue=false",
+            "headDeviceSync=false",
+            "headAttempted=true",
+            "headRecording=true",
+          ],
         },
         status: "scheduled",
       }],
+      onOwnerReleased: () => {
+        callbackFenceAttemptId = readRunnerMeta(callbackSql).active_attempt_id;
+      },
     });
+    callbackSql = sql;
     await runner.bindUser(TEST_USER_ID);
 
     await expect(runner.ensureRuntimeProcessingForUser({
@@ -1364,11 +1379,29 @@ describe("HostedUserRunner execution coordination", () => {
       kind: "runtime_processing_accepted",
     });
     await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
-    expect(
+    await vi.waitFor(() => expect(
       mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
       ),
-    ).toHaveLength(0);
+    ).toHaveLength(1));
+    const ownerReleaseCall =
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.find(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      )?.[0];
+    expect(callbackFenceAttemptId).toBeNull();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(ownerReleaseCall).toMatchObject({
+      boundUserId: TEST_USER_ID,
+      method: "POST",
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+$/u,
+      ),
+      timeoutMs: 2_000,
+    });
+    expect(new URLSearchParams(ownerReleaseCall?.search).get("runtimeAttemptId"))
+      .toBe(invoke.mock.calls[0]?.[0].job.request.attemptId);
+    expect(ownerReleaseCall).not.toHaveProperty("body");
+    expect(alarms).toEqual([]);
   });
 
   it("sends owner release when a selected wake is already due", async () => {

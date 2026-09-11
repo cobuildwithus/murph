@@ -4,8 +4,8 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 const provider = vi.hoisted(() => ({ read: vi.fn(), codes: new Map<string, string>() }));
 vi.mock("../src/lib/better-auth/delivery", () => ({ hostedAuthDelivery: () => ({
   email: async ({ address, code }: { address: string; code: string }) => { provider.codes.set(address, code); },
-  sms: async ({ phoneNumber, code }: { phoneNumber: string; code: string }) => { provider.codes.set(phoneNumber, code); },
 }) }));
+vi.mock("../src/lib/better-auth/twilio-verify", () => ({ hostedAuthSmsVerification: () => sms }));
 vi.mock("../src/lib/hosted-onboarding/privy", async (original) => ({
   ...await original<typeof import("../src/lib/hosted-onboarding/privy")>(),
   readHostedPrivyUserById: provider.read,
@@ -34,6 +34,8 @@ import { exchangeHostedAuthSession, readHostedAuthSessionResponse, logoutHostedA
 import { upsertHostedMemberPendingLinqParticipantContactTx } from "../src/lib/hosted-onboarding/hosted-member-routing-store";
 import { issueHostedInvite } from "../src/lib/hosted-onboarding/invite-service";
 import { sendHostedAuthOtp } from "../src/lib/better-auth/send-otp";
+import { prepareHostedAuthSmsOtp } from "../src/lib/better-auth/sms-otp";
+import { syntheticSmsVerification } from "./support/better-auth-sms-verification";
 import { hostedAuthOtpIdentifier } from "../src/lib/better-auth/otp-store";
 import { authLookupKey } from "../src/lib/better-auth/record-crypto";
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
@@ -51,11 +53,14 @@ import { readHostedMemberIdentity, upsertHostedMemberIdentity } from "../src/lib
 import { readHostedMemberEmailAuthorization } from "../src/lib/hosted-onboarding/hosted-member-store";
 import { buildHostedMemberPhoneIdentityFields } from "../src/lib/hosted-onboarding/member-identity-fields";
 
+let sms = syntheticSmsVerification(provider.codes);
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.searchParams.has("host") || url.pathname !== "/murph_dev_better_auth_login") throw new Error("Canonical auth proof requires its isolated local task database.");
+    || url.search || !/^\/(?:murph_dev_better_auth_login|murph_dev_twilio_verify|murph_test(?:_[a-z0-9_]+)?)$/u.test(url.pathname)) {
+    throw new Error("Canonical auth proof requires an isolated local test database.");
+  }
 }
 const configuration = () => ({ baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma: getPrisma() });
 const jwtKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -80,15 +85,18 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     vi.stubEnv("VERCEL", "");
     provider.read.mockReset();
     provider.codes.clear();
+    sms = syntheticSmsVerification(provider.codes);
   });
   afterAll(async () => { if (enabled) await getPrisma().$disconnect(); });
 
   async function send(kind: "email" | "phone", value: string) {
     let code = "";
     await sendHostedAuthOtp({ ...configuration(), contact: contact(kind, value),
-      delivery: { email: async (input) => { code = input.code; }, sms: async (input) => { code = input.code; } },
+      delivery: { email: async (input) => { code = input.code; } }, smsVerification: sms,
     });
-    const otp: HostedAuthOtp = kind === "email" ? { kind, address: value, code } : { kind, phoneNumber: value, code };
+    if (kind === "phone") code = provider.codes.get(value)!;
+    const otp: HostedAuthOtp = kind === "email" ? { kind, address: value, code } : { kind, phoneNumber: value, code,
+      verificationId: await prepareHostedAuthSmsOtp({ prisma: getPrisma(), phoneNumber: value, code, verification: sms }) };
     return otp;
   }
   function contact(kind: "email" | "phone", value: string) {
@@ -256,10 +264,17 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       deliveredAfterCommit = rows.length === 1;
     };
     try {
-      await sendHostedAuthOtp({ ...configuration(), contact: selected, delivery: { email: deliver, sms: deliver } });
+      await sendHostedAuthOtp({ ...configuration(), contact: selected, delivery: { email: deliver }, smsVerification: {
+        ...sms, send: async (input) => {
+          const sid = await sms.send(input);
+          await deliver({ code: provider.codes.get(value)! });
+          return sid;
+        },
+      } });
       expect(deliveredAfterCommit).toBe(true);
-      if (old.code !== code) await expect(commitHostedAuthOtp({ ...configuration(), ...prepared, otp: old })).rejects.toThrow();
-      const otp: HostedAuthOtp = kind === "email" ? { kind, address: value, code } : { kind, phoneNumber: value, code };
+      if (kind === "phone" || old.code !== code) await expect(commitHostedAuthOtp({ ...configuration(), ...prepared, otp: old })).rejects.toThrow();
+      const otp: HostedAuthOtp = kind === "email" ? { kind, address: value, code } : { kind, phoneNumber: value, code,
+        verificationId: await prepareHostedAuthSmsOtp({ prisma, phoneNumber: value, code, verification: sms }) };
       expect((await commitHostedAuthOtp({ ...configuration(), ...prepared, otp })).memberId).toBe(prepared.memberId);
     } finally { await prisma.hostedMember.deleteMany({ where: { id: prepared.memberId } }); }
   });

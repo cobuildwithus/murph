@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT hard-refresh capture fails although exact-thread export succeeds'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3213'
 ---
 
 ## Expected Behavior

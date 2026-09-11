@@ -9,6 +9,10 @@ import {
   buildEpicBetaRetrievalPlan,
   buildEpicBetaRetrievalQueryFingerprintInput,
   buildEpicBetaSmartResourceScope,
+  buildEpicBinarySmartResourceScope,
+  buildEpicMediaSmartResourceScope,
+  epicBinaryReadIsGranted,
+  epicMediaReadIsGranted,
 } from "@/src/lib/clinical-records/epic-policy";
 
 const EXACT_EPIC_REGISTRATION_API_NAMES = [
@@ -53,6 +57,35 @@ const EXACT_EPIC_REGISTRATION_API_NAMES = [
   "DocumentReference.Search (External CCDA) (R4)",
   "DocumentReference.Search (Outside Record - Clinical Notes) (R4)",
   "Observation.Search (Outside Record Vital Signs) (R4)",
+  "Binary.Read (External CCDA) (R4)",
+  "Binary.Read (Outside Record - Clinical Notes) (R4)",
+  "Binary.Read (Radiology Results) (R4)",
+  "Binary.Read (Labs) (R4)",
+  "Binary.Read (Generated CDAs) (R4)",
+  "Binary.Read (Patient-Entered Questionnaires) (R4)",
+  "Binary.Read (Correspondences) (R4)",
+  "Binary.Read (Handoff) (R4)",
+  "Binary.Read (Minimum Data Set) (R4)",
+  "DocumentReference.Search (Labs) (R4)",
+  "DocumentReference.Search (Generated CDAs) (R4)",
+  "DocumentReference.Search (Patient-Entered Questionnaires) (R4)",
+  "DocumentReference.Search (Correspondences) (R4)",
+  "DocumentReference.Search (Handoff) (R4)",
+  "DocumentReference.Search (Minimum Data Set) (R4)",
+  "Binary.Read (Document Information) (R4)",
+  "DocumentReference.Search (Document Information) (R4)",
+  "Binary.Read (Clinical References) (R4)",
+  "DocumentReference.Search (Clinical References) (R4)",
+  "Binary.Read (HIS) (R4)",
+  "DocumentReference.Search (HIS) (R4)",
+  "Binary.Read (OASIS) (R4)",
+  "DocumentReference.Search (OASIS) (R4)",
+  "Binary.Read (IRF-PAI) (R4)",
+  "DocumentReference.Search (IRF-PAI) (R4)",
+  "Binary.Read (Advance Directive) (R4)",
+  "DocumentReference.Search (Advance Directive) (R4)",
+  "Media.Read (Study) (R4)",
+  "Binary.Read (Study) (R4)",
 ] as const;
 
 describe("Epic Clinical Records acquisition policy", () => {
@@ -61,6 +94,19 @@ describe("Epic Clinical Records acquisition policy", () => {
     ["document-references-external-ccda", "DocumentReference", "external-ccda"],
     ["document-references-outside-notes", "DocumentReference", "external-clinical-note"],
     ["outside-vital-sign-observations", "Observation", "external-vital-signs"],
+    ["document-references-summaries", "DocumentReference", "summary-document"],
+    ["document-references-questionnaires", "DocumentReference", "questionnaire-response"],
+    ["document-references-correspondence", "DocumentReference", "correspondence"],
+    ["document-references-handoff", "DocumentReference", "handoff"],
+    ["document-references-assessments", "DocumentReference", "MDS"],
+    ["document-references-document-information", "DocumentReference", "document-information"],
+    ["document-references-clinical-references", "DocumentReference", "clinical-reference"],
+    ["document-references-his", "DocumentReference", "HIS"],
+    ["document-references-oasis", "DocumentReference", "OASIS"],
+    ["document-references-irf-pai", "DocumentReference", "IRFPAI"],
+    ["document-references-advance-directive", "DocumentReference", "42348-3"],
+    ["document-references-irf-pai-hyphenated", "DocumentReference", "IRF-PAI"],
+
   ])("requests the patient-bound lifetime %s variant", (queryScopeId, resourceType, category) => {
     const plan = buildEpicBetaRetrievalPlan({
       frozenAt: new Date("2026-09-10T12:00:00Z"), pageCount: "100", resourceTypes: [resourceType],
@@ -76,6 +122,42 @@ describe("Epic Clinical Records acquisition policy", () => {
     })).toBe(`patient/${resourceType}.s`);
   });
 
+  it("includes lab documents sharing the clinical-note query and MDS assessments", () => {
+    expect(EPIC_ACQUISITION_POLICY.queries.find((query) => query.queryScopeId === "document-references-notes")?.registrationApiKeys)
+      .toContain("document-reference-search-labs");
+    const plan = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-09-10T12:00:00Z"), pageCount: "100", resourceTypes: ["DocumentReference"] });
+    expect(buildEpicBetaInitialFhirPageUrl({
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1",
+      retrievalSlice: requireSlice(plan, "document-references-assessments"),
+    }).href).toBe("https://fhir.example.test/FHIR/R4/DocumentReference?patient=patient-1&category=MDS&_count=100");
+  });
+
+  it("requires an explicit patient Media read grant for supporting diagnostic images", () => {
+    expect(buildEpicMediaSmartResourceScope({ permissionVersion: "v1" })).toBe("patient/Media.read");
+    expect(buildEpicMediaSmartResourceScope({ permissionVersion: "v2" })).toBe("patient/Media.r");
+    for (const scope of ["patient/Media.read", "patient/Media.r", "patient/Media.rs", "patient/*.read", "patient/*.r"]) {
+      expect(epicMediaReadIsGranted([scope])).toBe(true);
+    }
+    for (const scope of ["patient/DiagnosticReport.rs", "patient/Binary.r", "patient/Media.s", "user/Media.read", "system/*.read"]) {
+      expect(epicMediaReadIsGranted([scope])).toBe(false);
+    }
+    expect(epicMediaReadIsGranted([])).toBe(false);
+    expect(EPIC_BETA_RESOURCE_TYPES).not.toContain("Media");
+  });
+
+  it("keeps document body read permission separate from primary resource coverage", () => {
+    expect(buildEpicBinarySmartResourceScope({ permissionVersion: "v1" })).toBe("patient/Binary.read");
+    expect(buildEpicBinarySmartResourceScope({ permissionVersion: "v2" })).toBe("patient/Binary.r");
+    for (const scope of ["patient/Binary.read", "patient/Binary.r", "patient/Binary.rs", "patient/*.read", "patient/*.r"]) {
+      expect(epicBinaryReadIsGranted([scope])).toBe(true);
+    }
+    for (const scope of ["patient/DocumentReference.rs", "patient/Binary.s", "user/Binary.read", "system/*.read", "patient/Binary.horse"]) {
+      expect(epicBinaryReadIsGranted([scope])).toBe(false);
+    }
+    expect(epicBinaryReadIsGranted([])).toBe(false);
+    expect(EPIC_BETA_RESOURCE_TYPES).not.toContain("Binary");
+  });
+
   it("activates every primary longitudinal query in a stable execution order", () => {
     const active = EPIC_ACQUISITION_POLICY.queries;
 
@@ -84,7 +166,7 @@ describe("Epic Clinical Records acquisition policy", () => {
       "launch/patient",
       "openid",
     ]);
-    expect(EPIC_ACQUISITION_POLICY.queries).toHaveLength(28);
+    expect(EPIC_ACQUISITION_POLICY.queries).toHaveLength(40);
     expect(active.map((query) => query.queryScopeId)).toEqual([
       "patient-demographics",
       "laboratory-observations",
@@ -114,6 +196,19 @@ describe("Epic Clinical Records acquisition policy", () => {
       "document-references-external-ccda",
       "document-references-outside-notes",
       "outside-vital-sign-observations",
+      "document-references-summaries",
+      "document-references-questionnaires",
+      "document-references-correspondence",
+      "document-references-handoff",
+      "document-references-assessments",
+      "document-references-document-information",
+      "document-references-clinical-references",
+      "document-references-his",
+      "document-references-oasis",
+      "document-references-irf-pai",
+      "document-references-advance-directive",
+      "document-references-irf-pai-hyphenated",
+
     ]);
     expect(new Set(active.map((query) => query.resourceType))).toEqual(
       new Set(EPIC_BETA_RESOURCE_TYPES),
@@ -167,9 +262,9 @@ describe("Epic Clinical Records acquisition policy", () => {
       pageCount: "100",
       resourceTypes: EPIC_BETA_RESOURCE_TYPES,
     });
-    expect(plan.slices).toHaveLength(28);
+    expect(plan.slices).toHaveLength(40);
     expect(plan.slices.filter((slice) => slice.coverage === "whole-family"))
-      .toHaveLength(28);
+      .toHaveLength(40);
     expect(plan.slices.filter((slice) => slice.coverage === "bounded-window"))
       .toHaveLength(0);
     expect(plan.slices.map((slice) =>
@@ -203,6 +298,19 @@ describe("Epic Clinical Records acquisition policy", () => {
       "document-references-external-ccda:DocumentReference:whole-family:whole",
       "document-references-outside-notes:DocumentReference:whole-family:whole",
       "outside-vital-sign-observations:Observation:whole-family:whole",
+      "document-references-summaries:DocumentReference:whole-family:whole",
+      "document-references-questionnaires:DocumentReference:whole-family:whole",
+      "document-references-correspondence:DocumentReference:whole-family:whole",
+      "document-references-handoff:DocumentReference:whole-family:whole",
+      "document-references-assessments:DocumentReference:whole-family:whole",
+      "document-references-document-information:DocumentReference:whole-family:whole",
+      "document-references-clinical-references:DocumentReference:whole-family:whole",
+      "document-references-his:DocumentReference:whole-family:whole",
+      "document-references-oasis:DocumentReference:whole-family:whole",
+      "document-references-irf-pai:DocumentReference:whole-family:whole",
+      "document-references-advance-directive:DocumentReference:whole-family:whole",
+      "document-references-irf-pai-hyphenated:DocumentReference:whole-family:whole",
+
     ]);
     const urls = plan.slices.map((retrievalSlice) => buildEpicBetaInitialFhirPageUrl({
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
@@ -211,7 +319,7 @@ describe("Epic Clinical Records acquisition policy", () => {
       retrievalSlice,
     }).toString());
     // The two surgical variants share Epic's category and now have identical lifetime queries.
-    expect(new Set(urls).size).toBe(27);
+    expect(new Set(urls).size).toBe(39);
 
     const patientSlice = requireSlice(plan, "patient-demographics");
     expect(buildEpicBetaInitialFhirPageUrl({

@@ -1,6 +1,7 @@
 ---
 title: 'Audio abort-replay fixture ages out of pending-input retention'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3126'
 ---
 
 ## Expected Behavior

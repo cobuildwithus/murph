@@ -182,6 +182,17 @@ not modify compact or ordinary Responses cache behavior, and never logs prompt
 content or cache keys. Specialized
 tools such as generated images continue to use their own managed providers even
 when Venice owns the core assistant turn.
+Hosted Linq container requests use the canonical HTTPS API base even when the
+Worker has a custom `LINQ_API_BASE_URL`. The existing outbound handler maps that
+canonical request to the Worker-owned upstream and injects the provider token.
+This matters for local providers: Cloudflare only intercepts outbound ports 80
+and 443, so forwarding a random local HTTP port to the container bypasses that
+boundary. Ambient host execution retains its configured upstream. The composed
+provider-egress test uses generated runner env, the production card client and
+provider-fetch handler, and a strict loopback HTTP provider; the isolated
+`provider-egress-token-bridge` journey covers actual container interception.
+See [Cloudflare outbound traffic](https://developers.cloudflare.com/containers/guides/outbound-traffic/).
+
 The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and direct invocation builds the runtime config from an explicit frozen supervisor env, preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception, and still blocks operator-only process-control env plus user-supplied proxy overrides.
 
 Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration routed through the Worker intercept. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus the Worker-owned `OPENAI_API_KEY` secret; the raw key is not copied into direct runtime env.
@@ -810,11 +821,11 @@ completion, may enter the corresponding identity-safe recovery or clear path.
 After an exact successful completion clears the fence, Cloudflare makes at most
 one signed, bodyless owner-release callback to web with a timeout capped at two
 seconds. Its signed query binds the opaque runtime attempt whose fence was
-cleared and may include the exact positive `immediateRecheckRequested` edge. A
-known future mailbox retry continuation skips the callback unless the result
-carries that edge. The edge means the invocation newly committed an unserviced
-default or retention schedule; it does not carry the schedule itself. Without
-the edge, Web signals only when current runnable mailbox lag or a live system
+cleared and may include the exact positive `immediateRecheckRequested` edge.
+A future mailbox retry continuation still sends this callback so Web can
+recheck actionable work after the owner releases its fence. The edge means the
+invocation newly committed an unserviced default or retention schedule; it does
+not carry the schedule itself. Without the edge, Web signals only when current runnable mailbox lag or a live system
 mailbox item beyond the handled-through frontier remains. Exact callbacks use
 the attempt-bound owner-release signal; legacy pointerless callbacks use the
 facts-only recheck. A persisted due wake alone therefore never becomes a

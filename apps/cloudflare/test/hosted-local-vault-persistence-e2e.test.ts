@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -8,20 +8,9 @@ import { promisify } from "node:util";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionBundleRef,
-} from "@murphai/hosted-execution/contracts";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  readHostedExecutionSnapshotBaseRef,
-  readHostedExecutionSnapshotHotRef,
-} from "@murphai/hosted-execution/parsers";
-import {
-  readHostedBundleTextFile,
-} from "@murphai/runtime-state/node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -39,6 +28,8 @@ import {
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+
+import { withHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot-restore.ts";
 
 const execFileAsync = promisify(execFile);
 const runId = Date.now();
@@ -264,7 +255,6 @@ async function expectVaultSnapshotText(
   },
 ): Promise<void> {
   const actualText = await readVaultSnapshotText(status, vaultRelativePath);
-  expect(actualText, input.summary).not.toBeNull();
   for (const marker of input.presentMarkers) {
     expect(actualText, input.summary).toContain(marker);
   }
@@ -276,47 +266,13 @@ async function expectVaultSnapshotText(
 async function readVaultSnapshotText(
   status: HostedRunnerStatusResponse,
   relativePath: string,
-): Promise<string | null> {
-  const snapshotRef = status.workspace?.snapshotRef ?? null;
-  const candidateRefs = [
-    readHostedExecutionSnapshotHotRef(snapshotRef),
-    readHostedExecutionSnapshotBaseRef(snapshotRef),
-  ].filter((ref): ref is HostedExecutionBundleRef => ref !== null);
-
-  for (const ref of candidateRefs) {
-    const bytes = await readHostedBundleBytes(ref);
-    const text = readHostedBundleTextFile({
-      bytes,
-      expectedKind: "vault",
-      path: relativePath,
-      root: "vault",
-    });
-    if (text !== null) {
-      return text;
-    }
-  }
-
-  return null;
-}
-
-async function readHostedBundleBytes(ref: HostedExecutionBundleRef): Promise<Uint8Array> {
-  const search = new URLSearchParams({
-    key: ref.key,
-    sha256: ref.hash,
-    size: String(ref.size),
+): Promise<string> {
+  return withHostedLocalWorkspaceSnapshot({
+    harness: requireScenario().harness,
+    status,
     userId,
+    read: ({ vaultRoot }) => readFile(path.join(vaultRoot, relativePath), "utf8"),
   });
-  const response = await requireScenario().harness.request(
-    `/__test/artifacts?${search.toString()}`,
-    {
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "GET",
-    },
-  );
-  expect(response.status).toBe(200);
-  return new Uint8Array(await response.arrayBuffer());
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {

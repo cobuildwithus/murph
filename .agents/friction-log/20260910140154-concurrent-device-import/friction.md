@@ -1,6 +1,7 @@
 ---
 title: 'Concurrent device-import proof times out before its foreground assertion'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3212'
 ---
 
 ## Expected Behavior

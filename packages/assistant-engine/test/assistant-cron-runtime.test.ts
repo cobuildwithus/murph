@@ -3669,6 +3669,26 @@ describe('assistant cron runtime orchestration', () => {
     expect(updated.job.target.sessionId).toBeNull()
   })
 
+  it.each([true, false])('preserves explicit canonical target audience %s and session continuity', async (threadIsDirect) => {
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-target-audience-')
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'audience-reminder')
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record, alias: 'synthetic-alias', sessionId: 'synthetic-session',
+    }))
+    const result = await setAssistantCronJobTarget({
+      channel: 'telegram', threadId: 'synthetic-thread', threadIsDirect,
+      sessionId: 'ignored-replacement-session', job: canonicalJob.jobId, vault: vaultRoot,
+    })
+    expect(result.job.target.threadIsDirect).toBe(threadIsDirect)
+    expect(result.job.target.sessionId).toBeNull()
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot))
+    expect(runtimeStore.jobs.find((record) => record.jobId === canonicalJob.jobId)?.sessionId).toBe('synthetic-session')
+    expect(result.job.target.alias).toBe('synthetic-alias')
+    expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.route).toMatchObject({
+      channel: 'telegram', threadId: 'synthetic-thread', threadIsDirect,
+    })
+  })
+
   it('updates canonical targets and clears preserved continuity when requested', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-canonical-target-',

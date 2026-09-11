@@ -8,7 +8,7 @@ import {
 } from "@murphai/clinical-records";
 
 export const EPIC_ACQUISITION_POLICY_ID = "epic-r4-longitudinal-v1";
-export const EPIC_ACQUISITION_POLICY_VERSION = "2026-09-10.additional-records-v6";
+export const EPIC_ACQUISITION_POLICY_VERSION = "2026-09-10.document-downloads-v7";
 export const EPIC_BETA_FHIR_PAGE_COUNT = "100";
 
 const REQUIRED_BASE_SCOPES = Object.freeze(["fhirUser", "launch/patient", "openid"] as const);
@@ -88,6 +88,35 @@ const REGISTRATION_APIS = [
   registrationApi("document-reference-search-external-ccda", "DocumentReference.Search (External CCDA) (R4)", "DocumentReference", "search"),
   registrationApi("document-reference-search-outside-clinical-notes", "DocumentReference.Search (Outside Record - Clinical Notes) (R4)", "DocumentReference", "search"),
   registrationApi("observation-search-outside-vital-signs", "Observation.Search (Outside Record Vital Signs) (R4)", "Observation", "search"),
+  registrationApi("binary-read-external-ccda", "Binary.Read (External CCDA) (R4)", "Binary", "read"),
+  registrationApi("binary-read-outside-clinical-notes", "Binary.Read (Outside Record - Clinical Notes) (R4)", "Binary", "read"),
+  registrationApi("binary-read-radiology-results", "Binary.Read (Radiology Results) (R4)", "Binary", "read"),
+  registrationApi("binary-read-labs", "Binary.Read (Labs) (R4)", "Binary", "read"),
+  registrationApi("binary-read-generated-cdas", "Binary.Read (Generated CDAs) (R4)", "Binary", "read"),
+  registrationApi("binary-read-questionnaires", "Binary.Read (Patient-Entered Questionnaires) (R4)", "Binary", "read"),
+  registrationApi("binary-read-correspondences", "Binary.Read (Correspondences) (R4)", "Binary", "read"),
+  registrationApi("binary-read-handoff", "Binary.Read (Handoff) (R4)", "Binary", "read"),
+  registrationApi("binary-read-minimum-data-set", "Binary.Read (Minimum Data Set) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-labs", "DocumentReference.Search (Labs) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-generated-cdas", "DocumentReference.Search (Generated CDAs) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-questionnaires", "DocumentReference.Search (Patient-Entered Questionnaires) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-correspondences", "DocumentReference.Search (Correspondences) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-handoff", "DocumentReference.Search (Handoff) (R4)", "DocumentReference", "search"),
+  registrationApi("document-reference-search-minimum-data-set", "DocumentReference.Search (Minimum Data Set) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-document-information", "Binary.Read (Document Information) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-document-information", "DocumentReference.Search (Document Information) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-clinical-references", "Binary.Read (Clinical References) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-clinical-references", "DocumentReference.Search (Clinical References) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-his", "Binary.Read (HIS) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-his", "DocumentReference.Search (HIS) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-oasis", "Binary.Read (OASIS) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-oasis", "DocumentReference.Search (OASIS) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-irf-pai", "Binary.Read (IRF-PAI) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-irf-pai", "DocumentReference.Search (IRF-PAI) (R4)", "DocumentReference", "search"),
+  registrationApi("binary-read-advance-directive", "Binary.Read (Advance Directive) (R4)", "Binary", "read"),
+  registrationApi("document-reference-search-advance-directive", "DocumentReference.Search (Advance Directive) (R4)", "DocumentReference", "search"),
+  registrationApi("media-read-study", "Media.Read (Study) (R4)", "Media", "read"),
+  registrationApi("binary-read-study", "Binary.Read (Study) (R4)", "Binary", "read"),
 ] as const satisfies readonly EpicRegistrationApi[];
 
 const QUERIES: readonly EpicQuery[] = [
@@ -173,7 +202,7 @@ const QUERIES: readonly EpicQuery[] = [
     fingerprintTemplate:
       "epic-fhir-r4:DocumentReference:search:patient:category=clinical-note:_count={pageCount}:v1",
     fixedSearchParameters: [{ name: "category", value: "clinical-note" }],
-    registrationApiKeys: ["document-reference-search-clinical-notes"],
+    registrationApiKeys: ["document-reference-search-clinical-notes", "document-reference-search-labs"],
     legacyWindowParameter: "period",
   },
   {
@@ -335,6 +364,103 @@ const QUERIES: readonly EpicQuery[] = [
     fixedSearchParameters: [{ name: "category", value: "external-vital-signs" }],
     registrationApiKeys: ["observation-search-outside-vital-signs"],
   },
+  {
+    queryScopeId: "document-references-summaries",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=summary-document:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "summary-document" }],
+    registrationApiKeys: ["document-reference-search-generated-cdas"],
+  },
+  {
+    queryScopeId: "document-references-questionnaires",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=questionnaire-response:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "questionnaire-response" }],
+    registrationApiKeys: ["document-reference-search-questionnaires"],
+  },
+  {
+    queryScopeId: "document-references-correspondence",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=correspondence:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "correspondence" }],
+    registrationApiKeys: ["document-reference-search-correspondences"],
+  },
+  {
+    queryScopeId: "document-references-handoff",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=handoff:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "handoff" }],
+    registrationApiKeys: ["document-reference-search-handoff"],
+  },
+  {
+    queryScopeId: "document-references-assessments",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=MDS:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "MDS" }],
+    registrationApiKeys: ["document-reference-search-minimum-data-set"],
+  },
+  {
+    queryScopeId: "document-references-document-information",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=document-information:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "document-information" }],
+    registrationApiKeys: ["document-reference-search-document-information"],
+  },
+  {
+    queryScopeId: "document-references-clinical-references",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=clinical-reference:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "clinical-reference" }],
+    registrationApiKeys: ["document-reference-search-clinical-references"],
+  },
+  {
+    queryScopeId: "document-references-his",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=HIS:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "HIS" }],
+    registrationApiKeys: ["document-reference-search-his"],
+  },
+  {
+    queryScopeId: "document-references-oasis",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=OASIS:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "OASIS" }],
+    registrationApiKeys: ["document-reference-search-oasis"],
+  },
+  {
+    queryScopeId: "document-references-irf-pai",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=IRFPAI:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "IRFPAI" }],
+    registrationApiKeys: ["document-reference-search-irf-pai"],
+  },
+  {
+    queryScopeId: "document-references-advance-directive",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=42348-3:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "42348-3" }],
+    registrationApiKeys: ["document-reference-search-advance-directive"],
+  },
+  {
+    // Epic's request table uses IRFPAI; its sample request uses IRF-PAI.
+    queryScopeId: "document-references-irf-pai-hyphenated",
+    resourceType: "DocumentReference",
+    operation: "search",
+    fingerprintTemplate: "epic-fhir-r4:DocumentReference:search:patient:category=IRF-PAI:_count={pageCount}:v1",
+    fixedSearchParameters: [{ name: "category", value: "IRF-PAI" }],
+    registrationApiKeys: ["document-reference-search-irf-pai"],
+  },
 ];
 
 export const EPIC_ACQUISITION_POLICY: EpicAcquisitionPolicy = {
@@ -388,6 +514,28 @@ export function buildEpicBetaSmartResourceScope(input: {
           .map((operation) => (operation === "read" ? "r" : "s"))
           .join("");
   return `patient/${input.resourceType}.${permission}`;
+}
+
+export function buildEpicBinarySmartResourceScope(input: {
+  permissionVersion: SmartPermissionVersion;
+}): string {
+  return input.permissionVersion === "v1" ? "patient/Binary.read" : "patient/Binary.r";
+}
+
+export function epicBinaryReadIsGranted(scopes: readonly string[]): boolean {
+  return scopes.some((scope) => scope.startsWith("patient/")
+    && clinicalFhirScopeAllowsOperation(scope, "Binary", "read"));
+}
+
+export function buildEpicMediaSmartResourceScope(input: {
+  permissionVersion: SmartPermissionVersion;
+}): string {
+  return input.permissionVersion === "v1" ? "patient/Media.read" : "patient/Media.r";
+}
+
+export function epicMediaReadIsGranted(scopes: readonly string[]): boolean {
+  return scopes.some((scope) => scope.startsWith("patient/")
+    && clinicalFhirScopeAllowsOperation(scope, "Media", "read"));
 }
 
 export function readGrantedEpicBetaResourceTypes(

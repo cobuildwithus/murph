@@ -1369,7 +1369,7 @@ function configureHostedSignupClaimLocalCryptoForTest(): () => void {
     publicKeyEncoding: { format: "jwk" },
   });
   const authorityKeyVersion =
-    "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
+    "projects/murph-test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
   Object.assign(process.env, {
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "test-automation-key",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
@@ -1379,7 +1379,7 @@ function configureHostedSignupClaimLocalCryptoForTest(): () => void {
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
     HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
     HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/web-wrap",
     HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
       JSON.stringify(authorityKey.privateKey),
     HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),

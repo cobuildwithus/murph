@@ -1,6 +1,6 @@
 # Member-specific one-vCPU container experiment
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -55,7 +55,7 @@ Updated: 2026-09-10
 2. Add fixed resource rendering and protected namespace/application provisioning.
 3. Map the selector and provisioning control in private Murph Cloud.
 4. Run focused proof, typechecks, complexity review, CI and ReviewGPT gates.
-5. Merge, deploy, verify account convergence and close this plan.
+5. Merge, deploy, verify native convergence and record account-allocation limits.
 
 ## Decisions
 
@@ -92,7 +92,48 @@ Updated: 2026-09-10
 - The forward fix permits an exact observed image reference only in the
   namespace-only preservation path. New release admission remains digest-only;
   native before/after receipts, resource checks and routing-off ordering remain.
-  Live convergence is pending the focused correction and its review/CI gates.
+- The correction merged as PR #3216 after 100 focused tests, Cloudflare
+  typecheck, complexity checks and all required exact-head CI passed. Final
+  ReviewGPT round 1 passed with verified Pro metadata and a 366-second response
+  capture, including 27 independently executed checks. The first tooling
+  attempt was invalid because its archive was absent; the exact captured thread
+  was inspected before the successful same-round full-snapshot retry.
+- The protected full retry passed all predeployment gates and stopped before
+  Worker mutation: pinned Wrangler 4.90.0 rejects the bootstrap no-rollout flag.
+  An actual-CLI synthetic probe proves that omitting the flag can reconcile an
+  existing application when native fields differ, despite matching image and
+  resources. Native Wrangler 4.93.0 provides the migration-only skip without
+  a deployment patch. The existing macOS compatibility correction is unrelated.
+- A separate main-branch upgrade shipped Wrangler 4.93.0 while the experiment's
+  dependency candidate was being verified. That candidate is superseded; the
+  outcome follow-up retains only the actual-CLI regression and task records.
+- Against the upgraded main branch, the frozen lockfile install, 36 actual-CLI,
+  bootstrap and deployment tests, and Cloudflare typecheck pass. The actual CLI
+  uploads the new namespace with selection off and makes no Container API call;
+  a plain deploy attempts a native application patch in the synthetic case.
+- Protected deployment completed successfully using the main-branch Wrangler
+  upgrade. All predeployment gates, deployment, final endpoint smoke and live
+  convergence verification passed. Native application admission checked the
+  exact 1-vCPU / 3-GiB / 6,000-MB specification. The final receipt reports the
+  dedicated application created at version 1 with capacity 1; ordinary serving
+  capacity remains 702 and retired applications remain at zero.
+- The protected selector metadata is unchanged, selection remains enabled, and
+  the one-time bootstrap control was cleared after namespace provisioning. A
+  later deployment had already begun; the existing-namespace branch skips
+  bootstrap before consulting that control, so the cleanup preserves its path.
+- Documentation drift, gardening and complexity checks pass. The outcome
+  follow-up changes isolated CLI proof and historical records only; it does not
+  require another final ReviewGPT production review.
+
+## Outcome and remaining measurement
+
+The smaller application and fresh-allocation eligibility are shipped. Existing
+warm sessions retain their exact target until normal retirement. The selected
+account's first smaller-container allocation has not been independently observed;
+that original success criterion remains an operational verification limit.
+Existing aggregate hot-reply and CLI timing provides the baseline, but no
+post-change timing or performance conclusion is claimed. Normal member traffic
+can supply the next allocation and the comparison data.
 
 - Focused allocation, slot lifecycle, namespace, configuration, staging and
   deployment tests; Cloudflare typecheck and complexity diff.
@@ -102,3 +143,4 @@ Updated: 2026-09-10
 - Prove first provisioning preserves serving resources, failed admission cannot
   enable routing, worker-only mode retains images, and later releases update the
   dedicated application. Verify actual 1/3/6000 resources after deployment.
+Completed: 2026-09-10
