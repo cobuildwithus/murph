@@ -6249,7 +6249,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(rejectedFetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps hosted-local Linq URL rewrite and provider fetch allowlist in sync", async () => {
+  it("keeps canonical container Linq URL and provider fetch allowlist in sync", async () => {
     const runnerEnv = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
@@ -6258,11 +6258,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(runnerEnv.LINQ_API_BASE_URL).toBe(
-      "http://host.docker.internal:4011/api/partner/v3",
+      "https://api.linqapp.com/api/partner/v3",
     );
     const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(runnerEnv);
     expect(providerFetchBaseUrls).toEqual([
-      "http://host.docker.internal:4011/api/partner/v3",
+      "https://api.linqapp.com/api/partner/v3",
     ]);
 
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
@@ -6281,7 +6281,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     );
 
-    const response = await hostedFetch("http://host.docker.internal:4011/api/partner/v3/chats", {
+    const response = await hostedFetch("https://api.linqapp.com/api/partner/v3/chats", {
       body: "{}",
       method: "POST",
     });
@@ -6289,7 +6289,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(response.status).toBe(204);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "configured Linq provider fetch");
-    expect(request.url).toBe("http://host.docker.internal:4011/api/partner/v3/chats");
+    expect(request.url).toBe("https://api.linqapp.com/api/partner/v3/chats");
     expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
