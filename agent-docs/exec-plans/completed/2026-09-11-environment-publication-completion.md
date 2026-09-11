@@ -1,6 +1,6 @@
 # Finish Environment browser publication after foreground recovery
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -86,5 +86,11 @@ preserving immediate priority for a fresh conversation.
 - Parent candidate review: Source and test boundaries inspected; existing
   runtime completion and publication owners remain authoritative. Complexity
   debt and maxima are unchanged in both source files.
-- Pending: Changelog provenance, final ReviewGPT, required CI, and unchanged
-  managed admission. No deployment success is claimed.
+- Changelog: PR #3284 is associated with the existing Environment recovery item.
+  All 10 focused archive rendering tests and Web typecheck passed. The production
+  presentation reference responds successfully and contains the archive anchor;
+  the existing content-only provenance exception applies.
+- Implementation and local review are complete. Final ReviewGPT, required CI,
+  and unchanged managed admission remain external completion gates owned by the
+  original session. No deployment success is claimed.
+Completed: 2026-09-11
