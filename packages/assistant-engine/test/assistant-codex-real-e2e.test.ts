@@ -76,6 +76,7 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { OPENAI_CODEX_MODEL_PROVIDER_CONFIG } from '@murphai/operator-config/assistant/target-runtime'
 import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
 import {
@@ -308,6 +309,12 @@ import {
 } from './support/codex-model-catalog.ts'
 import { createDeferred } from './test-helpers.ts'
 import { isAssistantGeneratedDeliveryRef } from '../src/assistant/generated-delivery-files.ts'
+import {
+  createCanonicalLiveFixture,
+  runCanonicalGroupBoundaryJourney,
+  runCanonicalMealRestartJourney,
+  runCanonicalReminderJourney,
+} from './support/canonical-live-journeys.ts'
 
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import {
@@ -334,6 +341,28 @@ const realCodexSuiteUsage = {
 function describeRealCodex(name: string, factory: () => void): void {
   const suite = RUN_REAL_CODEX_E2E ? describe : describe.skip
   suite(name, { tags: [REAL_CODEX_E2E_TAG] }, factory)
+}
+
+describeRealCodex('real model canonical production journeys', () => {
+  it('real model canonical meal persists across assistant restart', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalMealRestartJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
+  it('real model canonical reminder create fire and cancel', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalReminderJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
+  it('real model group privacy and quiet boundary', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalGroupBoundaryJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
+})
+function recordCanonicalProviderRequest(): void {
+  realCodexSuiteUsage.providerRequests += 1
+  realCodexSuiteUsage.requestsMissingUsage += 1
 }
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 
@@ -2401,6 +2430,31 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('uses production Responses websocket configuration for canonical provider journeys', () => {
+    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-5.6-terra', modelProvider: 'openai-env', productionTransport: true })
+    expect(toml).toContain('wire_api = "responses"')
+    expect(toml).toContain('supports_websockets = true')
+    expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
+    expect(toml).toContain('"MURPH_CANONICAL_JOURNEY_CLI"')
+    expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
+  })
+  it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
+    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-5.6-terra', modelProvider: 'openai-env' })
+    try {
+      const codex = await execFileAsync(fixture.codexCommand, ['-c', 'default_permissions="murph-member-read"', 'features', 'list'], { env: fixture.env, timeout: 60_000 })
+      expect(codex.stdout.trim()).not.toBe('')
+      const result = await fixture.cli(['meal', 'totals', '--from', '2026-08-29', '--to', '2026-08-29', '--format', 'json'])
+      expect(JSON.parse(result)).toMatchObject({ mealCount: 0 })
+      await expect(fixture.cli(['nonexistent-canonical-journey-command'])).rejects.toThrow()
+    } finally { await fixture.close() }
+  }, 120_000)
+  it('rejects unknown Personal Patterns fixture commands instead of fabricating success', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-pattern-fixture-contract-'))
+    try {
+      await materializePersonalPatternsBaselineVaultCli({ binDirectory: root, commandCapturePath: path.join(root, 'commands'), initialDigestSent: false, ledgerCapturePath: path.join(root, 'ledger'), vocabularyCapturePath: path.join(root, 'vocabulary') })
+      await expect(execFileAsync(path.join(root, 'vault-cli'), ['nonexistent-command'])).rejects.toThrow()
+    } finally { await removeRealCodexTemporaryPath(root) }
+  })
   it('executes canonical single-read nutrition fixtures through the real CLI', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'murph-nutrition-cli-fixture-'))
     const binDirectory = path.join(root, 'bin')
@@ -34997,7 +35051,8 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *)',
-      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    printf \'%s\\n\' \'unsupported Personal Patterns fixture command\' >&2',
+      '    exit 64',
       '    ;;',
       'esac',
       '',
@@ -38085,6 +38140,7 @@ function summarizeCodexEventSequence(
 
 async function resolveRealCodexE2eConfig(
   input: {
+    productionTransport?: boolean
     sourceEnv?: NodeJS.ProcessEnv
   } = {},
 ): Promise<RealCodexE2eConfig> {
@@ -38173,6 +38229,7 @@ async function resolveRealCodexE2eConfig(
       apiKeyEnv,
       model,
       modelProvider,
+      productionTransport: input.productionTransport,
     }),
     {
       encoding: 'utf8',
@@ -38224,6 +38281,7 @@ function buildRealCodexConfigToml(input: {
   defaultPermissions?: string | null
   model: string
   modelProvider: string
+  productionTransport?: boolean
   sandboxMode?: 'workspace-write' | null
 }): string {
   const baseUrl =
@@ -38253,6 +38311,7 @@ function buildRealCodexConfigToml(input: {
     'ignore_default_excludes = false',
     'include_only = [',
     ...REAL_CODEX_E2E_ENV_ALLOWLIST.map((key) => `  ${tomlString(key)},`),
+    ...(input.productionTransport ? ['HOME', 'VAULT', 'MURPH_CANONICAL_JOURNEY_CLI', 'MURPH_CANONICAL_JOURNEY_COMMANDS'].map((key) => `  ${tomlString(key)},`) : []),
     ']',
     '',
     `[model_providers.${tomlKey(input.modelProvider)}]`,
@@ -38262,7 +38321,7 @@ function buildRealCodexConfigToml(input: {
     'wire_api = "responses"',
     'request_max_retries = 4',
     'stream_max_retries = 5',
-    'supports_websockets = false',
+    `supports_websockets = ${input.productionTransport === true && input.modelProvider === OPENAI_ENV_MODEL_PROVIDER && OPENAI_CODEX_MODEL_PROVIDER_CONFIG.supportsWebSockets}`,
     '',
   ].join('\n')
 }

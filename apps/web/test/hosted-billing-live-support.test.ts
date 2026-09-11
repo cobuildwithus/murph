@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 
+import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,6 +17,7 @@ import {
   buildHostedStripeRunCorrelationToken,
   buildStripeFixtureChildEnvironmentForTest,
   HOSTED_STRIPE_BILLING_RUN_METADATA_KEY,
+  HostedStripeBillingSandbox,
   metadataCorrelatesHostedStripeRun,
   sanitizeHostedStripeBillingLiveFailure,
 } from "./support/hosted-stripe-billing-live";
@@ -309,6 +311,157 @@ describe("hosted billing live browser support", () => {
     });
   });
 });
+
+describe("hosted Stripe billing test clocks", () => {
+  it("waits for the provider to reach the requested second before returning its time", async () => {
+    const sandbox = createClockSandbox();
+    const clock = buildClockResponse();
+    const frozenTime = clock.frozen_time + 3_600;
+    const create = vi.spyOn(sandbox.stripe.testHelpers.testClocks, "create")
+      .mockResolvedValue(clock);
+    const retrieve = vi.spyOn(sandbox.stripe.testHelpers.testClocks, "retrieve")
+      .mockResolvedValueOnce(clock)
+      .mockResolvedValueOnce(buildClockResponse({ status: "advancing" }))
+      .mockResolvedValueOnce(buildClockResponse({ frozen_time: frozenTime }));
+    const advance = vi.spyOn(sandbox.stripe.testHelpers.testClocks, "advance")
+      .mockResolvedValue(buildClockResponse({ status: "advancing" }));
+
+    await sandbox.createTestClock("renewal");
+    await expect(sandbox.advanceTestClock({
+      frozenTime: new Date(frozenTime * 1_000),
+      testClockId: clock.id,
+    })).resolves.toEqual(new Date(frozenTime * 1_000));
+    expect(create).toHaveBeenCalledWith({
+      frozen_time: expect.any(Number),
+      name: clock.name,
+    });
+    expect(advance).toHaveBeenCalledExactlyOnceWith(clock.id, { frozen_time: frozenTime });
+    expect(retrieve).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { livemode: true },
+    { name: "murph-another-run-renewal" },
+    { status: "advancing" as const },
+  ])("rejects a changed clock boundary before mutation: %j", async (change) => {
+    const sandbox = createClockSandbox();
+    const clock = buildClockResponse();
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "create").mockResolvedValue(clock);
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "retrieve")
+      .mockResolvedValue(buildClockResponse(change));
+    const advance = vi.spyOn(sandbox.stripe.testHelpers.testClocks, "advance")
+      .mockRejectedValue(new Error("Unexpected provider mutation."));
+    await sandbox.createTestClock("renewal");
+
+    await expect(sandbox.advanceTestClock({
+      frozenTime: new Date((clock.frozen_time + 3_600) * 1_000),
+      testClockId: clock.id,
+    })).rejects.toThrow(/owned|ready/u);
+    expect(advance).not.toHaveBeenCalled();
+  });
+
+  it("rejects an untracked clock without making a provider request", async () => {
+    const sandbox = createClockSandbox();
+    const retrieve = vi.spyOn(sandbox.stripe.testHelpers.testClocks, "retrieve")
+      .mockRejectedValue(new Error("Unexpected provider request."));
+    await expect(sandbox.advanceTestClock({
+      frozenTime: new Date("2026-09-11T12:00:00.000Z"),
+      testClockId: "clock_untracked",
+    })).rejects.toThrow(/owned clock/u);
+    expect(retrieve).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["provider failure", { status: "internal_failure" as const }, /internal_failure/u],
+    ["unchanged ready clock", {}, /unexpected frozen time/u],
+  ] as const)("does not report successful advancement for %s", async (_label, change, error) => {
+    const sandbox = createClockSandbox();
+    const clock = buildClockResponse();
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "create").mockResolvedValue(clock);
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "retrieve")
+      .mockResolvedValueOnce(clock)
+      .mockResolvedValueOnce(buildClockResponse(change));
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "advance")
+      .mockResolvedValue(buildClockResponse({ status: "advancing" }));
+    await sandbox.createTestClock("renewal");
+
+    await expect(sandbox.advanceTestClock({
+      frozenTime: new Date((clock.frozen_time + 3_600) * 1_000),
+      testClockId: clock.id,
+    })).rejects.toThrow(error);
+  });
+
+  it("waits for an interrupted advancement before deleting its owned clock", async () => {
+    const sandbox = createClockSandbox();
+    const clock = buildClockResponse();
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "create").mockResolvedValue(clock);
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "retrieve")
+      .mockResolvedValueOnce(buildClockResponse({ status: "advancing" }))
+      .mockResolvedValue(clock);
+    vi.spyOn(sandbox.stripe.paymentMethods, "list").mockResolvedValue({
+      data: [], has_more: false, object: "list", url: "/v1/payment_methods",
+      lastResponse: clock.lastResponse,
+    });
+    const remove = vi.spyOn(sandbox.stripe.testHelpers.testClocks, "del")
+      .mockResolvedValue({
+        deleted: true, id: clock.id, object: "test_helpers.test_clock",
+        lastResponse: clock.lastResponse,
+      });
+    await sandbox.createTestClock("renewal");
+
+    await expect(sandbox.cleanup()).resolves.toMatchObject({ testClocksDeleted: 1 });
+    expect(remove).toHaveBeenCalledExactlyOnceWith(clock.id);
+  });
+
+  it("fails cleanup when its clock failed instead of silently retaining the resource", async () => {
+    const sandbox = createClockSandbox();
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "create")
+      .mockResolvedValue(buildClockResponse());
+    vi.spyOn(sandbox.stripe.testHelpers.testClocks, "retrieve")
+      .mockResolvedValue(buildClockResponse({ status: "internal_failure" }));
+    const remove = vi.spyOn(sandbox.stripe.testHelpers.testClocks, "del")
+      .mockRejectedValue(new Error("Unexpected provider deletion."));
+    const list = vi.spyOn(sandbox.stripe.paymentMethods, "list")
+      .mockRejectedValue(new Error("Unexpected provider request."));
+    await sandbox.createTestClock("renewal");
+
+    await expect(sandbox.cleanup()).rejects.toThrow(/internal_failure/u);
+    expect(remove).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+  });
+});
+
+function createClockSandbox(): HostedStripeBillingSandbox {
+  return new HostedStripeBillingSandbox({
+    accountId: "acct_clock_fixture",
+    portalConfigurationId: "bpc_clock_fixture",
+    priceIds: {
+      edge: "price_edge", familyEdge: "price_family_edge", familyMax: "price_family_max",
+      familyPulse: "price_family_pulse", pulse: "price_pulse",
+    },
+    privyAppId: "privy_clock_fixture",
+    runId: "billing_clock_fixture",
+    secretKey: "sk_test_clock_fixture",
+  });
+}
+
+function buildClockResponse(
+  change: Partial<Stripe.TestHelpers.TestClock> = {},
+): Stripe.Response<Stripe.TestHelpers.TestClock> {
+  return {
+    created: 1_789_041_600,
+    deletes_after: 1_791_633_600,
+    frozen_time: 1_789_041_600,
+    id: "clock_fixture",
+    livemode: false,
+    name: `murph-${buildHostedStripeRunCorrelationToken("billing_clock_fixture")}-renewal`,
+    object: "test_helpers.test_clock",
+    status: "ready",
+    status_details: {},
+    ...change,
+    lastResponse: { headers: {}, requestId: "req_clock_fixture", statusCode: 200 },
+  };
+}
 
 function createNavigationResponse(input: { ok: boolean; status: number }) {
   return {

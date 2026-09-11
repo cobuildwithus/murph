@@ -944,11 +944,16 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       inserted: true,
     });
 
-    const shellPrewarmResponse = await requireScenario().harness.request(
-      `/internal/users/${encodeURIComponent(identity.userId)}/runtime/shell-prewarm`,
+    const harness = requireScenario().harness;
+    const shellPrewarmResponse = await fetch(
+      new URL(
+        `/internal/users/${encodeURIComponent(identity.userId)}/runtime/shell-prewarm`,
+        `${harness.workerBaseUrl}/`,
+      ),
       {
         body: "{}",
         headers: {
+          authorization: `Bearer ${harness.oidcToken}`,
           "content-type": "application/json; charset=utf-8",
           [HOSTED_EXECUTION_USER_ID_HEADER]: identity.userId,
         },
