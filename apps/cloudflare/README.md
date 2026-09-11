@@ -68,11 +68,6 @@ Internal control routes:
   failed, or unavailable child abort keeps the existing fail-closed outer
   cancellation. Callback-signed Temporal/default work retains the cooperative
   wake-and-retry behavior.
-- `POST /internal/users/:userId/runtime/shell-prewarm` remains a Vercel
-  OIDC-authenticated compatibility receiver for older Web deployments. It
-  accepts the existing request contract but does not create a container or
-  member binding. Current Web no longer sends typing, routing, or instant-start
-  hints; the coordinator owns pristine global prewarming.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `GET /internal/temporal-worker/binding-admission` authenticates the existing
@@ -84,6 +79,15 @@ Internal control routes:
 The supported worker HTTP surface stops at those narrow control routes, the
 binding-admission and deploy-smoke callbacks, and the public banner and health
 checks.
+
+The retired `POST /internal/users/:userId/runtime/shell-prewarm` endpoint returns
+404 without resolving a runtime owner. Its client and Durable Object RPC
+compatibility methods are removed. Current Web sends no typing, routing, or
+instant-start shell hints; older Web's best-effort helper tolerates the optional
+failure. The coordinator owns pristine global prewarming, and durable mailbox
+signaling plus the post-Temporal direct ensure retain their existing behavior.
+Deployment and rollback constraints remain in
+[DEPLOY.md](./DEPLOY.md#retired-member-shell-prewarm-transport).
 
 ### Unified runner fleet and ready inventory
 
@@ -635,10 +639,11 @@ in-memory diagnostics. `prewarm_typing_start_issued_warm` and
 `prewarm_message_routing_start_issued_warm` mean the platform start call
 completed without a newly observed lifecycle start;
 their corresponding `*_cold_start_observed` cohorts mean the same container
-lifecycle did observe a cold start. Neither means health readiness completed. One observation contains
-one terminal operation outcome; later hints may increase only its bounded
-coalesced-hint count and never launch another operation before readiness
-consumes it.
+lifecycle did observe a cold start. Neither means health readiness completed.
+Historical observations recorded one terminal operation outcome; later hints
+could increase only its bounded coalesced-hint count before readiness consumed
+it. Current runtime preparation no longer forwards hint observations; stored
+fields remain readable by the latency schema and report.
 
 The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
@@ -682,8 +687,8 @@ trace, or attempt identifiers.
 Admission is read once before each fresh or replacement runtime session. Active
 wakes reuse the existing write fence and make no health-data admission callback.
 Explicit withdrawal still serializes behind ensures, clears the fence, and stops
-the exact runner before acknowledgement. Legacy member-specific prewarm hints
-are no-ops and perform no admission or allocation work.
+the exact runner before acknowledgement. Retired member-specific hint requests
+perform no admission or allocation work.
 
 Fresh starts overlap workspace metadata and runtime crypto reads with slot
 allocation after admission. The reads use the original command budget and stay

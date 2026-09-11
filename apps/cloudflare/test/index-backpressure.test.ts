@@ -155,28 +155,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("accepts an old Worker's shell-prewarm RPC without runtime work", async () => {
-    const { durableObject, storage } = createUserRunnerDurableObject();
-    const addressContainer = vi.spyOn(storage.runnerContainerNamespace, "getByName");
-    const fetch = vi.spyOn(globalThis, "fetch");
-    const bindUser = vi.spyOn(HostedUserRunner.prototype, "bindUser");
-
-    await expect(Reflect.apply(
-      durableObject.prewarmRuntimeShellForUser,
-      durableObject,
-      ["member_123", "linq-message-routing", {
-        shellPrewarmOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-      }],
-    )).resolves.toBeUndefined();
-
-    expect(addressContainer).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
-    expect(bindUser).not.toHaveBeenCalled();
-    expect(storage.state.storage.sql.exec("SELECT user_id FROM runner_meta").toArray())
-      .toEqual([]);
-  });
-
   it("forwards managed AI revocation through the UserRunner Durable Object", async () => {
     const revoke = vi.spyOn(
       HostedUserRunner.prototype,

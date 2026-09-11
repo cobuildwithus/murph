@@ -22,6 +22,18 @@ token, so a leaked runner sentinel can no longer count as successful delivery.
 This validates the locally supported protocol boundary; provider receipt delivery,
 media downloading/rendering, and live service behavior still require hosted proof.
 
+`apps/cloudflare/test/helpers/hosted-local-workspace-snapshot.test.ts` proves the
+shared hosted-local v2 snapshot seed with actual signed runtime-envelope
+verification, wrapped data keys, tar/zstd/AES-GCM construction, and the current
+encrypted restore owner. Only the Web envelope response and object-store HTTP
+transport are fixtures. It also proves local-only endpoint admission and no
+locator publication after upload failure. Run it through the Cloudflare Node
+Vitest config. The shared uploader completes the encrypted MinIO PUT and existing
+Wrangler locator before each caller publishes its Web checkpoint. Foreground
+priority/checkpoint ordering and canonical-receipt, shutdown-checkpoint, and
+snapshot-publication recovery remain separate fullstack journey proof; unit
+roundtrip success does not replace those hosted gates.
+
 Legacy phone-call deletion is covered by `hosted-ops-phone-call-deletion-route.test.ts`
 and `phone-calls-result-notification-store.test.ts`. With a dedicated loopback
 `DATABASE_URL` owned by the test role and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
