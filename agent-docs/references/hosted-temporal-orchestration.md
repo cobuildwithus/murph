@@ -905,6 +905,31 @@ The hard-cut architecture is accepted when:
   workflow, and proves the worker reaches Cloudflare ensure-processing. Heavier
   continuity/stress cases remain opt-in.
 
+## Compatibility controller upgrades
+
+The pull-request compatibility workflow executes the controller from trusted
+public `main`, not the controller proposed by that pull request. A successor
+controller therefore cannot authorize its own admission. When changing the
+controller and producer fixture together would fail the current controller,
+use two pull requests:
+
+1. Land only the controller/bootstrap change, keeping the candidate producer
+   fixture compatible with the currently trusted controller and supported
+   private readers. Run the existing controller contract tests and require the
+   ordinary exact-head compatibility status to pass under the old controller.
+2. After that merge is on public `main`, open or refresh the producer/runtime
+   change against that base. Require a new exact-head compatibility proof under
+   the successor controller and the private owner's live supported reader set.
+
+Review the first PR's changed paths and fixture diff to confirm it does not
+introduce the incompatible producer field or behavior early. If it cannot pass
+under the old controller, split out a compatible prerequisite at its existing
+owner; do not bypass the required status, execute candidate controller code
+with protected credentials, or temporarily relax private reader policy. A
+private reader prerequisite follows the existing consumer-first release order.
+The later production deployment still requires its separate exact-main
+admission; a bootstrap merge is not production authorization.
+
 ## Related References
 
 - `agent-docs/references/hosted-runtime-protocol.md` describes the current

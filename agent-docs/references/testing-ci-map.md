@@ -1214,8 +1214,14 @@ limits, and local proof distinctions are owned by
   explicit contention receipts and replay only a contended milestone after
   both writers finish, before checking the complete atomic JSON merge.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
-  opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
-  latency monitor. It runs the production query against 50,000 stale rows per
+  opt-in local-PostgreSQL correctness, plan, and cardinality proof for the
+  five-minute reply latency monitor. Select `-t 'small correctness fixture'`
+  to exercise all five candidate branches and usage-denial restart chronology
+  with one stale row per owner, independently of the stress work. For example:
+  `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts -t 'small correctness fixture'`.
+  Use an isolated loopback test database; the fixture uses transaction-local
+  temporary tables. Omit `-t` to retain the full CI proof, including canary
+  exclusion. The stress variant runs the production query against 50,000 stale rows per
   trace, delivery, and mailbox owner, admits one row through each recent
   accepted, staged, provider-started, delivery-accepted, and mailbox-consumed
   branch, and requires PostgreSQL to use the matching time indexes without a

@@ -109,6 +109,39 @@ minutes.
 Same-session waiting, polling, and deliberate handoffs all preserve exact-head,
 exact-thread, attachment, model, timeout, and response-marker validation.
 
+### Recover an accepted review after capture failure
+
+After the waited capture owner exits with a hard-refresh or export failure,
+retain its original capture metadata and recover the already accepted request
+before considering another send. For a failure without a confirmed lane rate
+limit, use the installed exact-metadata exporter from the same session:
+
+```bash
+pnpm exec cobuild-review-gpt thread export \
+  --browser-endpoint "$BROWSER_ENDPOINT" \
+  --chat-url "$CHAT_URL" \
+  --capture-metadata "$CAPTURE_METADATA" \
+  --output .tmp/review-gpt-recovered-thread.json
+```
+
+Set `BROWSER_ENDPOINT` and `CHAT_URL` to the original metadata's endpoint and
+conversation, and `CAPTURE_METADATA` to that invocation's unchanged metadata
+file. Keep the export in task-owned ignored scratch space. Do not start this
+recovery while a waiter or detached owner is still capturing the same request.
+The exporter rejects endpoint, thread, accepted-turn, response, or artifact
+identity mismatches; do not remove metadata or broaden the target to make a
+failed export succeed.
+
+A successful export recovers evidence; it does not by itself validate a review.
+Check the exact accepted prompt and attachment, completed response and
+`REVIEW_COMPLETE` marker, requested model evidence, and minimum response time
+under the final gate below. Preserve the original round and head when these
+checks pass. If the response is still incomplete, keep the original completion
+owner and paced polling rule. If identity or model evidence remains missing,
+report that gap without treating a visible answer as a pass. Close only any
+remaining task-owned recovery tab after capture; shared lanes remain untouched.
+Confirmed capability limits retain the separate lane-recovery rule below.
+
 ## Finding Disposition Boundary
 
 Every final `FINDINGS` result uses this parent-owned disposition boundary.
