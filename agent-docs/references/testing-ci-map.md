@@ -881,6 +881,25 @@ limits, and local proof distinctions are owned by
   boundary are observational. Private Murph Cloud owns its dedicated
   `Public Murph Integration` matrix leg and includes that leg in the Temporal
   orchestration aggregator.
+- `packages/assistant-runtime/test/hosted-device-sync-runtime.test.ts` exercises
+  the complete canonical Junction smoke replay through the real provider,
+  importer, SQLite service and post-checkpoint mailbox acknowledgment dispatcher.
+  A controlled yield retains the connection-scoped owner; an advancing logical
+  Date resumes the consumer at its retry deadline. Every original payload must
+  be acknowledged once with a matching canonical import receipt, every job must
+  succeed, and canonical metric expectations must hold. Its synthetic control
+  port, no-op canonical persistence callbacks and reopened SQLite do not prove
+  production Web transactions, cache-free snapshot restore or autonomous Temporal
+  delivery. Those require separate hosted proof.
+- The direct Junction replay uses
+  `apps/cloudflare/test/helpers/hosted-local-junction-replay-completion.ts` to keep
+  generic quiescence and require both dirty flags false with zero pending resources.
+  It then reads quiescence again before returning workspace state. One deadline
+  includes every phase and respects the original outer test budget; failed-job,
+  advanced-receipt, final dirty and Browser Vault content assertions remain.
+  Its focused tests cover retained future work, racing continuation, dirty-fact
+  disagreement, deadline exhaustion and read/job failures. Global continuation
+  sequences are not connection-specific completion evidence.
 - Hosted assistant-provider stub failures include only the allowlisted request
   kind, fixture match, queue size, and completed response status alongside the
   existing request fingerprint and byte count. An unfinished held stream keeps
