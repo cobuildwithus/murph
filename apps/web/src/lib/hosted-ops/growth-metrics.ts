@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readHostedRecentMemberProviderActivity } from "./recent-member-provider-activity";
+
 import {
   HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
   isHostedEmailConversationMessageWake,
@@ -1767,6 +1769,13 @@ export async function readHostedGrowthDashboard(
     })),
     startInclusive: dailyStart,
   });
+  const providerActivity = new Map((await readHostedRecentMemberProviderActivity({
+    memberIds: recentMemberRows.map((member) => member.id),
+    now,
+    start: activeUsersCurrentStart,
+    todayStart,
+    prisma,
+  })).map((row) => [row.memberId, row]));
   const recentMessagesByMemberId = new Map(
     activeUsersTrailing7DayDirectRows.map((row) => [row.userId, row] as const),
   );
@@ -1891,16 +1900,20 @@ export async function readHostedGrowthDashboard(
       capturedAt: now.toISOString(),
       members: recentMemberRows.map((member) => {
         const recentMessages = recentMessagesByMemberId.get(member.id);
+        const providerMessages = providerActivity.get(member.id);
+        const latest = [recentMessages?._max.createdAt, providerMessages?.lastMessageAt]
+          .filter((date): date is Date => date instanceof Date)
+          .sort((left, right) => right.getTime() - left.getTime())[0];
 
         return {
           createdAt: member.createdAt.toISOString(),
           lastMessageAt:
-            recentMessages?._max.createdAt?.toISOString() ?? null,
+            latest?.toISOString() ?? null,
           maskedPhoneNumberHint:
             member.identity?.maskedPhoneNumberHint ?? null,
           memberId: member.id,
-          messagesLast7Days: recentMessages?._count._all ?? 0,
-          messagesToday: todayMessagesByMemberId.get(member.id) ?? 0,
+          messagesLast7Days: (recentMessages?._count._all ?? 0) + (providerMessages?.messagesLast7Days ?? 0),
+          messagesToday: (todayMessagesByMemberId.get(member.id) ?? 0) + (providerMessages?.messagesToday ?? 0),
           onboardingCompleted: member.initialOnboardingCompletedAt !== null,
           suspended: member.suspendedAt !== null,
         };

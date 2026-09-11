@@ -314,6 +314,13 @@ async function readOpenAiImageGenerationResult(
 
   if (!response.ok) {
     const providerError = readOpenAiImageErrorBody(payload)
+    if (response.status === 403 && providerError.code === 'MURPH_IMAGE_CARD_REQUIRED') {
+      throw new VaultCliError(
+        'ASSISTANT_IMAGE_CARD_REQUIRED',
+        'Image generation on Starter requires a saved card. Add a card at https://www.withmurph.ai/settings#subscription, then ask for the image again. Saving a card does not charge you or start a subscription. Text chat still works.',
+        { retryable: false, providerErrorMessage: 'Starter image generation requires a saved payment card. Saving a card does not charge the member or start a subscription. Text chat still works.' },
+      )
+    }
     throw new VaultCliError(
       'ASSISTANT_IMAGE_GENERATION_FAILED',
       `OpenAI image ${operation} request failed with HTTP ${response.status}.`,

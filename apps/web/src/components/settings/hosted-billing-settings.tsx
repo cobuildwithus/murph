@@ -1,3 +1,4 @@
+import { ImageCardButton } from "./image-card-button";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { CheckIcon } from "lucide-react";
@@ -664,6 +665,7 @@ export function HostedBillingSettings(props: {
           usageTopUpTargetLabel={props.usageTopUpTargetLabel}
         />
       )}
+      <ImageCardButton available={starterAccessActive} />
       {props.usageActivityDetail}
       <div
         className={cn(

@@ -1,6 +1,6 @@
 # Non-expiring starter usage
 
-Last verified: 2026-08-18
+Last verified: 2026-09-10
 Status: Implemented current-state contract
 
 ## Product contract
@@ -83,6 +83,59 @@ accepted-message replay rules. After revalidating that exact token, the starter
 enrollment owner grants capacity and activates the member without contacting
 Stripe. A second ordinary planner pass counts and appends the original inbound
 once after active access is visible.
+
+## Text entry and image access
+
+New model-admitted direct phone contacts on iMessage, SMS, or RCS can use instant
+start from the existing configured phone prefixes. Signed provider ingress,
+exact same-line routing, unique new-member creation, and the exact admission
+token still own activation. Existing pending accounts are not converted by this
+change. iMessage email handles retain their separate existing identity path;
+SMS/RCS cannot claim email-handle authority.
+
+All personal Starter accounts require a currently attached Stripe card before
+a hosted image generation or image edit request. Ordinary text chat remains
+available within the existing allowance. Paid, Family-sponsored, and group
+access retain their current allowance owners. This check is in the Cloudflare
+provider interceptor, including requests outside the normal dynamic tool; local
+assistant image generation keeps its existing behavior.
+
+Web resolves the current usage source and, for direct Starter, lists one card
+on the member's existing encrypted Stripe customer binding. It checks mode and
+attachment and rechecks the binding after Stripe responds. Missing cards,
+provider failure, or incompatible responses cannot authorize an image request.
+There is no cached ever-added-card flag or new account field. The gateway uses
+its authenticated runtime member binding for the signed Web callback and never
+accepts a caller-selected payer.
+
+Settings offers card-only Stripe Checkout in setup mode, reusing the existing
+member customer owner. Saving a card starts no subscription and creates no
+charge or additional usage grant. Setup completion and expiry are receipt-only
+Stripe events; image access reads current attachment directly. A denied image
+completion tells the member how to save a card and request the image again,
+without automatically retrying or claiming an image exists.
+
+The existing operational alert cron also evaluates Starter abuse signals:
+10 enrolled accounts created in 15 minutes, or 3 accounts created in the past
+hour whose original Starter grants have at most half their capacity remaining.
+It reads at most 1,000 recent accounts; saturation alerts with lower-bound
+counts. It reuses `HOSTED_LINQ_ALERT_EMAILS`, the shared Resend configuration,
+and the incident lease, idempotency, and reminder policy. Alerts may send during
+quiet hours and do not depend on latency timezone configuration. Email contains
+aggregate counts and an Ops link, not member identities or messages. These
+signals request investigation; they neither prove fraud nor suspend accounts.
+
+Deploy the Web access route, setup-event handling, and Settings consumer with
+`HOSTED_ONBOARDING_LINQ_SMS_INSTANT_START_ENABLED` unset first, then deploy
+the Cloudflare gateway check. Only after its signed access proof passes, set
+that Web variable to `1` to enable new SMS/RCS instant start. It defaults off
+so a mixed deployment cannot open SMS grants before the image restriction.
+A new gateway against old Web denies images;
+old gateways do not enforce the card rule. Warm older runtimes still pass
+through the updated Worker gateway but may display generic failure copy until
+the assistant bundle updates. No persisted schema changes or data backfills
+are required. Once the restriction is enabled, rolling the Worker back below
+this check would reopen image access and requires disabling that effect first.
 
 ## Paid conversion
 

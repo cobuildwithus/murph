@@ -38,6 +38,19 @@ function openAiImageResponse(): Response {
 }
 
 describe('generateOpenAiImage', () => {
+  it('returns actionable Starter card recovery without retrying the image provider', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ error: {
+      code: 'MURPH_IMAGE_CARD_REQUIRED', message: 'untrusted provider prose',
+    } }, { status: 403 }))
+    await expect(generateOpenAiImage({
+      apiKey: 'test-key', fetchImpl, outputFormat: 'png',
+      prompt: 'Draw a small lighthouse', quality: 'low', size: '1024x1024',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_IMAGE_CARD_REQUIRED',
+      message: expect.stringContaining('https://www.withmurph.ai/settings#subscription'),
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
   it('keeps the image request timeout above two minutes', () => {
     expect(OPENAI_IMAGE_GENERATION_TIMEOUT_MS).toBe(240_000)
   })

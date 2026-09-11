@@ -1011,6 +1011,61 @@ async function restoreHostedStripeActivationResult(input: {
   };
 }
 
+async function applyHostedStripeEventForReconciliation(input: {
+  claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>;
+  prisma: PrismaClient;
+  stripeEvent: Stripe.Event;
+  usageCreditReconciliation: Awaited<ReturnType<typeof reconcileHostedUsageCreditStripeEvent>>;
+}) {
+  const { claimed, prisma, stripeEvent, usageCreditReconciliation } = input;
+  const setupOnlyCheckout = (stripeEvent.type === "checkout.session.completed"
+    || stripeEvent.type === "checkout.session.expired")
+    && (stripeEvent.data.object as Stripe.Checkout.Session).mode === "setup";
+  const preflightProcessingContext =
+    !setupOnlyCheckout && !usageCreditReconciliation.handled
+    && hostedStripeEventNeedsPreflightProcessingContext(stripeEvent)
+      ? await prepareHostedStripeEventProcessingContext(stripeEvent)
+      : undefined;
+  const directBillingMemberId = setupOnlyCheckout || usageCreditReconciliation.handled
+    ? null
+    : await resolveHostedStripeEventDirectBillingMemberId(
+        stripeEvent,
+        prisma,
+        preflightProcessingContext,
+      );
+  const legacyFamilySubscriptionId = setupOnlyCheckout || usageCreditReconciliation.handled ||
+      directBillingMemberId
+    ? null
+    : await prisma.$transaction(
+        (tx) => prepareHostedLegacySyntheticFamilyCleanupTx({ event: stripeEvent, tx }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+  const processing = setupOnlyCheckout
+    ? { memberId: null, result: buildEmptyHostedStripeEventProcessingResult() }
+    : usageCreditReconciliation.handled
+    ? {
+        memberId: usageCreditReconciliation.beneficiaryMemberId,
+        result: buildEmptyHostedStripeEventProcessingResult(),
+      }
+    : legacyFamilySubscriptionId
+    ? { memberId: null, result: buildEmptyHostedStripeEventProcessingResult() }
+    : directBillingMemberId
+    ? await processHostedStripeEventWithVerifiedMemberLock({
+        activationReceipt: claimed,
+        memberId: directBillingMemberId,
+        preflightProcessingContext,
+        prisma,
+        stripeEvent,
+      })
+    : await processHostedStripeEventWithDiscoveredMemberLock(
+        stripeEvent,
+        prisma,
+        claimed,
+        preflightProcessingContext,
+      );
+  return { processing, legacyFamilySubscriptionId };
+}
+
 async function processClaimedHostedStripeEvent(
   claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
   prisma: PrismaClient,
@@ -1031,46 +1086,9 @@ async function processClaimedHostedStripeEvent(
       prisma,
     });
     usageCreditEventHandled = usageCreditReconciliation.handled;
-    const preflightProcessingContext =
-      !usageCreditReconciliation.handled
-      && hostedStripeEventNeedsPreflightProcessingContext(stripeEvent)
-        ? await prepareHostedStripeEventProcessingContext(stripeEvent)
-        : undefined;
-    const directBillingMemberId = usageCreditReconciliation.handled
-      ? null
-      : await resolveHostedStripeEventDirectBillingMemberId(
-          stripeEvent,
-          prisma,
-          preflightProcessingContext,
-        );
-    const legacyFamilySubscriptionId = usageCreditReconciliation.handled ||
-        directBillingMemberId
-      ? null
-      : await prisma.$transaction(
-          (tx) => prepareHostedLegacySyntheticFamilyCleanupTx({ event: stripeEvent, tx }),
-          HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-        );
-    const processing = usageCreditReconciliation.handled
-      ? {
-          memberId: usageCreditReconciliation.beneficiaryMemberId,
-          result: buildEmptyHostedStripeEventProcessingResult(),
-        }
-      : legacyFamilySubscriptionId
-      ? { memberId: null, result: buildEmptyHostedStripeEventProcessingResult() }
-      : directBillingMemberId
-      ? await processHostedStripeEventWithVerifiedMemberLock({
-          activationReceipt: claimed,
-          memberId: directBillingMemberId,
-          preflightProcessingContext,
-          prisma,
-          stripeEvent,
-        })
-      : await processHostedStripeEventWithDiscoveredMemberLock(
-          stripeEvent,
-          prisma,
-          claimed,
-          preflightProcessingContext,
-        );
+    const { processing, legacyFamilySubscriptionId } = await applyHostedStripeEventForReconciliation({
+      claimed, prisma, stripeEvent, usageCreditReconciliation,
+    });
     reconciliationStage = "post_commit";
     const { memberId: processingMemberId } = processing;
     const {

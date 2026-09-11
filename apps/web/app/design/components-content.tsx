@@ -4,6 +4,7 @@ import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
+import { ImageCardButton } from "@/src/components/settings/image-card-button";
 import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
@@ -679,6 +680,14 @@ export function ComponentsContent() {
         <div>
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
+        </div>
+
+        <Separator />
+
+        <div data-design-component="starter-image-card" id="starter-image-card-component" inert>
+          <Section title="Starter image card setup">
+            <ImageCardButton available />
+          </Section>
         </div>
 
         <Separator />

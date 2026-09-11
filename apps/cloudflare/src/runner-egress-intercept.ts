@@ -129,6 +129,7 @@ import {
   parseHostedXaiRequestBody,
   readHostedXaiResponseMetadata,
 } from "./runner-egress-xai.ts";
+import { fetchHostedWebControlPlaneJson } from "./runtime-platform/web-control-transport.ts";
 import {
   DEFAULT_GEMINI_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
@@ -1445,6 +1446,50 @@ function reportOpenAiAuthorizationFailureSafely(input: {
   }
 }
 
+async function readHostedOpenAiRequestBody(input: {
+  nativeMemory: boolean;
+  pathnameSuffix: string;
+  request: Request;
+}): Promise<Response | {
+  boundedBody: ArrayBuffer | undefined;
+  memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null;
+}> {
+  let boundedBody: ArrayBuffer | undefined;
+  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
+  if (
+    input.nativeMemory
+    && input.request.method === "POST"
+    && input.pathnameSuffix === "/v1/responses"
+  ) {
+    const body = await readBoundedRequestBody(
+      input.request,
+      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+    );
+    if (body === null) {
+      return new Response("Payload Too Large", { status: 413 });
+    }
+    memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
+    if (!memoryRequestMetadata) {
+      return new Response("Invalid Codex memory request.", { status: 400 });
+    }
+    boundedBody = body;
+  } else if (
+    input.request.method === "POST"
+    && input.pathnameSuffix === "/v1/images/edits"
+  ) {
+    const body = await readBoundedRequestBody(
+      input.request,
+      HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES,
+    );
+    if (body === null) {
+      return new Response("Payload Too Large", { status: 413 });
+    }
+    boundedBody = body;
+  }
+
+  return { boundedBody, memoryRequestMetadata };
+}
+
 async function maybeHandleOpenAiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1495,37 +1540,17 @@ async function maybeHandleOpenAiRequest(input: {
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", "Bearer " + token);
-  let boundedBody: ArrayBuffer | undefined;
-  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
-  if (
-    nativeMemoryKind
-    && input.request.method === "POST"
-    && pathnameSuffix === "/v1/responses"
-  ) {
-    const body = await readBoundedRequestBody(
-      input.request,
-      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-    );
-    if (body === null) {
-      return new Response("Payload Too Large", { status: 413 });
-    }
-    memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
-    if (!memoryRequestMetadata) {
-      return new Response("Invalid Codex memory request.", { status: 400 });
-    }
-    boundedBody = body;
-  } else if (
-    input.request.method === "POST"
-    && pathnameSuffix === "/v1/images/edits"
-  ) {
-    const body = await readBoundedRequestBody(
-      input.request,
-      HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES,
-    );
-    if (body === null) {
-      return new Response("Payload Too Large", { status: 413 });
-    }
-    boundedBody = body;
+  const bodyRead = await readHostedOpenAiRequestBody({
+    nativeMemory: nativeMemoryKind !== null,
+    pathnameSuffix,
+    request: input.request,
+  });
+  if (bodyRead instanceof Response) return bodyRead;
+  const { boundedBody, memoryRequestMetadata } = bodyRead;
+
+  if (pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits") {
+    const denied = await checkHostedImageGenerationAccess({ authorization, env: input.env });
+    if (denied) return denied;
   }
 
   const upstreamRequest = await createHostedRunnerUpstreamRequest(
@@ -4487,4 +4512,43 @@ async function authorizeNativeHostedProviderCredential(input: {
     request: input.request,
     userId: readHostedRunnerBoundUserId(input.request),
   });
+}
+
+async function checkHostedImageGenerationAccess(input: {
+  authorization: HostedProviderEgressAuthorization;
+  env: RunnerOutboundEnvironmentSource;
+}): Promise<Response | null> {
+  try {
+    const fence = requireHostedDirectUsageWriteFence(input.authorization);
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const result = await fetchHostedWebControlPlaneJson({
+      body: {},
+      boundUserId: fence.userId,
+      description: "Hosted image generation access",
+      fetchImpl: fetch,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.imageGenerationAccess,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+    if (result && typeof result === "object" && "allowed" in result && "reason" in result) {
+      if (result.allowed === true && result.reason === "allowed") return null;
+      if (result.allowed === false && result.reason === "card_required") {
+        return Response.json({ error: {
+          code: "MURPH_IMAGE_CARD_REQUIRED",
+          message: "Save a card at https://www.withmurph.ai/settings#subscription to generate images. Saving a card does not charge you or start a subscription.",
+        } }, { status: 403 });
+      }
+    }
+  } catch {
+    // An unavailable or old Web deployment cannot grant paid image access.
+  }
+  return Response.json({ error: {
+    code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
+    message: "Image generation access could not be confirmed. Try again later.",
+  } }, { status: 503 });
 }

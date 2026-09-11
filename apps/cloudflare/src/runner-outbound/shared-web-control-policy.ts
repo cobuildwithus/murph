@@ -44,6 +44,7 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LABS_TOOL_PATH,
@@ -282,6 +283,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   physicalNoteSend: defineHostedRunnerWebControlPostRoute(
     "physical_note_send",
     HOSTED_PHYSICAL_NOTES_PATH,
+  ),
+  imageGenerationAccess: defineHostedRunnerWebControlPostRoute(
+    "image_generation_access",
+    HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   ),
   planUsageTool: defineHostedRunnerWebControlPostRoute(
     "plan_usage_tool",

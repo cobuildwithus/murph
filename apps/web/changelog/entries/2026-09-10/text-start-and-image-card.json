@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "text-start-and-image-card",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Start Murph by text",
+    "summary": "Eligible new SMS and RCS conversations can start chatting without opening a signup link.",
+    "details": "Starter text chat needs no card. Image generation on Starter requires a saved card, which you can add in Settings without a charge or subscription.",
+    "relevanceTags": [
+      "messaging",
+      "onboarding",
+      "images"
+    ],
+    "sourcePullRequests": []
+  }
+}

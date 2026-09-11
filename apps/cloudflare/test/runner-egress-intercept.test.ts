@@ -1558,8 +1558,35 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual(requestBody);
   });
 
+  it.each(["generations", "edits"])("denies image %s before OpenAI when the saved-card gate rejects", async (operation) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ allowed: false, reason: "card_required" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(new Request(`https://api.openai.com/v1/images/${operation}`, {
+      method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` },
+    }), createInterceptEnv({ OPENAI_API_KEY: "openai-worker-secret", validateRuntimeWriteFence: async () => true }), { containerId: "member_123--v-version_1" });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_CARD_REQUIRED" } });
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{}, { allowed: true }, { allowed: false, reason: "usage_unavailable" }])("fails closed on unavailable or incompatible image access responses", async (result) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(result));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/images/generations", {
+      method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` },
+    }), createInterceptEnv({ OPENAI_API_KEY: "openai-worker-secret", validateRuntimeWriteFence: async () => true }), { containerId: "member_123--v-version_1" });
+    expect(response.status).toBe(503);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+  });
+
   it("allows OpenAI image generation egress through the existing provider policy", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.pathname.endsWith("/image-generation/access")
+        ? Response.json({ allowed: true, reason: "allowed" })
+        : new Response("ok");
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -1593,7 +1620,12 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("rewrites sentinel credentials and forwards multipart bodies to OpenAI image edits", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.pathname.endsWith("/image-generation/access")
+        ? Response.json({ allowed: true, reason: "allowed" })
+        : new Response("ok");
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 

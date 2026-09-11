@@ -25,6 +25,25 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe('executeGenerateImageTool reference images', () => {
+  it('preserves the payment-card recovery meaning through the tool result without spending or retrying', async () => {
+    let requests = 0
+    const result = await executeGenerateImageTool({
+      args: { alt: null, prompt: 'Draw a blue circle.', outputFormat: 'png', quality: 'low', size: '1024x1024' },
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl: async () => {
+        requests += 1
+        return Response.json({ error: { code: 'MURPH_IMAGE_CARD_REQUIRED' } }, { status: 403 })
+      },
+      providerRequestOrdinal: 1,
+    })
+    expect(result.rpcSuccess).toBe(false)
+    expect(result.rpcText).toContain('saved payment card')
+    expect(result.rpcText).toContain('does not charge')
+    expect(result.rpcText).toContain('Text chat still works')
+    expect(result.usageDraft).toBeUndefined()
+    expect(requests).toBe(1)
+  })
+
   it('does not require a vault root when no reference image refs are provided', async () => {
     await withTempDir(async (codexHome) => {
       let capturedUrl: string | null = null

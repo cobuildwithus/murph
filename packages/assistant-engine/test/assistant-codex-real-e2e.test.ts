@@ -1,3 +1,4 @@
+import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.js'
 import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
@@ -38479,4 +38480,65 @@ describeRealCodex('real Codex reminder execution inspection e2e', () => {
       await rm(workingDirectory, { force: true, recursive: true })
     }
   }, 720_000)
+})
+
+
+describeRealCodex('real Codex Starter image card recovery', () => {
+  it('explains the Starter image card requirement after a denied background completion without retrying', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-starter-card-e2e-'))
+    try {
+      let imageRequests = 0
+      const denied = await executeGenerateImageTool({
+        args: { alt: 'Lighthouse illustration', prompt: 'Draw a small lighthouse.', outputFormat: 'png', quality: 'low', size: '1024x1024' },
+        env: { OPENAI_API_KEY: 'synthetic-image-key' },
+        fetchImpl: async () => {
+          imageRequests += 1
+          return Response.json({ error: { code: 'MURPH_IMAGE_CARD_REQUIRED' } }, { status: 403 })
+        },
+        providerRequestOrdinal: 1,
+      })
+      expect(denied.rpcSuccess).toBe(false)
+      expect(denied.rpcText).toContain('saved payment card')
+      expect(imageRequests).toBe(1)
+      expect(denied.usageDraft).toBeUndefined()
+      const identity = `image-completion:${'a'.repeat(64)}`
+      const completion = readTrustedHostedImageCompletion({
+        sourceRef: { kind: 'hosted-mailbox', lane: 'system', source: 'hosted-mailbox',
+          dedupeKey: identity, eventId: identity, itemId: identity, laneSeq: identity,
+          payloadSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA, payloadSource: 'inline', wakeSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA },
+        text: renderAssistantHostedImageCompletionSystemText({
+          originAssistantInputId: `ain_${'b'.repeat(32)}`, originAssistantInputIdExact: true,
+          result: { media: null, runtimeIssue: null, savedImageRef: null, failureDiagnostic: denied.rpcText },
+        }), transcriptText: null,
+      })
+      expect(completion?.status).toBe('failed')
+      const context = buildTrustedHostedImageCompletionTurnContext([{ inputId: `ain_${'c'.repeat(32)}`, trustedHostedImageCompletion: completion }])
+      if (!context) throw new Error('Expected production image failure context')
+      const dynamicTools = [MURPH_GENERATE_IMAGE_TOOL, MURPH_ATTACH_RESPONSE_MEDIA_TOOL]
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        configOverrides: ['features.image_generation=false'],
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, dynamicTools, env: config.env,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: resolveAssistantProviderPrompt({ dynamicTools,
+          prompt: 'Earlier, the member requested a lighthouse illustration and Murph said it would follow when ready. The trusted background completion is the only new input. Continue that task.',
+          providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+          turnContextPrompt: context, workingDirectory }),
+        reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(`[starter-image-card-e2e] ${JSON.stringify({ model: config.model, actions: actions.length, reply: result.finalMessage })}\n`)
+      expect(actions).toEqual([])
+      expect(result.responseMedia).toEqual([])
+      expect(result.finalMessage).toMatch(/card/iu)
+      expect(result.finalMessage).toContain('https://www.withmurph.ai/settings#subscription')
+      expect(result.finalMessage).toMatch(/(?:no|not|won.t|doesn.t)[^.!?]*(?:charg|subscription)/iu)
+      expect(result.finalMessage).not.toMatch(/(?:generated|created|attached|sent) (?:your|the) (?:image|illustration)/iu)
+      expect(imageRequests).toBe(1)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
