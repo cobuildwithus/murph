@@ -1,6 +1,6 @@
 # Reduce experiment progress query latency
 
-Status: active
+Status: completed
 Created: 2026-09-11
 
 ## Outcome and invariant
@@ -61,5 +61,8 @@ contracts are unchanged; no stochastic model journey is needed for the timing
 change. Parent review retained the existing canonical write lock for capture
 and releases it before metric analysis. No new state or authority owner.
 
-PR publication, exact-head CI, and required external review remain the
-completion steps. No production deployment.
+PR #3301 is open. Implementation and focused proof are complete; exact-head
+CI and required external review remain PR completion gates tracked by the
+original session. No production deployment.
+Updated: 2026-09-11
+Completed: 2026-09-11
