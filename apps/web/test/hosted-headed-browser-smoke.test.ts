@@ -1,9 +1,14 @@
-import { chromium } from "@playwright/test";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createServer, type ServerResponse } from "node:http";
+
+import { chromium, type Browser } from "@playwright/test";
 import { describe, expect, it } from "vitest";
 
 import {
   completeExternalJunctionAuthorizationForTest,
   disconnectHostedLocalJunctionAccountForTest,
+  navigateToHostedLocalJunctionStartForTest,
   readHostedLocalJunctionBrowserConfigForTest,
 } from "../scripts/run-hosted-local-junction-wearable-browser";
 
@@ -42,6 +47,52 @@ function createGarminConfig() {
 }
 
 describe("hosted headed browser boundary", () => {
+  it.runIf(smokeEnabled)(
+    "reaches warm transport health before a connect response slower than five seconds",
+    async () => {
+      await withNavigationServer({ connectDelayMs: 5_500, timeoutMs: 10_000 }, async ({
+        config, page, requests, tunnel,
+      }) => {
+        await navigateToHostedLocalJunctionStartForTest(page, config, tunnel);
+        expect(await page.title()).toBe("Synthetic connect page");
+        expect(requests.filter((route) => route === "/api/internal/health")).toHaveLength(1);
+        expect(requests.filter((route) => route === "/connect")).toHaveLength(1);
+        expect(requests[0]).toBe("/api/internal/health");
+      });
+    },
+  );
+
+  it.runIf(smokeEnabled)("rejects non-200 transport health without opening connect", async () => {
+    await withNavigationServer({ healthStatus: 503, timeoutMs: 1_500 }, async ({
+      config, page, requests, tunnel,
+    }) => {
+      await expect(navigateToHostedLocalJunctionStartForTest(page, config, tunnel))
+        .rejects.toThrow("Kernel reverse tunnel did not reach hosted-local Web in time.");
+      expect(requests).toContain("/api/internal/health");
+      expect(requests).not.toContain("/connect");
+    });
+  });
+
+  it.runIf(smokeEnabled)("rejects an exited tunnel before any browser request", async () => {
+    await withNavigationServer({}, async ({ config, page, requests, stopTunnel, tunnel }) => {
+      await stopTunnel();
+      await expect(navigateToHostedLocalJunctionStartForTest(page, config, tunnel))
+        .rejects.toThrow("Kernel reverse tunnel exited before reaching hosted-local Web.");
+      expect(requests).toEqual([]);
+    });
+  });
+
+  it.runIf(smokeEnabled)("keeps the configured connect deadline and its failure content-free", async () => {
+    await withNavigationServer({ connectDelayMs: 1_500, timeoutMs: 1_000 }, async ({
+      config, page, requests, tunnel,
+    }) => {
+      await expect(navigateToHostedLocalJunctionStartForTest(page, config, tunnel))
+        .rejects.toEqual(new Error("Hosted-local connect navigation did not complete."));
+      expect(requests.filter((route) => route === "/api/internal/health")).toHaveLength(1);
+      expect(requests.filter((route) => route === "/connect")).toHaveLength(1);
+    });
+  });
+
   it.runIf(smokeEnabled)("launches Chromium headed inside the CI virtual display", async () => {
     const browser = await chromium.launch({ headless: false });
     try {
@@ -475,3 +526,98 @@ describe("hosted headed browser boundary", () => {
     120_000,
   );
 });
+
+async function withNavigationServer(
+  input: { connectDelayMs?: number; healthStatus?: number; timeoutMs?: number },
+  run: (fixture: {
+    config: ReturnType<typeof createGarminConfig>;
+    page: Parameters<typeof navigateToHostedLocalJunctionStartForTest>[0];
+    requests: string[];
+    stopTunnel: () => Promise<void>;
+    tunnel: NonNullable<Parameters<typeof navigateToHostedLocalJunctionStartForTest>[2]>;
+  }) => Promise<void>,
+): Promise<void> {
+  const requests: string[] = [];
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const respond = (response: ServerResponse, body: string, status = 200) => {
+    response.writeHead(status, { "Cache-Control": "no-store", "Content-Type": "text/html" });
+    response.end(body);
+  };
+  const server = createServer((request, response) => {
+    const route = new URL(request.url ?? "/", "http://localhost").pathname;
+    requests.push(route);
+    if (route === "/api/internal/health") {
+      respond(response, "healthy", input.healthStatus);
+    } else if (route === "/connect") {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        respond(response, "<title>Synthetic connect page</title>");
+      }, input.connectDelayMs ?? 0);
+      timers.add(timer);
+    } else {
+      respond(response, "", 404);
+    }
+  });
+  // Only process lifetime is represented here; HTTP and Chromium are real.
+  // The protected provider lane remains the proof of Kernel's actual SSH tunnel.
+  const child = spawn(process.execPath, ["-e", "process.stdin.resume()"], {
+    env: { NODE_ENV: "test" },
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  const childExited = once(child, "exit");
+  const stopTunnel = async () => {
+    child.stdin.end();
+    await childExited;
+  };
+  let browser: Browser | undefined;
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string" || child.pid === undefined) {
+      throw new Error("Synthetic navigation fixture did not start.");
+    }
+    const webBaseUrl = `http://127.0.0.1:${address.port}`;
+    const config = {
+      ...createGarminConfig(),
+      startUrl: `${webBaseUrl}/connect`,
+      timeoutMs: input.timeoutMs ?? 10_000,
+      webBaseUrl,
+      webOrigin: webBaseUrl,
+    };
+    browser = await chromium.launch({
+      env: {
+        DISPLAY: process.env.DISPLAY ?? "",
+        XAUTHORITY: process.env.XAUTHORITY ?? "",
+      },
+      headless: false,
+    });
+    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(config.timeoutMs);
+    await run({
+      config,
+      page,
+      requests,
+      stopTunnel,
+      tunnel: {
+        child,
+        processId: child.pid,
+        removeParentExitHandler: () => undefined,
+        spawnFailed: false,
+      },
+    });
+  } finally {
+    for (const timer of timers) clearTimeout(timer);
+    const cleanup = await Promise.allSettled([
+      browser?.close(),
+      stopTunnel(),
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+        server.closeAllConnections();
+      }),
+    ]);
+    for (const result of cleanup) {
+      if (result.status === "rejected") throw new Error("Synthetic navigation fixture cleanup failed.");
+    }
+  }
+}

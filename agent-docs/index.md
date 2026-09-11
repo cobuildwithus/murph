@@ -28,6 +28,13 @@ Runtime progress diagnostics (aggregate alerts and code-only first-pending
 evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 
+Automation edit schema discovery and attended progress guidance are owned by
+`ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and
+declaration preservation, independent schema/runtime structural admission parity,
+versioned edits, nutrition/personalization inputs, and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
+`agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
+tool-description transport and its existing byte/count bounds.
+
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
 owners relevant to the task. A row's date is its recorded verification date,
@@ -55,7 +62,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `docs/hosted-auth-migration.md` | Staged Privy removal, encrypted Better Auth backend, Ops import, session/native continuity and retirement gates. | Hosted auth migration rollout | High | 2026-09-09 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, and retention limits. | Hosted account privacy workflow | High | 2026-05-13 |
-| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-09 |
+| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), foreground-wake summaries with fingerprinted correlation and caller/transport attribution, migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-09 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents. | Incident coordination and public status policy | High | 2026-08-05 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
@@ -83,7 +90,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/product-specs/journal.md` | Private web and native timelines derived from canonical health records. | Journal product spec | High | 2026-09-06 |
 | `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards with changed results, compact neutral states, tappable recorded-day counts, and inline comparison sample sizes. | Personal Patterns product spec | High | 2026-09-10 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
-| `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable usage-credit ledger; retained paid legacy compatibility. | Hosted access/billing product spec | High | 2026-09-10 |
+| `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable credit ledger, text entry, subscription access for Images and Responses HTTP/WebSocket generation, and abuse alerts; retained paid legacy compatibility. | Hosted access/billing product spec | High | 2026-09-11 |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers. | Hosted billing/current-state spec | High | 2026-07-30 |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Hosted billing/current-state spec. | Hosted billing/current-state spec | High | 2026-08-18 |
 | `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members. | Hosted billing/product spec | High | 2026-08-25 |
@@ -151,7 +158,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; GitHub dispatch, protected execution, exact receipts and cross-repository rollout. | Live provider proof | High | 2026-09-10 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, and Temporal integration build/process-shard proof. | Verification policy | High | 2026-09-11 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, and remote browser health readiness. | Verification policy | High | 2026-09-11 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Completion workflow and verified-base mergeability gate. | Completion workflow | High | 2026-09-11 |

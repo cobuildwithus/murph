@@ -231,7 +231,9 @@ function retainNativeContainer(rendered: Record<string, unknown>, live: Record<s
     instance_type: { vcpu: resources.vcpu, memory_mib: resources.memoryMiB, disk_mb: resources.diskMB },
     rollout_active_grace_period: live.rollout_active_grace_period,
     ...(Array.isArray(constraints.regions) ? { constraints: { regions: constraints.regions } } : {}),
-    ...(Number(maxInstances) > 0 && steps !== undefined ? { rollout_step_percentage: steps } : {}),
+    ...(Number(maxInstances) > 0 && steps !== undefined
+      ? { rollout_step_percentage: Array.isArray(steps) ? steps.slice(-Number(maxInstances)) : steps }
+      : {}),
   };
 }
 

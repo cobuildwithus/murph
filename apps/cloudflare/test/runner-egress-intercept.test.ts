@@ -1428,6 +1428,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           cookie: "session=user-supplied-cookie",
@@ -1558,8 +1559,66 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual(requestBody);
   });
 
+  it.each([
+    { subscriptionAllowed: false, image: true, status: 403 },
+    { subscriptionAllowed: true, image: true, status: 200 },
+    { subscriptionAllowed: false, image: false, status: 200 },
+  ])("checks Responses image access without gating text (subscription=$subscriptionAllowed image=$image)", async ({ subscriptionAllowed, image, status }) => {
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.hostname === "api.openai.com"
+        ? Response.json({ id: "response_synthetic", output: [] })
+        : Response.json({ allowed: subscriptionAllowed, reason: subscriptionAllowed ? "allowed" : "subscription_required" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential();
+    const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-5.6-terra",
+        input: "Draw a synthetic geometric pattern.",
+        tools: image ? [{ type: "image_generation" }] : [],
+      }),
+    }), createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      validateRuntimeProviderEgressCredential: async (input) => createProviderEgressCredentialValidationResult(input),
+    }), { containerId: "opaque-container-id" });
+    expect(response.status).toBe(status);
+    const upstream = findFetchCall(fetchMock, "api.openai.com");
+    expect(Boolean(upstream)).toBe(status === 200);
+    expect(fetchMock).toHaveBeenCalledTimes(Number(image) + Number(status === 200));
+  });
+
+  it.each(["generations", "edits"])("denies image %s before OpenAI when the subscription gate rejects", async (operation) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ allowed: false, reason: "subscription_required" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(new Request(`https://api.openai.com/v1/images/${operation}`, {
+      method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` },
+    }), createInterceptEnv({ OPENAI_API_KEY: "openai-worker-secret", validateRuntimeWriteFence: async () => true }), { containerId: "member_123--v-version_1" });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{}, { allowed: true }, { allowed: false, reason: "usage_unavailable" }])("fails closed on unavailable or incompatible image access responses", async (result) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(result));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/images/generations", {
+      method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` },
+    }), createInterceptEnv({ OPENAI_API_KEY: "openai-worker-secret", validateRuntimeWriteFence: async () => true }), { containerId: "member_123--v-version_1" });
+    expect(response.status).toBe(503);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+  });
+
   it("allows OpenAI image generation egress through the existing provider policy", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.pathname.endsWith("/image-generation/access")
+        ? Response.json({ allowed: true, reason: "allowed" })
+        : new Response("ok");
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -1593,7 +1652,12 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("rewrites sentinel credentials and forwards multipart bodies to OpenAI image edits", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.pathname.endsWith("/image-generation/access")
+        ? Response.json({ allowed: true, reason: "allowed" })
+        : new Response("ok");
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -3209,6 +3273,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -4458,6 +4523,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },

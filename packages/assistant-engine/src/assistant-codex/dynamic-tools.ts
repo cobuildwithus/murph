@@ -2271,6 +2271,12 @@ function executeInvalidAutomationArgumentsDynamicTool(
         'invalid_input',
       )
     default:
+      if (request.validationDigest.missingPaths?.includes('expectedUpdatedAt')) {
+        return toolTextResult(false, [
+          buildToolCallValidationFeedback(request.validationDigest, 'invalid_automation_arguments'),
+          'Repair: call automation with action=inspect and the same lookup. Copy automationId into lookup and updatedAt into expectedUpdatedAt, then retry action=patch with only the intended changes. Never guess the version or repeat the unchanged invalid call.',
+        ].join('\n'), 'invalid_input')
+      }
       return invalidDynamicToolArgumentsResult(
         'invalid_automation_arguments',
         request.validationDigest,

@@ -4597,6 +4597,33 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedBrowserVaultReplicaRefreshResult> => {
       const maintenanceSignal = maintenanceInput.signal ?? runtimeAbortController.signal;
+      const refreshWakeSignal = createCoalescingRuntimeWakeSignal();
+      const qualificationAbortController = new AbortController();
+      const qualificationSignal = AbortSignal.any([
+        maintenanceSignal,
+        qualificationAbortController.signal,
+      ]);
+      const wakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
+        enabled: true,
+        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+        async shouldInterrupt(notification) {
+          const classification = await classifyHostedPostCheckpointWake({
+            latencySeed: createHostedRuntimeWakeLatencySeed(notification)!,
+            requestId: `${requestId}:browser-vault-wake-classify`,
+            signal: qualificationSignal,
+          });
+          if (!runtimeStateDirty
+            && !runtimeOwnerHandoffRequested
+            && !imageGenerationController?.hasCompleted()
+            && (notification.requestedProcessingMode == null
+              || notification.requestedProcessingMode === (input.request.processingMode ?? "default"))
+            && classification.caughtUpToEveryLaneHighWater) {
+            return false;
+          }
+          refreshWakeSignal.notify(notification);
+          return true;
+        },
+      });
       emitPhaseLog({
         details: {
           workspacePresent: maintenanceInput.workspace !== null,
@@ -4613,7 +4640,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           force: browserVaultReplicaRefreshRequested,
           generatedAt: new Date().toISOString(),
           platform: guardedRuntime.platform,
-          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          runtimeWakeSignal: refreshWakeSignal,
           signal: maintenanceSignal,
           timeoutMs: null,
           vaultRoot: restored.vaultRoot,
@@ -4640,6 +4667,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
         }
         throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
+      } finally {
+        qualificationAbortController.abort();
+        await wakeInterruption.dispose();
+        const notification = wakeInterruption.takeNotification();
+        if (notification) options.runtimeWakeSignal?.notify(notification);
       }
     };
     const { createHostedImageGenerationController } = await import(
@@ -5052,6 +5084,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const classifyHostedPostCheckpointWake = async (input: {
       latencySeed: HostedRuntimeWakeLatencySeed;
       requestId: string;
+      signal?: AbortSignal;
     }): Promise<{
       caughtUpToEveryLaneHighWater: boolean;
       containsOnlyBrowserVaultRefreshWakes: boolean;
@@ -5064,6 +5097,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId: input.requestId,
           runnerInput: baseRunnerInput,
+          signal: input.signal,
         });
         const inspection =
           await inspectHostedPreCheckpointSystemMailboxPrefetch(
@@ -6039,6 +6073,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             input.rearmIdleCheckpointAfterEmptyProbe !== true
             || input.latencySeed === null
             || !shouldContinue()
+            || pendingDurableCheckpointEffects.length > 0
+            || readyDurableCheckpointEffects.length > 0
+            || durableCheckpointFollowUpPending
           ) {
             return;
           }
