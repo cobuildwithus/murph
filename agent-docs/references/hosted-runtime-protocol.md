@@ -3908,6 +3908,7 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
+
 After a default-mode checkpoint, foreground checks, vault-share delivery, and
 required durable-effect follow-up checkpoints precede the Browser Vault offer.
 The runtime offers that committed projection before ordinary due-assistant work or

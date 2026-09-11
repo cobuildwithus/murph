@@ -48,8 +48,21 @@ no production payloads or forced assistant phase flags are used.
   explicit bounded tradeoff instead of adding scheduling reads, persisted state,
   or unproved progress reclassification.
 - Existing timeout tests preserve due and earlier future assistant continuations.
-  A composed stalled-publication and due-reminder proof is being evaluated; the
-  managed no-nudge reminder scenario retains its 60-second delivery deadline.
-- Final ReviewGPT and exact-head CI remain pending. Managed release admission and production verification remain separate
+  The additional composed test lets a real queued outbox intent become due during
+  checkpoint publication, stalls the actual refresh helper until its two-second
+  test timeout, cold-restores the returned continuation, and proves one persisted
+  send with no replay on a later invocation. It uses no runtime wake notification.
+  It does not prove cron occurrence execution or autonomous Temporal scheduling.
+  The managed no-nudge reminder scenario retains its 60-second delivery deadline.
+- The composed proof and assistant-runtime typecheck passed. Changelog provenance
+  now includes PR #3272; its ten focused archive tests and Web typecheck passed.
+  The unchanged production archive reference is reachable and includes its anchor.
+- Parent candidate review accepts the source ordering, composed proof, bounded
+  scheduled-work tradeoff, and unchanged schema/provider-input contracts. No
+  unresolved accepted source findings remain. Final ReviewGPT and exact-head CI
+  continue on the final pushed candidate. Managed release admission and production verification remain separate
   required evidence; local tests do not establish live publication or release
   convergence.
+Status: completed
+Updated: 2026-09-11
+Completed: 2026-09-11
