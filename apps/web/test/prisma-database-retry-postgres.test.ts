@@ -172,6 +172,159 @@ describe.skipIf(!runPostgresRetryProof)(
       90_000,
     );
 
+    it.skipIf(!runTcpRetryProof)("teardown releases a query whose response is deliberately withheld", async () => {
+      const fixture = await createRetryProofFixture("pass");
+      let closing: Promise<void> | undefined;
+      try {
+        await fixture.prisma.$queryRaw`select 1`;
+        fixture.proxy.dropResponses();
+        const pending = Promise.resolve(fixture.prisma.$queryRaw`select 2`);
+        const rejection = expect(pending).rejects.toThrow();
+        await vi.waitFor(() => expect(fixture.proxy.droppedResponses()).toBeGreaterThan(0),
+          { interval: 10, timeout: 2_000 });
+        let closed = false;
+        closing = fixture.close().then(() => { closed = true; });
+        try {
+          await vi.waitFor(() => expect(closed).toBe(true), { interval: 10, timeout: 1_000 });
+        } finally {
+          // Also release the old cleanup order on assertion failure, so the
+          // regression itself cannot strand an owned socket or test database.
+          fixture.proxy.disconnectClients();
+          await closing;
+          await rejection;
+        }
+      } finally {
+        if (!closing) await fixture.close();
+      }
+    });
+
+    it.skipIf(!runTcpRetryProof)("recovers a model read after a real socket disconnect", async () => {
+      const fixture = await createRetryProofFixture("disconnect");
+      try {
+        await expect(fixture.prisma.hostedWorkspace.findUnique({
+          where: { userId: "synthetic-disconnect-proof" },
+        })).resolves.toBeNull();
+        expect(fixture.proxy.acceptedConnections()).toBe(2);
+        expect(loggedFailures(fixture.warn)).toContainEqual(expect.objectContaining({
+          category: "connection_closed", disposition: "retrying", source: "operation",
+        }));
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it.skipIf(!runTcpRetryProof)("retries a model read when its established socket loses the result", async () => {
+      const fixture = await createRetryProofFixture("pass");
+      try {
+        await fixture.prisma.$queryRaw`select 1`;
+        fixture.proxy.dropResponses();
+        const pending = Promise.resolve(fixture.prisma.hostedWorkspace.findUnique({
+          where: { userId: "synthetic-disconnect-proof" },
+        }));
+        const result = expect(pending).resolves.toBeNull();
+        await vi.waitFor(() => expect(fixture.proxy.droppedResponses()).toBeGreaterThan(0),
+          { interval: 10, timeout: 2_000 });
+        fixture.proxy.disconnectClients();
+        await result;
+        expect(fixture.proxy.acceptedConnections()).toBe(2);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it.skipIf(!runTcpRetryProof)("does not retry a real disconnected batch containing a model read and a write", async () => {
+      const fixture = await createRetryProofFixture("disconnect");
+      try {
+        await expect(fixture.prisma.$transaction([
+          fixture.prisma.hostedWorkspace.findUnique({ where: { userId: "synthetic-disconnect-proof" } }),
+          fixture.prisma.$executeRawUnsafe(`insert into "${fixture.table}" (id) values ('synthetic')`),
+        ])).rejects.toThrow();
+        expect(fixture.proxy.acceptedConnections()).toBe(1);
+        expect(loggedFailures(fixture.warn).filter((failure) => failure.disposition === "retrying"))
+          .toEqual([]);
+        expect(await fixture.setup.$queryRawUnsafe(`select id from "${fixture.table}"`)).toEqual([]);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it.skipIf(!runTcpRetryProof)("recovers a real socket disconnect before exactly one transaction callback", async () => {
+      const fixture = await createRetryProofFixture("disconnect");
+      let callbackRuns = 0;
+      try {
+        const rowId = randomUUID();
+        await fixture.prisma.$transaction(async (tx) => {
+          callbackRuns += 1;
+          await tx.$executeRawUnsafe(`insert into "${fixture.table}" (id) values ($1)`, rowId);
+        });
+        expect(callbackRuns).toBe(1);
+        expect(await fixture.setup.$queryRawUnsafe(`select id from "${fixture.table}"`))
+          .toEqual([{ id: rowId }]);
+        expect(fixture.proxy.acceptedConnections()).toBe(2);
+        expect(loggedFailures(fixture.warn)).toContainEqual(expect.objectContaining({
+          category: "connection_closed", disposition: "retrying", source: "transaction",
+        }));
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it.skipIf(!runTcpRetryProof)("does not retry a real disconnected read inside a transaction or repeat its callback", async () => {
+      const fixture = await createRetryProofFixture("pass");
+      let callbackRuns = 0;
+      try {
+        await expect(fixture.prisma.$transaction(async (tx) => {
+          callbackRuns += 1;
+          await tx.$executeRawUnsafe(`insert into "${fixture.table}" (id) values ('synthetic')`);
+          fixture.proxy.dropResponses();
+          const read = tx.hostedWorkspace.findUnique({ where: { userId: "synthetic-disconnect-proof" } });
+          // Force execution of Prisma's lazy promise before disconnecting.
+          const pending = Promise.resolve(read);
+          const rejection = expect(pending).rejects.toThrow();
+          await vi.waitFor(() => expect(fixture.proxy.droppedResponses()).toBeGreaterThan(0),
+            { interval: 10, timeout: 2_000 });
+          fixture.proxy.disconnectClients();
+          await rejection;
+          // Keep the failed transaction failed, rather than swallowing it.
+          return pending;
+        })).rejects.toThrow();
+        expect(callbackRuns).toBe(1);
+        expect(fixture.proxy.acceptedConnections()).toBe(1);
+        expect(loggedFailures(fixture.warn).filter((failure) => failure.disposition === "retrying"))
+          .toEqual([]);
+        expect(await fixture.setup.$queryRawUnsafe(`select id from "${fixture.table}"`)).toEqual([]);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it.skipIf(!runTcpRetryProof)("never replays an ordinary write committed before its connection is lost", async () => {
+      const fixture = await createRetryProofFixture("pass");
+      try {
+        await fixture.prisma.$queryRaw`select 1`;
+        fixture.proxy.dropResponses();
+        const rowId = randomUUID();
+        const pending = Promise.resolve(fixture.prisma.$executeRawUnsafe(
+          `insert into "${fixture.table}" (id) values ($1)`, rowId,
+        ));
+        const rejection = expect(pending).rejects.toThrow();
+        // Observe the commit independently while its acknowledgement is withheld.
+        await vi.waitFor(async () => {
+          expect(await fixture.setup.$queryRawUnsafe(`select id from "${fixture.table}"`))
+            .toEqual([{ id: rowId }]);
+        }, { interval: 10, timeout: 2_000 });
+        fixture.proxy.disconnectClients();
+        await rejection;
+        expect(fixture.proxy.acceptedConnections()).toBe(1);
+        expect(loggedFailures(fixture.warn).filter((failure) => failure.disposition === "retrying"))
+          .toEqual([]);
+        expect(await fixture.setup.$queryRawUnsafe(`select id from "${fixture.table}"`))
+          .toEqual([{ id: rowId }]);
+      } finally {
+        await fixture.close();
+      }
+    });
+
     it("never replays a real transaction that opened and then expired", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
@@ -239,18 +392,23 @@ function loggedFailures(
     .map((call) => call[1] as LoggedDatabasePoolFailure);
 }
 
-interface FirstConnectionStallProxy {
+type FirstConnectionFault = "stall" | "disconnect" | "pass";
+
+interface ConnectionFaultProxy {
   acceptedConnections: () => number;
   close: () => Promise<void>;
   databaseUrl: string;
+  disconnectClients: () => void;
+  dropResponses: () => void;
+  droppedResponses: () => number;
 }
 
-async function createRetryProofFixture() {
+async function createRetryProofFixture(fault: FirstConnectionFault = "stall") {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const setup = createPrismaClient({ databaseUrl, poolMax: 2 });
   const table = `murph_retry_proof_${randomUUID().replace(/-/g, "")}`;
   await setup.$executeRawUnsafe(`create table "${table}" (id text primary key)`);
-  const proxy = await startFirstConnectionStallProxy(databaseUrl);
+  const proxy = await startConnectionFaultProxy(databaseUrl, fault);
   const prisma = createPrismaClient({
     databaseUrl: proxy.databaseUrl,
     poolMax: 1,
@@ -259,10 +417,12 @@ async function createRetryProofFixture() {
   return {
     close: async () => {
       try {
-        await prisma.$disconnect();
+        // A fault may leave a query waiting for a withheld response. Release
+        // owned sockets before asking the pool to drain those active clients.
+        await proxy.close();
       } finally {
         try {
-          await proxy.close();
+          await prisma.$disconnect();
         } finally {
           try {
             await setup.$executeRawUnsafe(`drop table if exists "${table}"`);
@@ -285,13 +445,14 @@ async function createRetryProofFixture() {
 }
 
 /**
- * Keeps the first PostgreSQL startup socket local until pg times it out, then
- * transparently forwards the retry. No bytes from the failed attempt can reach
- * PostgreSQL, so a successful retry is safe to verify with an exactly-once row.
+ * Faults the first startup connection locally, then forwards later connections.
+ * Tests can also withhold server responses and disconnect only these owned
+ * sockets to prove recovery cannot replay an already-committed effect.
  */
-async function startFirstConnectionStallProxy(
+async function startConnectionFaultProxy(
   value: string,
-): Promise<FirstConnectionStallProxy> {
+  fault: FirstConnectionFault,
+): Promise<ConnectionFaultProxy> {
   if (!isClearlyLocalTcpPostgresUrl(value)) {
     throw new Error("The retry proxy requires a loopback TCP PostgreSQL URL.");
   }
@@ -301,6 +462,8 @@ async function startFirstConnectionStallProxy(
   const upstreamPort = Number.parseInt(directUrl.port || "5432", 10);
   const sockets = new Set<Socket>();
   let acceptedConnections = 0;
+  let dropResponses = false;
+  let droppedResponses = 0;
 
   const trackSocket = (socket: Socket) => {
     sockets.add(socket);
@@ -311,7 +474,11 @@ async function startFirstConnectionStallProxy(
     acceptedConnections += 1;
     trackSocket(downstream);
 
-    if (acceptedConnections === 1) {
+    if (acceptedConnections === 1 && fault !== "pass") {
+      if (fault === "disconnect") {
+        downstream.once("data", () => downstream.end());
+        return;
+      }
       // Consume the startup packet without forwarding it. pg owns the timeout
       // and closes this socket before the retry opens another connection.
       downstream.resume();
@@ -325,7 +492,10 @@ async function startFirstConnectionStallProxy(
     trackSocket(upstream);
     upstream.once("connect", () => {
       downstream.pipe(upstream);
-      upstream.pipe(downstream);
+      upstream.on("data", (data: Buffer) => {
+        if (dropResponses) droppedResponses += 1;
+        else downstream.write(data);
+      });
     });
     upstream.once("error", () => downstream.destroy());
     downstream.once("close", () => upstream.destroy());
@@ -352,6 +522,12 @@ async function startFirstConnectionStallProxy(
 
   return {
     acceptedConnections: () => acceptedConnections,
+    disconnectClients: () => {
+      for (const socket of sockets) socket.destroy();
+      dropResponses = false;
+    },
+    droppedResponses: () => droppedResponses,
+    dropResponses: () => { dropResponses = true; },
     close: async () => {
       for (const socket of sockets) {
         socket.destroy();

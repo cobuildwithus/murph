@@ -214,7 +214,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("serves a signed foreground reply while preserving generic system work", async () => {
+  it("continues the authorized system owner for a signed foreground reply after checkpoint acknowledgement", async () => {
     // Production maintains the memberless standby before member traffic arrives.
     // Establish that real precondition before starting the deliberately heavy
     // system-mailbox runtime so the local machine does not provision both
@@ -282,7 +282,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
       .toEqual(expect.arrayContaining(readyStandbySlotNames));
     const inboundText = "Reply while the full system mailbox is active.";
-    const replyText = "Foreground reply won over the full system mailbox.";
+    const replyText = "Foreground reply continued on the authorized runtime.";
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
     const providerStartObservations: Array<{
       providerStartedAt: Date;
@@ -300,7 +300,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       const foregroundReply = sendInboundAndRequirePromptReply({
         identity: systemMailboxProbe,
         inboundText,
-        label: "system mailbox foreground handoff",
+        label: "system mailbox foreground continuation",
         onAssistantProviderStart: async () => {
           const providerStartedAt = new Date();
           const [activeFence, status, deviceMailboxItem] =
@@ -341,9 +341,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemAttemptId: systemFence.attemptId,
         userId: systemMailboxProbe.userId,
       });
-      // An accepted wake may serve foreground under the exact system owner.
-      // If that owner settles first, a replacement may reuse its warm target
-      // or claim an observed pristine slot.
+      // This owner already has foreground authority. After its canonical
+      // acknowledgement settles, foreground input continues on the same fence
+      // and target without claiming a pristine standby slot.
       await expect(releaseForegroundPriorityOrderingBarrier({
         scenario: requireScenario(),
         userId: systemMailboxProbe.userId,
@@ -360,18 +360,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           ["Assistant provider started without an active runtime write fence."],
         ));
       }
-      if (providerStart.activeFence.attemptId === systemFence.attemptId) {
-        expect(providerStart.activeFence).toEqual(systemFence);
-      } else {
-        expect(providerStart.activeFence.processingMode).toBe("default");
-      }
-      expect([systemFence.runnerContainerName, ...readyStandbySlotNames]).toContain(
-        providerStart.activeFence.runnerContainerName,
-      );
-      if (providerStart.activeFence.runnerContainerName === systemFence.runnerContainerName) {
-        await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
-          .toEqual(expect.arrayContaining(readyStandbySlotNames));
-      }
+      expect(providerStart.activeFence).toEqual(systemFence);
+      await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
+        .toEqual(expect.arrayContaining(readyStandbySlotNames));
       if (!providerStart.systemLane) {
         throw new Error(await requireScenario().buildFailureMessage(
           systemMailboxProbe.userId,
@@ -401,21 +392,21 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       }
       await assertExactlyOneAcceptedReplyAfterBoundary({
         identity: systemMailboxProbe,
-        label: "system mailbox foreground handoff",
+        label: "system mailbox foreground continuation",
         replyText,
       });
       expect(countAssistantProviderInputs(inboundText)).toBe(
         providerRequestBaseline + 1,
       );
 
-      // Do not manufacture a second system pointer. The existing durable
-      // mailbox/runtime continuation must resume device/system work and
-      // advance progress, whether the exact owner is retained or replaced.
+      // The retained owner must resume yielded device/system work through its
+      // existing durable continuation, without manufacturing a second pointer.
       await requireSystemWakeStormPreserved(
         systemMailboxProbe.userId,
         latestAppend.wake.seq,
         {
           expectedWakeKinds: systemWakes.map((wake) => wake.kind),
+          expectedAttemptId: systemFence.attemptId,
           recoveryEvidenceStartedAt: providerStart.providerStartedAt,
         },
       );
@@ -2837,6 +2828,7 @@ async function requireSystemWakeStormPreserved(
   expectedImportedSeq: string,
   input: {
     expectedWakeKinds: readonly string[];
+    expectedAttemptId: string;
     recoveryEvidenceStartedAt: Date;
   },
 ): Promise<void> {
@@ -2870,7 +2862,7 @@ async function requireSystemWakeStormPreserved(
         }));
       const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
         const wakeKind = entry.redactedJson?.wakeKind;
-        return entry.attemptId !== null
+        return entry.attemptId === input.expectedAttemptId
           && typeof wakeKind === "string"
           && input.expectedWakeKinds.includes(wakeKind)
           && (
@@ -2887,7 +2879,8 @@ async function requireSystemWakeStormPreserved(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but seeded system work did not continue.",
+    "Foreground reply succeeded, but seeded system work did not continue under the retained owner.",
+    `expected system attempt id: ${input.expectedAttemptId}`,
     `expected imported sequence: ${expectedImportedSeq}`,
     `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
     `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,
@@ -3185,6 +3178,13 @@ function buildEverySystemWake(
       runId: `clinical_run_priority_${runId}`,
       userId: identity.userId,
     }),
+    {
+      eventId: `clinical-records.enrichment-requested:priority:${runId}`,
+      jobId: createHash("sha256").update(`clinical-enrichment:priority:${runId}`).digest("hex"),
+      kind: "clinical-records.enrichment-requested",
+      occurredAt: requestedAt,
+      userId: identity.userId,
+    },
     buildHostedExecutionDailyMetricReportedWake({
       date: requestedAt.slice(0, 10),
       eventId: `health.daily-metric.reported:priority:${runId}`,
