@@ -823,7 +823,7 @@ describe('hosted domain dynamic tools', () => {
       expect(MURPH_AUTOMATION_TOOL.description).toContain(scheduleExample)
     }
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
+      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` and the inspected `updatedAt` copied into `expectedUpdatedAt`.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Never invent schedule, update, timezone, route, group, or member fields outside the schema.',

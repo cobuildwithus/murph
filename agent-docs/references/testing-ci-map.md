@@ -627,6 +627,45 @@ one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
 
+The tool-contract suite inventories all exported and route-only registrations
+(currently 56) across eager native, deferred native, and code mode. It compares
+complete canonical JSON from the actual provider boundary and separately checks
+generated automation, nutrition, and personalization declarations. A catalog-wide
+guard rejects empty named-property schemas; intentionally generic connected-app
+arguments and no-argument tools remain supported. The pinned Codex converter can
+still shorten deep automation native parameters and code-mode types, so the full
+JSON supplement remains required. The mixed-mode condition-reminder journeys check
+the complete discovered supplement and exact saved reference, not shortened native
+reference-item fields.
+The custom-inference adapter suite checks complete long descriptions for function,
+namespace, and custom tools through both top-level and additional-tool transport.
+
+Focused live personalization proof uses
+`-- --test 'saves sentence-case preference'`: one sparse saved tone update, no
+persona/voice rewrite, no progress chatter, and a truthful confirmation. Existing
+`-- --test 'uses one canonical nutrition context read for date-window'` covers
+one valid nutrition card from canonical saved data without Goal mutations.
+
+Automation editing has a focused real-App-Server regression in
+`assistant-codex-tool-input-contract.test.ts`: generated code-mode declarations
+must expose a required string `expectedUpdatedAt`, typed lookup/instructions,
+and the original canonical readback guidance. Schema tests retain the exact
+runtime document and reject a missing version before the automation port; the
+failure-boundary test proves the model receives an actionable inspect-and-copy
+repair. CLI automation coverage verifies compact inventory retains `updatedAt`
+without losing pagination or its payload reduction.
+
+Run each synthetic live journey independently through `pnpm test:assistant:live`
+with `-- --test 'quick single edit'` or
+`-- --test 'several edits.*uses inspected versions'`. They use production prompts,
+the automation tool, and versioned fixture ports; assert one inspect/patch pair
+per record, no invalid calls or duplicate writes, and zero versus one early
+progress update. `MURPH_MEASURE_AUTOMATION_INPUT=1` enables the focused
+`automation edit: complete first provider input` tests for identical direct/group
+fixtures through real mixed-mode Codex conversion. They report complete decoded
+request bytes with only `prompt_cache_key` excluded and explicitly mark missing
+exact-tokenizer evidence.
+
 `packages/assistant-engine/test/assistant-codex-tool-input-contract.test.ts` is a
 default-on, credential-free regression gate under the existing package
 `test/**/*.test.ts` inclusion and normal package/PR CI. It starts the REAL pinned
@@ -638,6 +677,16 @@ resolver variants (boolean capability gates and direct/group progress modes),
 including follow-up, maintenance memory, group configuration/challenge/progress
 and both shared-read variants. Route alternatives sharing an identity run in
 separate batches; admission is never broadened to make a test pass.
+
+Automation structural admission also runs the advertised JSON through Ajv 2020
+with standard format validation and compares accepted/rejected fixtures with the
+production argument parser. Every action needs an accepted fixture; cases cover inspected
+versions, nested references/schedules, types, enums, formats, uniqueness, and bounds.
+Personalization checks every advertised enum value and invalid field types against
+runtime admission; all 32 persona-pair/presence combinations also validate the
+complete advertised schema. Ajv and its format plugin are test-only dependencies
+at versions already present in the lockfile. These tests do not claim full
+schema/parser equivalence: runtime-only refinements retain their dedicated tests.
 
 The fixture covers small documents and documents above the current compaction
 threshold, reference scopes/definitions, nested arrays/objects, compositions and

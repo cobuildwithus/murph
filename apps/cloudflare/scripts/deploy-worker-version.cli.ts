@@ -175,6 +175,9 @@ export async function runDeployWorkerVersionCli(
         // compatibility reader before native mutation as the normal fleet.
         for (const application of staged.applications.filter(application => application.className === "SmallRunnerContainer")) {
           await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+          if (application.applicationId) await releaseProvider.assertCapacity({
+            applicationId: application.applicationId, specification: application.specification,
+          });
           await releaseProvider.admitApplication({ ...application, rolloutStepPercentage: 100 });
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }

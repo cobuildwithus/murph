@@ -1157,6 +1157,12 @@ describe("startHostedContainerEntrypoint", () => {
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-identity-checked")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
+    expect(pendingWake.headers.get("x-runtime-wake-received-at-ms")).toBe(String(pendingWakeAcceptedAtEpochMs));
+    expect(pendingWake.headers.get("x-runtime-wake-accepted-at-ms")).toBe(String(pendingWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-received-at-ms")).toBe(String(firstWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-accepted-at-ms")).toBe(String(firstWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-pending")).toBeNull();
+    expect(idleWake.headers.get("x-runtime-wake-accepted-at-ms")).toBeNull();
     expect(secondPendingWake.status).toBe(204);
     expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondPendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
@@ -1206,6 +1212,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
         },
@@ -1217,6 +1225,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: true,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1228,6 +1238,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: true,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1239,6 +1251,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1250,6 +1264,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1417,6 +1433,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },
@@ -1428,6 +1446,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },

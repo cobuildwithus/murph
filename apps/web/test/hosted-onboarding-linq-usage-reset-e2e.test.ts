@@ -596,6 +596,7 @@ describe("hosted Linq usage reset e2e", () => {
       tx: usage.prisma,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_before_reset",
@@ -675,6 +676,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
