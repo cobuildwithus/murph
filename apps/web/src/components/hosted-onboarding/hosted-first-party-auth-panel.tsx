@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Mail, Phone } from "lucide-react";
+import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 import { Button } from "@/src/components/ui/button";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
@@ -125,6 +127,9 @@ export function HostedFirstPartyAuthPanel({
         />}
       {!active ? <div className="flex flex-wrap gap-2">
         {methods.filter((entry) => entry !== method).map((entry) => <Button key={entry} type="button" variant="outline" className="flex-1" onClick={() => { setMethod(entry); setError(null); }}>
+          {entry === "phone" ? <Phone aria-hidden="true" data-icon="inline-start" />
+            : entry === "email" ? <Mail aria-hidden="true" data-icon="inline-start" />
+              : <TelegramIcon data-icon="inline-start" />}
           {entry === "phone" ? "Use phone" : entry === "email" ? "Use email" : "Use Telegram"}
         </Button>)}
       </div> : null}
