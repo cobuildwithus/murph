@@ -157,6 +157,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants. | Device-sync ingestion contract | High | 2026-08-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
+| `agent-docs/exec-plans/completed/2026-09-10-member-one-vcpu.md` | Dedicated smaller-container deployment, native CLI bootstrap proof and pending natural-traffic measurement. | Historical implementation evidence | Low | 2026-09-10 |
 | `agent-docs/exec-plans/completed/2026-09-06-all-tool-failure-diagnostics-extension.md` | Separate PR #2985 telemetry extension record; original completed plan unchanged. | Historical implementation evidence | Low | 2026-09-06 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/completed/2026-09-09-bundled-cli-query-timing-owner.md` | Exact-leaf runner bundle correction and proof handoff; actual assembled validation and parent evidence pending. | Historical implementation evidence | Low | 2026-09-09 |
