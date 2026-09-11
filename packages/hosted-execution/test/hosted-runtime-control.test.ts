@@ -243,6 +243,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.ask.requested",
       "assistant.ask.completed",
       "clinical-records.sync-requested",
+      "clinical-records.enrichment-requested",
       "device-sync.wake",
       "environment-interview.completed",
       "environment-voice.captured",

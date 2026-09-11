@@ -57,6 +57,7 @@ const TERMINAL_CLINICAL_IMPORT_ERROR_CODES = new Set([
 ]);
 
 type ClinicalImporterModule = {
+  readClinicalAttachmentText(bytes: Uint8Array, mediaType: string): string | undefined;
   buildClinicalImportPlanFromSnapshot(input: {
     attachments?: ClinicalFhirSnapshotAttachment[];
     previousBatch?: { manifestPath: string; manifestContent: string; page: { relativePath: string; content: string } };
@@ -813,4 +814,13 @@ async function prepareClinicalDocumentExtraction(input: ClinicalFhirSnapshotImpo
     files.push({ ...attachment, ...(extractedText ? { extractedText } : {}) });
   }
   return files;
+}
+
+/** Reuse the importer-owned clinical charset and markup rules at the runtime boundary. */
+export async function readClinicalDocumentSourceText(input: {
+  bytes: Uint8Array;
+  mediaType: string;
+}): Promise<string | undefined> {
+  const importer = await loadRuntimeModule<ClinicalImporterModule>(CLINICAL_IMPORTER_MODULE_SPECIFIER);
+  return importer.readClinicalAttachmentText(input.bytes, input.mediaType);
 }

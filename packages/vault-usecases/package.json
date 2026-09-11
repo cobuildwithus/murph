@@ -59,6 +59,10 @@
       "types": "./dist/clinical-records.d.ts",
       "default": "./dist/clinical-records.js"
     },
+    "./clinical-enrichment": {
+      "types": "./dist/clinical-enrichment.d.ts",
+      "default": "./dist/clinical-enrichment.js"
+    },
     "./workouts": {
       "types": "./dist/workouts.d.ts",
       "default": "./dist/workouts.js"

@@ -26,7 +26,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
-import { initializeVault, readHabitatAspect } from "@murphai/core";
+import { initializeVault, patchAutomation, readHabitatAspect, upsertAutomation } from "@murphai/core";
 import { listCanonicalEntities } from "@murphai/query";
 import { createAssistantOutboxIntent, listAssistantOutboxIntents, type RunAssistantAutomationPassInput } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
@@ -38,9 +38,12 @@ import * as maintenanceCancellation from "../src/hosted-runtime/background-maint
 import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgment", "empty-wake"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
   const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment" || scenario === "empty-wake";
-  const persistent = scenario === "persistent" || scenario === "cold";
+  const cold = scenario === "cold" || scenario === "reminder";
+  const persistent = scenario === "persistent" || cold;
+  const reminderId = "automation_01JQ8PWXP5A68SQM1W0GYM41WZ";
+  const reminderAt = new Date(Date.parse(TEST_NOW) + 1_000).toISOString();
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
   const controller = new AbortController();
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
@@ -69,7 +72,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
     dedupeKey: "environment-interview.completed:concurrent-import",
     kind: "environment-interview.completed", lane: "system", laneSeq: "2",
   });
-  const items = scenario === "cold" ? [deviceItem, environmentItem]
+  const items = cold ? [deviceItem, environmentItem]
     : [createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" })];
   const baseDevicePort = createSnapshotDeviceSyncPort({
     connectionId,
@@ -89,7 +92,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
         if (replySent) {
           secondReply.resolve();
         } else {
-          items.push(createMailboxItem({ id: "mailbox_item_concurrent_followup", laneSeq: "2" }));
+          items.push(createMailboxItem({ id: "mailbox_item_concurrent_followup", laneSeq: scenario === "reminder" ? "1" : "2" }));
           runtimeWakeSignal.notify();
         }
       }
@@ -128,15 +131,17 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
   }));
   try {
     mocks.runAssistantAutomationPass.mockImplementation(async (input: RunAssistantAutomationPassInput) => {
-      const currentInputId = inputId;
+      const scheduledOccurrence = scenario === "reminder" && !inputId;
+      const currentInputId = scheduledOccurrence ? `${reminderId}:${reminderAt}` : inputId;
       if (!currentInputId || handledInputIds.has(currentInputId)) return { currentTurnDeliveryIntentIds: [], nextWakeAt: null, progressed: false };
+      if (scheduledOccurrence) assert.ok(Date.now() >= Date.parse(reminderAt));
       handledInputIds.add(currentInputId);
       events.push("model.started");
       await input.onProviderRequestStarted?.({
-        assistantInputIds: [currentInputId], providerRequestOrdinal: 0,
+        assistantInputIds: scheduledOccurrence ? [] : [currentInputId], providerRequestOrdinal: 0,
         source: "linq", startedAt: TEST_NOW,
       });
-      if (scenario !== "absent" && scenario !== "cold" && handledInputIds.size === 1) {
+      if (scenario !== "absent" && !cold && handledInputIds.size === 1) {
         items.push(deviceItem);
         if (persistent) items.push(environmentItem);
         runtimeWakeSignal.notify();
@@ -163,9 +168,14 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
         explicitTarget: "thread_1", identityId: "synthetic-member",
         message: "Your message is received.", sessionId: "synthetic-concurrent-session",
         threadId: "thread_1", threadIsDirect: true,
-        turnId: `turn_${currentInputId}`, turnTrigger: "automation-auto-reply", vault: vaultRoot,
+        turnId: scheduledOccurrence ? "turn_synthetic_reminder" : `turn_${currentInputId}`,
+        ...(scheduledOccurrence ? {} : { turnTrigger: "automation-auto-reply" as const }), vault: vaultRoot,
       });
-      await writeAssistantAutoReplyReplyTerminalEvidence({
+      if (scheduledOccurrence) {
+        // The model stand-in completes this one occurrence; runtime admission,
+        // provider dispatch, import persistence and acknowledgment stay real.
+        await patchAutomation({ lookup: reminderId, now: new Date(), status: "archived", vaultRoot });
+      } else await writeAssistantAutoReplyReplyTerminalEvidence({
         captureIds: [], deliveryIntentId: intent.intentId, inputIds: [currentInputId],
         outcome: "deferred", recordedAt: TEST_NOW, sessionId: intent.sessionId,
         terminalKind: "reply_intent_committed", vault: vaultRoot,
@@ -246,7 +256,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
       createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_concurrent_import", idleCheckpointDelayMs: 1,
-          ...(scenario === "cold" ? { processingMode: "system_mailbox" as const } : {}),
+          ...(cold ? { processingMode: "system_mailbox" as const } : {}),
         },
         forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
         resolvedConfig: {
@@ -269,7 +279,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
         },
         async importItem(item) {
           if (item.item.lane === "conversation") {
-            if (!inputId && scenario !== "cold") await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            if (!inputId && !cold) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
           }
@@ -278,7 +288,17 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
             events.push("environment.staged");
             return { status: "imported" };
           }
-          if (scenario === "cold") await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+          if (cold) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+          if (scenario === "reminder") {
+            await upsertAutomation({
+              automationId: reminderId, continuityPolicy: "fresh",
+              instructions: "Send one synthetic scheduled reminder.", now: new Date(TEST_NOW),
+              route: { channel: "linq", deliveryTarget: "thread_1", identityId: null,
+                participantId: null, threadId: "thread_1", threadIsDirect: true },
+              schedule: { at: reminderAt, kind: "at" }, status: "active",
+              title: "Synthetic concurrent reminder", vaultRoot,
+            });
+          }
           await enqueueHostedSystemMailboxItem({
             item: createResolvedDeviceSyncSystemMailboxItem(item.item), vaultRoot,
             wake: {
@@ -324,10 +344,15 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "acknowledgme
         },
       },
     );
-    if (scenario === "cold") {
+    if (cold) {
       await withRealTimeout(providerStarted.promise, 5_000, () => events.join(","));
-      items.push(createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" }));
-      runtimeWakeSignal.notify();
+      if (scenario === "reminder") {
+        // No conversation or external wake announces this local deadline.
+        vi.setSystemTime(new Date(reminderAt));
+      } else {
+        items.push(createMailboxItem({ id: "mailbox_item_concurrent_conversation", laneSeq: "1" }));
+        runtimeWakeSignal.notify();
+      }
     }
     if (completesBeforeReply || persistent) {
       await withRealTimeout(Promise.race([

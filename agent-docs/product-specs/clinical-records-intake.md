@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-09-05
+Last verified: 2026-09-11
 
 ## Product outcome
 
@@ -10,7 +10,7 @@ the provider's own SMART-on-FHIR sign-in, and import the authorized record
 families into the member's encrypted vault. The common path asks for no portal
 password inside Murph and no manual file download.
 
-The Epic policy collects 28 queries across 17 resource families, including
+The Epic policy collects 40 queries across 17 resource families, including
 labs, reports, medications, allergies and other chart records. Supported facts
 become canonical records; other evidence remains raw. This is a bounded
 one-time import, not a complete medical record or continuous sync.
@@ -29,7 +29,7 @@ canonical measurement surface. It preserves source values and accepted units
 Equivalent oxygen-saturation codings in one observation produce one measurement.
 Incompatible units, ambiguous values and missing comparable revisions retain
 their existing explicit review/retraction behavior. These mappings do not
-change provider acquisition windows; lifetime retrieval is a separate owner change.
+change acquisition scope; new retrieval plans independently request lifetime history.
 
 ### Hospital history and source notes
 
@@ -48,8 +48,8 @@ Inline clinical note text beyond 4,000 characters uses existing ordered note
 sections (up to 50 sections of 12,000 characters) with Unicode-safe boundaries.
 Oversized or invalid evidence remains explicitly held. Provider withdrawals
 and conflicting revisions retain the existing revision checks.
-Linked Binary bodies and additional provider query variants remain acquisition
-work owned separately from these retained-snapshot mappings.
+Linked Binary acquisition and document enrichment have separate owners from
+these deterministic retained-snapshot mappings.
 
 ## Member flow
 
@@ -187,7 +187,7 @@ register the four additional patient-facing APIs in the Epic app before rollout.
 Existing frozen plans retain their original query set.
 
 The variants retain source evidence through the current importer. Linked document
-bodies still require the separate Binary/dependency acquisition work; these
+bodies use the separate bounded Binary/dependency acquisition boundary; these
 queries do not claim to fetch every attachment or bypass provider release limits.
 Official patient-app request contracts: [radiology](https://fhir.epic.com/Specifications?api=10235),
 [external C-CDA](https://fhir.epic.com/Specifications?api=10135),
@@ -310,6 +310,42 @@ Web accepts partial received-page counts below served counts, rejects
 excess counts, and records same-generation saved counts after authorization
 ends without restoring access. Permanent outcome conflicts leave the mailbox
 retry loop; transient failures retain it.
+
+### Document enrichment
+
+After each imported FHIR page batch with downloaded attachments, the runtime
+durably admits enrichment for that batch's manifest before advancing the
+retrieval checkpoint. It does not wait for the whole chart or walk predecessor
+manifests. A local `clinical-records.enrichment-requested` mailbox pointer retains
+unfinished work and its next wake through the existing `default_owned` runtime
+path. Saved structured FHIR results remain available while enrichment runs.
+
+Murph extracts one document page at a time using at most three confined read-only
+subagents for labs, measurements and history. Supported evidence includes bounded
+text, clinical XML/HTML, PDF pages and PNG/JPEG images. The leaves share a
+120-second provider timeout and have no write, tool-network, delivery or delegation
+authority. They treat document instructions as untrusted evidence and cannot
+choose canonical identities or source paths. Foreground replies can continue
+during extraction; snapshots, workspace replacement, fence loss and shutdown
+abort and join the exact owned children. Cancellation retains durable work.
+
+Validated proposals are frozen in private operational state. A separate bounded
+canonical action derives source identity and raw/page provenance, checks existing
+facts, applies accepted proposals, and reads back the writes before advancing.
+It makes no model call. The host checks the immutable parent status and uses
+the canonical vault timezone for overlap and readback. Derived facts retain
+parent revision authority; later corrections or withdrawals retire older
+extraction facets, and stale queued proposals become explicit holds. Eligible
+scanned documents retain a neutral canonical source receipt even when text
+parsing cannot recover content. Lab publication requires supported specimen
+and catalog identity; ambiguous labels cannot create conflicting biomarkers.
+Equivalent existing facts are skipped; ambiguous facts
+are held rather than replacing structured FHIR results. Missing or unsupported
+source documents before extraction receive explicit holds so later documents
+can progress. Invalid manifests and changes to prepared source bytes fail closed.
+Recoverable failures retain bounded retry state; exhausted retries hold the
+affected document. Neither retrieval success nor an enrichment receipt proves
+that every document or clinical fact was recovered.
 
 ### Bounded repeat import
 

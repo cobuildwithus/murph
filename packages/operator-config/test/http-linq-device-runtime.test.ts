@@ -960,6 +960,34 @@ const missingPrimaryMessageIdentityCases = [
   },
 ] as const
 
+test.each([255, 256, 272])('linq runtime bounds %i-character keys at the provider boundary with stable distinct retries', async (length) => {
+  const env = { LINQ_API_BASE_URL: 'https://linq.example.test', LINQ_API_TOKEN: 'linq-token' }
+  const keys: string[] = []
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(requireStringRequestBody(init.body)) as { message: { idempotency_key: string } }
+    keys.push(body.message.idempotency_key)
+    expect(body.message.idempotency_key.length).toBeLessThanOrEqual(255)
+    const messageId = `message-${keys.indexOf(body.message.idempotency_key)}`
+    return createJsonResponse({
+      chat_id: 'chat-123', message: { id: messageId },
+      chat: { id: 'chat-123', message: { id: messageId } },
+    })
+  })
+  const idempotencyKey = 'k'.repeat(length)
+  const dependencies = { env, fetchImplementation }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await sendLinqChatMessage({ chatId: 'chat-123', idempotencyKey, message: 'Progress saved.\nhttps://example.test/progress' }, dependencies)
+    await createLinqChat({ from: '+15550000', to: ['+15550001'], idempotencyKey, message: 'Progress saved.' }, dependencies)
+    await sendLinqIMessageAppCard({ chatId: 'chat-123', idempotencyKey, card: NUTRITION_CARD }, dependencies)
+  }
+  expect(keys).toHaveLength(8)
+  expect(keys.slice(0, 4)).toEqual(keys.slice(4))
+  expect(keys[0]).not.toBe(keys[1])
+  expect(keys[0]).toBe(keys[2])
+  expect(keys[0]).toBe(keys[3])
+  if (length === 255) expect(keys[0]).toBe(idempotencyKey)
+})
+
 test('linq runtime sends a terminal payment URL as a separate rich-link message', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
@@ -1602,7 +1630,7 @@ test.each(missingPrimaryMessageIdentityCases)(
   },
 )
 
-test('linq runtime falls back to URL text after a definitive rich-link rejection', async () => {
+test.each(['payment-message-123', 'k'.repeat(272)])('linq runtime falls back to URL text after a definitive rich-link rejection with key %s', async (idempotencyKey) => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
     LINQ_API_TOKEN: 'linq-token',
@@ -1631,7 +1659,7 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
   const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
-      idempotencyKey: 'payment-message-123',
+      idempotencyKey,
       message:
         'Complete payment here:\nhttps://pay.example.test/checkout/session_123',
     },
@@ -1651,9 +1679,11 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
       providerMessageId: 'message-fallback',
     },
   ])
-  assert.deepEqual(bodies[2], {
+  expect(bodies[2]).toEqual({
     message: {
-      idempotency_key: 'payment-message-123:link:fallback',
+      idempotency_key: idempotencyKey.length <= 255
+        ? `${idempotencyKey}:link:fallback`
+        : expect.stringMatching(/^linq-idempotency:sha256:[a-f0-9]{64}$/u),
       parts: [{
         type: 'text',
         value: 'https://pay.example.test/checkout/session_123',
@@ -1661,6 +1691,9 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
     },
   })
   expect(fetchImplementation).toHaveBeenCalledTimes(3)
+  const providerKeys = bodies.map((body) => (body.message as { idempotency_key: string }).idempotency_key)
+  expect(new Set(providerKeys).size).toBe(3)
+  expect(providerKeys.every((key) => key.length <= 255)).toBe(true)
 })
 
 test('linq runtime never fabricates text for a link-only new chat', async () => {
