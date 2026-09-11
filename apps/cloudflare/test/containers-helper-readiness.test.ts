@@ -33,6 +33,64 @@ describe("patched Cloudflare container readiness probes", () => {
     vi.useRealTimers();
   });
 
+  it.each(["TimeoutError", "AbortError"])("returns HTTP 500 when a native wake fetch rejects with %s", async (name) => {
+    const runner: Container = Object.create(Container.prototype);
+    const nativeFetch = vi.fn(async () => {
+      throw new DOMException("Synthetic wake transport cancellation", name);
+    });
+    const decrementInflight = vi.fn();
+    Object.defineProperties(runner, {
+      container: { value: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
+      ctx: { value: { id: "synthetic-container" } },
+      defaultPort: { value: runnerPort },
+      decrementInflight: { value: decrementInflight },
+      inflightRequests: { value: 0, writable: true },
+      renewActivityTimeout: { value: vi.fn() },
+      state: { value: { getState: async () => ({ status: "healthy" }) } },
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      // Exercise the installed, patched SDK rather than the runner's transport
+      // double: the wrapper hides a thrown timeout inside an HTTP response.
+      const response = await runner.containerFetch("http://container/internal/runtime-wake", {
+        method: "POST",
+      });
+      expect(response.status).toBe(500);
+      expect(response.headers.get("x-runtime-wake-accepted")).toBeNull();
+      expect(nativeFetch).toHaveBeenCalledOnce();
+      expect(decrementInflight).toHaveBeenCalledOnce();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("performs SDK readiness before a wake when a running shell has non-healthy cached status", async () => {
+    const runner: Container = Object.create(Container.prototype);
+    const nativeFetch = vi.fn(async () => {
+      const response = new Response(null, { status: 204 });
+      Object.defineProperty(response, "webSocket", { value: null });
+      return response;
+    });
+    Object.defineProperties(runner, {
+      container: { value: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
+      defaultPort: { value: runnerPort },
+      decrementInflight: { value: vi.fn() },
+      inflightRequests: { value: 0, writable: true },
+      renewActivityTimeout: { value: vi.fn() },
+      state: { value: { getState: async () => ({ status: "running" }) } },
+    });
+    let releaseReadiness!: () => void;
+    const readiness = vi.spyOn(runner, "startAndWaitForPorts").mockImplementation(
+      () => new Promise<void>((resolve) => { releaseReadiness = resolve; }),
+    );
+    const wake = runner.containerFetch("http://container/internal/runtime-wake", { method: "POST" });
+    await vi.waitFor(() => expect(readiness).toHaveBeenCalledOnce());
+    expect(nativeFetch).not.toHaveBeenCalled();
+    releaseReadiness();
+    await expect(wake).resolves.toMatchObject({ status: 204 });
+    expect(nativeFetch).toHaveBeenCalledOnce();
+  });
+
   it("uses native destruction completion independently of cached SDK status", async () => {
     let finishNativeDestroy: () => void = () => { throw new Error("Destroy not started"); };
     const nativeDestroy = vi.fn(() => new Promise<void>((resolve) => {

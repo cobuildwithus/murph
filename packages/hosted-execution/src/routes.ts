@@ -192,6 +192,9 @@ export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =
   "hosted-device-sync-reconciler";
 
+export const HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH =
+  "/api/internal/hosted-execution/image-generation/access";
+
 /** Parses the complete Web-owned route; target and audience must agree. */
 export function parseHostedExecutionResolvedLinqDeliveryRoute(
   value: unknown,

@@ -105,6 +105,7 @@ export interface HostedOnboardingEnvironment {
   linqFirstContactAdmissionModel: string;
   linqFirstContactAdmissionOpenAiApiKey: string | null;
   linqInstantStartPhonePrefixes: readonly string[];
+  linqSmsInstantStartEnabled: boolean;
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
@@ -154,6 +155,7 @@ export function readHostedOnboardingEnvironment(
     linqFirstContactAdmissionOpenAiApiKey:
       readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY")
       ?? readEnv(source, "OPENAI_API_KEY"),
+    linqSmsInstantStartEnabled: readEnv(source, "HOSTED_ONBOARDING_LINQ_SMS_INSTANT_START_ENABLED") === "1",
     linqInstantStartPhonePrefixes:
       readHostedLinqInstantStartPhonePrefixes(source),
     linqLocalAllowedInboundPhoneNumbers:
