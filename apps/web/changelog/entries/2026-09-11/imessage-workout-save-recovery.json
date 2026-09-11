@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "imessage-workout-save-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Save workout sets in Messages",
+    "summary": "Workout cards can save completed sets while other sets are still unfinished.",
+    "details": "This fixes a submission error in existing iPhone app versions without requiring an app update.",
+    "relevanceTags": [
+      "workouts",
+      "imessage"
+    ],
+    "sourcePullRequests": []
+  }
+}

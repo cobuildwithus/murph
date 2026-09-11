@@ -546,6 +546,18 @@ forward fix. Focused proof must pin the exact V6 TypeScript/Swift fixture,
 exercise-reorder continuity, incompatible-unit rejection, planned defaults as
 incomplete until explicit completion, and preference-only/mixed action outcomes.
 
+## Installed Messages client request compatibility
+
+The Messages Web ingress accepts Swift-omitted nullable presentation fields on
+`workout.live.apply` and `workout.live.snapshot`: `subtitle`, `footer`, and each
+set's `target` and `actual`. It normalizes absence to explicit `null` before the
+existing strict member-action validation and mailbox admission. Completed sets
+still require an actual result; mutation preconditions, authority fields,
+unknown-field rejection, and bounds keep their existing validation. This is
+only an ingress compatibility rule. Canonical and persisted action schemas stay
+unchanged, so normalized requests remain readable by existing runners and
+omitted/null-equivalent retries retain the same admitted payload.
+
 ## V4/V6 live refresh
 
 Live refresh preserves the permanent card-reader contract: no new workout-card
