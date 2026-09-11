@@ -3186,6 +3186,13 @@ function buildEverySystemWake(
       runId: `clinical_run_priority_${runId}`,
       userId: identity.userId,
     }),
+    {
+      eventId: `clinical-records.enrichment-requested:priority:${runId}`,
+      jobId: createHash("sha256").update(`clinical-enrichment:priority:${runId}`).digest("hex"),
+      kind: "clinical-records.enrichment-requested",
+      occurredAt: requestedAt,
+      userId: identity.userId,
+    },
     buildHostedExecutionDailyMetricReportedWake({
       date: requestedAt.slice(0, 10),
       eventId: `health.daily-metric.reported:priority:${runId}`,
