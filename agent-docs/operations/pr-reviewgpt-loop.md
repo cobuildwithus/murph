@@ -372,10 +372,23 @@ the current user explicitly asks for it.
    and fails loudly if the profile needs operator cleanup.
 
    The wrapper requests the configured Pro review model on the selected lane.
-   If ChatGPT reports that the selected lane has reached its model limit, do not
-   move an existing conversation to another workspace. Reuse its original lane,
-   or use the fresh-full recovery command above with a different lane instead of
-   downgrading the model.
+   Treat `REVIEW_GPT_RATE_LIMITED`, a visible “Capabilities reduced until…”
+   notice, or Pro becoming unselectable under that notice as a lane rate limit.
+   A completed answer, `PASS`, matching model text, or elapsed-time fallback
+   cannot validate that attempt. Continue automatically on another configured
+   lane within the current pool cap, excluding lanes already limited in this
+   retry sequence. Try each allowed lane at most once; if all are limited,
+   report the reset notice and stop until a lane recovers.
+
+   Start a fresh conversation with the same requested model and reviewed head;
+   never move the limited conversation to another workspace. For round 1,
+   rerun the full review with a different explicit `REVIEW_GPT_BROWSER_LANE`.
+   For later rounds, use the fresh-full recovery command above with a different
+   lane and `REVIEW_GPT_FULL_REVIEW_REASON="previous lane capability limit"`,
+   omitting `REVIEW_GPT_THREAD_URL` and preserving the findings/disposition
+   summary. Keep the substantive round number and first-reviewed head: a
+   rejected rate-limited attempt is not a completed review round. Record the
+   replacement lane and conversation for subsequent same-thread work.
 
    To pin a specific lane, preserve a conversation's workspace, or debug one
    profile, set `REVIEW_GPT_BROWSER_LANE=eragon|hercules|mountain|vonneumann|apollo` on
