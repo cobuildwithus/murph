@@ -108,3 +108,5 @@ failure class, correct proven related defects, and publish the reviewed PR.
   boundary as well as shared card authoring. Publish the draft, finish metadata,
   then start review on the stable Ready head concurrently with required CI.
 - Production deployment and merge remain outside this request.
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3256. The candidate is
+  committed and pushed; merge-tree against current main passed without conflicts.
