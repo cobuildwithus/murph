@@ -1,6 +1,6 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 
-import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+import { JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -19,6 +19,7 @@ import type {
   DeviceConnectionSourceStatus,
 } from "./client.ts";
 export {
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
@@ -243,11 +244,19 @@ export function mergeHostedDeviceSyncConnectionMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown> | null | undefined;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  return mergeHostedJunctionHistoricalBackfillMetadata({
+  const merged = mergeHostedJunctionHistoricalBackfillMetadata({
     hostedMetadata: input.hostedMetadata,
     localConnectionStateUnpublished: input.localConnectionStateUnpublished,
     localMetadata: input.localMetadata ?? {},
   });
+  // Local SQLite owns the marker together with its queued children. Hydration
+  // must not discard unpublished scheduling progress within this connection
+  // epoch; cold restores recover it from the checkpointed wake instead.
+  const localSweepKey = input.localMetadata?.[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  if (typeof localSweepKey === "string") {
+    merged.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY] = localSweepKey;
+  }
+  return merged;
 }
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
@@ -737,6 +746,7 @@ export interface HostedExecutionDeviceSyncJobHint {
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
+  junctionTemporalSweepKey?: string;
   eventType?: string | null;
   jobs?: HostedExecutionDeviceSyncJobHint[];
   nextReconcileAt?: string | null;
@@ -1529,6 +1539,14 @@ export function parseHostedExecutionDeviceSyncWakeHint(
       record.jobs,
       "Hosted execution device-sync.wake hint jobs",
     ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index));
+  }
+
+  if (record.junctionTemporalSweepKey !== undefined) {
+    if (typeof record.junctionTemporalSweepKey !== "string"
+      || !/^[a-f0-9]{64}$/u.test(record.junctionTemporalSweepKey)) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionTemporalSweepKey must be a SHA-256 hash.");
+    }
+    next.junctionTemporalSweepKey = record.junctionTemporalSweepKey;
   }
 
   if (record.nextReconcileAt !== undefined) {

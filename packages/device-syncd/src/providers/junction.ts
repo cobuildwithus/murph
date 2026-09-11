@@ -83,7 +83,7 @@ import {
   type JunctionHistoricalBackfillEvidenceResource,
   type JunctionHistoricalBackfillStatus,
 } from "../junction-historical-backfill-progress.ts";
-import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
+import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY } from "../metadata.ts";
 import {
   buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
   buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey,
@@ -673,7 +673,6 @@ const JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT = Object.freeze({
   requestTimeoutMs: 8_000,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_TEMPORAL_AUTHORITY_LAG_MS = TIMESERIES_CHUNK_MS;
-const JUNCTION_TEMPORAL_SWEEP_METADATA_KEY = "junctionTemporalSweepV1";
 const JUNCTION_TEMPORAL_AUTHORITY_RESOURCES = new Set([
   "blood_oxygen",
   "stress_level",

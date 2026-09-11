@@ -318,7 +318,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    eligible day, timezone, resources, horizon, and stable provider roster and
    availability. Equivalent hourly passes skip the broad sweep; a changed scope
    schedules it again. This scheduling marker and its children commit atomically
-   through existing job completion, so a failed completion cannot lose the sweep.
+   through existing local job completion. Hosted SQLite is excluded from workspace
+   snapshots: the existing retained wake carries the marker with its exact jobs.
+   Control-plane publication keeps the previous marker until an incoming retained
+   wake or the post-checkpoint completion fence proves durable recovery. A crash
+   before checkpoint replays the original root; a cold restore after checkpoint
+   recovers both queued work and suppression under the existing connection epoch.
    Missing or unrecognized metadata schedules safely. The marker is never health
    completeness or source authority, and ordinary reconciliation is unchanged.
    Oxygen/stress data-event execution also schedules affected local days within

@@ -35,8 +35,9 @@ horizon even when no data changed.
 The existing account metadata and job queue remain the only scheduling owners.
 No new service, timer, table, raw payload, or authority cache. Old runtimes ignore
 this optional metadata and keep their more frequent sweep; queued day payloads
-remain compatible. The marker and queue must commit together or neither may
-advance. New data outside the existing feature horizon retains ordinary ingestion;
+remain compatible. The local marker and queue must commit together or neither may advance. Hosted
+publication additionally requires the existing workspace checkpoint: retained wake
+hints restore the exact queue and marker together without restoring SQLite. New data outside the existing feature horizon retains ordinary ingestion;
 this change does not expand indefinite historical feature repair.
 
 ## Product UX
@@ -57,8 +58,14 @@ this change does not expand indefinite historical feature repair.
 
 ## Verification
 
-Local implementation and parent candidate review are complete. Product UX: Ready
-for candidate review; production behavior still requires rollout verification.
+Round 1 final review found a reachable hosted recovery gap: local SQLite commits
+were atomic, but Web could publish suppression before the retained work checkpoint.
+The finding is accepted. The user authorized remediation after the required review
+pause. The correction carries the marker through existing checkpointed wake hints
+and fences Web publication; it adds no queue, timer, or authority cache.
+
+Remediation and parent candidate review are complete. Product UX: Ready for final
+review. Production behavior still requires rollout verification.
 
 - Device-syncd history/source reuse/admission/store/hosted hints: 186 passing tests.
 - Device-syncd resource tests: 51 passing; webhook tests: 46 passing.
@@ -80,5 +87,25 @@ for candidate review; production behavior still requires rollout verification.
 - Changelog not applicable: internal background request reduction and telemetry;
   no new member capability or claimed foreground performance improvement.
 
-Pending: exact-head external review and required CI, followed by the supported
+Remediation verification:
+
+- Real hosted pass crashes after control-plane apply and before the returned
+  retained-wake checkpoint. Web keeps the prior marker; replay from a fresh
+  runtime reconstructs all seven stress days, including the oldest. A saved wake
+  restores exact jobs and the marker, then permits publication. A same-day cold
+  root schedules no repeated temporal children.
+- Completion publication preserves unrelated metadata and respects reconnect
+  epochs even when cadence has not changed. Hint parsing bounds the optional
+  hash and metadata hydration preserves local queued scheduling only within an epoch.
+- All 131 hosted runtime tests, 112 hosted maintenance tests, and 109 hosted hint
+  tests pass. Three old inline-sweep fixtures now execute queued day authority;
+  ordinary-fact durability through slow/yielded resources remains asserted.
+- Both affected package typechecks pass. Complexity guard passes: hosted runtime
+  debt remains 143 and maximum remains 75; Junction debt remains reduced by nine.
+  Log guard, documentation drift, and diff whitespace checks pass.
+- Parent confirmed source admission remains live, the recovery record owns exact
+  jobs before remote suppression, no additional HTTP call or persistence owner is
+  introduced, and old readers can drop the optional hint without losing jobs.
+
+Pending: round 2 exact-head external review and required CI, followed by the supported
 hosted rollout and a bounded production traffic/no-op comparison.

@@ -101,6 +101,13 @@ provider issue is a deletion. Keep structural validation and bounded repair.
 Vendor clarification would improve the eventual fallback horizon; none was
 requested from the vendor during this investigation.
 
+Hosted suppression also needs a checkpoint boundary: runner SQLite is excluded
+from workspace snapshots. The retained wake must save the scheduling hash with
+its exact jobs before Web can publish that hash. A crash before that checkpoint
+must replay the original root; successful cold restores must retain same-day
+coalescing. The existing completion fence can publish a completed sweep without
+introducing another callback or durable owner.
+
 Before changing cadence, test late updates, corrections, complete empty-day
 retractions, duplicate and out-of-order events, events during an active fetch,
 new connections, delayed Garmin history, missing webhook deliveries, source

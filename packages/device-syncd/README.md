@@ -166,8 +166,10 @@ Current providers:
   A hashed `junctionTemporalSweepV1` metadata marker records the scheduled scope:
   newest eligible day, timezone, resources, horizon, and stable source roster and
   capabilities. Matching hourly reconciles skip the broad sweep; a new day or
-  changed scope schedules it again. The marker and children commit atomically;
-  it never proves an import completed. Ordinary reconciliation keeps its cadence.
+  changed scope schedules it again. The marker and children commit atomically in
+  local SQLite. Hosted recovery checkpoints the marker with exact retained jobs
+  before publishing it to Web; SQLite itself is excluded from hosted snapshots.
+  The marker never proves an import completed. Ordinary reconciliation keeps its cadence.
 - Oxygen/stress data-event jobs also queue intersecting local days within that
   rolling horizon, plus days still awaiting closure and the 24-hour arrival lag.
   Future children become available only after the lag. Bursts share the existing

@@ -37,6 +37,7 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
@@ -508,23 +509,14 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
     return null;
   }
 
-  const nextReconcileAt = resolveHostedWakeNextReconcileAt(
-    baseline.localState.nextReconcileAt,
-    wakeContext.hint.nextReconcileAt,
-  );
-  if (!nextReconcileAt) {
+  const update = buildHostedDeviceSyncCompletionFenceUpdate(baseline, wakeContext.hint);
+  if (!update) {
     return baseline.localState.nextReconcileAt;
   }
-
   const response = await input.deviceSyncPort.applyUpdates({
     occurredAt: input.wake.occurredAt,
     ...(input.signal ? { signal: input.signal } : {}),
-    updates: [{
-      connectionId,
-      localState: { nextReconcileAt },
-      observedConnectedAt: baseline.connection.connectedAt,
-      observedUpdatedAt: baseline.connection.updatedAt ?? null,
-    }],
+    updates: [update],
   });
   const applied = findHostedExecutionDeviceSyncRuntimeApplyEntry(
     response,
@@ -538,7 +530,7 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
   switch (applied.writeUpdate) {
     case "applied":
     case "unchanged":
-      return nextReconcileAt;
+      return update.localState.nextReconcileAt;
     case "missing":
       return null;
     case "skipped_version_mismatch":
@@ -546,6 +538,31 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
         "Hosted device-sync completion fence lost its connection version fence.",
       );
   }
+}
+
+function buildHostedDeviceSyncCompletionFenceUpdate(
+  baseline: HostedDeviceSyncRuntimeConnectionSnapshot,
+  hint: NonNullable<ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"]>,
+): (HostedDeviceSyncRuntimeConnectionUpdate & {
+  localState: { nextReconcileAt: string | null };
+}) | null {
+  const advancedReconcileAt = resolveHostedWakeNextReconcileAt(
+    baseline.localState.nextReconcileAt, hint.nextReconcileAt,
+  );
+  const metadata = projectHostedCheckpointedConnectionMetadata(
+    baseline.connection.metadata, baseline.connection.metadata, hint.junctionTemporalSweepKey,
+  );
+  const metadataChanged = !equalJsonRecords(metadata, baseline.connection.metadata);
+  if (!advancedReconcileAt && !metadataChanged) {
+    return null;
+  }
+  return {
+    connectionId: baseline.connection.id,
+    ...(metadataChanged ? { connection: { metadata } } : {}),
+    localState: { nextReconcileAt: advancedReconcileAt ?? baseline.localState.nextReconcileAt },
+    observedConnectedAt: baseline.connection.connectedAt,
+    observedUpdatedAt: baseline.connection.updatedAt ?? null,
+  };
 }
 
 export async function applyHostedPendingDirtyDeviceSyncStateForWake(input: {
@@ -788,6 +805,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       deferNextReconcileAtToBaseline:
         input.deferNextReconcileAtForLocalAccountId === localAccountId,
       hostedConnectionId,
+      checkpointedTemporalSweepKey: readHostedCheckpointedTemporalSweepKey(
+        input.wake, hostedConnectionId, account.connectedAt,
+      ),
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -1071,6 +1091,14 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
+  const temporalSweepKey = account.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  const retainedHint = {
+    ...(input.wake.hint ?? {}),
+    ...(typeof temporalSweepKey === "string"
+      ? { junctionTemporalSweepKey: temporalSweepKey }
+      : {}),
+  };
+
   // A provider job can create multiple follow-ups. The execution/admission
   // budget must never truncate or reject work already accepted by the queue.
   let retryAt: string | null = null;
@@ -1101,7 +1129,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
       wake: {
         ...input.wake,
         hint: {
-          ...(input.wake.hint ?? {}),
+          ...retainedHint,
           jobs: retryHints,
           nextReconcileAt: account.nextReconcileAt ?? null,
         },
@@ -1117,7 +1145,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
       wake: {
         ...input.wake,
         hint: {
-          ...(input.wake.hint ?? {}),
+          ...retainedHint,
           jobs: [],
           nextReconcileAt: account.nextReconcileAt ?? null,
           reason: HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON,
@@ -1129,14 +1157,14 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   if (wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON) {
     return null;
   }
-  const hostedConnectionId = input.state.localToHostedAccountIds.get(localAccountId) ?? null;
-  const baselineNextReconcileAt = hostedConnectionId
-    ? input.state.snapshot?.connections.find(
-        (entry) => entry.connection.id === hostedConnectionId,
-      )?.localState.nextReconcileAt ?? null
-    : null;
+  const baseline = input.state.snapshot?.connections.find(
+    (entry) => entry.connection.id === input.state.localToHostedAccountIds.get(localAccountId),
+  );
+  const baselineNextReconcileAt = baseline?.localState.nextReconcileAt ?? null;
+  const baselineSweepKey = baseline?.connection.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
   const nextReconcileAt = account.nextReconcileAt ?? null;
-  if (nextReconcileAt === baselineNextReconcileAt) {
+  if (nextReconcileAt === baselineNextReconcileAt
+    && (typeof temporalSweepKey !== "string" || temporalSweepKey === baselineSweepKey)) {
     return null;
   }
 
@@ -1145,7 +1173,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     wake: {
       ...input.wake,
       hint: {
-        ...(input.wake.hint ?? {}),
+        ...retainedHint,
         jobs: [],
         nextReconcileAt,
         reason: HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON,
@@ -1808,10 +1836,10 @@ function fingerprintHostedDeviceSyncRuntimeId(value: string): string {
 }
 
 function buildHostedDeviceSyncWakeAccountPatch(
-  account: Pick<StoredDeviceSyncAccount, "nextReconcileAt">,
+  account: Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "metadata">,
   hint: ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"],
-): Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt">> | null {
-  if (!hint || hint.nextReconcileAt === undefined) {
+): Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "metadata">> | null {
+  if (!hint) {
     return null;
   }
 
@@ -1819,13 +1847,54 @@ function buildHostedDeviceSyncWakeAccountPatch(
     account.nextReconcileAt ?? null,
     hint.nextReconcileAt,
   );
-  return nextReconcileAt ? { nextReconcileAt } : null;
+  if (!nextReconcileAt && (!hint.junctionTemporalSweepKey
+    || hint.junctionTemporalSweepKey === account.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY])) {
+    return null;
+  }
+  return {
+    ...(nextReconcileAt ? { nextReconcileAt } : {}),
+    ...(hint.junctionTemporalSweepKey ? {
+      metadata: {
+        ...account.metadata,
+        [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY]: hint.junctionTemporalSweepKey,
+      },
+    } : {}),
+  };
+}
+
+function readHostedCheckpointedTemporalSweepKey(
+  wake: HostedRuntimeEvent,
+  connectionId: string,
+  connectedAt: string,
+): string | undefined {
+  return wake.kind === "device-sync.wake"
+      && wake.connectionId === connectionId
+      && wake.expectedConnectedAt === connectedAt
+    ? wake.hint?.junctionTemporalSweepKey
+    : undefined;
+}
+
+function projectHostedCheckpointedConnectionMetadata(
+  localMetadata: Record<string, unknown>,
+  baselineMetadata: Record<string, unknown>,
+  checkpointedSweepKey: string | undefined,
+): Record<string, unknown> {
+  const metadata = { ...localMetadata };
+  const publishedSweepKey = checkpointedSweepKey
+    ?? baselineMetadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  if (publishedSweepKey === undefined) {
+    delete metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  } else {
+    metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY] = publishedSweepKey;
+  }
+  return metadata;
 }
 
 function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   account: StoredDeviceSyncAccount;
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
+  checkpointedTemporalSweepKey?: string;
   deferNextReconcileAtToBaseline: boolean;
   hostedConnectionId: string;
   observedTokenVersion: number | null;
@@ -1945,10 +2014,17 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     };
   }
 
-  if (!equalJsonRecords(input.account.metadata, baselineConnection?.metadata ?? {})) {
+  // A local marker only proves SQLite enqueue committed. Publish it only from
+  // an incoming retained wake: that wake and its exact remaining jobs already
+  // survived the workspace checkpoint. Before then, retain Web's marker.
+  const baselineMetadata = baselineConnection?.metadata ?? {};
+  const metadata = projectHostedCheckpointedConnectionMetadata(
+    input.account.metadata, baselineMetadata, input.checkpointedTemporalSweepKey,
+  );
+  if (!equalJsonRecords(metadata, baselineMetadata)) {
     update.connection = {
       ...(update.connection ?? {}),
-      metadata: { ...input.account.metadata },
+      metadata,
     };
   }
 
