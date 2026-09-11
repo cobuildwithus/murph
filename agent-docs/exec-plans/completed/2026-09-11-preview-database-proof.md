@@ -1,6 +1,6 @@
 # Prepare read-only Preview database isolation proof
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -46,7 +46,29 @@ the script when environment provisioning supplies authoritative isolation proof.
 
 ## Verification
 
-- Focused Web Vitest suite and standalone script typecheck/lint.
+- 29 focused Web Vitest cases, full Web typecheck and focused ESLint pass.
 - Read-only PostgreSQL query proof and CLI output proof with synthetic data.
 - Parent review, complexity check, documentation checks, ReviewGPT and CI.
 - Hosted execution remains pending; preparing code is not database-isolation proof.
+
+## Preparation outcome
+
+The dormant probe, synthetic boundary tests and operator instructions are
+prepared. Actual local PostgreSQL proof confirms the exported identity query,
+independent digest agreement and read-only write rejection. The rebuilt bundle
+passes its coarse-output, artifact-allowlist and local-identifier checks.
+
+ReviewGPT round 1 accepted one routing-override finding against
+`cc1357bf1aed9a2c0aadd78ee20b8c7254126c2e`. The correction rejects unsupported
+URL query keys before connecting and requires complete credentials. A direct
+pinned-driver regression reproduces the underlying override and confirms
+rejection. Round 2 passed at `4301b861857a0d621b0e4a2a9a11ab8543323df4`
+with no unresolved findings. Exact committed-turn, response hash and model
+metadata were verified. Complexity and documentation drift checks pass.
+
+This plan closes diagnostic preparation only. Required CI on the final
+plan-closure commit and the subsequent authorized hosted execution are tracked
+in PR #3285. No hosted connection, test account, login activation or production
+alias change has run as part of this preparation. A separate actual hosted
+result is required before claiming database separation.
+Completed: 2026-09-11
