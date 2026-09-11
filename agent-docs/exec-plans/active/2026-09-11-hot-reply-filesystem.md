@@ -58,7 +58,8 @@ until deployment.
   fresh input instead of assuming an empty pending scan bypasses it entirely.
 - No prompt, tool, routing, context assembly, or model-dependent outcome changed;
   deterministic composed-owner proof covers this optimization.
-- Release note, final ReviewGPT and exact-head CI pending.
+- Release-note archive tests: 10 passed. Web typecheck passed.
+- Draft PR: #3320. Final ReviewGPT and exact-head CI pending.
 
 ## Work removed
 
