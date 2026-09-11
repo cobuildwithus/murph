@@ -23,6 +23,7 @@ export type CliTimingOutcome = "ok" | "error" | "unknown";
 export const CLI_TIMING_MAX_FAILURES = 8;
 export const CLI_TIMING_FAILURE_CODES = [
   "unknown", "invalid_option", "invalid_payload", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
+  "exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid",
   "not_found", "conflict", "permission_denied", "invalid_path", "storage_unavailable",
   "knowledge_page_not_found", "knowledge_page_conflict", "knowledge_duplicate_slug", "knowledge_page_invalid",
   "QUERY_SOURCE_INVALID", "query_source_invalid", "unsupported_format",

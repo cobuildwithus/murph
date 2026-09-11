@@ -2893,6 +2893,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       details: {
         actionKind: 'command.execution',
         commandFamily: 'cat',
+        commandAttribution: 'recognized',
         commandOrdinal: 1,
         diagnosticRole: 'completion',
         durationMsBucket: '5_30s',
@@ -3489,6 +3490,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         details: {
           actionKind: 'command.execution',
           commandFamily: 'search',
+          commandAttribution: 'recognized',
           commandOrdinal: 1,
           diagnosticRole: 'completion',
           durationMsBucket: 'unknown',
