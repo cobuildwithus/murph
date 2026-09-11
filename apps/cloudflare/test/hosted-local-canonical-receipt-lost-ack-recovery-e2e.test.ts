@@ -21,17 +21,12 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
 import { hostedBrowserVaultReplicaObjectKey } from "../src/storage-paths.js";
@@ -51,6 +46,7 @@ import {
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 
 const runId = Date.now();
 const userId = `member_local_canonical_lost_ack_${runId}`;
@@ -436,15 +432,13 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
   );
   assertPreferenceFixtureDocuments(preferencesBytes, mutationsBytes);
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId: preferenceRecoveryUserId,
     vaultRoot,
   });
-  const snapshotHash = sha256HostedBundleHex(snapshot.bundle);
-  const snapshotRef = createSnapshotBundleRef({
-    hash: snapshotHash,
-    size: snapshot.bundle.byteLength,
-  });
+  const snapshotHash = snapshotRef.archive.encryptedObjectSha256;
   const receiptArtifacts = capturedWrites.map((write) =>
     createJsonArtifact(write.receipt)
   );
@@ -453,7 +447,6 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
     schema: "murph.hosted-canonical-write-receipt-log.v1",
   });
   const artifactsBySha256 = new Map<string, Uint8Array>();
-  addArtifact(artifactsBySha256, snapshotHash, new Uint8Array(snapshot.bundle));
   for (const write of capturedWrites) {
     for (const payload of write.payloads) {
       addArtifact(artifactsBySha256, payload.sha256, payload.bytes);
@@ -634,18 +627,6 @@ async function uploadHostedArtifact(
     },
   );
   expect(response.status).toBe(200);
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 async function createPreferenceRecoveryBrowserVaultReplicaRef(

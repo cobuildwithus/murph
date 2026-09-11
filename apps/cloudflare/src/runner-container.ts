@@ -1274,15 +1274,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  // Remove after UserRunner versions predating the unified fleet have drained.
-  async beginShellPrewarm(): Promise<{ accepted: true }> {
-    return { accepted: true };
-  }
-
-  async prewarmShell(): Promise<{ action: "superseded"; kind: "superseded" }> {
-    return { action: "superseded", kind: "superseded" };
-  }
-
   async abortWorkspaceInvocation(input: {
     attemptId: string;
     leaseGeneration: string;

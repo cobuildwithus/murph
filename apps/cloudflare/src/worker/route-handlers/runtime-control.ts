@@ -100,29 +100,6 @@ const runtimeHealthDataConsentRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
-const runtimeShellPrewarmRoute = {
-  authorizeBeforeMethod: true,
-  authorization: "vercel-oidc",
-  beforeMethod(context, params) {
-    return requireBoundInternalRouteUser(context, params, "runtime-shell-prewarm");
-  },
-  async handle(context) {
-    // Older Web deployments may still send hints; only the standby pool prewarms.
-    await readCachedRequestText(context, {
-      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-    });
-    return json({ accepted: true }, 202);
-  },
-  match: (pathname) => matchCloudflareHostedControlUserRoutePath(
-    "runtimeShellPrewarm",
-    pathname,
-  ),
-  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeShellPrewarm.method],
-  name: "runtime-shell-prewarm",
-  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-  wrongMethodResponse: "method-not-allowed",
-} satisfies DeclarativeRoute<WorkerRouteContext>;
-
 const userStatusRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -140,7 +117,6 @@ const userStatusRoute = {
 
 export const runtimeProcessingRoutes = [
   runtimeEnsureProcessingRoute,
-  runtimeShellPrewarmRoute,
   runtimeHealthDataConsentRoute,
 ] as const;
 

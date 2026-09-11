@@ -1,3 +1,4 @@
+import { importClinicalFhirSnapshot } from '@murphai/vault-usecases/clinical-records'
 import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
@@ -38477,6 +38478,71 @@ describeRealCodex('real Codex reminder execution inspection e2e', () => {
       expect(result.finalMessage).not.toMatch(/(?:was|has been|successfully) delivered|I.ve (?:created|rescheduled)|will (?:retry|automatically send)|no reminder was sent/iu)
     } finally {
       await rm(workingDirectory, { force: true, recursive: true })
+    }
+  }, 720_000)
+})
+
+
+describeRealCodex('real Codex imported hospital history e2e', () => {
+  it('reads dated hospital source notes without treating an old prescription as current intake', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hospital-history-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      const families = ['MedicationRequest', 'AllergyIntolerance'] as const
+      const resources = [
+        { resourceType: 'MedicationRequest', id: 'historic-antibiotic', subject: { reference: 'Patient/synthetic-patient' }, meta: { lastUpdated: '2026-09-01T12:00:00Z' }, status: 'stopped', intent: 'order', authoredOn: '2004-03-12', medicationCodeableConcept: { text: 'Amoxicillin' }, dosageInstruction: [{ text: '500 mg three times daily for 7 days' }] },
+        { resourceType: 'AllergyIntolerance', id: 'historic-allergy', patient: { reference: 'Patient/synthetic-patient' }, meta: { lastUpdated: '2026-09-01T12:00:00Z' }, recordedDate: '2020-05-10', code: { text: 'Penicillin' }, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] }, verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification', code: 'confirmed' }] }, reaction: [{ manifestation: [{ text: 'Hives' }] }] },
+      ]
+      await importClinicalFhirSnapshot({
+        vaultRoot: workingDirectory, connectionId: 'synthetic-hospital', retrievalJobId: 'synthetic-history',
+        fetchedAt: '2026-09-01T12:00:00Z', fhirBaseUrlHash: createHash('sha256').update('https://hospital.example.test/fhir').digest('hex'),
+        patientIdHash: createHash('sha256').update('synthetic-patient').digest('hex'), sourceSystem: 'epic-fhir', retrievalProtocol: 'query-slices-v2',
+        requestedScopes: families.map((family) => `patient/${family}.read`), grantedScopes: families.map((family) => `patient/${family}.read`),
+        retrievalSlices: families.map((resourceType) => ({ resourceType, queryScopeId: resourceType.toLowerCase(), sliceId: 'whole', coverage: 'whole-family', queryFingerprint: 'a'.repeat(64) })),
+        completedRetrievalSlices: families.map((resourceType) => ({ queryScopeId: resourceType.toLowerCase(), sliceId: 'whole' })),
+        pages: families.map((resourceType) => ({ resourceType, queryScopeId: resourceType.toLowerCase(), sliceId: 'whole', content: JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: resources.filter((resource) => resource.resourceType === resourceType).map((resource) => ({ resource })) }) })),
+      })
+      const before = await readVaultRawTolerant(workingDirectory)
+      expect(before.events.filter((event) => event.kind === 'note')).toHaveLength(2)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          currentInstant: '2026-09-10T16:00:00Z', currentLocalDate: '2026-09-10', currentTimeZone: 'America/New_York',
+          modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        }),
+        dynamicTools: [], env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        prompt: 'Please check my connected hospital records. What did the old amoxicillin prescription say, and what reaction was recorded for penicillin? Does that old prescription establish that I take amoxicillin now? Just summarize the records; do not change anything.',
+      })
+      process.stdout.write(`[hospital-history-readback] ${JSON.stringify({ reply: result.finalMessage })}\n`)
+      expect(result.finalMessage).toMatch(/amoxicillin/iu)
+      expect(result.finalMessage).toMatch(/500\s*(?:mg|milligrams)/iu)
+      expect(result.finalMessage).toMatch(/(?:three|3) times|(?:three|3)[ -]times|TID/iu)
+      expect(result.finalMessage).toMatch(/hives/iu)
+      expect(result.finalMessage).toMatch(/2004/iu)
+      expect(result.finalMessage).toMatch(/stopped|historical|old prescription/iu)
+      expect(result.finalMessage).toMatch(/does(?:n.t| not)|can(?:n.t|not)|does not establish|not (?:evidence|proof|confirm)/iu)
+      // A denial such as "does not establish that you currently take" is correct.
+      // Reject affirmative intake claims and dosing instructions, while the
+      // preceding assertion requires explicit uncertainty about current intake.
+      expect(result.finalMessage).not.toMatch(/(?:^|[.!?\n]\s*)(?:yes[,\s]+)?you (?:currently take|are taking) amoxicillin/iu)
+      expect(result.finalMessage).not.toMatch(/you (?:should take|must take) amoxicillin/iu)
+      const after = await readVaultRawTolerant(workingDirectory)
+      expect(after.events).toEqual(before.events)
+      expect(after.entities).toEqual(before.entities)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 720_000)
 })

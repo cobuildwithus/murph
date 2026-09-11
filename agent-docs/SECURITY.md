@@ -48,10 +48,10 @@ Last verified: 2026-08-31
   admission cache or repeated Web callback. A failed stop leaves that fence
   cleared, so later wakes cannot restart a revoked member. Renewal waits behind
   the stop before granting. Current Web producers no longer send member-specific
-  shell prewarm hints. The Worker authenticates and acknowledges older hints
-  without resolving a Durable Object, reading admission, or binding a member.
-  An inert Durable Object method temporarily accepts calls from older Workers
-  until those producer versions drain; it performs no runtime or member work.
+  shell prewarm hints. The retired HTTP endpoint returns 404 without resolving a
+  runtime owner; its Durable Object RPC compatibility methods are removed.
+  An older Web helper treats rejection as an optional hint failure, with no
+  admission read, container creation, or member binding.
   Pristine global inventory is content-free and memberless;
   only normal admitted execution binds it to a member. Web admission requires
   an extant, non-suspended member, and cleanup failure never restores authority.

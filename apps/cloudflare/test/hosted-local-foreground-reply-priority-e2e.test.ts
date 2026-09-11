@@ -56,18 +56,10 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   createCloudflareHostedControlClient,
 } from "@murphai/cloudflare-hosted-control/client";
-import {
-  buildCloudflareHostedControlRuntimeShellPrewarmPath,
-} from "@murphai/cloudflare-hosted-control/routes";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
@@ -82,6 +74,7 @@ import type {
   HostedLocalForegroundPriorityOrderingEvent,
   HostedLocalForegroundPriorityOrderingObservationState,
 } from "../src/hosted-local-test/foreground-priority-ordering.ts";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -951,8 +944,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       inserted: true,
     });
 
-    const shellPrewarmResponsePromise = requireScenario().harness.request(
-      buildCloudflareHostedControlRuntimeShellPrewarmPath(identity.userId),
+    const shellPrewarmResponse = await requireScenario().harness.request(
+      `/internal/users/${encodeURIComponent(identity.userId)}/runtime/shell-prewarm`,
       {
         body: "{}",
         headers: {
@@ -962,6 +955,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         method: "POST",
       },
     );
+    expect(shellPrewarmResponse.status).toBe(404);
+    await expect(shellPrewarmResponse.json()).resolves.toEqual({ error: "Not found" });
     await expect(readActiveRuntimeFenceForTest(identity.userId)).resolves.toBeNull();
 
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
@@ -987,11 +982,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       reason: "wake-appended-active-member",
-    });
-    const shellPrewarmResponse = await shellPrewarmResponsePromise;
-    expect(shellPrewarmResponse.status).toBe(202);
-    await expect(shellPrewarmResponse.json()).resolves.toEqual({
-      accepted: true,
     });
 
     const conversationItem = await readHostedMailboxItemForTest({
@@ -2950,11 +2940,13 @@ async function seedActivatedWorkspaceCheckpointInScenario(
     vault: vaultRoot,
   });
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    harness: targetScenario.harness,
     operatorHomeRoot,
+    userId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: await createBrowserVaultReplicaRef(hash, userId),
     environment: targetScenario.runtimeEnv,
@@ -2963,24 +2955,10 @@ async function seedActivatedWorkspaceCheckpointInScenario(
     redactedStatusJson: {
       seededForForegroundReplyPriority: true,
     },
-    snapshotRef: createSnapshotBundleRef({
-      hash,
-      size: snapshot.bundle.byteLength,
-    }),
+    snapshotRef,
     userId,
   });
   expect(checkpoint.status).toBe("updated");
-
-  await targetScenario.harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${hash}`,
-    {
-      body: new Blob([new Uint8Array(snapshot.bundle)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "PUT",
-    },
-  );
 }
 
 function buildEverySystemWake(
@@ -3328,18 +3306,6 @@ async function stageMealPhotoForProbe(identity: ProbeIdentity): Promise<{
     captureId,
     mealPhotoKey: staged.mealPhotoKey,
     sha256: staged.sha256,
-  };
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
   };
 }
 
