@@ -4,6 +4,12 @@ Last verified: 2026-09-11
 
 ## Current Repo Checks
 
+The canary outcome suite controls Date.now relative to its replica fixture
+timestamp and restores it after each case. An explicit clock advance proves the production
+24-hour expiry check still rejects a matching but expired replica. Run this
+decryption and authority proof with
+`pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-production-canary-outcome.test.ts`.
+
 A rejected live selector prints up to 20 exact matching names, an omitted count,
 and a read-only discovery command. Copy the rendered Vitest name, including
 parameterized values, into a sufficiently specific test pattern. Enumeration

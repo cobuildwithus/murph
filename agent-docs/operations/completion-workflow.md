@@ -36,18 +36,21 @@ alone does not authorize a narrower product or another state owner.
    plan-bearing commit, keep the plan active. `scripts/committer` takes explicit
    files and rejects directory targets; `scripts/finish-task` expands directories
    and closes the plan for the final commit. A PR with known edits still needed
-   stays draft.
+   stays draft. Before every subsequent push to an existing owned PR, follow
+   the verification guide's Draft-before-push sequence; do not wait for the
+   delayed controller to establish Draft.
 5. Once focused proof and parent candidate review pass and the pushed head is
    the intended candidate, mark the PR Ready. Start final ReviewGPT immediately
    when eligible, concurrently with CI. Follow the review loop's exact-head
    preflight and one completion owner; do not wait for CI before starting it.
 6. Triage findings against real evidence. Fix accepted issues at the smallest
-   correct boundary, rerun affected checks, and push. For a final ReviewGPT
-   `FINDINGS` result, follow its Finding Disposition Boundary before mutation;
+   correct boundary, rerun affected checks, mark Draft, and push. For a final
+   ReviewGPT `FINDINGS` result, follow its Finding Disposition Boundary before mutation;
    `PASS` proceeds without a user-resume pause. Re-establish readiness after
    any new push. Never rerun a review only to obtain agreement on a rejected finding.
 7. Perform the parent's final review after remediation. Close the active plan
-   and commit through `scripts/finish-task`; push and verify the resulting head.
+   and commit through `scripts/finish-task`; mark Draft before pushing and verify
+   the resulting head.
    Include every public-safe Frog entry created or modified during the task in that same scoped commit.
    A behavior-changing final edit needs the applicable checks and next review;
    explanatory docs and isolated proof additions follow the review loop's exemptions.
