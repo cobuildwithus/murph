@@ -51,6 +51,17 @@ roundtrip success does not replace those hosted gates. Negative HTTP assertions
 use authenticated fetch directly because the shared harness request helper throws
 on non-success responses before returning them.
 
+`apps/cloudflare/test/helpers/hosted-local-workspace-snapshot-restore.test.ts`
+proves the shared assertion-side reader with actual encrypted archive bytes.
+Messages member-action, vault-persistence and personalized-next-trials assertions
+use the prepared v2 restore owner against hosted-local MinIO, validate restored
+canonical vault metadata, and remove temporary plaintext after the assertion.
+Positive protected files and changed contents keep canonical-preservation proof
+from passing on an unsupported reference's empty result. Missing metadata,
+tampered bytes, wrong-member references and non-local settings fail closed.
+Run this focused suite through the Cloudflare Node Vitest config; live model
+and full-stack behavior remain the owning E2E journeys' separate proof.
+
 Legacy phone-call deletion is covered by `hosted-ops-phone-call-deletion-route.test.ts`
 and `phone-calls-result-notification-store.test.ts`. With a dedicated loopback
 `DATABASE_URL` owned by the test role and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
