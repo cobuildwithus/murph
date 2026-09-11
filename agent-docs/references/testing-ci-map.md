@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-09-05
+Last verified: 2026-09-10
 
 ## Current Repo Checks
 
@@ -22,13 +22,34 @@ token, so a leaked runner sentinel can no longer count as successful delivery.
 This validates the locally supported protocol boundary; provider receipt delivery,
 media downloading/rendering, and live service behavior still require hosted proof.
 
+`node scripts/run-postgres-tests.mjs --shard 1/4` runs the first of four
+required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
+service with the checked-in Prisma migrations, then discovers Web tests that
+declare a `MURPH_TEST_*POSTGRES*` flag and all `*.db.test.ts` files. The runner
+uses the broad Web Vitest config, enables the concurrency, runtime-log, and
+iMessage enrollment database owners, and executes files serially in each shard.
+Its in-memory receipt requires every selected file exactly once, at least one
+executed case per file, and no skipped, pending, or failed cases. Missing files,
+collection errors, interrupted runs, and an empty inventory fail the existing
+required `Release checks (ubuntu)` aggregator. Consent and supplement search
+retain their separate required database lanes below.
+
+For local proof, use an isolated loopback `murph_test_<slug>` database, run
+`pnpm --dir apps/web prisma:generate` and
+`pnpm --dir apps/web prisma:migrate:deploy` with that `DATABASE_URL`, then invoke
+the same runner. `--shard 1/1` selects the full discovered inventory; other shard
+counts partition it without accepting file filters that could silently narrow
+the required proof. Provider boundaries remain synthetic in these existing
+suites; the gate proves production database owners, not live provider behavior.
+
 Better Auth SMS provider contracts are covered by `better-auth-twilio-verify.test.ts`.
 Run the real PostgreSQL `better-auth-adapter-postgres-concurrency.test.ts`,
 `better-auth-member-postgres-concurrency.test.ts`, and
 `better-auth-sms-postgres-concurrency.test.ts` with
 `MURPH_TEST_POSTGRES_CONCURRENCY=1` through
 `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/<file>`.
-These opt-in suites require migrated loopback `murph_dev_better_auth_login` or
+These suites run in the required migrated PostgreSQL lane above. Local proof
+also accepts migrated loopback `murph_dev_better_auth_login` or
 `murph_dev_twilio_verify`; ordinary Web runs skip their database cases. They
 exercise encrypted challenge state, concurrent budgets, resend/expiry fences,
 provider-approval recovery and atomic browser/native canonical login/session
@@ -997,7 +1018,10 @@ limits, and local proof distinctions are owned by
   evidence with explicit continuation ownership, status transitions, legacy
   promotion, and fail-closed cardinality/binding checks; job hints do not decide
   the diagnostic. The PostgreSQL proof retains the 20,000 raw-candidate cap
-  before exclusions plus one truncation probe. The hosted-local
+  before exclusions plus one truncation probe. The inactive and active cap
+  cases seed and analyze their full fixtures in a separate transaction, keep
+  the reader's existing budget, and remove only their own member prefix
+  afterward. The hosted-local
   foreground-priority leg drives this monitor through authenticated cron HTTP
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, short-window active-incident coalescing,
@@ -1472,8 +1496,9 @@ database. The shard prepares the current Prisma schema with `prisma db push`;
 supplement search retains its own database and transactional fixtures. This
 proves decline uniqueness under real PostgreSQL contention, immutable retry audit
 values, accepted-scope exclusion, event/grant coherence, sequential withdrawal
-replay, and rollback after real event and grant writes. Existing opt-in
-`MURPH_TEST_POSTGRES_CONCURRENCY` suites are not enabled by this CI change.
+replay, and rollback after real event and grant writes. The broader
+`MURPH_TEST_POSTGRES_CONCURRENCY` suites run in the separate required
+PostgreSQL shards described above.
 
 For local proof, prepare an isolated loopback `murph_dev_<slug>` database with the
 same schema command, then run
