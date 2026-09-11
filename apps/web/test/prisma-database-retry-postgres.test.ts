@@ -172,6 +172,32 @@ describe.skipIf(!runPostgresRetryProof)(
       90_000,
     );
 
+    it.skipIf(!runTcpRetryProof)("teardown releases a query whose response is deliberately withheld", async () => {
+      const fixture = await createRetryProofFixture("pass");
+      let closing: Promise<void> | undefined;
+      try {
+        await fixture.prisma.$queryRaw`select 1`;
+        fixture.proxy.dropResponses();
+        const pending = Promise.resolve(fixture.prisma.$queryRaw`select 2`);
+        const rejection = expect(pending).rejects.toThrow();
+        await vi.waitFor(() => expect(fixture.proxy.droppedResponses()).toBeGreaterThan(0),
+          { interval: 10, timeout: 2_000 });
+        let closed = false;
+        closing = fixture.close().then(() => { closed = true; });
+        try {
+          await vi.waitFor(() => expect(closed).toBe(true), { interval: 10, timeout: 1_000 });
+        } finally {
+          // Also release the old cleanup order on assertion failure, so the
+          // regression itself cannot strand an owned socket or test database.
+          fixture.proxy.disconnectClients();
+          await closing;
+          await rejection;
+        }
+      } finally {
+        if (!closing) await fixture.close();
+      }
+    });
+
     it.skipIf(!runTcpRetryProof)("recovers a model read after a real socket disconnect", async () => {
       const fixture = await createRetryProofFixture("disconnect");
       try {
@@ -391,10 +417,12 @@ async function createRetryProofFixture(fault: FirstConnectionFault = "stall") {
   return {
     close: async () => {
       try {
-        await prisma.$disconnect();
+        // A fault may leave a query waiting for a withheld response. Release
+        // owned sockets before asking the pool to drain those active clients.
+        await proxy.close();
       } finally {
         try {
-          await proxy.close();
+          await prisma.$disconnect();
         } finally {
           try {
             await setup.$executeRawUnsafe(`drop table if exists "${table}"`);
