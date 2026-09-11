@@ -72,10 +72,9 @@ export interface SignalHostedMailboxAppendInput {
   expectedUserId?: string | null;
   // Lane facts from the caller's own append row in the current request.
   // Presence means the appending transaction already proved the mailbox row
-  // and the workspace row, so the signal path skips its checkpoint re-read
-  // and workspace upsert. Active access is still rechecked before signaling
-  // because legacy Temporal histories may execute mailbox pointers without
-  // the reconciliation gate.
+  // and the workspace row, so signaling needs no database rediscovery.
+  // This pointer is a wake hint, not execution authority: mailbox fetch and
+  // runtime admission retain their current access checks.
   knownCheckpoint?: {
     lane: HostedMailboxLane;
     laneSeq: string;
@@ -152,14 +151,6 @@ export async function signalHostedMailboxAppendRuntime(
     expectedUserId: input.expectedUserId ?? null,
     mailboxItemUserId: mailboxItem.userId,
   });
-  if (input.knownCheckpoint) {
-    await requireHostedRuntimeActiveAccess(mailboxItem.userId, {
-      code: "HOSTED_RUNTIME_USER_INACTIVE",
-      message: "Hosted runtime user is not active.",
-      prisma: input.prisma ?? getPrisma(),
-    });
-  }
-
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,
     client: input.client,
@@ -523,8 +514,8 @@ export async function signalHostedUserRuntimeWorkflow(
         workflowId,
       },
     );
-    // Access and pointer validation have completed. An ephemeral latency hint
-    // may overlap this request; success still requires its acknowledgement.
+    // The caller proved the committed pointer or workspace admission.
+    // An ephemeral hint may overlap; success still requires acknowledgement.
     input.onSignalStarted?.();
     return pending;
   };
