@@ -4,6 +4,10 @@ Last verified: 2026-09-11
 
 ## Purpose
 
+Verification inventory, composed diff routing, cold stale-invocation coverage and
+UTC PostgreSQL connection proof are indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 Local system-timer ownership and progress-based churn containment are owned by
 `agent-docs/RELIABILITY.md`; automatic restart, admission and replay regressions
 are indexed in `agent-docs/references/testing-ci-map.md`.
