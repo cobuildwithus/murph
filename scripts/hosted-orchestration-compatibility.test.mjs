@@ -34,6 +34,7 @@ import {
   inspectPrivateRun,
   inspectPrivateWorkflow,
   inspectPublicBranchRef,
+  inspectPublicCandidateAncestry,
   inspectPullRequest,
   inspectProducerFixtures,
   isTemporalCompatibilityRelevantPath,
@@ -915,66 +916,73 @@ test("controller finalizes a last-admitted success before the private token safe
 });
 
 for (const releaseScope of [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE]) {
-  test(`deployment controller binds ${releaseScope} and both rereads to exact public main`, async () => {
-    let privateMainReads = 0;
-    let publicMainReads = 0;
-    await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
-      if (
-        url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/`)
-        && url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)
-      ) {
-        privateMainReads += 1;
-        return jsonResponse(privateMainRef());
-      }
-      if (url.endsWith("/repos/cobuildwithus/murph/git/ref/heads/main")) {
-        publicMainReads += 1;
-        return jsonResponse(publicMainRef());
-      }
-      if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-        return jsonResponse({
-          id: WORKFLOW_ID,
-          name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-          path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-          state: "active",
-        });
-      }
-      if (url.endsWith("/dispatches")) {
-        assert.deepEqual(JSON.parse(init.body), {
-          inputs: buildDispatchInputs({
-            expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
-            releaseScope,
-            mode: HOSTED_RELEASE_ADMISSION_MODE,
-            producerDigest: PRODUCER_DIGEST,
-            producerFixtures: PRODUCER_FIXTURES,
-            publicSha: PUBLIC_SHA,
-            requestId: REQUEST_ID,
-          }),
-          ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
-          return_run_details: true,
-        });
-        return jsonResponse({ workflow_run_id: RUN_ID });
-      }
-      if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
-      if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-        return jsonResponse({
-          jobs: proofJobs({ releaseScope }),
-          total_count: releaseScope === HOSTED_RELEASE_SCOPE_PRODUCTION_CORE ? 10 : 5,
-        });
-      }
-      throw new Error(`unexpected URL ${url}`);
-    }, async () => {
-      const proof = await runTemporalCompatibility(compatibilityArgs({
-        dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
-        expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
-        releaseScope,
-        prNumber: null,
-        sleepFn: async () => undefined,
+  for (const advanceAt of [0, 1, 2]) {
+    test(`deployment controller preserves ${releaseScope} candidate when main advances at read ${advanceAt}`, async () => {
+      let privateMainReads = 0;
+      let publicMainReads = 0;
+      await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
+        if (
+          url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/`)
+          && url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)
+        ) {
+          privateMainReads += 1;
+          return jsonResponse(privateMainRef());
+        }
+        if (url.endsWith("/repos/cobuildwithus/murph/git/ref/heads/main")) {
+          publicMainReads += 1;
+          return jsonResponse(publicMainRef(advanceAt && publicMainReads >= advanceAt
+            ? "e".repeat(40) : PUBLIC_SHA));
+        }
+        if (url.includes(`/compare/${PUBLIC_SHA}...${"e".repeat(40)}`)) {
+          return jsonResponse({ status: "ahead", base_commit: { sha: PUBLIC_SHA },
+            merge_base_commit: { sha: PUBLIC_SHA } });
+        }
+        if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+          return jsonResponse({
+            id: WORKFLOW_ID,
+            name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+            path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+            state: "active",
+          });
+        }
+        if (url.endsWith("/dispatches")) {
+          assert.deepEqual(JSON.parse(init.body), {
+            inputs: buildDispatchInputs({
+              expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+              releaseScope,
+              mode: HOSTED_RELEASE_ADMISSION_MODE,
+              producerDigest: PRODUCER_DIGEST,
+              producerFixtures: PRODUCER_FIXTURES,
+              publicSha: PUBLIC_SHA,
+              requestId: REQUEST_ID,
+            }),
+            ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
+            return_run_details: true,
+          });
+          return jsonResponse({ workflow_run_id: RUN_ID });
+        }
+        if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
+        if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+          return jsonResponse({
+            jobs: proofJobs({ releaseScope }),
+            total_count: releaseScope === HOSTED_RELEASE_SCOPE_PRODUCTION_CORE ? 10 : 5,
+          });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }, async () => {
+        const proof = await runTemporalCompatibility(compatibilityArgs({
+          dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
+          expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+          releaseScope,
+          prNumber: null,
+          sleepFn: async () => undefined,
+        }));
+        assert.equal(proof.readerCount, 3);
+        assert.equal(publicMainReads, 2);
+        assert.equal(privateMainReads, 2);
       }));
-      assert.equal(proof.readerCount, 3);
-      assert.equal(publicMainReads, 2);
-      assert.equal(privateMainReads, 2);
-    }));
-  });
+    });
+  }
 }
 
 test("controller rejects a dispatch race that runs a different private main head", async () => {
@@ -1548,3 +1556,15 @@ function jsonResponse(value, init = {}) {
     ...init,
   });
 }
+
+test("deployment candidate ancestry rejects foreign, rewritten and malformed history", () => {
+  const valid = { status: "ahead", base_commit: { sha: PUBLIC_SHA },
+    merge_base_commit: { sha: PUBLIC_SHA } };
+  inspectPublicCandidateAncestry(valid, PUBLIC_SHA);
+  for (const invalid of [null, {}, { ...valid, status: "behind" },
+    { ...valid, status: "diverged" }, { ...valid, status: "identical" },
+    { ...valid, base_commit: { sha: "e".repeat(40) } },
+    { ...valid, merge_base_commit: { sha: "e".repeat(40) } }]) {
+    assert.throws(() => inspectPublicCandidateAncestry(invalid, PUBLIC_SHA), /protected branch history/u);
+  }
+});

@@ -1225,3 +1225,18 @@ function listedPullRequest({
     state: "open",
   };
 }
+
+test("required main proof survives later merges while PR proof still supersedes", async () => {
+  for (const name of REQUIRED_OWNER_JOBS.keys()) {
+    const source = await workflow(name);
+    assert.match(source, /group: .*github\.event\.pull_request\.number \|\| github\.sha/u,
+      `${name} must bind main proof to the candidate SHA`);
+  }
+  const stripe = await workflow("hosted-stripe-billing.yml");
+  assert.match(jobBlock(stripe, "live-stripe-browser"), /queue: max/u,
+    "shared sandbox serialization must not discard pending candidate proof");
+  const admission = await workflow("temporal-web-deployment-admission.yml");
+  assert.match(admission, /group: temporal-web-deployment-admission/u);
+  assert.match(admission, /cancel-in-progress: false/u);
+  assert.doesNotMatch(admission, /queue: max/u, "retain only the latest pending candidate");
+});

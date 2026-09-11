@@ -45,6 +45,11 @@ Generated-image retirement after hosted media expiry is owned by
 `agent-docs/RELIABILITY.md`; implementation and verification are tracked in
 `agent-docs/exec-plans/completed/2026-09-10-generated-image-retention-expiry-fix.md`.
 
+Public production candidates retain SHA-scoped required checks and protected-main
+ancestry admission as documented in `operations/verification-and-runtime.md`,
+`references/hosted-temporal-orchestration.md`, `SECURITY.md`, and
+`../apps/web/README.md`. Vercel remains the managed Git promotion owner.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
