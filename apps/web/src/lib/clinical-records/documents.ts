@@ -124,10 +124,11 @@ async function issueClinicalDocumentTicket(input: {
     descriptor.errorCode = "document-reference-unavailable";
     return descriptor;
   }
+  let ticket: ClinicalDocumentTicket;
   try {
     const sourceKind = input.attachment.isMedia ? "media" : "binary";
     const url = resolveClinicalDocumentUrl(input.attachment.url, input.input.fhirBaseUrl, sourceKind);
-    const ticket = clinicalDocumentTicketSchema.parse({
+    ticket = clinicalDocumentTicketSchema.parse({
       schema: "murph.clinical-document-ticket.v1", queryScopeId: input.input.queryScopeId,
       sliceId: input.input.sliceId, queryFingerprint: input.input.queryFingerprint,
       parentPageSha256: input.parentPageSha256, resourceType: type, resourceId: input.parsedId,
@@ -141,19 +142,26 @@ async function issueClinicalDocumentTicket(input: {
       descriptor.errorCode = "document-size-exceeded";
       return descriptor;
     }
-    const sealed = await sealClinicalDocumentTicket({ memberId: input.input.memberId, runId: input.input.runId,
-      generation: input.input.generation, value: JSON.stringify(ticket) });
-    if (sealed.length > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS) descriptor.errorCode = "document-ticket-too-large";
-    else descriptor.ticket = sealed;
   } catch {
     descriptor.errorCode = "document-reference-unavailable";
+    return descriptor;
   }
+  let sealed: string;
+  try {
+    sealed = await sealClinicalDocumentTicket({ memberId: input.input.memberId, runId: input.input.runId,
+      generation: input.input.generation, value: JSON.stringify(ticket) });
+  } catch (cause) {
+    throw clinicalRecordsError({ cause, code: "CLINICAL_RECORD_DOCUMENT_TICKET_SEAL_FAILED", httpStatus: 503,
+      message: "The Clinical Records document ticket could not be sealed.", retryable: true });
+  }
+  if (sealed.length > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS) descriptor.errorCode = "document-ticket-too-large";
+  else descriptor.ticket = sealed;
   return descriptor;
 }
 
 export function decodeClinicalDocumentBase64(value: string): Buffer {
   const canonical = value.replace(/\s+/gu, "");
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(canonical)) {
+  if (!isCanonicalClinicalBase64(canonical)) {
     throw new TypeError("Invalid document base64.");
   }
   const bytes = Buffer.from(canonical, "base64");
@@ -161,6 +169,13 @@ export function decodeClinicalDocumentBase64(value: string): Buffer {
     throw new TypeError("Invalid document bytes.");
   }
   return bytes;
+}
+
+function isCanonicalClinicalBase64(value: string): boolean {
+  if (!value || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)) return false;
+  const padding = value.indexOf("=");
+  if (padding < 0) return true;
+  return padding >= value.length - 2 && value.length - padding <= 2;
 }
 
 export async function readClinicalDocumentResponse(input: {

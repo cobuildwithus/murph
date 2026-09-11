@@ -290,7 +290,7 @@ export async function fetchClinicalRetrievalPage(input: {
       pageUrl: pageUrl.url,
     });
     return await finishClinicalRetrievalPage({ response, input, run, retrievalSlice, pageUrl,
-      fhirBaseUrl, openedPatientId, claimed });
+      fhirBaseUrl, openedPatientId: requireFhirPatientId(openedPatientId), claimed });
   } catch (error) {
     await releaseRetrievalPageRequest({
       chargeReservation: providerRequestStarted,

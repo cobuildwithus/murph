@@ -98,9 +98,16 @@ export function listClinicalFhirAttachments(resource: unknown): ClinicalFhirAtta
 export function decodeClinicalDocumentBase64(value: string): Buffer | null {
   if (value.length > Math.ceil(CLINICAL_DOCUMENT_MAX_BYTES / 3) * 4 + 1024) return null;
   const normalized = value.replace(/\s+/gu, "");
-  if (!normalized || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(normalized)) return null;
+  if (!isCanonicalClinicalBase64(normalized)) return null;
   const bytes = Buffer.from(normalized, "base64");
   return bytes.length <= CLINICAL_DOCUMENT_MAX_BYTES && bytes.toString("base64") === normalized ? bytes : null;
+}
+
+function isCanonicalClinicalBase64(value: string): boolean {
+  if (!value || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)) return false;
+  const padding = value.indexOf("=");
+  if (padding < 0) return true;
+  return padding >= value.length - 2 && value.length - padding <= 2;
 }
 
 export function hashClinicalDocumentBytes(bytes: Uint8Array): string {

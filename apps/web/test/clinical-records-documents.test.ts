@@ -61,6 +61,10 @@ describe("Clinical document attachment boundary", () => {
     expect(await issue([parent, parent])).toMatchObject([{ ticket: null, errorCode: "document-parent-ambiguous" }]);
     expect(mocks.seal).not.toHaveBeenCalled();
   });
+  it("keeps a transient ticket-sealing failure retryable", async () => {
+    mocks.seal.mockRejectedValueOnce(new Error("temporary key service failure"));
+    await expect(issue([parent])).rejects.toMatchObject({ code: "CLINICAL_RECORD_DOCUMENT_TICKET_SEAL_FAILED", retryable: true });
+  });
   it("preserves unavailable references as explicit outcomes and skips inline bytes", async () => {
     const value = { ...parent, content: [
       { attachment: { url: "https://outside.example.test/document" } },
@@ -77,6 +81,14 @@ describe("Clinical document attachment boundary", () => {
       hash: createHash("sha1").update(bytes).digest("base64") }), url: new URL(`${base}/Binary/body-1`), maxResponseBytes: 30 * 1024 * 1024 });
     expect(result.bytes.equals(bytes)).toBe(true);
     expect(result.mediaType).toBe(json ? "text/plain" : "text/plain; charset=utf-8");
+  });
+  it("decodes a multi-megabyte FHIR Binary without recursive base64 matching", async () => {
+    const bytes = Buffer.alloc(4 * 1024 * 1024, 23);
+    const result = await readClinicalDocumentResponse({
+      response: Response.json({ resourceType: "Binary", id: "body-1", contentType: "application/octet-stream", data: bytes.toString("base64") }),
+      ticket: ticket({ mediaType: "application/octet-stream" }), url: new URL(`${base}/Binary/body-1`), maxResponseBytes: 30 * 1024 * 1024,
+    });
+    expect(result.bytes.equals(bytes)).toBe(true);
   });
   it.each([
     { id: "other" }, { data: "%%%" }, { data: "aA" }, { contentType: "application/pdf" },

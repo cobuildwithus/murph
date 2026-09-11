@@ -42,6 +42,8 @@ describe("clinical attachment contracts", () => {
   });
   it("decodes only complete canonical base64", () => {
     expect(decodeClinicalDocumentBase64(body.toString("base64"))).toEqual(body);
+    const large = Buffer.alloc(4 * 1024 * 1024, 17);
+    expect(decodeClinicalDocumentBase64(large.toString("base64"))).toEqual(large);
     expect(decodeClinicalDocumentBase64("SGVsbG8=!!!")).toBeNull();
     expect(decodeClinicalDocumentBase64("SGVsbG8")).toBeNull();
   });
