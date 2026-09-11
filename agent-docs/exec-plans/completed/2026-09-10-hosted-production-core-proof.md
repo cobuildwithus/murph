@@ -1,6 +1,6 @@
 # Require composed hosted production proof
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -71,4 +71,14 @@ download no private logs or artifacts.
 - Doc gardening and diff whitespace checks passed.
 - Paired private selector and workflow source inspected; independent public and
   private digest computations agree for the same synthetic vector.
-- Exact-head CI, private verification, and ReviewGPT remain pending.
+- Public ReviewGPT round 1 passed on dbaed8c2d665cd7c2c1579284857ef5f5a237498
+  with concrete gpt-6-pro evidence and a substantive full-patch review.
+- All four required public CI checks passed on that reviewed head.
+- Private exact-head verify CI passed; private review completion remains owned by
+  the paired PR. Unchanged optional integration failures are tracked separately.
+- The final plan-closure commit changes explanatory documentation only; its
+  required exact-head CI remains the final handoff gate.
+- Public PR: https://github.com/cobuildwithus/murph/pull/3218
+- Private prerequisite: https://github.com/cobuildwithus/murph-cloud/pull/129
+- No deployment, protected-environment change or live-provider run was performed.
+Completed: 2026-09-10
