@@ -630,7 +630,11 @@ class DeviceSyncServiceController {
   }
 
   listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[] {
-    return this.jobTimingDiagnostics.map((entry) => ({ ...entry }));
+    return this.jobTimingDiagnostics.map((entry) => ({
+      ...entry,
+      snapshotImportOutcomes: { ...entry.snapshotImportOutcomes },
+      completeSourceDayImportOutcomes: { ...entry.completeSourceDayImportOutcomes },
+    }));
   }
 
   start(): void {
@@ -944,6 +948,8 @@ class DeviceSyncServiceController {
     let providerResourceRequestCount = 0;
     let providerResourceRequestElapsedMs = 0;
     let snapshotImportCount = 0;
+    const snapshotImportOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
+    const completeSourceDayImportOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
     let snapshotImportElapsedMs = 0;
     let snapshotCanonicalCoreElapsedMs = 0;
     let snapshotCanonicalWriteElapsedMs = 0;
@@ -992,6 +998,8 @@ class DeviceSyncServiceController {
             ),
         ...(resource ? { resource } : {}),
         snapshotImportCount,
+        snapshotImportOutcomes,
+        completeSourceDayImportOutcomes,
         snapshotImportElapsedMs,
         snapshotCanonicalCoreElapsedMs,
         snapshotCanonicalWriteElapsedMs,
@@ -1346,6 +1354,7 @@ class DeviceSyncServiceController {
           ensureExecutionActive();
           const importStartedAt = currentNow();
           snapshotImportCount += 1;
+          let importOutcome: keyof typeof snapshotImportOutcomes = "failed";
           let importResult: Awaited<ReturnType<DeviceSyncImporterPort["importDeviceProviderSnapshot"]>>;
           try {
             importResult = await this.importer.importDeviceProviderSnapshot(
@@ -1357,7 +1366,13 @@ class DeviceSyncServiceController {
               },
               { importSession: input.importSession, signal: jobAbortController.signal },
             );
+            const applied = toPlainRecord(importResult)?.applied;
+            importOutcome = applied === true ? "applied" : applied === false ? "noop" : "unknown";
           } finally {
+            snapshotImportOutcomes[importOutcome] += 1;
+            if (options?.completeSourceDay) {
+              completeSourceDayImportOutcomes[importOutcome] += 1;
+            }
             snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(
               importStartedAt,
               currentNow(),
@@ -1937,7 +1952,11 @@ class DeviceSyncServiceController {
   }
 
   private recordJobTimingDiagnostic(entry: DeviceSyncJobTimingDiagnostic): void {
-    this.jobTimingDiagnostics.push({ ...entry });
+    this.jobTimingDiagnostics.push({
+      ...entry,
+      snapshotImportOutcomes: { ...entry.snapshotImportOutcomes },
+      completeSourceDayImportOutcomes: { ...entry.completeSourceDayImportOutcomes },
+    });
 
     if (this.jobTimingDiagnostics.length > DEVICE_SYNC_JOB_TIMING_DIAGNOSTIC_LIMIT) {
       this.jobTimingDiagnostics.splice(

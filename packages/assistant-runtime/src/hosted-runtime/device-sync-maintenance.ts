@@ -19,6 +19,7 @@ import type {
   DeviceSyncJobFailureEventOrigin,
   DeviceSyncJobRecord,
   DeviceSyncJobTimingDiagnostic,
+  DeviceSyncImportOutcomeCounts,
 } from "@murphai/device-syncd/types";
 import {
   JUNCTION_ECG_BINDING_REASONS,
@@ -1590,6 +1591,18 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
                 0,
               ),
               deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
+              deviceSyncImportAppliedCount: jobTimingSummary.importOutcomes.applied,
+              deviceSyncImportNoopCount: jobTimingSummary.importOutcomes.noop,
+              deviceSyncImportFailedCount: jobTimingSummary.importOutcomes.failed,
+              deviceSyncImportUnknownCount: jobTimingSummary.importOutcomes.unknown,
+              deviceSyncCompleteSourceDayImportAppliedCount:
+                jobTimingSummary.completeSourceDayImportOutcomes.applied,
+              deviceSyncCompleteSourceDayImportNoopCount:
+                jobTimingSummary.completeSourceDayImportOutcomes.noop,
+              deviceSyncCompleteSourceDayImportFailedCount:
+                jobTimingSummary.completeSourceDayImportOutcomes.failed,
+              deviceSyncCompleteSourceDayImportUnknownCount:
+                jobTimingSummary.completeSourceDayImportOutcomes.unknown,
               deviceSyncJobTimingSampleLimit: HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
               deviceSyncJobTimingSummaries: jobTimingSummary.summaries,
               deviceSyncJobTimingTruncated: jobTimingSummary.truncated,
@@ -1651,13 +1664,28 @@ function summarizeHostedDeviceSyncJobTimings(
   diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
 ): {
   summaries: Array<Record<string, boolean | number | string | null>>;
+  importOutcomes: DeviceSyncImportOutcomeCounts;
+  completeSourceDayImportOutcomes: DeviceSyncImportOutcomeCounts;
   truncated: boolean;
 } {
+  const importOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
+  const completeSourceDayImportOutcomes = { applied: 0, noop: 0, failed: 0, unknown: 0 };
+  // Count the whole bounded pass, including imports inside reconciliation jobs.
+  // Slow-job samples below are deliberately unsuitable as a rate denominator.
+  for (const diagnostic of diagnostics) {
+    for (const outcome of ["applied", "noop", "failed", "unknown"] as const) {
+      importOutcomes[outcome] += diagnostic.snapshotImportOutcomes[outcome];
+      completeSourceDayImportOutcomes[outcome] +=
+        diagnostic.completeSourceDayImportOutcomes[outcome];
+    }
+  }
   const slowest = [...diagnostics]
     .sort((left, right) => right.elapsedMs - left.elapsedMs)
     .slice(0, HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT);
 
   return {
+    importOutcomes,
+    completeSourceDayImportOutcomes,
     summaries: slowest.map((diagnostic) => ({
       attempts: diagnostic.attempts,
       connectionSourceReadCount: diagnostic.connectionSourceReadCount,

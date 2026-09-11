@@ -738,6 +738,8 @@ test("device sync service records privacy-safe job phase timings", async () => {
       providerUnattributedElapsedMs: 1_500,
       resource: "sleep",
       snapshotImportCount: 1,
+      snapshotImportOutcomes: { applied: 1, noop: 0, failed: 0, unknown: 0 },
+      completeSourceDayImportOutcomes: { applied: 0, noop: 0, failed: 0, unknown: 0 },
       snapshotImportElapsedMs: 2_000,
       snapshotCanonicalCoreElapsedMs: 1_600,
       snapshotCanonicalWriteElapsedMs: 200,
@@ -745,6 +747,92 @@ test("device sync service records privacy-safe job phase timings", async () => {
       snapshotEventIdentityIndexElapsedMs: 1_200,
       snapshotNormalizationElapsedMs: 300,
     }]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync import outcomes distinguish no-ops, unknowns, and failures across complete source days", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-outcomes");
+  const now = "2026-08-25T10:00:00.000Z";
+  let importCount = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => new Date(now) },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: { warn() {} },
+    },
+    providers: [createFakeProvider({
+      async executeJob(context) {
+        for (let index = 0; index < 6; index += 1) {
+          await context.importSnapshot({}, index < 3 ? undefined : {
+            completeSourceDay: {
+              connectionId: "synthetic-connection",
+              dayKey: "2026-08-23",
+              resources: ["blood_oxygen"],
+              revisionAt: now,
+              timeZone: "UTC",
+            },
+          });
+        }
+        return {};
+      },
+    })],
+    importer: {
+      async importDeviceProviderSnapshot() {
+        importCount += 1;
+        if (importCount === 6) {
+          throw new Error("Synthetic import failure");
+        }
+        if (importCount === 3) {
+          return { ok: true };
+        }
+        return { applied: importCount === 1 || importCount === 4 };
+      },
+    },
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-import-outcomes",
+      scopes: ["read:data"],
+      tokens: {
+        accessToken: "synthetic-access",
+        accessTokenEncrypted: encryptStoredAccessToken(
+          "demo", "demo-import-outcomes", "synthetic-access",
+        ),
+        refreshToken: "synthetic-refresh",
+      },
+      connectedAt: now,
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "demo",
+      kind: "reconcile",
+      payload: {},
+      availableAt: now,
+    });
+    await service.runWorkerOnce();
+    const [diagnostic] = service.listJobTimingDiagnostics();
+    assert(diagnostic);
+    assert.equal(diagnostic?.outcome, "failed");
+    assert.equal(diagnostic?.snapshotImportCount, 6);
+    assert.equal(diagnostic?.canonicalProgressCommitted, true);
+    assert.deepEqual(diagnostic?.snapshotImportOutcomes, {
+      applied: 2, noop: 2, failed: 1, unknown: 1,
+    });
+    assert.deepEqual(diagnostic?.completeSourceDayImportOutcomes, {
+      applied: 1, noop: 1, failed: 1, unknown: 0,
+    });
+    // Returned diagnostics cannot mutate the service's retained counters.
+    diagnostic.snapshotImportOutcomes.noop = 999;
+    diagnostic.completeSourceDayImportOutcomes.noop = 999;
+    const [retained] = service.listJobTimingDiagnostics();
+    assert.equal(retained?.snapshotImportOutcomes.noop, 2);
+    assert.equal(retained?.completeSourceDayImportOutcomes.noop, 1);
   } finally {
     close();
   }
