@@ -1,8 +1,6 @@
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
+import { isSmallRunnerMember } from "./small-runner-profile.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
@@ -16,9 +14,7 @@ import {
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
-  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeFailurePhaseCode,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
@@ -33,6 +29,7 @@ import {
 } from "./runner-container-ca-env.ts";
 import {
   isHostedRunnerSlotName,
+  isHostedSmallRunnerSlotName,
   isHostedRunnerTargetName,
   isHostedStandbySlotName,
   readHostedStandbyReleaseId,
@@ -259,12 +256,10 @@ export type RunnerContainerEnsureReadyForProcessingResult =
       action?: "already_warm" | "started";
       coldStartTiming?: RunnerContainerColdStartTiming;
       kind: "ready";
-      shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
     }
   | {
       action?: never;
       kind: "cleanup_unsettled";
-      shellPrewarmObservation?: never;
     };
 
 export interface RunnerContainerColdStartTiming {
@@ -288,42 +283,6 @@ type RunnerContainerEnsureReadyResult = {
     "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
   >;
 };
-
-export interface RunnerContainerShellPrewarmObservation {
-  firstHintAtEpochMs: number;
-  hintCount: number;
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  finishedAtEpochMs?: number;
-  operationElapsedMs?: number;
-  outcome?: RunnerContainerShellPrewarmOutcome;
-  source: CloudflareHostedControlRuntimeShellPrewarmSource | "unknown";
-}
-
-export type RunnerContainerShellPrewarmOutcome =
-  | "cold_start_observed"
-  | "failed"
-  | "start_issued_warm"
-  | "superseded";
-
-export interface RunnerContainerBeginShellPrewarmInput
-  extends RunnerContainerEnsureReadyForProcessingInput {
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  source?: CloudflareHostedControlRuntimeShellPrewarmSource;
-}
-
-export type RunnerContainerPrewarmShellResult =
-  | {
-      action: "start_issued";
-      kind: "started";
-    }
-  | {
-      action: "superseded";
-      kind: "superseded";
-    };
-
-export interface RunnerContainerBeginShellPrewarmResult {
-  accepted: true;
-}
 
 export interface RunnerContainerRuntimeCompletionRecordedInput {
   attemptId: string;
@@ -351,12 +310,6 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
-  beginShellPrewarm?(
-    input: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult>;
-  prewarmShell?(
-    input: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   onRuntimeCompletionRecorded?(
@@ -663,7 +616,7 @@ export class RunnerContainer extends Container {
 
   protected readonly environment: RunnerContainerEnvironmentSource;
   // This discriminator is namespace identity, not a second lifecycle owner.
-  protected readonly slotNamespace: "runner" | "standby" = "runner";
+  protected readonly slotNamespace: "runner" | "standby" | "small" = "runner";
   private slotStore: RunnerSlotBindingStore | null = null;
   private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -717,6 +670,7 @@ export class RunnerContainer extends Container {
     if (this.slotNamespace === "standby") {
       throw new Error("Legacy standby inventory is drain-only.");
     }
+    if (this.slotNamespace === "small") throw new Error("Small runners do not provide shared standby inventory.");
     if (readHostedRunnerDeployment(this.environment)?.previous?.id === input.releaseId) {
       throw new Error("Previous runner inventory is drain-only.");
     }
@@ -777,6 +731,10 @@ export class RunnerContainer extends Container {
       const store = this.requireRunnerSlotStore();
       if (this.slotNamespace === "standby" && store.readOptional()?.state !== "bound") {
         throw new Error("Legacy standby allocation is drain-only.");
+      }
+      if (this.slotNamespace === "small" && store.readOptional()?.state !== "bound"
+        && !await isSmallRunnerMember(this.environment, input.userId)) {
+        throw new Error("The member is not eligible for a small runner binding.");
       }
       const deployment = readHostedRunnerDeployment(this.environment);
       if (deployment && input.releaseId !== deployment.active.id && store.readOptional()?.state !== "bound") {
@@ -917,7 +875,8 @@ export class RunnerContainer extends Container {
   private assertRunnerSlotNamespace(slotName: string): void {
     const valid = this.slotNamespace === "standby"
       ? isHostedStandbySlotName(slotName)
-      : isHostedRunnerSlotName(slotName);
+      : this.slotNamespace === "small" ? isHostedSmallRunnerSlotName(slotName)
+        : isHostedRunnerSlotName(slotName) && !isHostedSmallRunnerSlotName(slotName);
     if (!valid) throw new Error("Hosted runner slot belongs to a different namespace.");
     if (this.durableObjectName !== null && this.durableObjectName !== slotName) {
       throw new Error("Hosted runner slot does not match the addressed Durable Object.");
@@ -1313,23 +1272,6 @@ export class RunnerContainer extends Container {
       }
       throw error;
     }
-  }
-
-  // Accept queued calls from older workers without allocating member-specific shells.
-  async beginShellPrewarm(
-    payload: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult> {
-    const input = parseRunnerContainerBeginShellPrewarmInput(payload);
-    this.authorizeBoundUser(input.userId);
-    return { accepted: true };
-  }
-
-  async prewarmShell(
-    payload: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult> {
-    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    this.authorizeBoundUser(input.userId);
-    return { action: "superseded", kind: "superseded" };
   }
 
   async abortWorkspaceInvocation(input: {
@@ -4633,29 +4575,6 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
         }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
-  };
-}
-
-function parseRunnerContainerBeginShellPrewarmInput(
-  payload: RunnerContainerBeginShellPrewarmInput,
-): RunnerContainerBeginShellPrewarmInput {
-  const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-  const orchestration =
-    sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
-      payload.orchestration,
-    );
-  if (
-    payload.source !== undefined
-    && payload.source !== "linq-instant-start"
-    && payload.source !== "linq-message-routing"
-    && payload.source !== "linq-typing-started"
-  ) {
-    throw new TypeError("payload.source must be a supported shell-prewarm source.");
-  }
-  return {
-    ...input,
-    ...(orchestration === null ? {} : { orchestration }),
-    ...(payload.source === undefined ? {} : { source: payload.source }),
   };
 }
 

@@ -1,6 +1,6 @@
 # Non-expiring starter usage
 
-Last verified: 2026-08-18
+Last verified: 2026-09-10
 Status: Implemented current-state contract
 
 ## Product contract
@@ -102,28 +102,28 @@ idempotent wake for the resolved member while the accepted direct paid phase
 remains current. An expired processing lease does the same conservatively, so
 a process loss after the paid commit cannot discard the wake.
 
-Legacy Stripe trial subscriptions may still emit delayed events after rollout.
-The retained compatibility code may identify, cancel, or reconcile those exact
-provider objects, but historical trial fields and offer metadata are read-only
-legacy evidence. They must never restore a time-based entitlement, create a new
-trial, extend one, or suppress starter capacity.
+Legacy paid subscriptions still carry the historical Pulse-trial offer and
+policy metadata. Exact identity and known-policy validation remain part of
+ordinary paid reconciliation. An `active`, `past_due`, or `unpaid` provider
+subscription is potentially paid service, never authority for a free grant or
+trial-specific cancellation. `invoice.paid` remains the only source that may
+turn legacy trial evidence into paid access, and its line Price must overlap
+the exact subscription's current Price before Murph accepts that conversion.
+An invoice-proven paid identity continues to reconcile cancellation,
+delinquency, and recovery through the normal subscription owner. Exact bound
+terminal updates remain authoritative after delinquency clears the paid phase
+and on cancellation retries; they remove access without granting capacity.
 
-During the bounded compatibility window, an exact legacy trial object in a
-non-paid provider state is converted through the same Starter grant owner used
-by signup and migration. The conversion reads the historical trial usage
-period, appends the canonical full grant plus the deterministic debit when
-needed, and clears the obsolete local Stripe identity. Provider states that may
-represent paid service (`active`, `past_due`, or `unpaid`) fail closed and stay
-on the ordinary invoice-backed reconciliation path. `invoice.paid` remains the
-only source that may turn legacy trial evidence into paid access, and its line
-Price must overlap the exact subscription's current Price before Murph accepts
-that conversion.
+The unpaid provider-object drain and its delayed-event window are complete.
+Unbound retired unpaid trial events and unpaid trial Checkout events return the
+existing empty activation outcome: no Starter migration grant, activation,
+billing-identity replacement, or trial-specific cancellation. There is no new
+age-based replay exclusion. Generic Family-loser financial reconciliation and
+account-deletion cleanup retain their ordinary authority checks.
 
-Family invite acceptance never treats a locally `paused` legacy row as safe to
-sponsor while its Stripe subscription remains bound. The provider-validated
-retirement owner clears that obsolete binding first; the ordinary Family guard
-then admits the Starter member while continuing to fail closed for every bound
-nonterminal direct subscription.
+A Family invitation still fails closed for every bound nonterminal direct
+subscription, including a locally paused row. The retired trial path no longer
+clears such bindings or creates free access.
 
 ## Existing-member migration
 
@@ -137,9 +137,9 @@ canonical starter ledger history:
 5. preserve purchased and referral credit; and
 6. clear a persisted usage block only when total available credit is positive.
 
-This shape applies to untouched, partially consumed, and fully exhausted
-accounts. Fully exhausted accounts therefore retain auditable full-grant and
-full-debit history instead of disappearing from the starter ledger. Paid
+The completed migration applied this shape to untouched, partially consumed,
+and fully exhausted accounts. Fully exhausted accounts therefore retain
+auditable full-grant and full-debit history instead of disappearing from the starter ledger. Paid
 conversions, suspended members, and explicitly terminal billing states are not
 reactivated.
 
@@ -157,8 +157,9 @@ The current product has no:
 - trial-only checkout offer exposed to new users.
 
 Historical completed execution plans and database columns remain historical
-records. Live code may retain only the bounded legacy Stripe-cleanup reads
-required to drain already-created provider objects.
+records. Live code retains paid normalization, immutable history decoding, and
+completed-receipt recovery; the unpaid migration and cancellation paths are
+removed.
 
 ## Deployment and rollback
 
@@ -181,15 +182,20 @@ production apply retired 69 exact candidates, then its automatic verification
 reported zero remaining candidates and convergence. The one-time Ops control,
 batch route and service, and local CLI were then removed.
 
-The checkout-time per-member cleanup owner is removed after the completed
-provider-object drain. Starting an ordinary paid Checkout no longer retrieves
-or cancels a legacy subscription. Keep the configured accepted legacy Pulse
-Price plus the delayed-event, Family-conversion, and account-deletion guards
-through the delayed-event and manual-replay horizon so exact old objects remain
-verifiable. These retained guards continue to fail closed for unreadable,
-ambiguous, or potentially paid provider state. After that horizon has passed,
-remove the remaining legacy offer fields and event compatibility together in a
-separate contracting change.
+The checkout-time cleanup owner and delayed unpaid-trial conversion/cancellation
+owner are removed. Starting an ordinary paid Checkout does not retrieve or
+cancel a legacy trial. Preserve the accepted legacy Pulse Price, paid offer
+normalization, historical ledger provenance, and completed-receipt fallback.
+Those have current consumers independent of the completed unpaid drain. The
+generic customer-provisioning idempotency namespace also retains its historical
+name so unknown-outcome retries address the original provider operation.
+
+Before rollout of the unpaid contraction, recheck that no unpaid legacy
+subscription bindings or pending legacy phone-transfer deletion cleanup remain.
+Deploy through the normal Web compatibility path. Do not reset poisoned
+receipts, rewrite historical ledger entries, or impose a new replay policy.
+After deploy, ordinary paid events and historical completed receipt retries
+must retain their existing behavior.
 
 Rollback after the committed Starter migration is forward-only: repair or
 redeploy the current compatible Web/runner pair. A pre-Starter Web or runner
@@ -210,20 +216,21 @@ After deploy, verify:
 - paid checkout still activates only from accepted Stripe paid evidence and
   resumes already accepted Starter-exhausted work without another inbound;
 - subscription-first and invoice-first paid-event orderings each produce one
-  retry-owned runtime recheck, while replay produces none; and
+  retry-owned runtime recheck, while replay produces none;
 - a failed post-commit signal and an expired receipt lease both reissue the
   already-committed paid wake before the receipt can complete;
-- delayed legacy trial events cannot recreate or extend free access; and
-- a legacy trial retired to Starter can accept a Family invitation only after
-  its obsolete direct subscription binding is cleared.
+- delayed legacy trial events cannot recreate or extend free access;
+- paid legacy cancellation and delinquency update current billing without
+  creating Starter credit; and
+- phone transfer rejects retired trial billing scaffolds while retaining the
+  ordinary pristine and untouched Starter source checks.
 
-Remaining event compatibility is removable only when all three conditions
-hold: old trial creators are gone, the operator dry-run has reported zero, and
-the maximum delayed Stripe event and manual-replay horizon has elapsed. The
-first two are complete; the horizon remains the final gate for those retained
-event guards. Analytics-only cohort names and immutable historical records are
-not runtime compatibility and may remain.
+Paid legacy event normalization, completed-receipt fallback, and accounting
+history are separate compatibility contracts. Their removal requires proof that
+their own consumers are gone; expiration of an old trial event window does not
+supply that proof. Analytics-only cohort names and immutable historical records
+may remain.
 
 Do not revert the Starter migration: its ledger kind and historical entries are
-accounting history. Recovery after migration commit is forward-only while both
-the Web direct-control deployment and the Temporal worker remain paused.
+accounting history. Recovery after migration commit remains forward-only
+against the compatible Web and runner deployment.

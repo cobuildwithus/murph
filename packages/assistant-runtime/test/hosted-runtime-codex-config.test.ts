@@ -1,3 +1,4 @@
+import { executeOperatorDiagnostic } from "@murphai/assistant-engine/assistant-ask";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -51,6 +52,7 @@ import {
 } from "../src/hosted-runtime/launch-spec.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+  resolveHostedOperatorModelProvider,
 } from "../src/hosted-runtime/codex-runtime-env.ts";
 import {
   buildHostedRunnerExecutablePath,
@@ -495,7 +497,10 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.match(config, /base_url = "https:\/\/api\.venice\.ai\/api\/v1"/u);
   assert.match(config, /env_key = "VENICE_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
-  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(
+    readProviderConfigSection(config, "venice"),
+    /^supports_websockets = true$/mu,
+  );
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /^expose_spawn_agent_model_overrides = false$/mu);
@@ -535,7 +540,10 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.match(config, /^model_auto_compact_token_limit = 98304$/mu);
   assert.match(config, /^request_max_retries = 1$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
-  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(
+    readProviderConfigSection(config, "hosted-custom-inference"),
+    /^supports_websockets = true$/mu,
+  );
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
@@ -1323,6 +1331,80 @@ test("hosted Codex current-time proof ignores non-authoritative request content"
     1,
   );
 });
+
+test.each(["openai", "venice", "custom-inference"])(
+  "hosted %s config registers credential-based OpenAI for operator tasks",
+  async (provider) => {
+    const operatorHomeRoot = await createTemporaryDirectory();
+    const prepared = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: provider === "custom-inference" ? "hosted-custom-inference" : provider,
+        HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "32000",
+        OPENAI_API_KEY: "synthetic-openai-credential",
+        VENICE_API_KEY: "synthetic-venice-credential",
+        MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-custom-credential",
+      },
+    });
+    const config = await readFile(prepared.codexConfigPath, "utf8");
+    const operatorProvider = resolveHostedOperatorModelProvider(
+      prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    );
+    assert.equal(operatorProvider, "hosted-openai");
+    const section = readProviderConfigSection(config, "hosted-openai");
+    assert.match(section, /^env_key = "OPENAI_API_KEY"$/mu);
+    assert.match(section, /^requires_openai_auth = false$/mu);
+    assert.doesNotMatch(config, /synthetic-.*-credential/u);
+  },
+);
+
+for (const memberProvider of ["openai", "venice"]) {
+  testHostedCodexAuthE2e(`operator diagnostic authenticates through hosted config with ${memberProvider} member provider`, async () => {
+    const operatorHomeRoot = await createTemporaryDirectory();
+    const requests: string[] = [];
+    const authorizationHeaders: string[] = [];
+    const answer = { outcome: "answered", answer: "Synthetic retained error is unavailable." };
+    const server = await startResponsesStubServer({
+      requests, authorizationHeaders,
+      requiredAuthorization: "Bearer synthetic-operator-credential",
+      responseText: JSON.stringify(answer),
+    });
+    try {
+      const prepared = await prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: memberProvider,
+          [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: `${readServerBaseUrl(server)}/v1`,
+          NODE_ENV: "test",
+          OPENAI_API_KEY: "synthetic-operator-credential",
+          VENICE_API_KEY: "synthetic-member-credential",
+          PATH: process.env.PATH ?? "",
+        },
+      });
+      const result = await executeOperatorDiagnostic({
+        codexHome: prepared.codexHome,
+        env: prepared.runtimeEnv,
+        model: "gpt-5.6-sol",
+        modelProvider: resolveHostedOperatorModelProvider(
+          prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+        ),
+        question: "Report whether the synthetic retained error is available.",
+        workspaceRoot: operatorHomeRoot,
+        abortSignal: AbortSignal.timeout(60_000),
+      });
+      assert.deepEqual(result, answer);
+      // Native Codex may probe WebSockets before falling back to this HTTP stub.
+      // Every transport attempt must authenticate, with one actual model request.
+      assert.ok(authorizationHeaders.length > 0);
+      assert.ok(authorizationHeaders.every((header) => header === "Bearer synthetic-operator-credential"));
+      const modelRequests = requests.filter((body) => body.length > 0);
+      assert.equal(modelRequests.length, 1);
+      assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-5.6-sol");
+    } finally {
+      await closeHttpServer(server);
+    }
+  }, 90_000);
+}
 
 testHostedCodexAuthE2e(
   "hosted Codex runtime authenticates, excludes native memory, and rejects legacy OpenAI config",
@@ -2270,7 +2352,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
     exposeSpawnAgentModelOverrides: true,
     model: null,
     provider: {
-      id: "openai",
+      id: "hosted-openai",
       name: "OpenAI",
       baseUrl: "https://api.openai.com/v1",
       envKey: "OPENAI_API_KEY",
@@ -2282,7 +2364,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
   assert.equal(
     config,
     [
-      'model_provider = "openai"',
+      'model_provider = "hosted-openai"',
       'model_reasoning_effort = "medium"',
       `model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}`,
       'log_dir = "/tmp/murph-codex-log"',
@@ -2291,7 +2373,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "check_for_update_on_startup = false",
       "allow_login_shell = false",
       "",
-      '[model_providers."openai"]',
+      '[model_providers."hosted-openai"]',
       'name = "OpenAI"',
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
@@ -3161,4 +3243,10 @@ function assertHostedCodexAutoCompactTokenLimit(config: string): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readProviderConfigSection(config: string, provider: string): string {
+  const section = config.split(`[model_providers."${provider}"]\n`)[1]?.split("\n[")[0];
+  assert.ok(section, `Expected provider configuration for ${provider}`);
+  return section;
 }

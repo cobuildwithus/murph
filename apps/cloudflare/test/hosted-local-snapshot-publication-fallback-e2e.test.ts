@@ -10,10 +10,9 @@ import {
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
+import type {
+  HostedBrowserVaultReplicaRef,
+  HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   isHostedWorkspaceSnapshotV2Ref,
@@ -21,10 +20,6 @@ import {
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
@@ -45,6 +40,7 @@ import {
   type HostedLocalLinqStub,
   type ObservedLinqRequest,
 } from "./helpers/hosted-local-linq-support.js";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 
 const runId = Date.now();
 const userId = `member_local_snapshot_publication_fallback_${runId}`;
@@ -350,15 +346,14 @@ async function seedBaselineWorkspaceSnapshot(): Promise<HostedExecutionSnapshotR
   await mkdir(path.dirname(markerPath), { recursive: true });
   await writeFile(markerPath, baselineFileContents, "utf8");
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
-  const snapshotRef = createSnapshotBundleRef({
-    hash,
-    size: snapshot.bundle.byteLength,
-  });
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
     environment: requireScenario().runtimeEnv,
@@ -372,17 +367,6 @@ async function seedBaselineWorkspaceSnapshot(): Promise<HostedExecutionSnapshotR
   });
   expect(checkpoint.status).toBe("updated");
 
-  const uploadResponse = await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${hash}`,
-    {
-      body: new Blob([new Uint8Array(snapshot.bundle)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "PUT",
-    },
-  );
-  expect(uploadResponse.status).toBe(200);
   return snapshotRef;
 }
 
@@ -620,18 +604,6 @@ function requireWorkspaceVersion(status: HostedRunnerStatusResponse): bigint {
     throw new Error("Hosted snapshot publication fallback status is missing a workspace version.");
   }
   return BigInt(version);
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(

@@ -121,7 +121,6 @@ readonly typecheck_package_dirs=(
   "packages/gateway-core"
   "packages/cli"
   "packages/openclaw-plugin"
-  "packages/assistantd"
   "packages/assistant-runtime"
   "packages/vault-usecases"
   "apps/web"

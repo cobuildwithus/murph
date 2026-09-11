@@ -1,16 +1,19 @@
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   addCaptureWithLookup,
+  applyHostedCanonicalWriteReceipt,
   findCaptureByLookup,
   initializeVault,
   readJsonlRecords,
   runGeneratedImageCaptureRetention,
   validateVault,
+  withHostedCanonicalWritePort,
+  type HostedCanonicalWritePersistenceInput,
   VaultError,
 } from "@murphai/core";
 
@@ -98,6 +101,99 @@ async function readLookupIndex(vaultRoot: string): Promise<{
 }
 
 describe("generated image capture retention", () => {
+  it("retires a due image reported missing by the materializer without counting absent bytes", async () => {
+    const vaultRoot = await createTempVault();
+    const capture = await addGeneratedCapture({
+      lookupKey: "generated:expired-hosted-image",
+      recordedAt: "2026-07-01T12:00:00.000Z",
+      vaultRoot,
+    });
+    const attachmentRef = capture.event.attachments![0]!.relativePath;
+    await rm(path.join(vaultRoot, attachmentRef));
+    const replayRoot = await createTempVault();
+    await cp(vaultRoot, replayRoot, { recursive: true });
+    const persisted: HostedCanonicalWritePersistenceInput[] = [];
+    const input = {
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      vaultRoot,
+      materializeCandidatePaths: async () => ({ missingStoredPaths: [attachmentRef] }),
+    };
+
+    await expect(withHostedCanonicalWritePort({
+      async persistCanonicalWrite(write) { persisted.push(write); },
+    }, () => runGeneratedImageCaptureRetention(input))).resolves.toMatchObject({
+      blockedCaptureCount: 0,
+      retiredByteCount: 0,
+      retiredCaptureCount: 1,
+      nextEligibleAt: null,
+    });
+    await expect(findCaptureByLookup({
+      vaultRoot,
+      lookupKey: "generated:expired-hosted-image",
+    })).resolves.toMatchObject({ status: "deleted" });
+    const tombstone = JSON.parse(await readFile(path.join(vaultRoot, attachmentRef), "utf8"));
+    expect(tombstone.reason).toBe("generated_image_retention");
+    expect((await validateVault({ vaultRoot })).valid).toBe(true);
+    expect(persisted).toHaveLength(1);
+    const write = persisted[0]!;
+    expect(write.receipt.actions[0]).toMatchObject({
+      kind: "text_upsert", targetRelativePath: attachmentRef, effect: "create", allowRaw: true,
+    });
+    const replay = () => applyHostedCanonicalWriteReceipt({
+      vaultRoot: replayRoot,
+      receipt: write.receipt,
+      readPayload: async (ref) => write.payloads.find((payload) => payload.sha256 === ref.sha256)?.bytes ?? null,
+    });
+    await replay();
+    await replay();
+    expect(await findCaptureByLookup({ vaultRoot: replayRoot, lookupKey: "generated:expired-hosted-image" }))
+      .toMatchObject({ status: "deleted" });
+    await writeFile(path.join(replayRoot, attachmentRef), "unexpected bytes");
+    await expect(replay()).rejects.toMatchObject({ code: "HOSTED_CANONICAL_WRITE_RAW_CONFLICT" });
+    expect(await readFile(path.join(replayRoot, attachmentRef), "utf8")).toBe("unexpected bytes");
+    await expect(runGeneratedImageCaptureRetention(input)).resolves.toMatchObject({
+      blockedCaptureCount: 0,
+      retiredCaptureCount: 0,
+      nextEligibleAt: null,
+    });
+  });
+
+  it.each(["unreported", "changed", "manifest-hash", "manifest-owner"])(
+    "does not let the missing-path report bypass %s validation",
+    async (scenario) => {
+      const vaultRoot = await createTempVault();
+      const lookupKey = `generated:missing-${scenario}`;
+      const capture = await addGeneratedCapture({
+        lookupKey, recordedAt: "2026-07-01T12:00:00.000Z", vaultRoot,
+      });
+      const attachmentRef = capture.event.attachments![0]!.relativePath;
+      if (scenario === "changed") {
+        await writeFile(path.join(vaultRoot, attachmentRef), "changed bytes");
+      } else {
+        await rm(path.join(vaultRoot, attachmentRef));
+      }
+      const manifestPath = path.join(vaultRoot, capture.manifestPath!);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      if (scenario === "manifest-hash") manifest.artifacts[0].sha256 = "0".repeat(64);
+      if (scenario === "manifest-owner") manifest.owner.id = "another-capture";
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      const result = await runGeneratedImageCaptureRetention({
+        vaultRoot, now: new Date("2026-07-15T12:00:00.000Z"),
+        materializeCandidatePaths: async () => ({
+          missingStoredPaths: scenario === "unreported" ? ["raw/unrelated.png"] : [attachmentRef],
+        }),
+      });
+      expect(result).toMatchObject({ blockedCaptureCount: 1, retiredCaptureCount: 0 });
+      expect(await findCaptureByLookup({ vaultRoot, lookupKey })).toMatchObject({ status: "live" });
+      expect(await readFile(manifestPath, "utf8")).toBe(JSON.stringify(manifest));
+      if (scenario === "changed") {
+        expect(await readFile(path.join(vaultRoot, attachmentRef), "utf8")).toBe("changed bytes");
+      } else {
+        await expect(readFile(path.join(vaultRoot, attachmentRef))).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    },
+  );
+
   it("is a no-op when an empty checkpoint workspace has no lookup index", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-empty-retention-"));
     cleanupPaths.push(vaultRoot);

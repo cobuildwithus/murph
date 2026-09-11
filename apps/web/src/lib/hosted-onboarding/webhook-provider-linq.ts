@@ -4252,8 +4252,8 @@ function buildHostedLinqFirstContactAdmissionText(
       || part.type === "imessage_app"
     )
     .map((part) => part.type === "imessage_app"
-      ? normalizeHostedLinqPartText(part.fallback_text) ?? ""
-      : normalizeHostedLinqPartText(part.value) ?? "")
+      ? normalizeNullableString(part.fallback_text) ?? ""
+      : normalizeNullableString(part.value) ?? "")
     .filter(Boolean)
     .join("\n")
     .trim();
@@ -4423,7 +4423,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   senderMemberId?: string;
   userId: string;
 }): ReturnType<typeof buildHostedExecutionLinqConversationMessageWake> {
-  const fullWake = buildHostedExecutionLinqConversationMessageWake({
+  const wakeInput: Parameters<typeof buildHostedExecutionLinqConversationMessageWake>[0] = {
     ...(input.accountLookupKey === undefined
       ? {}
       : { accountLookupKey: input.accountLookupKey }),
@@ -4445,60 +4445,29 @@ function buildHostedLinqConversationWakeForMailbox(input: {
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
     userId: input.userId,
-  });
+  };
+  const fullWake = buildHostedExecutionLinqConversationMessageWake(wakeInput);
   if (serializedHostedLinqWakeBytes(fullWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
     return fullWake;
   }
 
   const compactWake = buildHostedExecutionLinqConversationMessageWake({
-    ...(input.accountLookupKey === undefined
-      ? {}
-      : { accountLookupKey: input.accountLookupKey }),
-    eventId: input.eventId,
-    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
-    ...(input.groupReactionContext
-      ? { groupReactionContext: input.groupReactionContext }
-      : {}),
+    ...wakeInput,
     linqMessage: {
       ...input.linqMessage,
       parts: buildHostedLinqMailboxParts(input.rawParts, "compact"),
     },
-    occurredAt: input.occurredAt,
-    contactKind: input.participantContact.kind,
-    contactLookupKey: input.participantContact.lookupKey,
-    ...(input.participantContact.kind === "phone"
-      ? { phoneLookupKey: input.participantContact.lookupKey }
-      : {}),
-    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
-    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
-    userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(compactWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
     return compactWake;
   }
 
   return buildHostedExecutionLinqConversationMessageWake({
-    ...(input.accountLookupKey === undefined
-      ? {}
-      : { accountLookupKey: input.accountLookupKey }),
-    eventId: input.eventId,
-    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
-    ...(input.groupReactionContext
-      ? { groupReactionContext: input.groupReactionContext }
-      : {}),
+    ...wakeInput,
     linqMessage: {
       ...input.linqMessage,
       parts: buildMinimalHostedLinqMailboxParts(input.rawParts),
     },
-    occurredAt: input.occurredAt,
-    contactKind: input.participantContact.kind,
-    contactLookupKey: input.participantContact.lookupKey,
-    ...(input.participantContact.kind === "phone"
-      ? { phoneLookupKey: input.participantContact.lookupKey }
-      : {}),
-    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
-    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
-    userId: input.userId,
   });
 }
 
@@ -4569,8 +4538,8 @@ function buildHostedLinqMailboxTextPart(
     }
 
     const value = part.type === "imessage_app"
-      ? normalizeHostedLinqPartText(part.fallback_text) ?? "[iMessage app]"
-      : normalizeHostedLinqPartText(part.value);
+      ? normalizeNullableString(part.fallback_text) ?? "[iMessage app]"
+      : normalizeNullableString(part.value);
     if (!value) {
       continue;
     }
@@ -4663,8 +4632,8 @@ function buildMinimalHostedLinqMailboxParts(
       || part.type === "imessage_app"
     )
     .map((part) => part.type === "imessage_app"
-      ? normalizeHostedLinqPartText(part.fallback_text) ?? "[iMessage app]"
-      : normalizeHostedLinqPartText(part.value) ?? "")
+      ? normalizeNullableString(part.fallback_text) ?? "[iMessage app]"
+      : normalizeNullableString(part.value) ?? "")
     .filter(Boolean)
     .join("\n")
     .slice(0, HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS);
@@ -4969,14 +4938,6 @@ async function readRetryableUnsentFallbackRecipientPhone(input: {
   }
 
   return fallbackRecipientPhone;
-}
-
-function normalizeHostedLinqPartText(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function truncateHostedLinqPartText(value: string, maxChars: number): {

@@ -61,7 +61,7 @@ const mocks = vi.hoisted(() => ({
       updatedAt: toTestIsoTimestamp(record.updatedAt),
     }),
   ),
-  resolveDeviceProviderApplication: vi.fn(),
+
   scheduleHostedSourceDeliveryStallNotices: vi.fn(),
   writeHostedRuntimeLogs: vi.fn(),
 }));
@@ -104,14 +104,6 @@ vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
   writeHostedRuntimeLogs: mocks.writeHostedRuntimeLogs,
 }));
 
-vi.mock("@/src/lib/device-sync/provider-applications", () => ({
-  isDeviceProviderApplicationError: (value: unknown) =>
-    Boolean(value && typeof value === "object" && "code" in value),
-  isMemberOwnedDeviceProviderApplicationProvider: (value: unknown) =>
-    value === "strava",
-  resolveDeviceProviderApplication: mocks.resolveDeviceProviderApplication,
-}));
-
 vi.mock("@/src/lib/device-sync/source-delivery-stall-notice", async (importOriginal) => ({
   ...(await importOriginal<typeof import(
     "@/src/lib/device-sync/source-delivery-stall-notice"
@@ -145,8 +137,7 @@ function buildHostedRecord(
     metadataJson: Record<string, unknown>;
     nextReconcileAt: string | null;
     provider: string;
-    providerApplicationId: string | null;
-    providerApplicationRevision: number | null;
+
     providerConfigKey: string | null;
     providerAccountBlindIndex: string | null;
     refreshLeaseExpiresAt: string | null;
@@ -191,8 +182,7 @@ function buildHostedRecord(
     },
     nextReconcileAt: null,
     provider: "oura",
-    providerApplicationId: null,
-    providerApplicationRevision: null,
+
     providerConfigKey: null,
     providerAccountBlindIndex: "blind:acct_123",
     refreshLeaseExpiresAt: null,
@@ -439,9 +429,7 @@ function createAuthorityHarness(input: {
     currentStoredAccount = null;
     return currentRecord;
   });
-  const providerApplicationFindFirst = vi.fn(
-    async (): Promise<{ id: string } | null> => null,
-  );
+
   const activeTokenRootRead = vi.fn(async () => {
     authorityEvents.push("lock-and-read-root");
     return input.activeTokenRootKeyId ?? null;
@@ -456,9 +444,7 @@ function createAuthorityHarness(input: {
       findFirst,
       update,
     },
-    deviceProviderApplication: {
-      findFirst: providerApplicationFindFirst,
-    },
+
   };
 
   let connectionSources = (input.connectionSources ?? []).map((source) =>
@@ -527,7 +513,7 @@ function createAuthorityHarness(input: {
     persistPreparedRuntimeApplyTokenWrite,
     persistStoredConnectionTokenBundle: vi.fn(),
     prepareRuntimeApplyTokenWrites,
-    providerApplicationFindFirst,
+
     prisma: {
       deviceConnection: {
         findMany: vi.fn(async ({ where }: {
@@ -540,9 +526,7 @@ function createAuthorityHarness(input: {
             : []
         ),
       },
-      deviceProviderApplication: {
-        findFirst: providerApplicationFindFirst,
-      },
+
     },
     syncDurableConnectionState,
     readRuntimeConnectionSecretMaterial,
@@ -1095,7 +1079,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.resolveDeviceProviderApplication.mockReset();
+
   });
 
   it("rejects a 65-source update before control-plane, KMS, or transaction work", async () => {
@@ -1854,51 +1838,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(harness.record.metadata).toEqual(currentMetadata);
-  });
-
-  it("rejects runtime writes after a provider-application binding becomes stale", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        provider: "strava",
-        providerApplicationId: "dpa_123",
-        providerApplicationRevision: 4,
-      }),
-    });
-    harness.store.providerApplicationFindFirst.mockResolvedValue(null);
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              localState: {
-                lastSyncCompletedAt: "2026-04-06T10:05:00.000Z",
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(response.updates[0]).toMatchObject({
-      connection: expect.objectContaining({
-        status: "reauthorization_required",
-      }),
-      connectionId: "conn_123",
-      tokenUpdate: "missing",
-      writeUpdate: "skipped_version_mismatch",
-    });
-    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
-    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
   });
 
   it("rejects a destructive apply when OAuth replacement changes connectedAt after snapshot hydration", async () => {
@@ -3767,290 +3706,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       externalAccountId: "acct_123",
       tokenVersion: 1,
     });
-  });
-
-  it("projects exact member-owned provider config only with credential material", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        provider: "strava",
-        providerApplicationId: "dpa_123",
-        providerApplicationRevision: 4,
-      }),
-    });
-    mocks.resolveDeviceProviderApplication.mockResolvedValue({
-      applicationId: "dpa_123",
-      provider: "strava",
-      providerConfigs: {
-        strava: {
-          clientId: "member-client",
-          clientSecret: "member-secret",
-        },
-      },
-      revision: 4,
-    });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledWith({
-      applicationId: "dpa_123",
-      expectedRevision: 4,
-      memberId: "user_123",
-      prisma: harness.store.prisma,
-      provider: "strava",
-    });
-    expect(response.providerConfigs).toEqual({
-      strava: {
-        clientId: "member-client",
-        clientSecret: "member-secret",
-      },
-    });
-    expect(response.connections[0]).toMatchObject({
-      connection: { status: "active" },
-      credential: { kind: "oauth_tokens" },
-    });
-  });
-
-  it("resolves one shared app binding once across a 32-connection credential page", async () => {
-    const harness = createAuthorityHarness();
-    const records = Array.from(
-      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
-      (_, index) => buildHostedRecord({
-        createdAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
-        id: `conn_app_bound_${String(index + 1).padStart(2, "0")}`,
-        provider: "strava",
-        providerApplicationId: "dpa_shared",
-        providerApplicationRevision: 7,
-      }),
-    );
-    mocks.resolveDeviceProviderApplication.mockResolvedValue({
-      applicationId: "dpa_shared",
-      provider: "strava",
-      providerConfigs: {
-        strava: {
-          clientId: "member-client",
-          clientSecret: "member-secret",
-        },
-      },
-      revision: 7,
-    });
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledOnce();
-    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledWith({
-      applicationId: "dpa_shared",
-      expectedRevision: 7,
-      memberId: "user_123",
-      prisma: harness.store.prisma,
-      provider: "strava",
-    });
-    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
-    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledOnce();
-    expect(response.connections).toHaveLength(32);
-    expect(response.connections.every(
-      (entry) => entry.credential.kind === "oauth_tokens",
-    )).toBe(true);
-    expect(response.providerConfigs).toEqual({
-      strava: {
-        clientId: "member-client",
-        clientSecret: "member-secret",
-      },
-    });
-  });
-
-  it("checks one shared app binding once across a 32-connection redacted page", async () => {
-    const harness = createAuthorityHarness();
-    const records = Array.from(
-      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
-      (_, index) => buildHostedRecord({
-        createdAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
-        id: `conn_app_bound_redacted_${String(index + 1).padStart(2, "0")}`,
-        provider: "strava",
-        providerApplicationId: "dpa_shared",
-        providerApplicationRevision: 7,
-      }),
-    );
-    harness.store.providerApplicationFindFirst.mockResolvedValue({ id: "dpa_shared" });
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: false,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(harness.store.providerApplicationFindFirst).toHaveBeenCalledOnce();
-    expect(mocks.resolveDeviceProviderApplication).not.toHaveBeenCalled();
-    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
-    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledOnce();
-    expect(response.connections).toHaveLength(32);
-    expect(response.connections.every(
-      (entry) => entry.credential.kind === "oauth_tokens_redacted",
-    )).toBe(true);
-    expect(response.providerConfigs).toBeUndefined();
-  });
-
-  it("does not project client credentials for a non-active app-bound connection", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        provider: "strava",
-        providerApplicationId: "dpa_123",
-        providerApplicationRevision: 4,
-        status: "reauthorization_required",
-      }),
-    });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(mocks.resolveDeviceProviderApplication).not.toHaveBeenCalled();
-    expect(response.providerConfigs).toBeUndefined();
-    expect(response.connections[0]).toMatchObject({
-      connection: { status: "reauthorization_required" },
-      credential: { kind: "oauth_tokens_redacted" },
-    });
-  });
-
-  it("withholds tokens and forces repair when an app-bound config is stale", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        provider: "strava",
-        providerApplicationId: "dpa_123",
-        providerApplicationRevision: 4,
-      }),
-    });
-    mocks.resolveDeviceProviderApplication.mockRejectedValue(
-      Object.assign(new Error("stale application"), {
-        code: "DEVICE_PROVIDER_APPLICATION_REVISION_MISMATCH",
-      }),
-    );
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(response.providerConfigs).toBeUndefined();
-    expect(response.connections[0]).toMatchObject({
-      connection: { status: "reauthorization_required" },
-      credential: { kind: "oauth_tokens_redacted" },
-    });
-  });
-
-  it("marks a stale app binding for repair in credential-free status snapshots", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        provider: "strava",
-        providerApplicationId: "dpa_123",
-        providerApplicationRevision: 4,
-      }),
-    });
-    harness.store.providerApplicationFindFirst.mockResolvedValue(null);
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: false,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(mocks.resolveDeviceProviderApplication).not.toHaveBeenCalled();
-    expect(response.providerConfigs).toBeUndefined();
-    expect(response.connections[0]).toMatchObject({
-      connection: { status: "reauthorization_required" },
-      credential: { kind: "oauth_tokens_redacted" },
-    });
-  });
-
-  it("propagates provider-application storage outages instead of misclassifying them as repair", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        provider: "strava",
-        providerApplicationId: "dpa_123",
-        providerApplicationRevision: 4,
-      }),
-    });
-    const storageError = new Error("kms unavailable");
-    mocks.resolveDeviceProviderApplication.mockRejectedValue(storageError);
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-
-    await expect(readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    })).rejects.toBe(storageError);
   });
 
   it("reads 32 redacted hosted rows without selecting or opening device secrets", async () => {

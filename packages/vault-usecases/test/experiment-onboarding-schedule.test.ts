@@ -419,6 +419,7 @@ test("applyExperimentOnboardingRecord rejects legacy string schedule payloads", 
 
 test("experiment onboarding writers do not preserve legacy string run-plan schedules", async () => {
   const sourceFiles = [
+    "packages/vault-usecases/src/experiment-onboarding-options.ts",
     "packages/vault-usecases/src/usecases/experiment-journal-vault.ts",
     "packages/vault-usecases/src/usecases/types.ts",
     "packages/cli/src/commands/experiment.ts",

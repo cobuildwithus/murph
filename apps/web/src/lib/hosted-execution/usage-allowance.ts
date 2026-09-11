@@ -61,6 +61,7 @@ import {
 import {
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
+  hasActiveHostedThreadContainerAccessWithParticipants,
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
@@ -1510,8 +1511,42 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
   });
 }
 
+export const hostedAiUsageMemberSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+  billingRef: {
+    select: {
+      currentBillingPhase: true,
+      currentBillingPlanCode: true,
+      currentCheckoutOffer: true,
+      currentPeriodEnd: true,
+      currentPeriodStart: true,
+      stripeSubscriptionLookupKey: true,
+      usagePlanTransitionAt: true,
+      usagePlanTransitionFromCode: true,
+      usagePlanTransitionKind: true,
+      usagePlanTransitionToCode: true,
+    },
+  },
+  threadContainer: {
+    select: {
+      monthlyUsageLimitUsdMicros: true,
+      owner: {
+        select: hostedMemberPersonAccessSelect,
+      },
+    },
+  },
+  billingStatus: true,
+  suspendedAt: true,
+  usageCreditBalanceUsdMicros: true,
+  usageCreditLedgerVersion: true,
+});
+
+export type HostedAiUsageMemberState = Prisma.HostedMemberGetPayload<{
+  select: typeof hostedAiUsageMemberSelect;
+}>;
+
 export async function readHostedAiUsageGate(input: {
   memberId: string;
+  memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
@@ -1519,38 +1554,11 @@ export async function readHostedAiUsageGate(input: {
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
   return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    const memberState = await tx.hostedMember.findUnique({
+    const memberState = input.memberState ?? await tx.hostedMember.findUnique({
       where: {
         id: input.memberId,
       },
-      select: {
-        billingRef: {
-          select: {
-            currentBillingPhase: true,
-            currentBillingPlanCode: true,
-            currentCheckoutOffer: true,
-            currentPeriodEnd: true,
-            currentPeriodStart: true,
-            stripeSubscriptionLookupKey: true,
-            usagePlanTransitionAt: true,
-            usagePlanTransitionFromCode: true,
-            usagePlanTransitionKind: true,
-            usagePlanTransitionToCode: true,
-          },
-        },
-        threadContainer: {
-          select: {
-            monthlyUsageLimitUsdMicros: true,
-            owner: {
-              select: hostedMemberPersonAccessSelect,
-            },
-          },
-        },
-        billingStatus: true,
-        suspendedAt: true,
-        usageCreditBalanceUsdMicros: true,
-        usageCreditLedgerVersion: true,
-      },
+      select: hostedAiUsageMemberSelect,
     });
 
     if (!memberState) {
@@ -1571,13 +1579,15 @@ export async function readHostedAiUsageGate(input: {
         };
     const allowanceBillingRef = allowanceAccess.billingRef;
     const familyAccessActive = allowanceAccess.familyAccessActive;
-    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
-      container: memberState,
-      containerMemberId: input.memberId,
-      now,
-      threadContainer: memberState.threadContainer,
-      tx,
-    });
+    const threadContainerAccessActive = memberState.threadContainer
+      ? await hasActiveHostedThreadContainerAccessWithParticipants({
+          container: memberState,
+          containerMemberId: input.memberId,
+          now,
+          owner: memberState.threadContainer.owner,
+          prisma: tx,
+        })
+      : null;
 
     // Thread-container members are synthetic (`not_started` own billing):
     // their access is decided by the container branch of the allowance-period
@@ -1678,6 +1688,7 @@ export async function readHostedAiUsageGateSnapshots(input: {
 // ensure-creates the period inside the spend transaction as the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
+  memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
@@ -1686,7 +1697,11 @@ export async function checkHostedAiUsageGate(input: {
     return decision;
   }
 
-  return resolveHostedAiUsageGate(input);
+  return resolveHostedAiUsageGate({
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.prisma,
+  });
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {

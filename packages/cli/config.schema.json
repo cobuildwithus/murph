@@ -418,22 +418,22 @@
                           "minLength": 1
                         },
                         "codexHome": {
-                          "description": "Optional Codex home directory used by local assistant chat.",
+                          "description": "Optional Codex home directory used by local assistant turns.",
                           "type": "string",
                           "minLength": 1
                         },
                         "model": {
-                          "description": "Optional Codex model override for local chat turns.",
+                          "description": "Optional Codex model override for local turns.",
                           "type": "string",
                           "minLength": 1
                         },
                         "modelProvider": {
-                          "description": "Optional Codex model provider id for local chat turns.",
+                          "description": "Optional Codex model provider id for local turns.",
                           "type": "string",
                           "minLength": 1
                         },
                         "reasoningEffort": {
-                          "description": "Optional Codex reasoning effort for local assistant chat turns.",
+                          "description": "Optional Codex reasoning effort for local assistant turns.",
                           "type": "string",
                           "enum": [
                             "low",
@@ -443,7 +443,7 @@
                           ]
                         },
                         "sandbox": {
-                          "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
+                          "description": "Codex sandbox mode for local assistant turns. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
                           "type": "string",
                           "enum": [
                             "read-only",
@@ -452,7 +452,7 @@
                           ]
                         },
                         "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
+                          "description": "Codex approval policy for local assistant turns. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
                           "type": "string",
                           "const": "never"
                         },
@@ -467,103 +467,6 @@
                         },
                         "deliveryTarget": {
                           "description": "Optional one-send Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`. Reply-in-place sessions can often omit this and reuse the saved thread.",
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                },
-                "chat": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "session": {
-                          "description": "Existing Murph assistant session id to resume.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "alias": {
-                          "description": "Optional stable alias used to map an external conversation onto one assistant session.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "channel": {
-                          "description": "Optional local channel label: telegram.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "thread": {
-                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "codexCommand": {
-                          "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "codexHome": {
-                          "description": "Optional Codex home directory used by local assistant chat.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "model": {
-                          "description": "Optional Codex model override for local chat turns.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "modelProvider": {
-                          "description": "Optional Codex model provider id for local chat turns.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "reasoningEffort": {
-                          "description": "Optional Codex reasoning effort for local assistant chat turns.",
-                          "type": "string",
-                          "enum": [
-                            "low",
-                            "medium",
-                            "high",
-                            "xhigh"
-                          ]
-                        },
-                        "sandbox": {
-                          "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
-                          "type": "string",
-                          "enum": [
-                            "read-only",
-                            "workspace-write",
-                            "danger-full-access"
-                          ]
-                        },
-                        "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
-                          "type": "string",
-                          "const": "never"
-                        },
-                        "profile": {
-                          "description": "Optional Codex config profile name.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -992,103 +895,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          }
-        },
-        "chat": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "options": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "requestId": {
-                  "description": "Optional caller-supplied request id for audit correlation.",
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128
-                },
-                "session": {
-                  "description": "Existing Murph assistant session id to resume.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "alias": {
-                  "description": "Optional stable alias used to map an external conversation onto one assistant session.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "channel": {
-                  "description": "Optional local channel label: telegram.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "identity": {
-                  "description": "Optional local assistant identity id for multi-user routing.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "participant": {
-                  "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "thread": {
-                  "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "codexCommand": {
-                  "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "codexHome": {
-                  "description": "Optional Codex home directory used by local assistant chat.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "model": {
-                  "description": "Optional Codex model override for local chat turns.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "modelProvider": {
-                  "description": "Optional Codex model provider id for local chat turns.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "reasoningEffort": {
-                  "description": "Optional Codex reasoning effort for local assistant chat turns.",
-                  "type": "string",
-                  "enum": [
-                    "low",
-                    "medium",
-                    "high",
-                    "xhigh"
-                  ]
-                },
-                "sandbox": {
-                  "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
-                  "type": "string",
-                  "enum": [
-                    "read-only",
-                    "workspace-write",
-                    "danger-full-access"
-                  ]
-                },
-                "approvalPolicy": {
-                  "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
-                  "type": "string",
-                  "const": "never"
-                },
-                "profile": {
-                  "description": "Optional Codex config profile name.",
-                  "type": "string",
-                  "minLength": 1
                 }
               }
             }

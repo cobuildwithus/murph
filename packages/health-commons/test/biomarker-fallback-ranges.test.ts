@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -11,7 +12,15 @@ import {
   listReviewedBiomarkerFallbackRanges,
   resolveBiomarkerFallbackStatusRanges,
   resolveReviewedBiomarkerFallbackRanges,
-} from "../src/biomarker-fallback-ranges.ts";
+} from "@murphai/health-metrics";
+
+it("keeps the reviewed runtime range catalog on health-metrics' public surface", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { exports: Record<string, unknown> };
+
+  expect(Object.hasOwn(manifest.exports, "./biomarker-fallback-ranges")).toBe(false);
+});
 
 const PAGE_AUTHORED_STATUS_MIRRORS = [
   "biomarker:bilirubin",

@@ -17,7 +17,7 @@ import {
 } from "../shared.ts";
 
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
-import { deriveJunctionCanonicalCoverageEvidence } from "./junction.ts";
+import { deriveJunctionCanonicalCoverageEvidence } from "./junction-canonical-coverage.ts";
 import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
 

@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 
 import { runSafeBuild } from "../scripts/safe-build.ts";
+import * as importerRuntime from "../src/index.ts";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(packageDir, "..", "..");
@@ -65,11 +66,8 @@ test("package manifest exposes only focused importer subpaths", async () => {
     exports?: Record<string, { default?: string; import?: string; types?: string } | undefined>;
   };
 
-  assert.deepEqual(packageManifest.exports?.["./sample-series-summary"], {
-    types: "./dist/sample-series-summary.d.ts",
-    import: "./dist/sample-series-summary.js",
-    default: "./dist/sample-series-summary.js",
-  });
+  assert.equal(packageManifest.exports?.["./sample-series-summary"], undefined);
+  assert.equal(packageManifest.exports?.["./device-providers/metric-catalog"], undefined);
   assert.deepEqual(packageManifest.exports?.["./clinical-records"], {
     types: "./dist/clinical-records/index.d.ts",
     import: "./dist/clinical-records/index.js",
@@ -81,6 +79,20 @@ test("package manifest exposes only focused importer subpaths", async () => {
     default: "./dist/device-providers/junction.js",
   });
   assert.doesNotMatch(readFileSync(path.join(packageDir, "src", "index.ts"), "utf8"), /clinical-records/u);
+});
+
+test("importer root keeps neutral metric primitives on their owning package", () => {
+  for (const symbol of [
+    "summarizeSampleSeries",
+    "normalizeWearableMetricValue",
+    "resolveWearableCanonicalMetricKey",
+    "resolveWearableMetricCatalogEntry",
+    "resolveWearableMetricTolerance",
+    "wearableCanonicalMetricKeys",
+    "wearableMetricCatalog",
+  ]) {
+    assert.equal(symbol in importerRuntime, false, `${symbol} belongs to @murphai/health-metrics`);
+  }
 });
 
 test("build script preserves the last good dist until TypeScript succeeds", async () => {

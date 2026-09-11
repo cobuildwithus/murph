@@ -65,8 +65,12 @@ describe("auth code delivery", () => {
     await hostedAuthDelivery().email({ address: "member@example.test", code: "123456" });
     expect(mocks.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: expect.stringMatching(/^auth-/u), subject: "Your Murph sign-in code", to: ["member@example.test"],
+      text: expect.stringContaining("123456"),
+      html: expect.stringContaining(">123456</span>"),
     }));
-    await expect(hostedAuthDelivery().email({ address: "member@example.test", code: "invalid" })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
+    for (const code of ["invalid", "12345", "1234567", "<img src=x onerror=alert(1)>"]) {
+      await expect(hostedAuthDelivery().email({ address: "member@example.test", code })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
+    }
     expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
   });
   it("redacts provider exceptions from the public error", async () => {

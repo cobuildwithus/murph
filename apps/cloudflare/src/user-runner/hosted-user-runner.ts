@@ -2,14 +2,10 @@ import {
   type HostedHealthDataConsentState,
   type HostedRunnerStatusResponse,
   type HostedRuntimeHealthDataAdmissionResponse,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -388,28 +384,6 @@ export class HostedUserRunner {
     } finally {
       clearTimeout(queueTimeout);
     }
-  }
-
-  async prewarmRuntimeShellForUser(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void> {
-    // Hints never create member-specific shells. The memberless coordinator
-    // owns optional prewarming in every mode; allocation alone binds a target.
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-        ...(orchestration?.shellPrewarmOrchestrationAttemptId === undefined ? {} : {
-          orchestrationAttemptId: orchestration.shellPrewarmOrchestrationAttemptId,
-        }),
-        shellPrewarmSource: source ?? "unknown",
-      },
-      message: "Hosted runner shell prewarm admission decided.",
-      phase: "scheduled",
-      userId,
-    });
   }
 
   async reconcileRuntimeHealthDataConsentForUser(
