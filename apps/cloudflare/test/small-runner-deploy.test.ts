@@ -2,8 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { unstable_readConfig } from "wrangler";
 import { prepareSmallRunnerNamespaceBootstrap, stageHostedRunnerRelease } from "../scripts/stage-runner-release.ts";
 import { runnerApplicationSpecification } from "../scripts/runner-release-application.ts";
+import { buildHostedWranglerDeployConfig, readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
 
 const oldImage = `registry.example.test/runner@sha256:${"a".repeat(64)}`;
 const newImage = `registry.example.test/runner@sha256:${"b".repeat(64)}`;
@@ -139,5 +141,39 @@ describe("small runner protected deployment", () => {
     const retained = JSON.parse(await readFile(staged.configPath, "utf8"));
     expect(retained.containers[2]).toMatchObject({ image: oldImage,
       instance_type: { vcpu: 1, memory_mib: 3072, disk_mb: 6000 } });
+  });
+
+  it.each([0, 1, 2, 10])("bounds rendered rollout steps by retained small capacity %s", async capacity => {
+    const rendered = buildHostedWranglerDeployConfig(readHostedDeployAutomationEnvironment({
+      CF_WORKER_NAME: "synthetic-worker",
+      CF_BUNDLES_BUCKET: "synthetic-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "synthetic-preview",
+      CF_PUBLIC_BASE_URL: "https://synthetic-worker.example.test",
+      HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
+      HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
+      HOSTED_CRYPTO_ENV: "production",
+      HOSTED_R2_PRESIGN_ACCOUNT_ID: "synthetic-account",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "synthetic-bundles",
+    }));
+    const small = (rendered.containers as Array<Record<string, unknown>>)
+      .find(entry => entry.class_name === "SmallRunnerContainer");
+    expect(small).toMatchObject({ max_instances: 10, rollout_step_percentage: [10, 25, 50, 100] });
+    await writeFile(configPath, JSON.stringify({ ...config,
+      containers: config.containers.map(entry => entry.class_name === "SmallRunnerContainer" ? small : entry),
+    }));
+    const staged = await stageHostedRunnerRelease({ configPath, currentVersion: version(true),
+      currentVersionId: "worker-live", releaseSha: "1".repeat(40), retainServingRunner: true,
+      listApplications: async name => (await listApplications(true)(name)).map(entry => ({ ...entry,
+        max_instances: name.endsWith("-smallrunnercontainer") ? capacity : entry.max_instances,
+      })),
+    });
+    const retained = JSON.parse(await readFile(staged.configPath, "utf8")).containers[2];
+    expect(retained).toMatchObject({ image: oldImage, max_instances: capacity,
+      instance_type: { vcpu: 1, memory_mib: 3072, disk_mb: 6000 } });
+    expect(staged.applications.map(entry => entry.className)).toEqual(["DeploySmokeRunnerContainer"]);
+    if (capacity === 0) expect(retained).not.toHaveProperty("rollout_step_percentage");
+    else expect(retained.rollout_step_percentage).toEqual([10, 25, 50, 100].slice(-capacity));
+    expect(() => unstable_readConfig({ config: staged.configPath }, { hideWarnings: true })).not.toThrow();
   });
 });

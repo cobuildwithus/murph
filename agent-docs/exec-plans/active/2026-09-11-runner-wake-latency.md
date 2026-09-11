@@ -72,6 +72,19 @@ Updated: 2026-09-11
   Cloudflare typecheck and the complexity guard pass with no hotspots above 20.
 - Private contract coverage accepts old/new capacities with enabled and retained
   profiles, while rejecting other capacities and resource changes. Full private
-  verification is running; its 778-test coverage suite has passed.
-- Required candidate review and CI are pending. Actual reply latency and resource
-  identity remain required protected-deployment evidence.
+  verification and required CI passed; final review passed at the original head.
+  The preliminary specialist review remains pending.
+- Public final review round one identified invalid rollout-step arrays when a
+  worker-only deployment retains the old smaller native capacity. The parent
+  accepted the finding and the user resumed remediation. The existing retention
+  owner now trims arrays to retained capacity while preserving numeric steps and
+  omitting steps for zero capacity; no new owner or abstraction was introduced.
+- The renderer-to-staging regression failed for retained capacities one and two
+  before correction. All 66 focused staging/config/CLI tests pass afterward;
+  the 12 small-runner tests also pass the pinned Wrangler config parser directly.
+  Cloudflare typecheck and the complexity guard pass.
+- Required public CI exposed a fixed-date canary fixture aging past 24 hours.
+  A focused run reproduced ten failures. The matching upstream fixture fix and
+  Frog entry already exist on main and will be incorporated by base reconciliation.
+- Public round two and final-head CI remain pending. Actual reply latency and
+  resource identity remain required protected-deployment evidence.
