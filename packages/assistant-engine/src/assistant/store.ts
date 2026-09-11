@@ -725,7 +725,7 @@ export async function readAssistantAutomationState(
   vault: string,
 ): Promise<AssistantAutomationState> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
+    await ensureAssistantStateDirectory(paths.assistantStateRoot)
     return readAutomationState(paths)
   })
 }

@@ -1,8 +1,6 @@
-import { readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
+import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
+import { isSmallRunnerMember } from "./small-runner-profile.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
@@ -16,9 +14,7 @@ import {
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
-  sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeFailurePhaseCode,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
@@ -32,8 +28,8 @@ import {
   buildHostedRunnerContainerCaEnv,
 } from "./runner-container-ca-env.ts";
 import {
-  hostedRunnerSlotBindingMatchesTarget,
   isHostedRunnerSlotName,
+  isHostedSmallRunnerSlotName,
   isHostedRunnerTargetName,
   isHostedStandbySlotName,
   readHostedStandbyReleaseId,
@@ -260,12 +256,10 @@ export type RunnerContainerEnsureReadyForProcessingResult =
       action?: "already_warm" | "started";
       coldStartTiming?: RunnerContainerColdStartTiming;
       kind: "ready";
-      shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
     }
   | {
       action?: never;
       kind: "cleanup_unsettled";
-      shellPrewarmObservation?: never;
     };
 
 export interface RunnerContainerColdStartTiming {
@@ -289,42 +283,6 @@ type RunnerContainerEnsureReadyResult = {
     "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
   >;
 };
-
-export interface RunnerContainerShellPrewarmObservation {
-  firstHintAtEpochMs: number;
-  hintCount: number;
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  finishedAtEpochMs?: number;
-  operationElapsedMs?: number;
-  outcome?: RunnerContainerShellPrewarmOutcome;
-  source: CloudflareHostedControlRuntimeShellPrewarmSource | "unknown";
-}
-
-export type RunnerContainerShellPrewarmOutcome =
-  | "cold_start_observed"
-  | "failed"
-  | "start_issued_warm"
-  | "superseded";
-
-export interface RunnerContainerBeginShellPrewarmInput
-  extends RunnerContainerEnsureReadyForProcessingInput {
-  orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics;
-  source?: CloudflareHostedControlRuntimeShellPrewarmSource;
-}
-
-export type RunnerContainerPrewarmShellResult =
-  | {
-      action: "start_issued";
-      kind: "started";
-    }
-  | {
-      action: "superseded";
-      kind: "superseded";
-    };
-
-export interface RunnerContainerBeginShellPrewarmResult {
-  accepted: true;
-}
 
 export interface RunnerContainerRuntimeCompletionRecordedInput {
   attemptId: string;
@@ -352,12 +310,6 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
-  beginShellPrewarm?(
-    input: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult>;
-  prewarmShell?(
-    input: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   onRuntimeCompletionRecorded?(
@@ -595,6 +547,27 @@ function createActiveRuntimeUserFence(
   };
 }
 
+// Internal RPC metadata, not an acknowledgement or a new processing authority.
+export interface RunnerRuntimeWakeDiagnostics {
+  wakeStage: "admission" | "dispatch" | "drain" | "acknowledgement" | "legacy_health" | "exiting_owner";
+  wakeEnteredAtEpochMs: number;
+  wakeFinishedAtEpochMs?: number;
+  wakeDispatchAtEpochMs?: number;
+  wakeResponseAtEpochMs?: number;
+  wakeDrainFinishedAtEpochMs?: number;
+  wakeHandlerReceivedAtEpochMs?: number;
+  wakeHandlerAcceptedAtEpochMs?: number;
+  wakeStatus?: number;
+  wakeAccepted?: boolean;
+  wakePending?: boolean;
+  wakeIdentityChecked?: boolean;
+  wakeAbsent?: boolean;
+  wakeMismatch?: boolean;
+  wakeSignalAborted?: boolean;
+  wakeActivePointerPresent?: boolean;
+  wakeLifecyclePendingCount?: number;
+}
+
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
   leaseGeneration: string;
@@ -604,7 +577,7 @@ export interface RunnerRuntimeWakeInput {
   userId: string;
 }
 
-export type RunnerRuntimeWakeResult =
+export type RunnerRuntimeWakeResult = (
   | { action: "already_running" | "woken"; kind: "accepted" }
   | {
       kind: "not-wakeable";
@@ -618,7 +591,8 @@ export type RunnerRuntimeWakeResult =
         | "container-rpc-timeout"
         | "missing-container-binding"
         | "missing-wake-method";
-    };
+    }
+) & { wakeDiagnostics?: RunnerRuntimeWakeDiagnostics };
 
 export interface RunnerContainerEnsureProcessingInput {
   activeRuntime?: RunnerRuntimeWakeInput | null;
@@ -634,7 +608,7 @@ export interface RunnerContainerProcessingFailure {
   status: number | null;
 }
 
-export type RunnerContainerEnsureProcessingResult =
+export type RunnerContainerEnsureProcessingResult = (
   | {
       action: "already_running" | "restarted" | "started" | "woken";
       kind: "accepted";
@@ -651,7 +625,8 @@ export type RunnerContainerEnsureProcessingResult =
   | {
       kind: "wake-unconfirmed";
       reason: Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"];
-    };
+    }
+) & { wakeDiagnostics?: RunnerRuntimeWakeDiagnostics };
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
@@ -664,7 +639,7 @@ export class RunnerContainer extends Container {
 
   protected readonly environment: RunnerContainerEnvironmentSource;
   // This discriminator is namespace identity, not a second lifecycle owner.
-  protected readonly slotNamespace: "runner" | "standby" = "runner";
+  protected readonly slotNamespace: "runner" | "standby" | "small" = "runner";
   private slotStore: RunnerSlotBindingStore | null = null;
   private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -677,7 +652,6 @@ export class RunnerContainer extends Container {
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
   private stopGeneration = 0;
-  private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
   private pointerlessWakeBlockingLifecycleCount = 0;
   private pendingCompletionCleanup: RunnerContainerPendingCompletionCleanup | null = null;
@@ -719,6 +693,7 @@ export class RunnerContainer extends Container {
     if (this.slotNamespace === "standby") {
       throw new Error("Legacy standby inventory is drain-only.");
     }
+    if (this.slotNamespace === "small") throw new Error("Small runners do not provide shared standby inventory.");
     if (readHostedRunnerDeployment(this.environment)?.previous?.id === input.releaseId) {
       throw new Error("Previous runner inventory is drain-only.");
     }
@@ -779,6 +754,10 @@ export class RunnerContainer extends Container {
       const store = this.requireRunnerSlotStore();
       if (this.slotNamespace === "standby" && store.readOptional()?.state !== "bound") {
         throw new Error("Legacy standby allocation is drain-only.");
+      }
+      if (this.slotNamespace === "small" && store.readOptional()?.state !== "bound"
+        && !await isSmallRunnerMember(this.environment, input.userId)) {
+        throw new Error("The member is not eligible for a small runner binding.");
       }
       const deployment = readHostedRunnerDeployment(this.environment);
       if (deployment && input.releaseId !== deployment.active.id && store.readOptional()?.state !== "bound") {
@@ -919,7 +898,8 @@ export class RunnerContainer extends Container {
   private assertRunnerSlotNamespace(slotName: string): void {
     const valid = this.slotNamespace === "standby"
       ? isHostedStandbySlotName(slotName)
-      : isHostedRunnerSlotName(slotName);
+      : this.slotNamespace === "small" ? isHostedSmallRunnerSlotName(slotName)
+        : isHostedRunnerSlotName(slotName) && !isHostedSmallRunnerSlotName(slotName);
     if (!valid) throw new Error("Hosted runner slot belongs to a different namespace.");
     if (this.durableObjectName !== null && this.durableObjectName !== slotName) {
       throw new Error("Hosted runner slot does not match the addressed Durable Object.");
@@ -1317,23 +1297,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  // Accept queued calls from older workers without allocating member-specific shells.
-  async beginShellPrewarm(
-    payload: RunnerContainerBeginShellPrewarmInput,
-  ): Promise<RunnerContainerBeginShellPrewarmResult> {
-    const input = parseRunnerContainerBeginShellPrewarmInput(payload);
-    this.authorizeBoundUser(input.userId);
-    return { accepted: true };
-  }
-
-  async prewarmShell(
-    payload: RunnerContainerEnsureReadyForProcessingInput,
-  ): Promise<RunnerContainerPrewarmShellResult> {
-    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-    this.authorizeBoundUser(input.userId);
-    return { action: "superseded", kind: "superseded" };
-  }
-
   async abortWorkspaceInvocation(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -1468,6 +1431,7 @@ export class RunnerContainer extends Container {
       const wake = await this.wakeRuntime(input.activeRuntime);
       if (wake.kind === "accepted") {
         return {
+          wakeDiagnostics: wake.wakeDiagnostics,
           action: wake.action,
           kind: "accepted",
         };
@@ -1475,6 +1439,7 @@ export class RunnerContainer extends Container {
 
       if (wake.kind === "unknown") {
         return {
+          wakeDiagnostics: wake.wakeDiagnostics,
           kind: "wake-unconfirmed",
           reason: wake.reason,
         };
@@ -1482,6 +1447,7 @@ export class RunnerContainer extends Container {
 
       if (!input.invoke) {
         return {
+          wakeDiagnostics: wake.wakeDiagnostics,
           kind: "start-required",
           reason: "no-active-child",
         };
@@ -1520,16 +1486,30 @@ export class RunnerContainer extends Container {
     }
   }
 
-  async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
+  async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<
+    RunnerRuntimeWakeResult & { wakeDiagnostics: RunnerRuntimeWakeDiagnostics }
+  > {
+    const diagnostics: RunnerRuntimeWakeDiagnostics = {
+      wakeEnteredAtEpochMs: Date.now(), wakeStage: "admission",
+    };
+    const result = await this.wakeRuntimeObserved(input, diagnostics);
+    return { ...result, wakeDiagnostics: { ...diagnostics, wakeFinishedAtEpochMs: Date.now() } };
+  }
+
+  private async wakeRuntimeObserved(
+    input: RunnerRuntimeWakeInput,
+    diagnostics: RunnerRuntimeWakeDiagnostics,
+  ): Promise<RunnerRuntimeWakeResult> {
     this.authorizeBoundUser(input.userId);
     this.noteContainerInteraction();
-    const interactionGeneration = this.containerInteractionGeneration;
     const destroyRequestAtWakeStart = this.lastDestroyRequest;
     const stopGenerationAtWakeStart = this.stopGeneration;
     if (this.workspaceInvocationNoPointerAbort) {
       return { kind: "unknown", reason: "active-child-rejected" };
     }
     const active = this.readWorkspaceInvocationOperation();
+    diagnostics.wakeActivePointerPresent = active !== null;
+    diagnostics.wakeLifecyclePendingCount = this.lifecycleLockPendingCount;
     if (
       active
       && (
@@ -1616,8 +1596,10 @@ export class RunnerContainer extends Container {
     }
 
     this.noteRunnerActivity("runtime-wake");
+    const runtimeWakeSignal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
     try {
-      const runtimeWakeSignal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
+      diagnostics.wakeStage = "dispatch";
+      diagnostics.wakeDispatchAtEpochMs = Date.now();
       const response = await this.containerFetch(
         RUNNER_RUNTIME_WAKE_URL,
         {
@@ -1629,6 +1611,9 @@ export class RunnerContainer extends Container {
           signal: runtimeWakeSignal,
         },
       );
+      diagnostics.wakeResponseAtEpochMs = Date.now();
+      diagnostics.wakeStatus = response.status;
+      copyRuntimeWakeHandlerTiming(response.headers, diagnostics);
       const acceptedHeader = response.headers.get("x-runtime-wake-accepted");
       const accepted = acceptedHeader === "1";
       const explicitlyRejected = acceptedHeader === "0";
@@ -1637,9 +1622,17 @@ export class RunnerContainer extends Container {
         response.headers.get("x-runtime-wake-identity-checked") === "1";
       const mismatch = response.headers.get("x-runtime-wake-mismatch") === "1";
       const pending = response.headers.get("x-runtime-wake-pending") === "1";
+      diagnostics.wakeStage = "drain";
+      diagnostics.wakeAccepted = accepted;
+      diagnostics.wakePending = pending;
+      diagnostics.wakeIdentityChecked = identityChecked;
+      diagnostics.wakeAbsent = absent;
+      diagnostics.wakeMismatch = mismatch;
       await drainRunnerContainerMetadataResponseBody(response, {
         signal: runtimeWakeSignal,
       });
+      diagnostics.wakeDrainFinishedAtEpochMs = Date.now();
+      diagnostics.wakeStage = "acknowledgement";
       const acceptedWithoutIdentityProof =
         response.ok && accepted && !active && !identityChecked;
       let legacyNoActiveChild = false;
@@ -1653,6 +1646,7 @@ export class RunnerContainer extends Container {
         && !mismatch
       ) {
         try {
+          diagnostics.wakeStage = "legacy_health";
           legacyNoActiveChild = !(await this.readWorkspaceInvocationActiveFromHealth());
         } catch {
           legacyNoActiveChild = false;
@@ -1683,8 +1677,7 @@ export class RunnerContainer extends Container {
         (
           !active
           && (
-            this.containerInteractionGeneration !== interactionGeneration
-            || this.lastDestroyRequest !== destroyRequestAtWakeStart
+            this.lastDestroyRequest !== destroyRequestAtWakeStart
             || this.stopGeneration !== stopGenerationAtWakeStart
           )
         )
@@ -1720,6 +1713,7 @@ export class RunnerContainer extends Container {
         && !mismatch
         && active.result
       ) {
+        diagnostics.wakeStage = "exiting_owner";
         await active.result.catch(() => undefined);
         if (
           this.pointerlessWakeBlockingLifecycleCount > 0
@@ -1749,6 +1743,8 @@ export class RunnerContainer extends Container {
         return { kind: "unknown", reason: "container-rpc-timeout" };
       }
       return { kind: "unknown", reason: "container-rpc-error" };
+    } finally {
+      diagnostics.wakeSignalAborted = runtimeWakeSignal.aborted;
     }
   }
 
@@ -1758,8 +1754,9 @@ export class RunnerContainer extends Container {
     // Keep the native status proof and activity renewal under one lifecycle
     // lock so idle expiry cannot stop the container between them.
     return await this.withLifecycleLock(async () => {
+      if (this.isPlatformContainerDefinitelyStopped()) return "stopped";
       const status = await readRunnerContainerStatus(this);
-      if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {
+      if (isRunnerContainerStopped(status)) {
         return "stopped";
       }
       if (
@@ -3167,6 +3164,12 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<boolean> {
+    if (this.isPlatformContainerDefinitelyStopped()) {
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "current") {
+        this.recordCurrentContainerStopped();
+      }
+      return true;
+    }
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
     const statusDeadlineAtMs = input.cleanupDeadlineAtMs
@@ -3219,16 +3222,7 @@ export class RunnerContainer extends Container {
     ) {
       return true;
     }
-    const ownershipBeforeRequest = this.readContainerCleanupOwnership(
-      input.expectedStart,
-      stateBeforeDestroy,
-    );
-    if (ownershipBeforeRequest !== "current") {
-      return ownershipBeforeRequest === "superseded";
-    }
-
     const destroyStartedAt = Date.now();
-    const stopGenerationBeforeDestroy = this.stopGeneration;
     this.lastDestroyRequest = {
       failClosed,
       reason: input.reason,
@@ -3248,95 +3242,30 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
 
-    if (
-      input.expectedInteractionGeneration !== undefined
-      && this.containerInteractionGeneration !== input.expectedInteractionGeneration
-    ) {
-      return true;
-    }
-    const ownershipBeforeDestroy = this.readContainerCleanupOwnership(
-      input.expectedStart,
-      stateBeforeDestroy,
-    );
-    if (ownershipBeforeDestroy !== "current") {
-      return ownershipBeforeDestroy === "superseded";
-    }
     this.pointerlessWakeBlockingLifecycleCount += 1;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const destroyRequest = this.destroy().then(
-        () => ({ kind: "destroy-resolved" as const }),
-        (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
-      );
-      const destroySettle = this.waitForDestroyedContainerStopped({
-        ...(input.cleanupDeadlineAtMs === undefined
-          ? {}
-          : { cleanupDeadlineAtMs: input.cleanupDeadlineAtMs }),
-        destroyStartedAt,
-        expectedStart: input.expectedStart,
-        failClosed,
-        statusBeforeDestroy,
-        stopGenerationBeforeDestroy,
-      }).then(
-        (settled) => ({ kind: "settle-finished" as const, settled }),
-        (error: unknown) => ({ error, kind: "settle-rejected" as const }),
-      );
-      const firstDestroyOutcome = await Promise.race([
-        destroyRequest,
-        destroySettle,
+      // The SDK delegates to native destroy(), whose promise is the stop receipt.
+      // Cached getState()/onStop bookkeeping may lag it and is not a second gate.
+      await Promise.race([
+        this.destroy(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            reject(new Error("Hosted runner container destruction timed out."));
+          }, Math.max(1, (input.cleanupDeadlineAtMs
+            ?? destroyStartedAt + RUNNER_DESTROY_SETTLE_TIMEOUT_MS) - Date.now()));
+        }),
       ]);
-
-      if (firstDestroyOutcome.kind === "destroy-rejected") {
-        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-          return true;
-        }
-        const error = firstDestroyOutcome.error;
-        if (isSettledRunnerContainerDestroyRaceError(error)) {
-          return true;
-        }
-        emitRunnerContainerLifecycleFailure({
-          destroyLatencyMs: Date.now() - destroyStartedAt,
-          error,
-          failClosed,
-          context,
-          message: "Hosted execution container destroy request failed.",
-          statusBeforeDestroy,
-          stage: "destroy",
-        });
-        if (failClosed) {
-          throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
-        }
-        return false;
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
+        return true;
       }
-
-      const settledOutcome = firstDestroyOutcome.kind === "destroy-resolved"
-        ? await destroySettle
-        : firstDestroyOutcome;
-      if (settledOutcome.kind === "settle-rejected") {
-        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-          return true;
-        }
-        if (failClosed) {
-          throw settledOutcome.error;
-        }
-        return false;
-      }
-
-      const settled = settledOutcome.settled;
-      if (!settled.ok) {
-        return false;
-      }
+      this.recordCurrentContainerStopped();
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
           destroyLatencyMs: Date.now() - destroyStartedAt,
-          destroySettleLatencyMs: settled.settleLatencyMs,
-          destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
           failClosed,
           lifecycleStage: "destroyed",
-          observedStatusesAfterDestroy: settled.observedStatuses,
-          settleReason: settled.settleReason,
-          statusAfterDestroy: settled.statusAfterDestroy,
-          stopObservedAfterDestroy: settled.stopObservedAfterDestroy,
           statusBeforeDestroy,
         },
         message: "Hosted execution container destroy completed.",
@@ -3344,138 +3273,30 @@ export class RunnerContainer extends Container {
         userId: context?.userId,
       });
       return true;
-    } finally {
-      this.pointerlessWakeBlockingLifecycleCount -= 1;
-    }
-  }
-
-  private async waitForDestroyedContainerStopped(input: {
-    cleanupDeadlineAtMs?: number;
-    destroyStartedAt: number;
-    expectedStart?: RunnerContainerCurrentStart | null;
-    failClosed: boolean;
-    statusBeforeDestroy: string | null;
-    stopGenerationBeforeDestroy: number;
-  }): Promise<
-    | {
-        ok: true;
-        observedStatuses: string[];
-        settleReason: "onStop" | "status" | "superseded";
-        settleLatencyMs: number;
-        statusAfterDestroy: string | null;
-        stopObservedAfterDestroy: boolean;
-      }
-    | {
-        ok: false;
-      }
-  > {
-    const context = this.currentLogContext;
-    const cleanupDeadlineAtMs = input.cleanupDeadlineAtMs
-      ?? Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
-    const observedStatuses: string[] = [];
-    let lastError: unknown = null;
-    let statusAfterDestroy: string | null = null;
-    const supersededResult = () => ({
-      ok: true as const,
-      observedStatuses,
-      settleLatencyMs: Date.now() - input.destroyStartedAt,
-      settleReason: "superseded" as const,
-      statusAfterDestroy,
-      stopObservedAfterDestroy: false,
-    });
-
-    while (true) {
+    } catch (error) {
       if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-        return supersededResult();
+        return true;
       }
-      if (this.stopGeneration > input.stopGenerationBeforeDestroy) {
-        return {
-          ok: true,
-          observedStatuses,
-          settleLatencyMs: Date.now() - input.destroyStartedAt,
-          settleReason: "onStop",
-          statusAfterDestroy,
-          stopObservedAfterDestroy: true,
-        };
+      if (isMissingRunnerContainerError(error)) {
+        this.recordCurrentContainerStopped();
+        return true;
       }
-
-      let remainingMs = cleanupDeadlineAtMs - Date.now();
-      if (remainingMs <= 0) {
-        const error = lastError
-          ? new Error("Hosted runner container did not report stopped after destroy.", {
-              cause: lastError,
-            })
-          : new Error("Hosted runner container did not report stopped after destroy.");
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            destroyLatencyMs: Date.now() - input.destroyStartedAt,
-            destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
-            failClosed: input.failClosed,
-            lifecycleStage: "destroy-settle",
-            observedStatusesAfterDestroy: observedStatuses,
-            statusAfterDestroy,
-            statusBeforeDestroy: input.statusBeforeDestroy,
-          },
-          error,
-          level: input.failClosed ? "error" : "warn",
-          message: "Hosted execution container destroy did not settle to stopped.",
-          phase: "failed",
-          userId: context?.userId,
-        });
-        if (input.failClosed) {
-          throw error;
-        }
-        return { ok: false };
+      emitRunnerContainerLifecycleFailure({
+        destroyLatencyMs: Date.now() - destroyStartedAt,
+        error,
+        failClosed,
+        context,
+        message: "Hosted execution container destroy request failed.",
+        statusBeforeDestroy,
+        stage: "destroy",
+      });
+      if (failClosed) {
+        throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
       }
-
-      try {
-        const stateAfterDestroy = await readRunnerContainerStateWithTimeout(
-          this,
-          Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
-        );
-        statusAfterDestroy = readContainerStatus(stateAfterDestroy);
-        appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
-        const ownershipAfterDestroy = this.readContainerCleanupOwnership(
-          input.expectedStart,
-          stateAfterDestroy,
-        );
-        if (ownershipAfterDestroy === "superseded") {
-          return supersededResult();
-        }
-        if (ownershipAfterDestroy === "ambiguous") {
-          return { ok: false };
-        }
-        if (
-          isRunnerContainerStopped(statusAfterDestroy)
-          && !this.isPlatformContainerDefinitelyRunning()
-        ) {
-          this.recordCurrentContainerStopped();
-          return {
-            ok: true,
-            observedStatuses,
-            settleReason: "status",
-            settleLatencyMs: Date.now() - input.destroyStartedAt,
-            statusAfterDestroy,
-            stopObservedAfterDestroy: this.stopGeneration > input.stopGenerationBeforeDestroy,
-          };
-        }
-      } catch (error) {
-        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
-          return supersededResult();
-        }
-        lastError = error;
-        appendObservedRunnerContainerStatus(observedStatuses, "status_error");
-      }
-
-      remainingMs = cleanupDeadlineAtMs - Date.now();
-      if (remainingMs <= 0) {
-        continue;
-      }
-      await this.waitForStopOrDelay(
-        input.stopGenerationBeforeDestroy,
-        Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
-      );
+      return false;
+    } finally {
+      clearTimeout(timeout);
+      this.pointerlessWakeBlockingLifecycleCount -= 1;
     }
   }
 
@@ -3549,44 +3370,6 @@ export class RunnerContainer extends Container {
       throw new RunnerContainerCleanupUnsettledError(error);
     }
     throw new RunnerContainerCleanupUnsettledError(input.cause);
-  }
-
-  private async waitForStopOrDelay(
-    observedStopGeneration: number,
-    delayMs: number,
-  ): Promise<void> {
-    if (this.stopGeneration > observedStopGeneration) {
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      let timeout: ReturnType<typeof setTimeout> | null = null;
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (timeout) {
-          clearTimeout(timeout);
-        }
-        this.stopObservers.delete(finish);
-        resolve();
-      };
-      this.stopObservers.add(finish);
-      timeout = setTimeout(finish, delayMs);
-      if (this.stopGeneration > observedStopGeneration) {
-        finish();
-      }
-    });
-  }
-
-  private resolveStopObservers(): void {
-    const observers = [...this.stopObservers];
-    this.stopObservers.clear();
-    for (const observer of observers) {
-      observer();
-    }
   }
 
   private startRunnerActivityRenewal(): () => void {
@@ -3783,8 +3566,7 @@ export class RunnerContainer extends Container {
   private recordCurrentContainerStopped(): boolean {
     const currentGenerationObserved = this.currentContainerStart !== null
       || this.recentReadinessProof !== null
-      || this.lastDestroyRequest !== null
-      || this.stopObservers.size > 0;
+      || this.lastDestroyRequest !== null;
     if (!currentGenerationObserved) {
       return false;
     }
@@ -3796,7 +3578,6 @@ export class RunnerContainer extends Container {
     this.lastActivityObservedAtMs = null;
     this.lastActivityObservedStage = null;
     this.lastDestroyRequest = null;
-    this.resolveStopObservers();
     return true;
   }
 
@@ -4763,19 +4544,16 @@ export async function destroyHostedExecutionContainer(input: {
     const runnerContainerName = input.runnerContainerName ?? input.userId;
     const container = input.runnerContainerNamespace.getByName(runnerContainerName);
     if (isHostedRunnerTargetName(runnerContainerName)) {
-      if (!container.readStandbySlotBinding || !container.retireStandbySlot) {
+      if (!container.retireStandbySlot) {
         throw new Error("Hosted standby runner cleanup RPC is unavailable.");
       }
-      await container.retireStandbySlot({
+      // The addressed owner validates member/slot authority and acknowledges
+      // only after native destruction and durable retirement have completed.
+      const receipt = await container.retireStandbySlot({
         target: { slotName: runnerContainerName, userId: input.userId },
       });
-      const retired = await container.readStandbySlotBinding();
-      if (
-        !hostedRunnerSlotBindingMatchesTarget(retired, runnerContainerName)
-        || retired.state !== "retired"
-        || retired.claimId !== null || retired.userId !== null
-      ) {
-        throw new Error("Hosted runner cleanup did not prove exact terminal retirement.");
+      if (receipt?.retired !== true) {
+        throw new Error("Hosted runner cleanup did not acknowledge terminal retirement.");
       }
     } else {
       await container.destroyInstance();
@@ -4853,29 +4631,6 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
         }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
-  };
-}
-
-function parseRunnerContainerBeginShellPrewarmInput(
-  payload: RunnerContainerBeginShellPrewarmInput,
-): RunnerContainerBeginShellPrewarmInput {
-  const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
-  const orchestration =
-    sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
-      payload.orchestration,
-    );
-  if (
-    payload.source !== undefined
-    && payload.source !== "linq-instant-start"
-    && payload.source !== "linq-message-routing"
-    && payload.source !== "linq-typing-started"
-  ) {
-    throw new TypeError("payload.source must be a supported shell-prewarm source.");
-  }
-  return {
-    ...input,
-    ...(orchestration === null ? {} : { orchestration }),
-    ...(payload.source === undefined ? {} : { source: payload.source }),
   };
 }
 
@@ -4970,10 +4725,7 @@ async function assertRunnerHealthy(
   const runnerBundle = readRunnerContainerMetadataRecordProperty(payload.runnerBundle);
   if (
     expectedBundleIdentity
-    && (
-      runnerBundle.bundleFingerprint !== expectedBundleIdentity.bundleFingerprint
-      || runnerBundle.sourceFingerprint !== expectedBundleIdentity.sourceFingerprint
-    )
+    && !hostedRunnerImageMatches(environment, runnerBundle.bundleFingerprint, runnerBundle.sourceFingerprint)
   ) {
     throw new HostedRunnerContainerBundleMismatchError();
   }
@@ -5570,10 +5322,6 @@ function isMissingRunnerContainerError(error: unknown): boolean {
   return message !== null && message.includes("No such container");
 }
 
-function isSettledRunnerContainerDestroyRaceError(error: unknown): boolean {
-  return isMissingRunnerContainerError(error);
-}
-
 function readErrorMessage(error: unknown): string | null {
   if (typeof error === "string") {
     const message = error.trim();
@@ -5675,4 +5423,17 @@ function readRunnerDurableObjectName(state: unknown): string | null {
   const id = state.id;
   return typeof id === "object" && id !== null && "name" in id && typeof id.name === "string"
     ? id.name : null;
+}
+
+function copyRuntimeWakeHandlerTiming(
+  headers: Headers,
+  diagnostics: RunnerRuntimeWakeDiagnostics,
+): void {
+  for (const [header, key] of [
+    ["x-runtime-wake-received-at-ms", "wakeHandlerReceivedAtEpochMs"],
+    ["x-runtime-wake-accepted-at-ms", "wakeHandlerAcceptedAtEpochMs"],
+  ] as const) {
+    const value = Number(headers.get(header));
+    if (Number.isSafeInteger(value) && value > 0) diagnostics[key] = value;
+  }
 }

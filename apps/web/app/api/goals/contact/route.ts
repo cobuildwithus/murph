@@ -23,13 +23,14 @@ export async function POST(request: Request): Promise<Response> {
     return goalContactError(400, "INVALID_GOAL_CONTACT_REQUEST");
   }
 
+  const contactOnly = Object.keys(body).length === 0;
   const routeId = readGoalRouteId(body.goalRouteId);
-  if (!routeId || Object.keys(body).length !== 1) {
+  if (!contactOnly && (!routeId || Object.keys(body).length !== 1)) {
     return goalContactError(400, "INVALID_GOAL_CONTACT_REQUEST");
   }
 
-  const goal = resolveHealthCommonsCanonicalGoalEntry(routeId);
-  if (!goal) {
+  const goal = routeId ? resolveHealthCommonsCanonicalGoalEntry(routeId) : null;
+  if (!contactOnly && !goal) {
     return goalContactError(404, "GOAL_NOT_FOUND");
   }
 
@@ -50,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const option = resolveGoalContactOption({
     murphPhoneNumber: contactContext.murphPhoneNumber,
-    startPrompt: goal.startPrompt,
+    startPrompt: goal?.startPrompt ?? "",
     textAvailable: contactContext.initialContactChannels.text,
   });
 

@@ -7,7 +7,7 @@ import {
 } from "@murphai/hosted-execution";
 import type { HostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
-import { readHostedWorkspaceSnapshotProcessFailureDiagnostics } from "../workspace-snapshot-local.ts";
+import { readHostedWorkspaceSnapshotProcessFailureDiagnostics } from "../workspace-snapshot-process-diagnostics.ts";
 import {
   HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,

@@ -12,6 +12,14 @@ This package exists to give CLI shells, assistant runtimes, daemons, setup flows
 
 It does not own canonical record schemas, canonical write behavior, query entity-family contracts, query projection storage, device-sync runtime state, inbox daemon behavior, assistant/session state, hosted product facts, or CLI-only device/control-plane composition. Those stay with their owning packages.
 
+Reminder-backed experiment logging receives a trusted `readAssistantOutboxIntent`
+dependency through the service factory. CLI composition supplies the assistant
+engine's public reader; vault usecases never open assistant outbox files. The
+usecase still validates the exact intent, private accepted delivery, experiment
+owner, and planned occurrence before the canonical write. The reader is not a
+command or JSON input, and reminder-backed writes fail closed when it is absent.
+Ordinary experiment logging does not require the assistant reader.
+
 Keep this package thin. Add a surface here only when multiple CLI/headless callers need the same vault usecase orchestration and importing the lower-level owner internals would create the wrong dependency direction.
 
 Exact command paths compose core-owned canonical readers or query-owned bounded
@@ -22,6 +30,12 @@ global-invariant commands may still materialize the shared query projection.
 When an exact read feeds a mutation, carry the observed lifecycle revision or
 source revision into the canonical core writer rather than treating projection
 state as write authority.
+
+Experiment edit option compilation lives in `src/experiment-onboarding-options.ts`
+alongside onboarding capture and assistant-support options. The pure builders
+validate protocol references, run logging, analysis, and dates. The experiment
+usecase owns schedule-file reads, current frontmatter, canonical locking, and
+updates, preserving date and logging validation before schedule reads.
 
 ## Clinical FHIR snapshots
 

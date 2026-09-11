@@ -10,12 +10,11 @@ limited to `refs/heads/main` at the exact current `main` SHA; an arbitrary or
 stale branch dispatch fails in the read-only selection job before protected
 environment access.
 
-The read-only selection job inspects the latest completed scheduled run of this
-exact workflow. It skips paid work only when that run succeeded at the current
-protected-`main` SHA. A missing checkpoint, changed SHA, or latest failure runs
-the canary; an explicit rerun of the trusted controller attempt bypasses the
-skip. Fixed, non-canceling concurrency prevents overlap without creating a
-waiter for every commit or deployment event.
+Every six-hour scheduled admission executes the native journey, even when
+protected `main` is unchanged. There is no successful-workflow history shortcut:
+provider, authentication, and deployed configuration can change without a source
+commit. The read-only selection job validates manual recovery authority. Fixed,
+non-canceling concurrency prevents overlapping native journeys.
 
 The canary checks out that exact `main` SHA and proves it remains in protected
 history. Native source pins are versioned in

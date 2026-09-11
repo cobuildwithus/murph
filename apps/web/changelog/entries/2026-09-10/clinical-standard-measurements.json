@@ -1,0 +1,22 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "clinical-standard-measurements",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More measurements from connected medical records",
+    "summary": "Murph can save height, BMI, head circumference and more standard vital signs from connected medical records.",
+    "details": "Supported measurements retain their original dates and source. Imports now handle inches, grams and Fahrenheit alongside existing units.",
+    "relevanceTags": [
+      "medical-records"
+    ],
+    "sourcePullRequests": [
+      3172
+    ],
+    "tryIt": {
+      "label": "View connected records",
+      "href": "/records"
+    }
+  }
+}

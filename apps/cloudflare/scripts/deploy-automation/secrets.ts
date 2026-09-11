@@ -8,11 +8,13 @@ export {
 } from "./worker-secret-names.ts";
 
 import { normalizeOptionalString, requireConfiguredString } from "./shared.ts";
+import { assertSmallRunnerSelection } from "../../src/small-runner-profile.ts";
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 export function buildHostedWorkerSecretsPayload(
   source: EnvSource = process.env,
 ): Record<string, string> {
+  assertSmallRunnerSelection(source);
   return {
     ...readRequiredStringMap(source, HOSTED_WORKER_REQUIRED_SECRET_NAMES),
     ...readPresentStringMap(source, HOSTED_WORKER_OPTIONAL_SECRET_NAMES),

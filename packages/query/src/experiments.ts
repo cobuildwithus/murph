@@ -34,6 +34,7 @@ import {
   resolveExperimentAdherenceTargets,
   resolveEffectiveExperimentLinkedEventMissingPolicy,
   resolveInterventionSessionLocalDate,
+  type AdherenceSessionCounts,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
@@ -823,56 +824,18 @@ function buildAdherenceCalendarFromContext(
 
 function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
   const targets = resolveAdherenceTargets(context);
-  const rollupTarget = resolveExperimentAdherenceRollupTarget(targets);
-  const hasAmbiguousTargets = targets.length > 1 && !rollupTarget;
+  const progressTarget = resolveExperimentAdherenceRollupTarget(targets);
+  const hasAmbiguousTargets = targets.length > 1 && !progressTarget;
   const targetSessions =
-    rollupTarget?.rollup?.targetCompletions ??
+    progressTarget?.rollup?.targetCompletions ??
     (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.targetSessions ?? null);
   const minimumUsefulSessions =
-    rollupTarget?.rollup?.minimumUsefulCompletions ??
+    progressTarget?.rollup?.minimumUsefulCompletions ??
     (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.minimumUsefulSessions ?? null);
-  const progressTarget = hasAmbiguousTargets ? null : rollupTarget ?? targets[0] ?? null;
   const adherenceCalendar = buildAdherenceCalendarFromContext(context);
-  const rollupCells = progressTarget?.calendar && rollupTarget && adherenceCalendar
-    ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
-    : null;
-  const progressObservations = progressTarget
-    ? buildAdherenceObservations(context, [progressTarget])
-    : [];
-  const progressCells = progressTarget?.calendar
-    ? rollupCells ?? adherenceCalendar?.cells ?? []
-    : [];
-  const occurrenceCounts =
-    progressTarget?.calendar && progressTarget.evidence.kind === "linkedEventCount"
-      ? countCalendarAdherenceSessions({
-          asOf: context.asOf,
-          cells: progressCells,
-          observations: progressObservations,
-          target: progressTarget,
-        })
-      : null;
-  const progressCounts = occurrenceCounts ??
-    (progressTarget && !progressTarget.calendar
-      ? countCompletedAdherenceSessions({
-          asOfDate: context.asOf,
-          observations: progressObservations,
-          target: progressTarget,
-          windows: buildWindowSummary(context.frontmatter),
-        })
-      : null);
-  const confidenceCounts = !hasAmbiguousTargets && progressTarget?.calendar
-    ? occurrenceCounts ?? countAdherenceConfidenceSessions({
-        cells: progressCells,
-        observations: progressObservations,
-      })
-    : progressCounts ?? {
-        sensedSessions: 0,
-        confirmedSessions: 0,
-        assumedSessions: 0,
-      };
-
-  const countedLoggedEvidenceIds = occurrenceCounts
-    ? new Set(occurrenceCounts.loggedEvidenceIds)
+  const counts = countProgressAdherence(context, progressTarget, adherenceCalendar);
+  const countedLoggedEvidenceIds = counts.loggedEvidenceIds
+    ? new Set(counts.loggedEvidenceIds)
     : null;
   const sessionEventIds = context.events
     .filter(isCompletedSessionEvent)
@@ -882,36 +845,15 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     )
     .map((event) => event.entityId);
 
-  let completedSessions = 0;
-  let partialSessions = 0;
-  if (!hasAmbiguousTargets) {
-    if (occurrenceCounts) {
-      completedSessions = occurrenceCounts.completedSessions;
-      partialSessions = occurrenceCounts.partialSessions;
-    } else if (progressTarget?.calendar) {
-      completedSessions = progressCells.filter(
-        (cell) => cell.status === "satisfied" || cell.status === "assumed",
-      ).length;
-      partialSessions = progressCells.filter((cell) => cell.status === "partial").length;
-    } else {
-      completedSessions = progressCounts?.completedSessions ?? 0;
-      partialSessions = progressCounts?.partialSessions ?? 0;
-    }
-  }
-
+  const { completedSessions, partialSessions } = counts;
   const loggedSessions = completedSessions + partialSessions;
   const expectedSessionsByNow = hasAmbiguousTargets
     ? null
-    : occurrenceCounts
-      ? occurrenceCounts.expectedSessionsByNow
-      : progressTarget?.calendar && adherenceCalendar
-        ? (rollupCells ?? adherenceCalendar.cells)
-            .filter((cell) => cell.status !== "scheduled").length
-        : computeExpectedSessionsByNow(
-            context.frontmatter,
-            context.asOf,
-            targetSessions,
-          );
+    : counts.expectedSessionsByNow ?? computeExpectedSessionsByNow(
+        context.frontmatter,
+        context.asOf,
+        targetSessions,
+      );
   const evidence = buildProgressAdherenceEvidence(progressTarget);
 
   let status: ExperimentAdherenceStatus = "unknown";
@@ -946,17 +888,63 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     status,
     targetSessions,
   };
-  if (confidenceCounts.sensedSessions > 0) {
-    summary.sensedSessions = confidenceCounts.sensedSessions;
+  if (counts.sensedSessions > 0) {
+    summary.sensedSessions = counts.sensedSessions;
   }
-  if (confidenceCounts.confirmedSessions > 0) {
-    summary.confirmedSessions = confidenceCounts.confirmedSessions;
+  if (counts.confirmedSessions > 0) {
+    summary.confirmedSessions = counts.confirmedSessions;
   }
-  if (confidenceCounts.assumedSessions > 0) {
-    summary.assumedSessions = confidenceCounts.assumedSessions;
+  if (counts.assumedSessions > 0) {
+    summary.assumedSessions = counts.assumedSessions;
   }
 
   return summary;
+}
+
+interface ExperimentProgressAdherenceCounts extends Pick<
+  AdherenceSessionCounts,
+  "completedSessions" | "partialSessions" | "sensedSessions" | "confirmedSessions" | "assumedSessions"
+> {
+  expectedSessionsByNow?: number;
+  loggedEvidenceIds?: readonly string[];
+}
+
+function countProgressAdherence(
+  context: ExperimentSummaryContext,
+  target: QueryExperimentAdherenceTarget | null,
+  calendar: ExperimentAdherenceCalendarResult | null,
+): ExperimentProgressAdherenceCounts {
+  const observations = target ? buildAdherenceObservations(context, [target]) : [];
+  if (!target?.calendar) {
+    return countCompletedAdherenceSessions({
+      asOfDate: context.asOf,
+      observations,
+      target,
+      windows: buildWindowSummary(context.frontmatter),
+    });
+  }
+
+  const progressCells = (calendar?.cells ?? [])
+    .filter((cell) => cell.targetId === target.targetId);
+  if (target.evidence.kind === "linkedEventCount") {
+    return countCalendarAdherenceSessions({
+      asOf: context.asOf,
+      cells: progressCells,
+      observations,
+      target,
+    });
+  }
+
+  return {
+    ...countAdherenceConfidenceSessions({ cells: progressCells, observations }),
+    completedSessions: progressCells.filter(
+      (cell) => cell.status === "satisfied" || cell.status === "assumed",
+    ).length,
+    partialSessions: progressCells.filter((cell) => cell.status === "partial").length,
+    expectedSessionsByNow: calendar
+      ? progressCells.filter((cell) => cell.status !== "scheduled").length
+      : undefined,
+  };
 }
 
 function buildProgressAdherenceEvidence(

@@ -161,6 +161,7 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
+  onProviderRequestStarted?: (() => void) | null;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -228,6 +229,7 @@ export async function runHostedAssistantAutomationLane(input: {
           preProviderPhase: input.preProviderPhase ?? null,
           ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          onProviderRequestStarted: input.onProviderRequestStarted,
           ...(input.beforeProviderAcceptedInputs
             ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
             : {}),
@@ -310,6 +312,7 @@ export async function runHostedAssistantAutomation(
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
+    onProviderRequestStarted?: (() => void) | null;
     beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
     providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
     readForegroundInputIds?: (() => readonly string[]) | null;
@@ -544,6 +547,7 @@ export async function runHostedAssistantAutomation(
         recordHostedAssistantMilestonesBestEffort({ context, milestones });
       },
       onProviderRequestStarted: (event) => {
+        options?.onProviderRequestStarted?.();
         const source = readHostedIngressLatencySource(event.source);
         const runtimeAttemptId = options?.runtimeAttemptId?.trim() ?? "";
         activeProviderMilestoneTraceContext = source && runtimeAttemptId

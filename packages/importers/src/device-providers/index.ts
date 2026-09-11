@@ -112,18 +112,6 @@ export type {
 } from "./provider-descriptors.ts";
 
 export {
-  resolveWearableCanonicalMetricKey,
-  resolveWearableMetricCatalogEntry,
-  resolveWearableMetricTolerance,
-  wearableCanonicalMetricKeys,
-  wearableMetricCatalog,
-} from "./metric-catalog.ts";
-export type {
-  WearableCanonicalMetricKey,
-  WearableMetricCatalogEntry,
-  WearableMetricRecordKind,
-} from "./metric-catalog.ts";
-export {
   buildWearableRawIngestReceipt,
   stableStringify,
 } from "./raw-ingest-receipt.ts";

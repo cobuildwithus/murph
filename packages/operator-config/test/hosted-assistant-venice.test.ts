@@ -22,14 +22,15 @@ test("hosted assistant configuration accepts the registered Venice Codex provide
       },
       homeDirectory,
     });
+    const operatorConfig = await readOperatorConfig(homeDirectory);
     assert.deepEqual(result, {
+      config: operatorConfig?.hostedAssistant,
       configured: true,
       provider: "codex-cli",
       seeded: true,
       source: "hosted-env",
     });
 
-    const operatorConfig = await readOperatorConfig(homeDirectory);
     const providerConfig = resolveHostedAssistantProviderConfig(
       operatorConfig?.hostedAssistant,
     );

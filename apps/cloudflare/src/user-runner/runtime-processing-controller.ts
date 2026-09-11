@@ -2,19 +2,17 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
-import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  type HostedRuntimeHealthDataAdmissionResponse,
   type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
+import { isSmallRunnerMember } from "../small-runner-profile.ts";
 import type {
   WorkerAnalyticsEngineDatasetLike,
 } from "../worker-contracts.js";
@@ -23,7 +21,6 @@ import {
   RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   type HostedExecutionContainerNamespaceLike,
   type RunnerContainerColdStartTiming,
-  type RunnerContainerShellPrewarmObservation,
   type RunnerContainerStartupFailureStage,
 } from "../runner-container.js";
 import {
@@ -57,6 +54,8 @@ import {
   buildRunnerRecordTimingLogDetails,
   classifyRuntimeStartFailureRetryReason,
   mapRunnerProcessingRetryReason,
+  observeRuntimeProcessingFence,
+  type RuntimeProcessingDiagnostics,
   type RuntimeProcessingRetryAttribution,
   type RuntimeProcessingRetryReason,
   type RuntimeProcessingStartFailureRetryReason,
@@ -119,6 +118,12 @@ export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   userId: string;
 };
 
+// Internal to this controller. Observations are never accepted on the incoming
+// ensure RPC and are not serialized into invocation/authoritative contracts.
+type ObservedRuntimeProcessingInput = RuntimeProcessingInput & {
+  diagnostics: RuntimeProcessingDiagnostics;
+};
+
 export interface RuntimeHealthDataConsentStopResult {
   activeInvocationPreempted: boolean;
   runnerContainerDestroyAttempted: boolean;
@@ -142,7 +147,6 @@ type FreshRuntimeStartPreparation =
       preparedAtEpochMs: number;
       runtimePreparationWaitAfterContainerReadyMs: number;
       startupOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
-      shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
     }
   | {
       kind: "retry";
@@ -176,7 +180,7 @@ type FreshRunnerContainerResolution =
       response: HostedRuntimeEnsureProcessingResponse;
     };
 
-function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
+function toRuntimeInvocationInput(input: ObservedRuntimeProcessingInput): RuntimeInvocationInput {
   return {
     ...(input.assistantExecutionBlocked
       ? { assistantExecutionBlocked: true as const }
@@ -189,38 +193,15 @@ function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocat
 }
 
 function withRuntimeProcessingOrchestration(
-  input: RuntimeProcessingInput,
+  input: ObservedRuntimeProcessingInput,
   orchestration: RuntimeProcessingOrchestrationDiagnostics,
-): RuntimeProcessingInput {
+): ObservedRuntimeProcessingInput {
   return {
     ...input,
     orchestration: {
       ...(input.orchestration ?? {}),
       ...orchestration,
     },
-  };
-}
-
-function toShellPrewarmOrchestrationDiagnostics(
-  observation: RunnerContainerShellPrewarmObservation | undefined,
-): RuntimeProcessingOrchestrationDiagnostics | null {
-  if (!observation) {
-    return null;
-  }
-  return {
-    ...(observation.orchestration ?? {}),
-    shellPrewarmFirstHintAtEpochMs: observation.firstHintAtEpochMs,
-    shellPrewarmHintCount: observation.hintCount,
-    ...(observation.finishedAtEpochMs === undefined ? {} : {
-      shellPrewarmFinishedAtEpochMs: observation.finishedAtEpochMs,
-    }),
-    ...(observation.operationElapsedMs === undefined ? {} : {
-      shellPrewarmOperationElapsedMs: observation.operationElapsedMs,
-    }),
-    ...(observation.outcome === undefined ? {} : {
-      shellPrewarmOutcome: observation.outcome,
-    }),
-    shellPrewarmSource: observation.source,
   };
 }
 
@@ -260,8 +241,8 @@ function toContainerColdStartOrchestrationDiagnostics(
 }
 
 function withoutSupersededRuntimeFenceDiagnostics(
-  input: RuntimeProcessingInput,
-): RuntimeProcessingInput {
+  input: ObservedRuntimeProcessingInput,
+): ObservedRuntimeProcessingInput {
   if (!input.orchestration) {
     return input;
   }
@@ -289,6 +270,8 @@ export class RuntimeProcessingController {
     private readonly input: {
       env: HostedExecutionEnvironment;
       invocationService: Pick<RuntimeInvocationService, "prepareForFreshStart" | "invokePreparedWithFence">;
+      readHealthDataAdmission: (userId: string, timeoutMs: number) =>
+        Promise<HostedRuntimeHealthDataAdmissionResponse>;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
       readCheckpointHandoff?: (input: {
         attemptId: string;
@@ -307,6 +290,7 @@ export class RuntimeProcessingController {
 
   private createRetryLater(
     input: RuntimeProcessingRetryAttribution & {
+      diagnostics: RuntimeProcessingDiagnostics;
       orchestrationAttemptId: string;
       userId: string;
     },
@@ -317,33 +301,13 @@ export class RuntimeProcessingController {
     });
   }
 
-  async beginShellPrewarmForUser(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void> {
-    // Hints never create member-specific shells. The memberless coordinator
-    // owns optional prewarming in every mode; allocation alone binds a target.
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        shellPrewarmAdmissionOutcome: "skipped_standby_pool",
-        ...(orchestration?.shellPrewarmOrchestrationAttemptId === undefined ? {} : {
-          orchestrationAttemptId: orchestration.shellPrewarmOrchestrationAttemptId,
-        }),
-        shellPrewarmSource: source ?? "unknown",
-      },
-      message: "Hosted runner shell prewarm admission decided.",
-      phase: "scheduled",
-      userId,
-    });
-  }
-
   async ensureForUser(
     input: RuntimeProcessingInput,
+    diagnostics: RuntimeProcessingDiagnostics = { stage: "state_bind", details: {} },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     const runtimeWakeStartedAt = Date.now();
-    const processingInput = withRuntimeProcessingOrchestration(input, {
+    diagnostics.stage = "state_bind";
+    const processingInput = withRuntimeProcessingOrchestration({ ...input, diagnostics }, {
       userRunnerEnsureStartedAtEpochMs: runtimeWakeStartedAt,
       runnerStateBindStartedAtEpochMs: Date.now(),
     });
@@ -358,7 +322,10 @@ export class RuntimeProcessingController {
       runnerStateBindFinishedAtEpochMs: Date.now(),
       runnerStateReadStartedAtEpochMs: Date.now(),
     });
+    diagnostics.stage = "state_read";
+    diagnostics.details.runnerStateBindFinishedAtEpochMs = Date.now();
     const record = await this.input.stateStore.readState();
+    diagnostics.details.runnerStateReadFinishedAtEpochMs = Date.now();
     const stateReadyInput = withRuntimeProcessingOrchestration(stateReadInput, {
       runnerStateReadFinishedAtEpochMs: Date.now(),
     });
@@ -473,7 +440,7 @@ export class RuntimeProcessingController {
 
   private async ensureExistingRuntimeProcessing(input: {
     commandBudget: RuntimeProcessingCommandBudget;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     record: RunnerStateRecord;
     runtimeWakeStartedAt: number;
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
@@ -481,6 +448,7 @@ export class RuntimeProcessingController {
     if (!record.writeFence) {
       if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
         return this.createRetryLater({
+          diagnostics: input.input.diagnostics,
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "command_budget_exhausted",
           userId: input.input.userId,
@@ -495,30 +463,13 @@ export class RuntimeProcessingController {
     }
 
     const activeFence = record.writeFence;
-    if (activeFence.kind !== "runtime") {
-      return this.createRetryLater({
-        orchestrationAttemptId: input.input.orchestrationAttemptId,
-        reason: "container_busy",
-        stage: "non_runtime_write_fence",
-        userId: input.input.userId,
-      });
-    }
-
+    observeRuntimeProcessingFence(input.input.diagnostics, activeFence);
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
-    const triggeredByTrustedWebDirect =
-      isTrustedWebDirectRuntimeProcessing(input.input);
-    const cooperativeMailboxOwnerHandoff =
+    const foregroundPromotionRequested =
       activeFence.processingMode === "system_mailbox"
       && requestedProcessingMode === "default";
     if (activeFence.processingMode !== requestedProcessingMode) {
-      if (
-        activeFence.processingMode === "inbox_media_retention"
-        || (
-          activeFence.processingMode === "system_mailbox"
-          && requestedProcessingMode === "default"
-          && triggeredByTrustedWebDirect
-        )
-      ) {
+      if (activeFence.processingMode === "inbox_media_retention") {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
           activeFence,
           commandBudget: input.commandBudget,
@@ -527,9 +478,13 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
-      if (!cooperativeMailboxOwnerHandoff) {
+      // Retention waits behind either conversational owner. Default and system
+      // work can wake the same child. The child checks its existing authority
+      // before foreground promotion; a system wake never downgrades it.
+      if (requestedProcessingMode === "inbox_media_retention") {
         const activeRuntimeState =
           await this.readActiveRuntimeFenceLiveness({
+            diagnostics: input.input.diagnostics,
             activeFence,
             commandBudget: input.commandBudget,
             record,
@@ -545,6 +500,7 @@ export class RuntimeProcessingController {
         }
 
         return this.createRetryLater({
+          diagnostics: input.input.diagnostics,
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "container_busy",
           stage: "active_runtime_contention",
@@ -562,6 +518,7 @@ export class RuntimeProcessingController {
     if (canCoalesceWithoutWake) {
       const activeRuntimeState =
         await this.readActiveRuntimeFenceLiveness({
+          diagnostics: input.input.diagnostics,
           activeFence,
           commandBudget: input.commandBudget,
           record,
@@ -577,6 +534,7 @@ export class RuntimeProcessingController {
       }
       if (activeRuntimeState.outcome !== "exact-active") {
         return this.createRetryLater({
+          diagnostics: input.input.diagnostics,
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "container_rpc_error",
           userId: input.input.userId,
@@ -604,7 +562,12 @@ export class RuntimeProcessingController {
       }),
       activeWakeStartedAtEpochMs,
     });
+    input.input.diagnostics.stage = "active_wake";
+    input.input.diagnostics.details.wakeAttemptId = activeFence.attemptId;
+    input.input.diagnostics.details.wakeLeaseGeneration = String(activeFence.generation);
+    input.input.diagnostics.details.activeWakeStartedAtEpochMs = activeWakeStartedAtEpochMs;
     const containerResult = await ensureActiveRuntimeProcessing({
+      diagnostics: input.input.diagnostics,
       activeRuntime: {
         attemptId: activeFence.attemptId,
         leaseGeneration: String(activeFence.generation),
@@ -612,7 +575,7 @@ export class RuntimeProcessingController {
           ? { orchestration: inputAtActiveWakeStart.orchestration }
           : {}),
         processingMode: activeFence.processingMode,
-        ...(cooperativeMailboxOwnerHandoff
+        ...(foregroundPromotionRequested
           ? { requestedProcessingMode }
           : {}),
         userId: record.userId,
@@ -624,6 +587,7 @@ export class RuntimeProcessingController {
       runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
     });
     const activeWakeFinishedAtEpochMs = Date.now();
+    input.input.diagnostics.details.activeWakeFinishedAtEpochMs = activeWakeFinishedAtEpochMs;
     const inputAfterActiveWake = withRuntimeProcessingOrchestration(inputAtActiveWakeStart, {
       activeWakeAccepted: containerResult.kind === "accepted",
       activeWakeElapsedMs:
@@ -633,16 +597,9 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
-      if (cooperativeMailboxOwnerHandoff) {
-        // The active child accepted the wake so it can checkpoint and release.
-        // It did not accept processing under the requested mode.
-        return this.createRetryLater({
-          orchestrationAttemptId: input.input.orchestrationAttemptId,
-          reason: "container_busy",
-          stage: "cooperative_handoff_pending",
-          userId: input.input.userId,
-        });
-      }
+      // Acceptance belongs to this exact child, not to a replacement owner.
+      // A consented system-mailbox child can service foreground in place;
+      // blocked or exiting children retain their normal release/recheck path.
       const action = containerResult.action === "already_running"
         ? "already_running"
         : "woken";
@@ -672,6 +629,7 @@ export class RuntimeProcessingController {
 
     const activeRuntimeState =
       await this.readActiveRuntimeFenceLiveness({
+        diagnostics: input.input.diagnostics,
         activeFence,
         commandBudget: input.commandBudget,
         record,
@@ -687,6 +645,7 @@ export class RuntimeProcessingController {
     }
 
     return this.createRetryLater({
+      diagnostics: input.input.diagnostics,
       orchestrationAttemptId: input.input.orchestrationAttemptId,
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
@@ -696,7 +655,7 @@ export class RuntimeProcessingController {
   private async replaceInactiveRuntimeFence(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     preserveCheckpointHandoff?: boolean;
     preserveStartingFence?: boolean;
     record: RunnerStateRecord;
@@ -709,6 +668,7 @@ export class RuntimeProcessingController {
       && this.shouldPreserveStartingWriteFence(activeFence)
     ) {
       return this.createRetryLater({
+        diagnostics: input.input.diagnostics,
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "starting_fence_preserved",
         userId: input.input.userId,
@@ -720,6 +680,7 @@ export class RuntimeProcessingController {
       && await this.hasLiveCheckpointHandoff(activeFence, record.userId)
     ) {
       return this.createRetryLater({
+        diagnostics: input.input.diagnostics,
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "checkpoint_handoff_pending",
         userId: input.input.userId,
@@ -749,6 +710,7 @@ export class RuntimeProcessingController {
     }
     if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
       return this.createRetryLater({
+        diagnostics: input.input.diagnostics,
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "command_budget_exhausted",
         userId: input.input.userId,
@@ -776,7 +738,7 @@ export class RuntimeProcessingController {
   private async preemptActiveBackgroundRuntimeForPriorityProcessing(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     record: RunnerStateRecord;
     runtimeWakeStartedAt: number;
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
@@ -785,6 +747,7 @@ export class RuntimeProcessingController {
     const abortResult = await this.abortActiveRuntimeFence({
       activeFence,
       commandBudget: input.commandBudget,
+      diagnostics: input.input.diagnostics,
       orchestrationAttemptId: input.input.orchestrationAttemptId,
       record,
       runnerContainerName,
@@ -808,6 +771,7 @@ export class RuntimeProcessingController {
   private async abortActiveRuntimeFence(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
+    diagnostics: RuntimeProcessingDiagnostics;
     orchestrationAttemptId: string;
     record: RunnerStateRecord;
     runnerContainerName?: string | null;
@@ -826,6 +790,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          diagnostics: input.diagnostics,
           orchestrationAttemptId: input.orchestrationAttemptId,
           reason: "container_rpc_error",
           userId: input.record.userId,
@@ -838,6 +803,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          diagnostics: input.diagnostics,
           orchestrationAttemptId: input.orchestrationAttemptId,
           reason: "container_busy",
           stage: "background_preemption_unavailable",
@@ -867,6 +833,7 @@ export class RuntimeProcessingController {
         return {
           aborted: false,
           response: this.createRetryLater({
+            diagnostics: input.diagnostics,
             orchestrationAttemptId: input.orchestrationAttemptId,
             reason: "container_rpc_error",
             userId: input.record.userId,
@@ -876,6 +843,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          diagnostics: input.diagnostics,
           orchestrationAttemptId: input.orchestrationAttemptId,
           reason: "container_busy",
           stage: "background_preemption_not_accepted",
@@ -894,6 +862,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          diagnostics: input.diagnostics,
           orchestrationAttemptId: input.orchestrationAttemptId,
           reason: isRuntimeProcessingCommandBudgetTimeout(error)
             ? "container_rpc_timeout"
@@ -911,11 +880,14 @@ export class RuntimeProcessingController {
   }
 
   private async readActiveRuntimeFenceLiveness(input: {
+    diagnostics: RuntimeProcessingDiagnostics;
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     record: RunnerStateRecord;
     runnerContainerName?: string | null;
   }): Promise<RuntimeFenceLivenessReadResult> {
+    const livenessStartedAt = Date.now();
+    input.diagnostics.stage = "liveness";
     const result = await readRuntimeFenceLivenessBestEffort({
       commandBudget: input.commandBudget,
       identity: {
@@ -929,6 +901,10 @@ export class RuntimeProcessingController {
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       stepTimeoutMs: this.input.env.webControlTimeoutMs,
     });
+    input.diagnostics.details.runtimeLivenessOutcome = result.outcome;
+    input.diagnostics.details.runtimeLivenessElapsedMs = Math.max(0, Date.now() - livenessStartedAt);
+    delete input.diagnostics.details.runtimeLivenessReason;
+    if (result.outcome === "indeterminate") input.diagnostics.details.runtimeLivenessReason = result.reason;
     if (result.outcome === "indeterminate" && result.error !== undefined) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -985,13 +961,14 @@ export class RuntimeProcessingController {
   private async resolveFreshRunnerContainer(input: {
     commandBudget: RuntimeProcessingCommandBudget;
     initialRecord: RunnerStateRecord;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     timings: RunnerAllocationTimings;
   }): Promise<FreshRunnerContainerResolution> {
     if (!this.input.runnerContainerNamespace) {
       return {
         kind: "retry",
         response: this.createRetryLater({
+          diagnostics: input.input.diagnostics,
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "missing_container_binding",
           userId: input.input.userId,
@@ -1012,10 +989,11 @@ export class RuntimeProcessingController {
             runnerContainerName: pending,
             userId,
           });
-          if (retained === "ready") {
+          if (typeof retained !== "string") {
             return {
               kind: "ready",
               runnerContainerName: pending,
+              verifiedSlotBinding: retained,
               standbyAllocationOutcome: "retained",
               standbyAllocationReason: "retained",
             };
@@ -1034,6 +1012,7 @@ export class RuntimeProcessingController {
     }
 
     const releaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
+    const small = await isSmallRunnerMember(this.input.runnerRuntimeEnvSource, userId);
     const cold = (reason: RunnerAllocationReason, outcome: "disabled" | "fallback" = "disabled") =>
       measureRunnerAllocationStep(input.timings, "runnerTargetBindElapsedMs", () => this.bindFreshRunnerTarget({
         claimId: createHostedStandbyClaimId(),
@@ -1042,8 +1021,11 @@ export class RuntimeProcessingController {
         reason,
         releaseId,
         runtimeInput: input.input,
-        slotName: createHostedRunnerSlotName(releaseId),
+        slotName: createHostedRunnerSlotName(releaseId, small ? "small" : "default"),
       }));
+    // The experiment has no shared pristine inventory. Warm retention above
+    // remains exact-target based, including after selection is disabled.
+    if (small) return await cold("mode_not_allocate");
     if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate") {
       return await cold("mode_not_allocate");
     }
@@ -1072,7 +1054,7 @@ export class RuntimeProcessingController {
     commandBudget: RuntimeProcessingCommandBudget;
     coordinatorNamespace: HostedStandbyCoordinatorNamespaceLike;
     releaseId: string;
-    runtimeInput: RuntimeProcessingInput;
+    runtimeInput: ObservedRuntimeProcessingInput;
     timings: RunnerAllocationTimings;
   }): Promise<FreshRunnerContainerResolution> {
     const budget = {
@@ -1143,7 +1125,7 @@ export class RuntimeProcessingController {
     outcome: "claimed" | "disabled" | "fallback";
     reason: RunnerAllocationReason;
     releaseId: string;
-    runtimeInput: RuntimeProcessingInput;
+    runtimeInput: ObservedRuntimeProcessingInput;
     slotName: string;
   }): Promise<FreshRunnerContainerResolution> {
     const { slotName, runtimeInput, releaseId, claimId } = input;
@@ -1197,7 +1179,7 @@ export class RuntimeProcessingController {
     if (recovery.kind !== "completed" || !hostedRunnerSlotBindingMatchesTarget(recovery.value, slotName)) {
       return retry();
     }
-    let binding: HostedStandbySlotBinding = recovery.value;
+    const binding = recovery.value;
     if (binding.state === "bound" && boundExactly(binding)) {
       // Same allocating request, same random claim: a just-bound cold target
       // may start. This exception is never used by later pending recovery.
@@ -1205,17 +1187,11 @@ export class RuntimeProcessingController {
     }
     if (binding.state === "unbound") {
       const retirement = await settle(() => slot.retireStandbySlot({}));
-      if (retirement.kind !== "completed") return retry();
-      const receipt = await settle(() => slot.readStandbySlotBinding());
-      if (receipt.kind !== "completed") return retry();
-      binding = receipt.value;
+      if (retirement.kind !== "completed" || retirement.value?.retired !== true) return retry();
+    } else if (binding.state !== "retired") {
+      // Foreign, retiring, malformed and unavailable evidence stays pinned.
+      return retry();
     }
-    // Foreign, retiring, malformed and unavailable evidence all stay pinned.
-    // The retirement RPC's boolean is not a terminal receipt for this identity.
-    if (
-      !hostedRunnerSlotBindingMatchesTarget(binding, slotName)
-      || binding.state !== "retired"
-    ) return retry();
     await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
       runnerContainerName: slotName,
       userId: runtimeInput.userId,
@@ -1232,7 +1208,7 @@ export class RuntimeProcessingController {
     commandBudget: RuntimeProcessingCommandBudget;
     runnerContainerName: string;
     userId: string;
-  }): Promise<"cleared" | "ready" | "retry"> {
+  }): Promise<HostedStandbySlotBinding | "cleared" | "retry"> {
     const currentReleaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
     const identity = readHostedRunnerTargetIdentity(input.runnerContainerName);
     if (!identity) return "retry";
@@ -1252,7 +1228,7 @@ export class RuntimeProcessingController {
     if (binding.state === "bound") {
       return isSupportedHostedRunnerRelease(this.input.runnerRuntimeEnvSource, binding.releaseId)
         && binding.userId === input.userId
-        && isHostedStandbyClaimId(binding.claimId) ? "ready" : "retry";
+        && isHostedStandbyClaimId(binding.claimId) ? binding : "retry";
     }
     if (binding.state !== "retired" || binding.claimId !== null || binding.userId !== null) return "retry";
     const cleared = await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
@@ -1276,11 +1252,12 @@ export class RuntimeProcessingController {
   }
 
   private createStandbyRetryResolution(
-    input: RuntimeProcessingInput,
+    input: ObservedRuntimeProcessingInput,
   ): Extract<FreshRunnerContainerResolution, { kind: "retry" }> {
     return {
       kind: "retry",
       response: this.createRetryLater({
+        diagnostics: input.diagnostics,
         orchestrationAttemptId: input.orchestrationAttemptId,
         reason: "container_rpc_error",
         userId: input.userId,
@@ -1291,12 +1268,54 @@ export class RuntimeProcessingController {
   private async startRuntimeProcessing(input: {
     action: "started" | "replaced";
     commandBudget: RuntimeProcessingCommandBudget;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     runtimeWakeStartedAt: number;
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
+    // An existing write fence owns an admitted session. Only a new session
+    // (including replacement) needs the Web-owned consent/member read.
     let processingInput = withRuntimeProcessingOrchestration(input.input, {
       freshStartRequestedAtEpochMs: Date.now(),
+      healthDataAdmissionReadStartedAtEpochMs: Date.now(),
     });
+    processingInput.diagnostics.stage = "admission";
+    processingInput.diagnostics.details.healthDataAdmissionReadStartedAtEpochMs = Date.now();
+    let admission: HostedRuntimeHealthDataAdmissionResponse;
+    try {
+      admission = await runRuntimeProcessingCommandStep({
+        budget: input.commandBudget,
+        operation: () => this.input.readHealthDataAdmission(
+          processingInput.userId,
+          readRuntimeProcessingCommandStepTimeoutMs({
+            budget: input.commandBudget,
+            stepTimeoutMs: this.input.env.webControlTimeoutMs,
+          }),
+        ),
+        stepTimeoutMs: this.input.env.webControlTimeoutMs,
+      });
+      if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
+        throw new Error(RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE);
+      }
+    } catch (error) {
+      if (!isRuntimeProcessingCommandBudgetTimeout(error)) throw error;
+      return this.createRetryLater({
+        diagnostics: processingInput.diagnostics,
+        orchestrationAttemptId: processingInput.orchestrationAttemptId,
+        reason: "command_budget_exhausted",
+        userId: processingInput.userId,
+      });
+    }
+    processingInput = withRuntimeProcessingOrchestration(processingInput, {
+      healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
+    });
+    processingInput.diagnostics.details.healthDataAdmissionReadFinishedAtEpochMs = Date.now();
+    if (!admission.processingAllowed) {
+      processingInput.diagnostics.details.runtimeProcessingRetryReason = "admission_denied";
+      return {
+        kind: "retry_later",
+        retryAt: new Date(Date.now() + 60_000).toISOString(),
+      };
+    }
+    processingInput.diagnostics.stage = "fresh_start";
     const initialRecord = await this.input.stateStore.readState();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -1368,6 +1387,9 @@ export class RuntimeProcessingController {
         runnerContainerName,
         userId: processingInput.userId,
       });
+      observeRuntimeProcessingFence(processingInput.diagnostics, {
+        ...token, processingMode: normalizeRuntimeProcessingMode(processingInput.processingMode),
+      });
       // Launch identity belongs to the request that acquired this fresh fence.
       // Active wakes never reach this point and therefore cannot claim it.
       const triggeredByWebDirect =
@@ -1389,6 +1411,7 @@ export class RuntimeProcessingController {
     } catch (error) {
       if (error instanceof RunnerContainerReservationLostError) {
         return this.createRetryLater({
+          diagnostics: processingInput.diagnostics,
           orchestrationAttemptId: processingInput.orchestrationAttemptId,
           reason: "container_rpc_error",
           userId: processingInput.userId,
@@ -1421,8 +1444,7 @@ export class RuntimeProcessingController {
         freshStartContainerReadyAtEpochMs: preparation.containerReadyAtEpochMs,
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
-      ...(preparation.startupOrchestration ?? {}),
-      ...(preparation.shellPrewarmOrchestration ?? {}),
+      ...preparation.startupOrchestration,
     });
     const preparationOrchestration =
       preparation.prepared.input.orchestration ?? {};
@@ -1437,7 +1459,7 @@ export class RuntimeProcessingController {
         ...toRuntimeInvocationInput(processingInput),
         orchestration: {
           ...preparationOrchestration,
-          ...(processingInput.orchestration ?? {}),
+          ...processingInput.orchestration,
           ...(runtimeInvocationPreparationElapsedMs === undefined ? {} : {
             runtimeInvocationPreparationElapsedMs,
           }),
@@ -1469,7 +1491,7 @@ export class RuntimeProcessingController {
       input: {
         ...prepared.input,
         orchestration: {
-          ...(prepared.input.orchestration ?? {}),
+          ...prepared.input.orchestration,
           freshStartInvocationAcceptedAtEpochMs: Date.now(),
         },
       },
@@ -1512,7 +1534,7 @@ export class RuntimeProcessingController {
     verifiedSlotBinding?: HostedStandbySlotBinding;
     prepareInvocation: ReturnType<RuntimeInvocationService["prepareForFreshStart"]>;
     commandBudget: RuntimeProcessingCommandBudget;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     runnerContainerName: string;
     token: RunnerWriteFenceToken;
   }): Promise<FreshRuntimeStartPreparation> {
@@ -1611,14 +1633,11 @@ export class RuntimeProcessingController {
       startupOrchestration: toContainerColdStartOrchestrationDiagnostics(
         startupConfirmed.coldStartTiming,
       ),
-      shellPrewarmOrchestration: toShellPrewarmOrchestrationDiagnostics(
-        startupConfirmed.shellPrewarmObservation,
-      ),
     };
   }
 
   private async confirmPreparedRuntimeWriteFenceIsActive(input: {
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     token: RunnerWriteFenceToken;
   }): Promise<boolean> {
     const current = await this.input.stateStore.readWriteFenceToken();
@@ -1642,14 +1661,13 @@ export class RuntimeProcessingController {
 
   private async confirmRuntimeContainerStartup(input: {
     commandBudget: RuntimeProcessingCommandBudget;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     runnerContainerName: string;
     token: RunnerWriteFenceToken;
   }): Promise<
     | {
         coldStartTiming?: RunnerContainerColdStartTiming;
         confirmed: true;
-        shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
       }
     | {
         confirmed: false;
@@ -1660,6 +1678,7 @@ export class RuntimeProcessingController {
       return {
         confirmed: false,
         response: this.createRetryLater({
+          diagnostics: input.input.diagnostics,
           orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "missing_container_binding",
           userId: input.input.userId,
@@ -1735,6 +1754,7 @@ export class RuntimeProcessingController {
         return {
           confirmed: false,
           response: this.createRetryLater({
+            diagnostics: input.input.diagnostics,
             orchestrationAttemptId: input.input.orchestrationAttemptId,
             reason: "container_rpc_timeout",
             userId: input.input.userId,
@@ -1757,9 +1777,6 @@ export class RuntimeProcessingController {
           coldStartTiming: readinessResult.coldStartTiming,
         }),
         confirmed: true,
-        ...(readinessResult.shellPrewarmObservation === undefined ? {} : {
-          shellPrewarmObservation: readinessResult.shellPrewarmObservation,
-        }),
       };
     } catch (error) {
       if (
@@ -1792,6 +1809,7 @@ export class RuntimeProcessingController {
         return {
           confirmed: false,
           response: this.createRetryLater({
+            diagnostics: input.input.diagnostics,
             orchestrationAttemptId: input.input.orchestrationAttemptId,
             reason: "container_rpc_timeout",
             userId: input.input.userId,
@@ -1819,7 +1837,7 @@ export class RuntimeProcessingController {
   private async clearWriteFenceAfterStartupConfirmationFailure(input: {
     error: unknown;
     failureStage: RuntimeStartupCallerFailureStage;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     retryReason?: RuntimeProcessingStartFailureRetryReason;
     startupConfirmationStartedAtEpochMs: number;
     startupConfirmationTimeoutMs?: number;
@@ -1846,7 +1864,7 @@ export class RuntimeProcessingController {
 
   private async clearWriteFenceAfterRuntimeStartFailure(input: {
     error: unknown;
-    input: RuntimeProcessingInput;
+    input: ObservedRuntimeProcessingInput;
     message: string;
     retryReason?: RuntimeProcessingStartFailureRetryReason;
     startupFailure?: {
@@ -1890,6 +1908,7 @@ export class RuntimeProcessingController {
     return {
       confirmed: false,
       response: this.createRetryLater({
+        diagnostics: input.input.diagnostics,
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: retryReason,
         userId: input.input.userId,
@@ -1993,7 +2012,7 @@ function readBoundedRuntimeStartupFailureElapsedMs(
 }
 
 function normalizeRuntimeProcessingMode(
-  value: RuntimeProcessingInput["processingMode"],
+  value: ObservedRuntimeProcessingInput["processingMode"],
 ): RunnerRuntimeProcessingMode {
   return value === "inbox_media_retention"
       || value === "system_mailbox"
@@ -2002,7 +2021,7 @@ function normalizeRuntimeProcessingMode(
 }
 
 function isTrustedWebDirectRuntimeProcessing(
-  input: RuntimeProcessingInput,
+  input: ObservedRuntimeProcessingInput,
 ): boolean {
   return input.orchestration?.triggeredByWebDirect === true
     && isHostedRuntimeDirectEnsureOrchestrationAttemptId(

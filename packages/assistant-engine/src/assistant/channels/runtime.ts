@@ -1212,6 +1212,7 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   return {
+    isActive: () => !stopped && !linkedStopSignal.signal.aborted && refreshFailure === null,
     ...(afterMessageRefreshMs === null
       ? {}
       : {

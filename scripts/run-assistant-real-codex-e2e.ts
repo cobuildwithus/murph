@@ -42,6 +42,13 @@ const DEFAULT_OPTIONS: AssistantRealCodexRunOptions = {
   testPattern: null,
 }
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
+const LIVE_TEST_DISCOVERY_HINT = [
+  'List exact names without running a journey:',
+  'MURPH_RUN_REAL_CODEX_E2E=1 pnpm --dir packages/assistant-engine exec vitest list',
+  '--config vitest.config.ts test/assistant-codex-real-e2e.test.ts',
+  `--tagsFilter ${REAL_CODEX_E2E_TAG} --json`,
+].join(' ')
+const MAX_DIAGNOSTIC_MATCHES = 20
 export const ASSISTANT_REAL_CODEX_COMMAND = fileURLToPath(
   new URL(
     `../packages/assistant-engine/node_modules/.bin/${
@@ -228,12 +235,17 @@ export function requireSingleAssistantRealCodexTest(
     return []
   })
   if (names.length === 0) {
-    throw new Error('The test-name pattern did not match a live journey.')
+    throw new Error(`The test-name pattern did not match a live journey.\n${LIVE_TEST_DISCOVERY_HINT}`)
   }
   if (names.length !== 1) {
-    throw new Error(
+    const matches = names.slice(0, MAX_DIAGNOSTIC_MATCHES)
+    const omitted = names.length - matches.length
+    throw new Error([
       `The test-name pattern matched ${names.length} live journeys; make it more specific.`,
-    )
+      ...matches.map((name) => `  ${name}`),
+      ...(omitted > 0 ? [`  ... ${omitted} more matches.`] : []),
+      LIVE_TEST_DISCOVERY_HINT,
+    ].join('\n'))
   }
   return names[0] as string
 }

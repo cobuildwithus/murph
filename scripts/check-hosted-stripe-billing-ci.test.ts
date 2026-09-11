@@ -42,6 +42,13 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes(await readWorkflow())).toEqual([]);
   });
 
+  it.each([
+    ["apps/web/test/hosted-billing-browser-hydration.test.ts", "missing-hydration-proof"],
+    ['MURPH_E2E_BILLING_BROWSER_SMOKE: "1"', "disabled-hydration-proof"],
+  ])("rejects removing the real browser proof requirement %s", async (marker, code) => {
+    expect(issueCodes((await readWorkflow()).replace(marker, ""))).toContain(code);
+  });
+
   it("rejects pull_request_target", async () => {
     const source = (await readWorkflow()).replace(
       "  pull_request:\n",
@@ -249,5 +256,35 @@ describe("hosted Stripe provider boundary guard", () => {
     })).toContain(
       "provider-boundary-missing:assertHostedStripeListenerAlive",
     );
+  });
+
+  it("rejects replacing the Stripe renewal clock with a local no-op", async () => {
+    const sources = await readProviderSources();
+    expect(providerIssueCodes({
+      ...sources,
+      sandbox: sources.sandbox.replaceAll(
+        "this.stripe.testHelpers.testClocks.advance",
+        "Promise.resolve",
+      ),
+    })).toContain("provider-boundary-missing:this.stripe.testHelpers.testClocks.advance");
+  });
+
+  it("rejects removing the production entitlement readback after renewal", async () => {
+    const sources = await readProviderSources();
+    expect(providerIssueCodes({
+      ...sources,
+      matrix: sources.matrix.replaceAll(
+        "await readHostedBillingUsageGateForTest",
+        "await readSeededBillingState",
+      ),
+    })).toContain("provider-boundary-missing:await readHostedBillingUsageGateForTest");
+  });
+
+  it("rejects reading renewed allowance against an unchanged wall clock", async () => {
+    const sources = await readProviderSources();
+    expect(providerIssueCodes({
+      ...sources,
+      matrix: sources.matrix.replace("at: stripeNow", "at: new Date()"),
+    })).toContain("provider-boundary-missing:at: stripeNow");
   });
 });

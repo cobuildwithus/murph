@@ -1,7 +1,5 @@
 export {
-  selectBrowserVaultHistory,
   selectBrowserVaultJournal,
-  selectBrowserVaultOverview,
 } from "./browser-replica/client-overview.ts";
 export type {
   JournalDay,
@@ -28,7 +26,6 @@ export type {
   BrowserVaultExperimentRunCardLookup,
   BrowserVaultExperimentRunCardMetric,
   BrowserVaultExperimentRunCardSummary,
-  BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultTimelineRow,
 } from "./browser-replica/shared.ts";

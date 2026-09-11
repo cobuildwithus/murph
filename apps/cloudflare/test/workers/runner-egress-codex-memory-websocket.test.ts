@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import {
-  relayHostedCodexMemoryWebSocketUpgrade,
-} from "../../src/runner-egress-codex-memory-websocket.ts";
+  relayHostedOpenAiResponsesWebSocketUpgrade,
+} from "../../src/runner-egress-openai-responses-websocket.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
   hostedRunnerIntercept,
@@ -22,6 +22,111 @@ import {
 
 const createdAt = 1_775_000_000;
 const memberId = "member_123";
+
+async function openImageGateSocket(nativeMemory = false) {
+  const pair = new WebSocketPair();
+  const provider = pair[1];
+  provider.accept({ allowHalfOpen: true });
+  provider.addEventListener("close", (event) => provider.close(event.code, event.reason), { once: true });
+  let subscriptionAllowed = false;
+  const subscriptionAccess = vi.fn(async () => Response.json({
+    allowed: subscriptionAllowed,
+    reason: subscriptionAllowed ? "allowed" : "subscription_required",
+  }));
+  vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (target) => {
+    const url = new URL(target instanceof Request ? target.url : String(target));
+    if (url.hostname === "api.openai.com") {
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    expect(url.pathname).toBe("/api/internal/hosted-execution/image-generation/access");
+    return await subscriptionAccess();
+  }));
+  const env: RunnerOutboundEnvironmentSource = {
+    ...createHostedExecutionTestEnv(),
+    BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+    OPENAI_API_KEY: "openai-worker-secret",
+    USER_RUNNER: { getByName: () => ({ validateRuntimeWriteFence: async () => true }) },
+  };
+  const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/responses", {
+    headers: {
+      [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
+      [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "7",
+      [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "4",
+      [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: memberId,
+      authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+      connection: "Upgrade",
+      "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+      "sec-websocket-version": "13",
+      upgrade: "websocket",
+      ...(nativeMemory ? { "x-codex-turn-metadata": JSON.stringify({ request_kind: "memory" }) } : {}),
+    },
+  }), env, { containerId: "opaque-container-id" });
+  expect(response.status).toBe(101);
+  const client = response.webSocket;
+  if (!client) throw new Error("Expected image-gated Responses socket.");
+  client.accept({ allowHalfOpen: true });
+  client.addEventListener("close", (event) => { client.close(event.code, event.reason); }, { once: true });
+  return { subscriptionAccess, client, provider, setSubscription: (allowed: boolean) => { subscriptionAllowed = allowed; } };
+}
+
+const imageFrame = JSON.stringify({
+  type: "response.create",
+  model: "gpt-5.6-terra",
+  input: "Draw a synthetic geometric pattern.",
+  tools: [{ type: "image_generation" }],
+});
+
+test.each([false, true])("blocks native image frames before provider spend (memory=%s)", async (nativeMemory) => {
+  const { subscriptionAccess, client, provider } = await openImageGateSocket(nativeMemory);
+  const received = vi.fn();
+  provider.addEventListener("message", received);
+  const denied = nextMessage(client);
+  const closed = nextClose(client);
+  client.send(new TextEncoder().encode(imageFrame).buffer);
+  expect(JSON.parse(String(await denied))).toMatchObject({ type: "error", error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
+  await expect(closed).resolves.toMatchObject({ code: 1008 });
+  expect(subscriptionAccess).toHaveBeenCalledTimes(1);
+  expect(received).not.toHaveBeenCalled();
+});
+
+test("preserves text streams and checks the current subscription for each image frame", async () => {
+  const { subscriptionAccess, client, provider, setSubscription } = await openImageGateSocket();
+  const received: Array<string | ArrayBuffer> = [];
+  provider.addEventListener("message", (event) => { received.push(event.data); });
+  for (const streamId of ["first", "second"]) {
+    const text = JSON.stringify({ type: "response.create", stream_id: streamId, model: "gpt-5.6-terra", input: "Synthetic text." });
+    const forwarded = nextMessage(provider);
+    client.send(text);
+    await expect(forwarded).resolves.toBe(text);
+  }
+  expect(subscriptionAccess).not.toHaveBeenCalled();
+  setSubscription(true);
+  const forwardedImage = nextMessage(provider);
+  client.send(imageFrame);
+  await expect(forwardedImage).resolves.toBe(imageFrame);
+  expect(subscriptionAccess).toHaveBeenCalledTimes(1);
+  setSubscription(false);
+  const denied = nextMessage(client);
+  const closed = nextClose(client);
+  client.send(imageFrame);
+  expect(JSON.parse(String(await denied))).toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
+  await expect(closed).resolves.toMatchObject({ code: 1008 });
+  expect(subscriptionAccess).toHaveBeenCalledTimes(2);
+  expect(received).toHaveLength(3);
+});
+
+test("fails closed when image access is unavailable on an existing socket", async () => {
+  const { subscriptionAccess, client, provider } = await openImageGateSocket();
+  subscriptionAccess.mockResolvedValueOnce(Response.json({}));
+  const received = vi.fn();
+  provider.addEventListener("message", received);
+  const denied = nextMessage(client);
+  const closed = nextClose(client);
+  client.send(imageFrame);
+  expect(JSON.parse(String(await denied))).toMatchObject({ error: { code: "MURPH_IMAGE_ACCESS_UNAVAILABLE" } });
+  await expect(closed).resolves.toMatchObject({ code: 1008 });
+  expect(received).not.toHaveBeenCalled();
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,7 +166,7 @@ test("terminates only the two relay legs and preserves application headers", asy
   provider.accept({ allowHalfOpen: true });
 
   const persistUsage = vi.fn(async () => undefined);
-  const response = relayHostedCodexMemoryWebSocketUpgrade({
+  const response = relayHostedOpenAiResponsesWebSocketUpgrade({
     persistUsage,
     upstreamResponse: new Response(null, {
       headers: {
@@ -148,6 +253,7 @@ test("routes marked upgrades through durable native-memory accounting before del
   const upstreamPair = new WebSocketPair();
   const upstreamClient = upstreamPair[0];
   const provider = upstreamPair[1];
+  provider.binaryType = "arraybuffer";
   provider.accept({ allowHalfOpen: true });
 
   let markUsageStarted: (() => void) | undefined;
@@ -218,14 +324,14 @@ test("routes marked upgrades through durable native-memory accounting before del
   if (!client) throw new TypeError("Expected intercepted WebSocket.");
   client.accept({ allowHalfOpen: true });
 
-  const request = JSON.stringify({
+  const request = new TextEncoder().encode(JSON.stringify({
     model: "gpt-5.6-luna",
     service_tier: "flex",
     type: "response.create",
-  });
+  })).buffer;
   const providerMessage = nextMessage(provider);
   client.send(request);
-  await expect(providerMessage).resolves.toBe(request);
+  await expect(providerMessage).resolves.toEqual(request);
 
   const completed = JSON.stringify({
     response: {

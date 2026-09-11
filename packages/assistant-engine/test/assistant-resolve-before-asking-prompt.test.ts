@@ -42,6 +42,16 @@ describe('assistant resolve-before-asking guidance', () => {
     )
   })
 
+  it('allows private Murph troubleshooting without expanding other audiences', () => {
+    const direct = buildPrompt('direct')
+    expect(direct).toContain('Murph setup and troubleshooting')
+    expect(direct).toContain('Read non-secret diagnostics in the current member workspace, including `.runtime`, when asked to troubleshoot Murph.')
+    expect(direct).not.toContain('Decline only actual professional work—production code, client deliverables, or operations—')
+    for (const scope of ['group', 'unverified-external'] as const) {
+      expect(buildPrompt(scope)).not.toContain('Read non-secret diagnostics in the current member workspace')
+    }
+  })
+
   it('keeps group resolution within the canonical shared-source boundary', () => {
     const prompt = buildPrompt('group')
 

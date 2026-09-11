@@ -2208,7 +2208,7 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('### 4. Reflect, save, and park the threads')
     expect(compact).toContain(
-      "got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app?",
+      "got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits.",
     )
     expect(compact).toContain(
       'The current prompt\'s “Hosted wearable connection links are available for …” line is the sole source of provider examples.',
@@ -2217,7 +2217,7 @@ describe('assistant skill assets', () => {
       'If the line is absent, omit provider examples rather than inventing or recalling names.',
     )
     expect(compact).toContain(
-      'Keep Apple Health out of this provider-example clause; it is offered only through the separate native-app relay after a clear “none,” never as a `murph.device` provider.',
+      'Keep Apple Health out of this provider-example clause; it is offered only through the separate native-app relay after a clear “none” when it is not already connected, never as a `murph.device` connect provider.',
     )
     expect(compact).toContain(
       'Before the visible reply, also save the confirmed definition of progress and reason it matters through the Context-memory rule in `persistence-recovery-follow-up.md`',
@@ -2240,6 +2240,31 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('### 5. Resolve the foundation checkpoints')
     expect(raw).toContain('1. **Data sources and wearables.**')
+    expect(compact).toContain(
+      'call `murph.device` with unfiltered `action: list_accounts` once this turn when available, before the user-facing question.',
+    )
+    expect(compact).toContain(
+      "A hosted resume snapshot's device-account error does not mean no connections.",
+    )
+    expect(compact).toContain(
+      'If the lookup fails or is unavailable, keep the state unknown',
+    )
+    expect(compact).toContain(
+      "a tool error's generic retry hint does not override the one-read limit",
+    )
+    expect(compact).toContain(
+      'Apple Health alone does not establish whether the user wears a device.',
+    )
+    expect(compact).toContain(
+      'I can see Apple Health is connected. Do you also use a watch or ring?',
+    )
+    expect(compact).toContain(
+      'If visible or saved context already answers that question, including no wearable, acknowledge the connection and advance.',
+    )
+    expect(compact).not.toContain('If none is visible, ask whether')
+    expect(compact).not.toContain(
+      'so the advice actually fits. do you use a wearable or health app?',
+    )
     expect(compact).toContain(
       'Build its example clause only from labels on the current prompt\'s hosted wearable connection line: one label when only one exists and a few when several do.',
     )
@@ -2509,7 +2534,7 @@ describe('assistant skill assets', () => {
       parkIndex,
     )
     const workedReplyStart = aspirationReference.indexOf(
-      'a\ncomplete reply can be:',
+      'the reflection can be:',
     )
     expect(workedReplyStart).toBeGreaterThan(parkIndex)
     const workedReplySection = aspirationReference.slice(

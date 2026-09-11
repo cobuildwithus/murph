@@ -4892,12 +4892,11 @@ function createSharedPlan(input?: {
       bindingDelivery: AssistantBindingDelivery | null;
       channel: string | null;
       deliveryPolicy: "binding-target-only" | "explicit-target-override" | "not-requested";
-      effectiveThreadIsDirect: boolean | null;
+      threadIsDirect: boolean | null;
       explicitTarget: string | null;
       identityId: string | null;
       replyToMessageId: string | null;
       threadId: string | null;
-      threadIsDirect: boolean | null;
     }> | null;
   };
   persistUserPromptOnFailure?: boolean;
@@ -4916,12 +4915,11 @@ function createSharedPlan(input?: {
               bindingDelivery: null,
               channel: null,
               deliveryPolicy: "not-requested",
-              effectiveThreadIsDirect: null,
+              threadIsDirect: null,
               explicitTarget: null,
               identityId: null,
               replyToMessageId: null,
               threadId: null,
-              threadIsDirect: null,
               ...input.conversationPolicy.audience,
             }
           : {
@@ -4929,12 +4927,11 @@ function createSharedPlan(input?: {
           bindingDelivery: null,
           channel: null,
           deliveryPolicy: "not-requested",
-          effectiveThreadIsDirect: null,
+          threadIsDirect: null,
           explicitTarget: null,
           identityId: null,
           replyToMessageId: null,
           threadId: null,
-          threadIsDirect: null,
         },
       operatorAuthority: "direct-operator",
     },

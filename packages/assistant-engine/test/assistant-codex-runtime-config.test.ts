@@ -190,7 +190,6 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
-      excludeResumeTurns: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       prompt: 'User message:\nWhat changed?',

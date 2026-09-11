@@ -51,9 +51,7 @@ pnpm_args=(
   --config.registry=https://registry.npmjs.org/
   dlx
   "$package_spec"
+  "$@"
 )
-if [[ $# -gt 0 ]]; then
-  pnpm_args+=(-- "$@")
-fi
 
 exec pnpm "${pnpm_args[@]}"

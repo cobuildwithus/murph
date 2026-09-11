@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("repository Vault CLI development entrypoint", () => {
-  it("uses root source aliases and owns the chat shortcut", () => {
+  it("uses root source aliases without the retired chat shortcut", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts?: Record<string, string> };
@@ -15,7 +15,7 @@ describe("repository Vault CLI development entrypoint", () => {
     expect(packageJson.scripts?.["vault-cli"]).toBe(
       "tsx --tsconfig tsconfig.base.json packages/cli/src/bin.ts",
     );
-    expect(packageJson.scripts?.chat).toBe("pnpm vault-cli assistant chat");
+    expect(packageJson.scripts?.chat).toBeUndefined();
   });
 
   it("documents the repository-owned launcher instead of the raw source command", () => {

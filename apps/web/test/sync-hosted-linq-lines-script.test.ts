@@ -47,7 +47,6 @@ describe("sync-hosted-linq-lines script", () => {
     vi.clearAllMocks();
     mocks.getEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: [],
-      linqMaxActiveMembersPerConversationPhone: 1,
     });
     mocks.syncConfiguredLines.mockResolvedValue(undefined);
     mocks.syncProviderInventory.mockResolvedValue({ syncedCount: 0 });

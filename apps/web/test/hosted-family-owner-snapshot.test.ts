@@ -70,7 +70,7 @@ function ownerSnapshotPrisma() {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
     hostedAccountGroupPlanCapacity: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),
     },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
@@ -149,6 +149,7 @@ test("owner snapshot maps seats, member labels, masked phone, and share links", 
 
   expect(snapshot).not.toBeNull();
   expect(snapshot?.billingActive).toBe(true);
+  expect(prisma.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
   expect(snapshot?.seats).toEqual({
     active: 2,
     billed: 4,
@@ -171,6 +172,21 @@ test("owner snapshot maps seats, member labels, masked phone, and share links", 
   // Dad is a phone-bound invite: no Telegram link, even though a bot is configured.
   expect(invite?.telegramInviteUrl).toBeNull();
   expect(invite?.acceptUrl).toBe("https://app.murph.test/family/accept/CODEDAD");
+});
+
+test("owner snapshot never fills missing tier capacity from the legacy total", async () => {
+  const prisma = ownerSnapshotPrisma();
+  prisma.hostedAccountGroupPlanCapacity.findMany.mockResolvedValue([]);
+
+  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+    // @ts-expect-error: focused prisma double exposes only the methods under test
+    prisma,
+    memberId: "m_owner",
+    now: NOW,
+  });
+
+  expect(snapshot?.seats.billed).toBe(0);
+  expect(prisma.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
 });
 
 test(
@@ -223,7 +239,7 @@ test(
     expect(transactionPrisma.hostedAccountGroupPlanCapacity.findMany)
       .toHaveBeenCalledTimes(1);
     expect(transactionPrisma.hostedAccountGroupBillingRef.findUnique)
-      .toHaveBeenCalledTimes(1);
+      .not.toHaveBeenCalled();
     expect(transactionPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(encryptionMocks.decryptHostedWebNullableString).toHaveBeenCalled();
   },
@@ -283,7 +299,7 @@ test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", 
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
     hostedAccountGroupPlanCapacity: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),
     },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
@@ -350,7 +366,7 @@ test("active member identity falls back to the invited email when there is no la
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
     hostedAccountGroupPlanCapacity: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),
     },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
@@ -621,7 +637,7 @@ function acceptanceViewPrisma(input: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
     hostedAccountGroupPlanCapacity: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([{ billedQuantity: 4, planCode: "pulse" }]),
     },
     // No existing member matches the invited phone by default (findMany is the
     // version-tolerant read the resolver uses), so the accept page falls back to

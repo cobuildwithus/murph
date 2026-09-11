@@ -64,6 +64,54 @@ afterEach(async () => {
 
 describe("buildClinicalImportPlanFromSnapshot", () => {
   it.each([
+    ["Condition", "code", { text: "Historical asthma" }],
+    ["AllergyIntolerance", "code", { text: "Penicillin allergy" }],
+    ["MedicationRequest", "medicationCodeableConcept", { text: "Amoxicillin" }],
+    ["MedicationStatement", "medicationCodeableConcept", { text: "Vitamin D" }],
+    ["MedicationDispense", "medicationCodeableConcept", { text: "Metformin" }],
+    ["Encounter", "reasonCode", [{ text: "Follow-up visit" }]],
+    ["Procedure", "code", { text: "Appendectomy" }],
+    ["Immunization", "vaccineCode", { text: "Tetanus vaccine" }],
+    ["FamilyMemberHistory", "condition", [{ code: { text: "Diabetes" } }]],
+    ["CarePlan", "description", "Physical therapy plan"],
+    ["CareTeam", "name", "Rehabilitation team"],
+    ["Goal", "description", { text: "Walk without pain" }],
+    ["Device", "deviceName", [{ name: "Hip implant", type: "user-friendly-name" }]],
+    ["ServiceRequest", "code", { text: "Physical therapy referral" }],
+  ] as const)("imports %s as a source statement with its original details and revision", async (resourceType, field, value) => {
+    const relativePath = `${resourceType}/page-1.json`;
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType, relativePath, count: 1 }],
+      pages: { [relativePath]: [{ resourceType, id: "source-history", [field]: value }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const notes = upserts(plan).filter((payload) => payload.kind === "note");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.note).toContain(JSON.stringify(value, null, 2).split("\n")[0] ?? "");
+    expect(notes[0]?.note).toContain(field);
+    expect(notes[0]?.note).toContain("Clinical event date is not available");
+    expect(notes[0]?.externalRef).toMatchObject({ resourceId: "source-history", version: "2026-07-01T12:00:00.000Z" });
+    expect(reviews(plan)).toEqual([]);
+    if (resourceType.startsWith("Medication")) expect(notes[0]?.note).toContain("does not establish that a dose was taken");
+  });
+
+  it("preserves calendar dates, source status, dosing and correction retractions", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "MedicationRequest", relativePath: "MedicationRequest/page-1.json", count: 2 }],
+      pages: { "MedicationRequest/page-1.json": [
+        { resourceType: "MedicationRequest", id: "old-order", status: "stopped", intent: "order", authoredOn: "2004-03-12", medicationCodeableConcept: { text: "Amoxicillin" }, dosageInstruction: [{ text: "500 mg three times daily for 7 days" }] },
+        { resourceType: "MedicationRequest", id: "erroneous-order", status: "entered-in-error" },
+      ] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", occurredAt: "2004-03-12" })]);
+    const note = upserts(plan)[0];
+    expect(note && "note" in note ? note.note : "").toContain("500 mg three times daily for 7 days");
+    expect(note && "note" in note ? note.note : "").toContain('"status": "stopped"');
+    expect(retractions(plan)).toEqual([expect.objectContaining({ externalRef: expect.objectContaining({ resourceId: "erroneous-order" }) })]);
+  });
+
+  it.each([
     ["Device", "patient"],
     ["FamilyMemberHistory", "patient"],
     ["MedicationDispense", "subject"],
@@ -87,7 +135,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(reviews(plan)).toEqual([
       expect.objectContaining({
         action: "review",
-        reason: "FHIR resource type is raw evidence only in v1",
+        reason: "clinical history content or date is unavailable or exceeds supported import bounds",
         resourceType,
       }),
     ]);
@@ -119,7 +167,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       .rejects.toThrow("manifest patient");
   });
 
-  it("plans safe vitals and lab imports while leaving positive conditions raw", async () => {
+  it("plans safe vitals and lab imports and provider condition history", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -250,23 +298,11 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       "measurement",
       "test",
       "measurement",
+      "measurement",
+      "note",
     ]);
     expect(upserts(plan).some((candidate) => candidate.kind === "clinical_assertion")).toBe(false);
-    expect(reviews(plan)).toHaveLength(2);
-    expect(reviews(plan)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resourceType: "Observation",
-          resourceId: "height-1",
-          reason: "observation code is not importable",
-        }),
-        expect.objectContaining({
-          resourceType: "Condition",
-          resourceId: "condition-positive-1",
-          reason: "condition registry import not implemented",
-        }),
-      ]),
-    );
+    expect(reviews(plan)).toEqual([]);
 
     const bloodPressure = upserts(plan).find(
       (candidate): candidate is ClinicalImportUpsertOfKind<"measurement"> =>
@@ -309,6 +345,64 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         value: 91,
       },
     ]);
+  });
+
+  it.each([
+    ["8302-2", "cm", 175, "body-height", "cm"],
+    ["8302-2", "[in_i]", 69, "body-height", "in"],
+    ["39156-5", "kg/m2", 24.2, "bmi", "kg/m^2"],
+    ["9843-4", "[in_i]", 15, "head-circumference", "in"],
+    ["9843-4", "cm", 38.1, "head-circumference", "cm"],
+    ["2708-6", "%", 98, "spo2", "percent"],
+    ["8310-5", "[degF]", 98.6, "temperature", "degF"],
+    ["29463-7", "g", 3500, "body-weight", "g"],
+  ] as const)("imports standard vital %s in %s without changing the value", async (
+    code, sourceUnit, value, metric, unit,
+  ) => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation",
+        id: "standard-vital",
+        status: "final",
+        effectiveDateTime: "2010-04-02T12:00:00.000Z",
+        code: { coding: [{ system: "http://loinc.org", code }] },
+        valueQuantity: { value, system: "http://unitsofmeasure.org", code: sourceUnit },
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({
+      kind: "measurement",
+      occurredAt: "2010-04-02T12:00:00.000Z",
+      measurements: [{ metric, unit, value }],
+      externalRef: expect.objectContaining({ resourceId: "standard-vital" }),
+    })]);
+  });
+
+  it.each([
+    ["8302-2", "kg"],
+    ["39156-5", "percent"],
+    ["9843-4", "kg"],
+    ["2708-6", "mmHg"],
+    ["8310-5", "K"],
+  ])("retains vital %s with incompatible unit %s for review", async (code, unit) => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+      pages: { "Observation/page-1.json": [{
+        resourceType: "Observation",
+        id: "incompatible-vital",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: { coding: [{ system: "http://loinc.org", code }] },
+        valueQuantity: { value: 20, system: "http://unitsofmeasure.org", code: unit },
+      }] },
+    });
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(upserts(plan)).toEqual([]);
+    expect(reviews(plan)).toEqual([expect.objectContaining({
+      reason: "vital quantity unit is not importable",
+    })]);
   });
 
   it("preserves unqualified laboratory reference ranges", async () => {
@@ -626,9 +720,9 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
             },
             {
               code: {
-                coding: [{ system: "http://loinc.org", code: "8302-2", display: "Body height" }],
+                coding: [{ system: "http://loinc.org", code: "8887-2", display: "Heart rate device type" }],
               },
-              valueQuantity: { value: 170, unit: "cm" },
+              valueCodeableConcept: { text: "Device type" },
             },
           ],
         }],
@@ -1007,12 +1101,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
                 data: Buffer.from("Follow up in two weeks.").toString("base64"),
               },
             },
-            {
-              attachment: {
-                contentType: "application/pdf",
-                url: "https://example.invalid/discharge-instructions.pdf",
-              },
-            },
           ],
         },
         "AllergyIntolerance/page-1.json": [
@@ -1230,15 +1318,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
+    expect(upserts(plan).filter((payload) => payload.kind === "clinical_assertion")).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "code-only-allergy-condition" }) })]);
     expect(reviews(plan)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resourceId: "allergy-code-only-condition",
         reason: "no-known allergy evidence is resolved at snapshot scope",
-      }),
-      expect.objectContaining({
-        resourceId: "code-only-allergy-condition",
-        reason: "condition registry import not implemented",
       }),
     ]));
   });
@@ -1368,7 +1453,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     }
   });
 
-  it("fails closed on ambiguous or malformed DocumentReference inline text data", async () => {
+  it("imports all inline document parts and records only metadata for unreadable documents", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -1477,32 +1562,16 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toHaveLength(5);
-    expect(reviews(plan)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resourceId: "document-malformed-base64",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "document-invalid-utf8",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "document-multiple-text",
-          reason: "document reference has multiple inline text attachments",
-        }),
-        expect.objectContaining({
-          resourceId: "document-valid-then-malformed",
-          reason: "document reference has multiple inline text attachments",
-        }),
-        expect.objectContaining({
-          resourceId: "document-numeric-data",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-      ]),
-    );
+    const notes = upserts(plan).filter((payload) => payload.kind === "note");
+    expect(notes.filter((payload) => payload.noteType === "fhir_document_reference")).toEqual([
+      expect.objectContaining({ note: "Attachment 1\n\nDischarge summary.\n\nAttachment 2\n\nAddendum: stop medication." }),
+    ]);
+    const receipts = notes.filter((payload) => payload.noteType === "clinical-document-receipt");
+    expect(receipts.map((payload) => payload.externalRef?.resourceId)).toEqual([
+      "document-malformed-base64", "document-invalid-utf8", "document-valid-then-malformed", "document-numeric-data",
+    ]);
+    expect(receipts.every((payload) => !/Discharge summary|not-base64|1400/u.test(payload.note ?? ""))).toBe(true);
+    expect(reviews(plan)).toEqual([]);
   });
 
   it("plans complete laboratory panels atomically", async () => {
@@ -1748,7 +1817,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", note: "x".repeat(1001) }), expect.objectContaining({ kind: "note", sections: [{ heading: "Provider record — part 1", kind: "other", text: "x".repeat(4001) }] })]);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1758,14 +1827,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         expect.objectContaining({
           resourceId: "lab-oversize-text-value",
           reason: "laboratory observation result is not importable",
-        }),
-        expect.objectContaining({
-          resourceId: "report-oversize-summary",
-          reason: "diagnostic report summary exceeds supported import bounds",
-        }),
-        expect.objectContaining({
-          resourceId: "document-oversize-note",
-          reason: "document reference text exceeds supported import bounds",
         }),
       ]),
     );
@@ -1831,25 +1892,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        resourceId: "whitespace-report-summary",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "numeric-report-summary",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "numeric-report-narrative",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "whitespace-lab-analyte",
-        reason: "laboratory observation result is not importable",
-      }),
-    ]));
+    expect(upserts(plan)).toEqual([
+      ...["whitespace-report-summary", "numeric-report-summary", "numeric-report-narrative"].map((resourceId) =>
+        expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId }) })),
+    ]);
+    expect(reviews(plan)).toEqual([expect.objectContaining({
+      resourceId: "whitespace-lab-analyte", reason: "laboratory observation result is not importable",
+    })]);
   });
 
   it("preserves lab analytes that do not derive a slug", async () => {
@@ -2777,8 +2826,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toHaveLength(19);
+    expect(upserts(plan)).toEqual([
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "report-no-summary" }) }),
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "report-date-only-effective" }) }),
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "document-metadata-only" }) }),
+      expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "allergy-scoped-negative" }) }),
+    ]);
+    expect(reviews(plan)).toHaveLength(15);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2822,28 +2876,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
           reason: "clinical timestamp is missing",
         }),
         expect.objectContaining({
-          resourceId: "report-no-summary",
-          reason: "diagnostic report summary is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "report-date-only-effective",
-          reason: "clinical timestamp is missing",
-        }),
-        expect.objectContaining({
-          resourceId: "document-metadata-only",
-          reason: "document reference text is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
           resourceId: "allergy-missing-status",
           reason: "allergy status is not importable",
         }),
         expect.objectContaining({
           resourceId: "allergy-unknown-status",
           reason: "allergy status is not importable",
-        }),
-        expect.objectContaining({
-          resourceId: "allergy-scoped-negative",
-          reason: "allergy registry import not implemented",
         }),
         expect.objectContaining({
           resourceId: "allergy-local-no-known-code",
@@ -3076,16 +3114,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
+    expect(upserts(plan).filter((payload) => payload.kind === "clinical_assertion")).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "allergy-positive-conflict" }) })]);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "allergy-negative-conflict",
           reason: "no-known allergy evidence is resolved at snapshot scope",
-        }),
-        expect.objectContaining({
-          resourceId: "allergy-positive-conflict",
-          reason: "allergy registry import not implemented",
         }),
         expect.objectContaining({
           resourceId: "allergy-mixed-no-known",
@@ -3141,15 +3176,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
+    expect(upserts(plan).filter((payload) => payload.kind === "clinical_assertion")).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "penicillin-allergy-condition" }) })]);
     expect(reviews(plan)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resourceId: "allergy-negative-with-condition-conflict",
         reason: "no-known allergy evidence is resolved at snapshot scope",
-      }),
-      expect.objectContaining({
-        resourceId: "penicillin-allergy-condition",
-        reason: "condition registry import not implemented",
       }),
     ]));
   });
@@ -3369,7 +3401,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       ]),
     );
     expect(retractions(plan)).toEqual([]);
-    expect(executableDecisions(plan)).toEqual([]);
+    expect(executableDecisions(plan).every((decision) => decision.action === "retract" && decision.externalRef.resourceType === "allergy-intolerance")).toBe(true);
   });
 
   it("rejects no-known allergies with contradictory note detail", async () => {
@@ -4374,7 +4406,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(upserts(restoredPlan).filter((payload) => payload.kind === "clinical_assertion")).toHaveLength(1);
     expect(upserts(incompletePlan).filter((payload) => payload.kind === "clinical_assertion")).toEqual([]);
     expect(retractions(incompletePlan)).toEqual([]);
-    expect(executableDecisions(incompletePlan)).toEqual([]);
+    expect(executableDecisions(incompletePlan).every((decision) => decision.action === "retract" && decision.externalRef.resourceType === "allergy-intolerance")).toBe(true);
     if (!firstAssertion) {
       throw new Error("Expected snapshot-scoped no-known-allergy assertion.");
     }
@@ -4591,6 +4623,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       externalRef,
       reason: "unsupported modifier semantics",
       evidence,
+      ...(["DocumentReference", "DiagnosticReport"].includes(resourceType) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
     }]);
   });
 
@@ -4923,7 +4956,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       "FHIR resource id is missing",
       "FHIR resource id is missing",
       "FHIR resource lastUpdated is missing",
-      "condition registry import not implemented",
+      "FHIR resource id is missing",
     ]);
   });
 

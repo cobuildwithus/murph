@@ -40,6 +40,8 @@ import {
 } from "./sensitive-actions/server";
 import type { SensitiveActionChallengeResponse } from "./sensitive-actions/shared";
 
+import { commitApprovalPasskeyWriteTx } from "./sensitive-actions/passkey-store";
+
 const ACTION_APPROVAL_TTL_MS = 15 * 60 * 1_000;
 const ACTION_APPROVAL_KIND = "assistant.action.approve";
 const ACTION_APPROVAL_KEY_VERSION = "murph-action-approval-key-v1";
@@ -371,6 +373,9 @@ export async function decideHostedActionApprovalTx(input: {
   const proof = input.decision === "approved"
     ? requireApprovalChallenge(input.challenge)
     : null;
+  if (proof) {
+    await commitApprovalPasskeyWriteTx({ prepared: proof.credentialWrite, prisma: input.tx });
+  }
   const expiresAt = input.decision === "approved"
     ? new Date(now.getTime() + ACTION_APPROVAL_TTL_MS)
     : input.approval.expiresAt;

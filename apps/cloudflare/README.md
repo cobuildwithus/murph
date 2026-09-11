@@ -68,11 +68,6 @@ Internal control routes:
   failed, or unavailable child abort keeps the existing fail-closed outer
   cancellation. Callback-signed Temporal/default work retains the cooperative
   wake-and-retry behavior.
-- `POST /internal/users/:userId/runtime/shell-prewarm` remains a Vercel
-  OIDC-authenticated compatibility receiver for older Web deployments. It
-  accepts the existing request contract but does not create a container or
-  member binding. Current Web no longer sends typing, routing, or instant-start
-  hints; the coordinator owns pristine global prewarming.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `GET /internal/temporal-worker/binding-admission` authenticates the existing
@@ -84,6 +79,15 @@ Internal control routes:
 The supported worker HTTP surface stops at those narrow control routes, the
 binding-admission and deploy-smoke callbacks, and the public banner and health
 checks.
+
+The retired `POST /internal/users/:userId/runtime/shell-prewarm` endpoint returns
+404 without resolving a runtime owner. Its client and Durable Object RPC
+compatibility methods are removed. Current Web sends no typing, routing, or
+instant-start shell hints; older Web's best-effort helper tolerates the optional
+failure. The coordinator owns pristine global prewarming, and durable mailbox
+signaling plus the post-Temporal direct ensure retain their existing behavior.
+Deployment and rollback constraints remain in
+[DEPLOY.md](./DEPLOY.md#retired-member-shell-prewarm-transport).
 
 ### Unified runner fleet and ready inventory
 
@@ -178,6 +182,17 @@ not modify compact or ordinary Responses cache behavior, and never logs prompt
 content or cache keys. Specialized
 tools such as generated images continue to use their own managed providers even
 when Venice owns the core assistant turn.
+Hosted Linq container requests use the canonical HTTPS API base even when the
+Worker has a custom `LINQ_API_BASE_URL`. The existing outbound handler maps that
+canonical request to the Worker-owned upstream and injects the provider token.
+This matters for local providers: Cloudflare only intercepts outbound ports 80
+and 443, so forwarding a random local HTTP port to the container bypasses that
+boundary. Ambient host execution retains its configured upstream. The composed
+provider-egress test uses generated runner env, the production card client and
+provider-fetch handler, and a strict loopback HTTP provider; the isolated
+`provider-egress-token-bridge` journey covers actual container interception.
+See [Cloudflare outbound traffic](https://developers.cloudflare.com/containers/guides/outbound-traffic/).
+
 The container supervisor sets `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to Cloudflare's runtime interception CA path, and direct invocation builds the runtime config from an explicit frozen supervisor env, preserves those CA bundle pointers plus Cloudflare-managed proxy env needed by hosted-local Containers egress interception, and still blocks operator-only process-control env plus user-supplied proxy overrides.
 
 Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration routed through the Worker intercept. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus the Worker-owned `OPENAI_API_KEY` secret; the raw key is not copied into direct runtime env.
@@ -187,7 +202,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 - The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to the canonical ENAM R2 bucket through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
 - V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
 - Ordinary inbound hosted video bytes are not portable workspace state. Snapshot planning excludes normalized video paths derived from validated canonical inbox captures even while accepted input still protects the local file; invalid capture metadata fails planning closed. Unprotected videos are immediately eligible for the existing atomic inbox-retention cleanup, while explicit canonical event raw references remain the durable-save exception.
-- Legacy full/base bundle refs and legacy artifact sidecars remain restoreable during migration, but v2 snapshot production does not externalize raw files into artifact blobs.
+- Live workspace restore and checkpoint construction accept v2 refs or null bootstrap state. Legacy ref decoders and object cleanup remain for retained orphan metadata; canonical write receipt artifact recovery remains supported.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and short-lived direct-R2 upload sessions without persisted presigned URLs. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; snapshot refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
 - A valid workspace-CAS snapshot is not discarded because web observes newer conversation input. Current web commits the request snapshot, redacted watermarks, and wake projection as one prefix and may return `conversationInputAhead`; a live default-mode runtime imports through the existing foreground path, while retention-only work or shutdown leaves the durable mailbox row for reconciliation. The runner performs no post-upload wake discard and no metadata-only shutdown resnapshot. If shutdown follows a real import that staged assistant input, its ordinary dirty checkpoint carries a due assistant wake so restore can run it. Handling for an old web deployment's `foreground_pending` checkpoint response remains compatibility-only.
@@ -572,17 +587,19 @@ event count, and `double2` is the selected retry delay in milliseconds. For
 `container_busy` only, optional `blob3` records one of these closed control-path
 stages:
 
-- `non_runtime_write_fence`: the active write fence is not runtime-owned.
 - `active_runtime_contention`: an active runtime fence remains contended after
   the liveness check.
-- `cooperative_handoff_pending`: the active child accepted a release wake but
-  has not handed off yet.
 - `background_preemption_unavailable`: the active container exposes no
   background-abort capability.
 - `background_preemption_not_accepted`: background abort returned a bounded
   non-accepted, non-failure status.
 - `stopped_container_record_pending`: a destroyed pending stop target could not
   yet be cleared from the runner record.
+
+Historical reports still recognize `non_runtime_write_fence` and
+`cooperative_handoff_pending`; current code no longer emits them. An exact
+system-mailbox child that accepts a foreground wake is acknowledged without
+requiring a new owner. The child retains its existing authority checks.
 
 The stage is a finite mechanism label, not a processing mode, scenario name,
 identifier, free-text value, or private-state projection. Other retry reasons
@@ -624,10 +641,11 @@ in-memory diagnostics. `prewarm_typing_start_issued_warm` and
 `prewarm_message_routing_start_issued_warm` mean the platform start call
 completed without a newly observed lifecycle start;
 their corresponding `*_cold_start_observed` cohorts mean the same container
-lifecycle did observe a cold start. Neither means health readiness completed. One observation contains
-one terminal operation outcome; later hints may increase only its bounded
-coalesced-hint count and never launch another operation before readiness
-consumes it.
+lifecycle did observe a cold start. Neither means health readiness completed.
+Historical observations recorded one terminal operation outcome; later hints
+could increase only its bounded coalesced-hint count before readiness consumed
+it. Current runtime preparation no longer forwards hint observations; stored
+fields remain readable by the latency schema and report.
 
 The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
@@ -668,6 +686,12 @@ route-to-RPC aggregate. Other per-phase chronology guards omit unavailable or
 reversed cross-runtime clock samples. The report returns no member, mailbox,
 trace, or attempt identifiers.
 
+Admission is read once before each fresh or replacement runtime session. Active
+wakes reuse the existing write fence and make no health-data admission callback.
+Explicit withdrawal still serializes behind ensures, clears the fence, and stops
+the exact runner before acknowledgement. Retired member-specific hint requests
+perform no admission or allocation work.
+
 Fresh starts overlap workspace metadata and runtime crypto reads with slot
 allocation after admission. The reads use the original command budget and stay
 local to that invocation; unused failures are observed if allocation returns a
@@ -676,17 +700,29 @@ binding workspace facts. It also overlaps immutable slot-binding verification
 with runner-secret and snapshot-restore preparation. Launch still requires the
 exact active write fence, verified member binding, usage admission and container
 readiness. Warm active-runtime wakes do not start these fresh preparation reads.
-Fresh allocation carries its verified immutable binding result into that same
-request's fenced preparation, avoiding a second binding RPC. The receipt is
+Fresh allocation and retained-slot resolution carry their verified immutable
+binding result into that same request's fenced preparation, avoiding a second
+binding RPC. The receipt is
 validated against the selected slot, member, claim format, region and release;
-it is neither persisted nor sent to the container. Retained/direct preparation
-still reads binding evidence, and the container still checks its live bound
-member at launch. Exact bind-response recovery can reuse its verified result.
+it is neither persisted nor sent to the container. Direct preparation without a
+receipt still reads binding evidence, and the container still checks its live
+bound member at launch. Exact bind-response recovery can reuse its verified result.
+Retirement validates the exact target inside the slot owner and acknowledges only
+after destruction and durable identity scrubbing; callers do not reread the binding
+after that acknowledgement. Ambiguous failed binding still requires recovery evidence.
 The individual read timings overlap allocation and each other; they are not
 additive slices of `runtimeInvocationPreparationElapsedMs`, which measures the
 remaining fenced preparation call.
 
 ## Runner Container Lifecycle
+
+Native `destroy()` completion is the destruction receipt. Cleanup keeps its
+existing timeout and exact-generation checks, but does not poll cached SDK status
+or wait for a later `onStop` hook after that promise resolves. A native
+`running === false` observation lets retained-slot reconciliation retire an
+already-stopped target without another status read or destruction request.
+The immutable slot still enters retirement before cleanup and is scrubbed only
+after stop proof; ambiguous or failed cleanup keeps the existing target pinned.
 
 The native Cloudflare container is a warm per-user shell. Startup readiness is
 allowed up to 15 wall-clock seconds, including lifecycle-lock queue time. Once
@@ -787,11 +823,11 @@ completion, may enter the corresponding identity-safe recovery or clear path.
 After an exact successful completion clears the fence, Cloudflare makes at most
 one signed, bodyless owner-release callback to web with a timeout capped at two
 seconds. Its signed query binds the opaque runtime attempt whose fence was
-cleared and may include the exact positive `immediateRecheckRequested` edge. A
-known future mailbox retry continuation skips the callback unless the result
-carries that edge. The edge means the invocation newly committed an unserviced
-default or retention schedule; it does not carry the schedule itself. Without
-the edge, Web signals only when current runnable mailbox lag or a live system
+cleared and may include the exact positive `immediateRecheckRequested` edge.
+A future mailbox retry continuation still sends this callback so Web can
+recheck actionable work after the owner releases its fence. The edge means the
+invocation newly committed an unserviced default or retention schedule; it does
+not carry the schedule itself. Without the edge, Web signals only when current runnable mailbox lag or a live system
 mailbox item beyond the handled-through frontier remains. Exact callbacks use
 the attempt-bound owner-release signal; legacy pointerless callbacks use the
 facts-only recheck. A persisted due wake alone therefore never becomes a

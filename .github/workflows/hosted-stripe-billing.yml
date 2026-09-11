@@ -122,6 +122,17 @@ jobs:
           pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage
           scripts/check-hosted-stripe-billing-ci.test.ts
 
+      - name: Install Playwright Chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
+
+      - name: Test billing controls through real React hydration
+        env:
+          MURPH_E2E_BILLING_BROWSER_SMOKE: "1"
+        run: >-
+          pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+          apps/web/test/hosted-billing-browser-hydration.test.ts
+
   live-stripe-browser:
     name: Live hosted-local Stripe browser matrix
     needs:

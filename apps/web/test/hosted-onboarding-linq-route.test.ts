@@ -99,6 +99,7 @@ describe("hosted onboarding Linq webhook route", () => {
 
     expect(response.status).toBe(202);
     expect(mocks.handleHostedOnboardingLinqWebhook).toHaveBeenCalledWith({
+      webhookReceivedAt: expect.any(Date),
       rawBody: JSON.stringify({
         ok: true,
       }),

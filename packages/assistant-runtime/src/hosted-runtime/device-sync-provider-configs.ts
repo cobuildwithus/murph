@@ -1,11 +1,8 @@
 import {
-  cloneSerializableConfiguredDeviceSyncProviderConfigs,
-  configuredDeviceSyncProviderKeys,
   readConfiguredJunctionDeviceSyncProviderConfig,
 } from "@murphai/device-syncd/config";
 import type {
   ConfiguredDeviceSyncProviderConfigs,
-  SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 import type { HostedAssistantRuntimeDeviceSyncConfig } from "./models.ts";
 
@@ -18,7 +15,6 @@ const HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS = [
 
 export function resolveHostedRuntimeDeviceSyncProviderConfigs(
   providerConfigs: HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"],
-  memberProviderConfigs: SerializableConfiguredDeviceSyncProviderConfigs,
   platformEnv: Readonly<Record<string, string>>,
 ): ConfiguredDeviceSyncProviderConfigs {
   const runtimeProviderConfigs: ConfiguredDeviceSyncProviderConfigs = {};
@@ -41,23 +37,6 @@ export function resolveHostedRuntimeDeviceSyncProviderConfigs(
 
   if (providerConfigs.strava) {
     runtimeProviderConfigs.strava = providerConfigs.strava;
-  }
-
-  for (const provider of configuredDeviceSyncProviderKeys) {
-    const memberConfig = memberProviderConfigs[provider];
-    if (!memberConfig) {
-      continue;
-    }
-    const runtimeConfig = runtimeProviderConfigs[provider];
-    const serializableRuntimeConfig = runtimeConfig
-      ? cloneSerializableConfiguredDeviceSyncProviderConfigs({
-          [provider]: runtimeConfig,
-        })[provider]
-      : undefined;
-    runtimeProviderConfigs[provider] = {
-      ...(serializableRuntimeConfig ?? {}),
-      ...memberConfig,
-    } as never;
   }
 
   return runtimeProviderConfigs;

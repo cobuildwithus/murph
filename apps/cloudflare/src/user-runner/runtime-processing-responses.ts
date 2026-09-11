@@ -13,6 +13,7 @@ import {
   computeHostedRuntimeProcessingRecheckDelayMs,
 } from "../runtime-processing-timing.ts";
 import type {
+  RuntimeProcessingDiagnostics,
   RuntimeProcessingRetryAttribution,
   RuntimeProcessingRetryReason,
 } from "./diagnostics.js";
@@ -23,6 +24,7 @@ export const HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA =
 type RuntimeProcessingRetryLaterInput =
   RuntimeProcessingRetryAttribution & {
     analytics?: WorkerAnalyticsEngineDatasetLike | null;
+    diagnostics?: RuntimeProcessingDiagnostics;
     orchestrationAttemptId?: string;
     userId: string;
   };
@@ -57,6 +59,12 @@ export function computeRuntimeProcessingOwnerRecheckAt(input: {
 export function createRuntimeProcessingRetryLater(
   input: RuntimeProcessingRetryLaterInput,
 ): HostedRuntimeEnsureProcessingResponse {
+  if (input.diagnostics) {
+    input.diagnostics.details.runtimeProcessingRetryReason = input.reason;
+    if (input.reason === "container_busy") {
+      input.diagnostics.details.runtimeProcessingRetryStage = input.stage;
+    }
+  }
   emitHostedExecutionStructuredLog({
     component: "hosted.runner",
     details: {
@@ -74,7 +82,7 @@ export function createRuntimeProcessingRetryLater(
     userId: input.userId,
   });
   // Analytics Engine remains deliberately identifier-free; correlation lives
-  // only in the structured Workers log above.
+  // in the structured Workers log and the detached runtime-log summary.
   const attribution: RuntimeProcessingRetryAttribution =
     input.reason === "container_busy"
       ? { reason: input.reason, stage: input.stage }

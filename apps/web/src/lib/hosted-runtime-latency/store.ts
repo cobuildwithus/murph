@@ -204,6 +204,8 @@ export interface HostedIngressLatencyDashboard {
 }
 
 export async function recordHostedIngressAcceptedFromMailboxItem(input: {
+  webhookReceivedAt?: Date;
+  ingressTypingAcceptedAt?: Date;
   mailboxItemId: string;
   prisma?: HostedIngressLatencyPrismaClient;
   source: HostedIngressLatencySource | string;
@@ -220,6 +222,8 @@ export async function recordHostedIngressAcceptedFromMailboxItem(input: {
 
   await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
     mailboxItem,
+    webhookReceivedAt: input.webhookReceivedAt,
+    ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     source,
   });
 
@@ -227,6 +231,8 @@ export async function recordHostedIngressAcceptedFromMailboxItem(input: {
 }
 
 export async function recordHostedIngressTemporalSignalAccepted(input: {
+  webhookReceivedAt?: Date;
+  ingressTypingAcceptedAt?: Date;
   at?: Date | string | null;
   expectedUserId?: string | null;
   mailboxItemId: string;
@@ -247,6 +253,8 @@ export async function recordHostedIngressTemporalSignalAccepted(input: {
 
   const trace = await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
     mailboxItem,
+    webhookReceivedAt: input.webhookReceivedAt,
+    ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     source,
   });
   await updateHostedIngressLatencyTraceEarliestMilestone(prisma, {
@@ -1148,9 +1156,11 @@ function readHostedIngressAssistantMilestoneLeaf(
         leafKey: "assistantInputAcceptedForExecutionAtEpochMs",
       };
     case "linq_typing_request_started":
-      return { keepEarliest: false, leafKey: "linqTypingRequestStartedAtEpochMs" };
+      return { keepEarliest: true, leafKey: "linqTypingRequestStartedAtEpochMs" };
+    case "telegram_typing_accepted":
+      return { keepEarliest: true, leafKey: "telegramTypingAcceptedAtEpochMs" };
     case "linq_typing_accepted":
-      return { keepEarliest: false, leafKey: "linqTypingAcceptedAtEpochMs" };
+      return { keepEarliest: true, leafKey: "linqTypingAcceptedAtEpochMs" };
     case "progress_update_accepted":
       return { keepEarliest: true, leafKey: "progressUpdateAcceptedAtEpochMs" };
     case "first_codex_output_observed":
@@ -2120,6 +2130,8 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
   input: {
     mailboxItem: NonNullable<Awaited<ReturnType<typeof readTraceMailboxItem>>>;
     source: HostedIngressLatencySource;
+    webhookReceivedAt?: Date;
+    ingressTypingAcceptedAt?: Date;
   },
 ) {
   await prisma.$executeRaw`
@@ -2130,6 +2142,8 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       mailbox_item_id,
       mailbox_lane,
       mailbox_lane_seq,
+      ingress_typing_accepted_at,
+      webhook_received_at,
       accepted_at,
       created_at,
       updated_at
@@ -2141,11 +2155,26 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       ${input.mailboxItem.id},
       ${input.mailboxItem.lane},
       ${input.mailboxItem.laneSeq},
+      ${input.ingressTypingAcceptedAt ?? null},
+      ${input.webhookReceivedAt ?? null},
       ${input.mailboxItem.acceptedAt},
       CURRENT_TIMESTAMP,
       CURRENT_TIMESTAMP
     )
-    ON CONFLICT (mailbox_item_id) DO NOTHING
+    ON CONFLICT (mailbox_item_id) DO UPDATE
+    SET ingress_typing_accepted_at = LEAST(
+      hosted_ingress_latency_trace.ingress_typing_accepted_at,
+      EXCLUDED.ingress_typing_accepted_at
+    ), webhook_received_at = LEAST(
+      hosted_ingress_latency_trace.webhook_received_at,
+      EXCLUDED.webhook_received_at
+    )
+    WHERE (EXCLUDED.webhook_received_at IS NOT NULL
+      AND (hosted_ingress_latency_trace.webhook_received_at IS NULL
+        OR EXCLUDED.webhook_received_at < hosted_ingress_latency_trace.webhook_received_at))
+      OR (EXCLUDED.ingress_typing_accepted_at IS NOT NULL
+        AND (hosted_ingress_latency_trace.ingress_typing_accepted_at IS NULL
+          OR EXCLUDED.ingress_typing_accepted_at < hosted_ingress_latency_trace.ingress_typing_accepted_at))
   `;
 
   const trace = await prisma.hostedIngressLatencyTrace.findUnique({

@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   Spectrum,
@@ -10,16 +11,31 @@ import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
+import {
+  LINQ_PRODUCTION_CANARY_GOAL_TITLE,
+  type LinqProductionCanaryOutcome,
+} from "../src/lib/hosted-onboarding/linq-production-canary-contract";
 
 const CANARY_RESET_PATH =
   "/api/internal/hosted-onboarding/linq/production-canary/reset";
+const CANARY_OUTCOME_PATH =
+  "/api/internal/hosted-onboarding/linq/production-canary/outcome";
 const CANARY_REPLY_BUDGET_MS = 20_000;
 const CANARY_REPLY_WAIT_MS = 90_000;
 const CANARY_RESET_TIMEOUT_MS = 300_000;
+const CANARY_OUTCOME_WAIT_MS = 90_000;
 const CANARY_TURNS = [
   { prompt: "Hey Murph", stage: "welcome" },
   { prompt: "Yes, ready.", stage: "identity-question" },
   { prompt: "My name is Robin. I am 32 and a woman.", stage: "runtime-identity" },
+  {
+    prompt: `Please save a new active health goal with the exact title "${LINQ_PRODUCTION_CANARY_GOAL_TITLE}". I want to walk for twenty minutes before lunch each day, starting today. Save it now and tell me when it is saved.`,
+    stage: "save-goal",
+  },
+  {
+    prompt: "What is the exact title of the walking goal I just asked you to save? Please read my saved goals and tell me its title; do not create or change anything.",
+    stage: "read-goal",
+  },
 ] as const;
 
 type LinqProductionCanaryConfig = {
@@ -47,6 +63,7 @@ export async function runLinqProductionCanary(
   source: NodeJS.ProcessEnv = process.env,
   reportTurn?: (result: LinqProductionCanaryTurnResult) => void,
 ): Promise<{
+  canonicalOutcome: { baselineGoalCount: number; savedGoalCount: number; readbackGoalCount: number };
   reset: LinqProductionCanaryResetResult;
   turns: LinqProductionCanaryTurnResult[];
 }> {
@@ -66,6 +83,7 @@ export async function runLinqProductionCanary(
     const target = await provider.user(config.targetPhoneNumber);
     const space = await provider.space.create(target);
     const turns: LinqProductionCanaryTurnResult[] = [];
+    const canonicalOutcome = { baselineGoalCount: 0, savedGoalCount: 0, readbackGoalCount: 0 };
     let previousReplyAt: number | null = null;
 
     for (const [index, { prompt, stage }] of CANARY_TURNS.entries()) {
@@ -110,9 +128,18 @@ export async function runLinqProductionCanary(
       assertLinqProductionCanaryReply({ reply, turn });
       turns.push(turnResult);
       previousReplyAt = replyAt;
+      if (stage === "runtime-identity" || stage === "save-goal" || stage === "read-goal") {
+        const expectedCount = stage === "runtime-identity" ? 0 : 1;
+        const outcome = await waitForCanonicalGoalOutcome(config, expectedCount, stage);
+        if (stage === "runtime-identity") canonicalOutcome.baselineGoalCount = outcome.matchingGoalCount;
+        if (stage === "save-goal") canonicalOutcome.savedGoalCount = outcome.matchingGoalCount;
+        if (stage === "read-goal") canonicalOutcome.readbackGoalCount = outcome.matchingGoalCount;
+        // Observation deliberately waits for publication. It is outside reply latency.
+        previousReplyAt = null;
+      }
     }
 
-    return { reset, turns };
+    return { canonicalOutcome, reset, turns };
   } finally {
     await app.stop();
   }
@@ -166,6 +193,9 @@ function assertLinqProductionCanaryReply(input: {
   if (!input.reply) {
     throwCanaryFailure("reply-empty");
   }
+  if (input.turn === 5 && !input.reply.includes(LINQ_PRODUCTION_CANARY_GOAL_TITLE)) {
+    throwCanaryFailure("goal-readback-reply-invalid");
+  }
   const isIdentityQuestion = Object.values(MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS)
     .some((question) => input.reply === question);
   if (
@@ -180,6 +210,53 @@ function assertLinqProductionCanaryReply(input: {
   ) {
     throwCanaryFailure("reply-semantics-invalid");
   }
+}
+
+async function waitForCanonicalGoalOutcome(
+  config: LinqProductionCanaryConfig,
+  expectedCount: 0 | 1,
+  stage: string,
+): Promise<LinqProductionCanaryOutcome> {
+  const signal = AbortSignal.timeout(CANARY_OUTCOME_WAIT_MS);
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const response = await fetch(new URL(CANARY_OUTCOME_PATH, config.productionBaseUrl), {
+      headers: { authorization: `Bearer ${config.resetSecret}` },
+      method: "GET",
+      redirect: "error",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+    }).catch(() => throwCanaryFailure(`outcome-read-failed; stage=${stage}`));
+    if (!response.ok) throwCanaryFailure(`outcome-read-failed; stage=${stage}`);
+    const body: unknown = await response.json().catch(() => null);
+    if (!isLinqProductionCanaryOutcomeResponse(body)) {
+      throwCanaryFailure(`outcome-response-invalid; stage=${stage}`);
+    }
+    const { outcome } = body;
+    if (outcome.ready) {
+      if (outcome.totalGoalCount > expectedCount
+        || outcome.totalGoalCount !== outcome.matchingGoalCount
+        || outcome.matchingGoalIdCount !== outcome.matchingGoalCount) {
+        throwCanaryFailure(`outcome-cardinality-invalid; stage=${stage}`);
+      }
+      if (outcome.matchingGoalCount === expectedCount) return outcome;
+    }
+    await delay(1_000, undefined, { signal })
+      .catch(() => throwCanaryFailure(`outcome-not-ready; stage=${stage}`));
+  }
+  throwCanaryFailure(`outcome-not-ready; stage=${stage}`);
+}
+
+function isLinqProductionCanaryOutcomeResponse(value: unknown): value is {
+  ok: true;
+  outcome: LinqProductionCanaryOutcome;
+} {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (record.ok !== true || !record.outcome || typeof record.outcome !== "object") return false;
+  const outcome = record.outcome as Record<string, unknown>;
+  return typeof outcome.ready === "boolean"
+    && isNonNegativeInteger(outcome.totalGoalCount)
+    && isNonNegativeInteger(outcome.matchingGoalCount)
+    && isNonNegativeInteger(outcome.matchingGoalIdCount);
 }
 
 async function resetProductionConversationCanary(
@@ -283,7 +360,7 @@ function isLinqProductionCanaryResetResponse(value: unknown): value is {
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function throwCanaryFailure(code: string): never {

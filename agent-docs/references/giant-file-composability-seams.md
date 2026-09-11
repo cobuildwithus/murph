@@ -1,6 +1,6 @@
 # Giant File Composability Seams
 
-Last verified: 2026-06-03
+Last verified: 2026-09-10
 
 Murph is still greenfield, so the bias here is to cut cleaner module seams before compatibility glue, broad helper surfaces, and public re-export paths harden around accidental file shape.
 
@@ -91,6 +91,15 @@ This file is large, but the size comes from one real boundary: canonical high-le
 **Why keep it:** the helpers are tightly coupled to the four exported mutation façades and the canonical event/sample/document write semantics they share.
 
 **Guardrail:** only split this file when a helper cluster clearly belongs to a stable record family with its own durable owner, not just because the helper section is long.
+
+Exact document-source evidence now has that owner in
+`packages/core/src/domains/documents/source-evidence.ts`. It joins content
+receipts, audit ownership, document lifecycle, manifests, and raw-byte integrity
+for document reuse, once-only workout imports, inbox preservation, and inbox
+retention. The module owns read-only proof and correlation inspection;
+`mutations.ts` retains source hashing, import orchestration, and the correlation
+audit write, while `public-mutations.ts` retains canonical lock routing. Shared
+raw-manifest, integrity, and event-spine primitives stay in their existing owners.
 
 #### B. Keep `packages/core/src/operations/write-batch.ts` as one staged-write boundary
 

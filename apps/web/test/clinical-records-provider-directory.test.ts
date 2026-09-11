@@ -78,6 +78,8 @@ describe("Clinical Records provider directory", () => {
         "patient/Procedure.s",
         "patient/Goal.s",
         "patient/ServiceRequest.s",
+        "patient/Binary.r",
+        "patient/Media.r",
       ],
     });
     expect(buildEpicBetaRetrievalPlan({
@@ -109,6 +111,23 @@ describe("Clinical Records provider directory", () => {
       "provider-goals",
       "service-requests",
       "vital-sign-observations",
+      "document-references-imaging",
+      "document-references-external-ccda",
+      "document-references-outside-notes",
+      "outside-vital-sign-observations",
+      "document-references-summaries",
+      "document-references-questionnaires",
+      "document-references-correspondence",
+      "document-references-handoff",
+      "document-references-assessments",
+      "document-references-document-information",
+      "document-references-clinical-references",
+      "document-references-his",
+      "document-references-oasis",
+      "document-references-irf-pai",
+      "document-references-advance-directive",
+      "document-references-irf-pai-hyphenated",
+
     ]);
   });
 

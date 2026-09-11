@@ -1,5 +1,4 @@
 import {
-  isHostedRuntimeShellPrewarmOrchestrationAttemptId,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
@@ -48,6 +47,8 @@ type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   response: HostedWebhookServiceResponse;
+  webhookReceivedAt?: Date;
+  ingressTypingAcceptedAt?: Promise<Date | null>;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -59,7 +60,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   const {
     eventId,
     mailboxItemId,
-    runtimeShellPrewarmOrchestrationAttemptId,
     source,
     userId,
     wakeMailboxCheckpoint,
@@ -78,12 +78,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
           userId,
         }
       : undefined;
-  const directEnsureEligible = Boolean(knownCheckpoint && source === "linq");
 
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${source}.wake-handoff`,
     {
-      directEnsureWakeEligible: directEnsureEligible,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       plannerCheckpointPresent: Boolean(knownCheckpoint),
       responseReason: input.response.reason,
@@ -92,6 +90,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
+  let directEnsureWake: Promise<void> | null = null;
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   let temporalSignalAcceptedAt: Date | null = null;
   try {
@@ -102,12 +101,30 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         expectedUserId: userId,
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,
+        // The signal owner validates the durable checkpoint and active access
+        // before this callback, whether the checkpoint was cached or reread.
+        onSignalStarted: () => {
+          directEnsureWake = startHostedDirectRuntimeWakeBestEffort({
+            onTiming: async (timing) => {
+              await recordHostedDirectEnsureWakeTimingBestEffort({
+                mailboxItemId,
+                source,
+                timing,
+                userId,
+              });
+            },
+            source,
+            userId,
+          });
+        },
       }),
       signal: input.signal,
     });
     temporalSignalAcceptedAt = new Date();
   } catch (error) {
     scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
+      webhookReceivedAt: input.webhookReceivedAt,
+      ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
       mailboxItemId,
       scheduleAfterResponse: input.scheduleAfterResponse,
       source,
@@ -116,42 +133,22 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     });
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
-      directEnsureWakeStarted: false,
+      directEnsureWakeStarted: Boolean(directEnsureWake),
       errorName,
     });
     throw error;
-  }
-
-  // Linq-only latency fast path, after Temporal has accepted the durable wake.
-  // With consumed_at live, a racing ensure is harmless: consumed mailbox items
-  // restage with a null reply target, and a gap invocation that imports only
-  // already-consumed work finds nothing replyable and exits.
-  const directEnsureWake = directEnsureEligible
-    ? startHostedDirectRuntimeWakeBestEffort({
-        onTiming: async (timing) => {
-          await recordHostedDirectEnsureWakeTimingBestEffort({
-            mailboxItemId,
-            runtimeShellPrewarmOrchestrationAttemptId,
-            source: "linq",
-            timing,
-            userId,
-          });
-        },
-        source: "linq",
-        userId,
-      })
-    : null;
-  if (directEnsureWake) {
-    if (input.scheduleAfterResponse) {
-      // Keep the in-flight request alive past the response without ever
-      // putting its latency on the provider success path.
-      input.scheduleAfterResponse(() => directEnsureWake);
-    } else {
-      void directEnsureWake;
+  } finally {
+    // Keep an authorized hint alive on both acknowledgement and signal failure.
+    // The webhook still reports Temporal failure so the provider can retry.
+    const wake = directEnsureWake;
+    if (wake && input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(() => wake);
     }
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
+    webhookReceivedAt: input.webhookReceivedAt,
+    ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     mailboxItemId,
     scheduleAfterResponse: input.scheduleAfterResponse,
     source,
@@ -173,20 +170,13 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
 async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   mailboxItemId: string;
-  runtimeShellPrewarmOrchestrationAttemptId?: string;
-  source: "linq";
+  source: "linq" | "telegram";
   timing: CloudflareHostedControlRuntimeEnsureProcessingTiming;
   userId: string;
 }): Promise<void> {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: 1,
     orchestration: {
-      ...(isHostedRuntimeShellPrewarmOrchestrationAttemptId(
-        timingRecord.runtimeShellPrewarmOrchestrationAttemptId,
-      ) ? {
-        shellPrewarmExpectedOrchestrationAttemptId:
-          timingRecord.runtimeShellPrewarmOrchestrationAttemptId,
-      } : {}),
       tokenAcquireStartedAtEpochMs: timingRecord.timing.tokenAcquireStartedAtEpochMs,
       tokenAcquiredAtEpochMs: timingRecord.timing.tokenAcquiredAtEpochMs,
       directEnsureRequestStartedAtEpochMs:
@@ -235,6 +225,8 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
 }
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
+  webhookReceivedAt?: Date;
+  ingressTypingAcceptedAt?: Promise<Date | null>;
   mailboxItemId: string;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   source: "linq" | "telegram";
@@ -246,8 +238,11 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
     return;
   }
   const task = async () => {
+    const ingressTypingAcceptedAt = await input.ingressTypingAcceptedAt ?? undefined;
     if (input.temporalSignalAcceptedAt) {
       await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
+        ingressTypingAcceptedAt,
+        webhookReceivedAt: input.webhookReceivedAt,
         at: input.temporalSignalAcceptedAt,
         mailboxItemId: input.mailboxItemId,
         source,
@@ -256,6 +251,8 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
       return;
     }
     await recordHostedWebhookIngressLatencyAcceptedBestEffort({
+      ingressTypingAcceptedAt,
+      webhookReceivedAt: input.webhookReceivedAt,
       mailboxItemId: input.mailboxItemId,
       source,
     });
@@ -273,12 +270,16 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
 }
 
 async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
+  ingressTypingAcceptedAt?: Date;
+  webhookReceivedAt?: Date;
   mailboxItemId: string;
   source: HostedIngressLatencySource;
 }): Promise<void> {
   const { mailboxItemId, source } = input;
   try {
     await recordHostedIngressAcceptedFromMailboxItem({
+      ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
+      webhookReceivedAt: input.webhookReceivedAt,
       mailboxItemId,
       source,
     });
@@ -292,6 +293,8 @@ async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
 }
 
 async function recordHostedWebhookIngressLatencyTemporalSignalBestEffort(input: {
+  ingressTypingAcceptedAt?: Date;
+  webhookReceivedAt?: Date;
   at: Date;
   mailboxItemId: string;
   source: HostedIngressLatencySource;
@@ -300,6 +303,8 @@ async function recordHostedWebhookIngressLatencyTemporalSignalBestEffort(input: 
   const { at, mailboxItemId, source, userId } = input;
   try {
     await recordHostedIngressTemporalSignalAccepted({
+      ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
+      webhookReceivedAt: input.webhookReceivedAt,
       at,
       expectedUserId: userId,
       mailboxItemId,

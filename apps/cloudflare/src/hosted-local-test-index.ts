@@ -5,6 +5,7 @@ export {
 export {
   RunnerContainer,
   NextRunnerContainer,
+  SmallRunnerContainer,
 } from "./hosted-local-test/runner-container.ts";
 export {
   HostedLocalTestStandbyRunnerContainer as StandbyRunnerContainer,

@@ -146,6 +146,7 @@ export const automationCompactListItemSchema = automationRecordSchema
     activeUntil: true,
     schedule: true,
     supportKind: true,
+    updatedAt: true,
   })
   .strict();
 
@@ -237,6 +238,7 @@ function automationCompactListItem(
     activeUntil: record.activeUntil,
     schedule: record.schedule,
     supportKind: record.supportKind,
+    updatedAt: record.updatedAt,
   };
 }
 
@@ -1353,6 +1355,7 @@ export function registerAutomationCommands(
   automation.command("list", {
     args: z.object({}),
     description: "List automation records with optional filters.",
+    hint: "Use --compact --text <words> to find matching ids with small output; use automation show <id> for instructions and full readback before editing. Use automation edit <id> for sparse operator edits, preserving omitted fields.",
     options: withBaseOptions({
       status: z
         .array(z.enum(automationStatusValues))
@@ -1374,7 +1377,7 @@ export function registerAutomationCommands(
         .optional()
         .describe("Continue an exact support-series listing after this automation id."),
       compact: z.boolean().default(false).describe(
-        "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+        "Return identifiers, current updatedAt, and basic lifecycle and schedule state; use automation show for complete details.",
       ),
       limit: z.number().int().positive().max(200).default(10),
     }),

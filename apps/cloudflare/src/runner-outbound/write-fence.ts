@@ -19,9 +19,6 @@ export interface RunnerRuntimeWriteFenceHeaders {
   workspaceVersion: string | null;
 }
 
-export interface RunnerRuntimeWriteFenceWriteAuthority
-  extends RunnerRuntimeWriteFenceHeaders {}
-
 export interface RunnerRuntimeWriteFenceWorkspaceAuthority
   extends RunnerRuntimeWriteFenceHeaders {
   workspaceVersion: string;
@@ -64,29 +61,6 @@ export async function requireRunnerRuntimeWriteFence(input: {
   request: Request;
   userId: string;
 }): Promise<RunnerRuntimeWriteFenceHeaders> {
-  const headers = readRunnerRuntimeWriteFenceHeaders(input.request);
-  if (!headers) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
-
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
-    attemptId: headers.attemptId,
-    generation: headers.generation,
-    userId: input.userId,
-  });
-  if (!ownsWriteFence) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
-
-  return headers;
-}
-
-export async function requireRunnerRuntimeWriteFenceWrite(input: {
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string;
-}): Promise<RunnerRuntimeWriteFenceWriteAuthority> {
   const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
@@ -131,7 +105,7 @@ export async function applyRunnerRuntimeUsageSettlement(input: {
   env: RunnerOutboundEnvironmentSource;
   settlement: HostedRuntimeUsageRecordResponse | null;
   userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<void> {
   if (input.settlement?.platformAiUsageAllowedAfter === true) {
     return;

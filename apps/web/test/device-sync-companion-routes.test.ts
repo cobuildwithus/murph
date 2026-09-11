@@ -12,6 +12,7 @@ import { createBearerRequest, createJsonPostRequest } from "./route-test-helpers
 
 vi.mock("server-only", () => ({}));
 
+const LEGACY_TOKEN = `header.${Buffer.from(JSON.stringify({ exp: 4_000_000_000 })).toString("base64url")}.signature`;
 const SIGN_IN_TOKEN = "junction-sdk-sign-in-token-do-not-log";
 const HRV_ROUTE_NOW = "2026-07-10T13:46:00.000Z";
 
@@ -28,8 +29,11 @@ const mocks = vi.hoisted(() => ({
   listMemberConnectionStatuses: vi.fn(),
   listRecentConnectionStatusSignals: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
+  projectHostedMemberIdentityState: vi.fn(),
   persistHostedDeviceSyncCompanionMetadata: vi.fn(),
   prismaClient: {
+    hostedAuthRecord: { findUnique: vi.fn() },
+    hostedMemberIdentity: { findUnique: vi.fn() },
     hostedMailboxItem: {
       findUnique: vi.fn(),
     },
@@ -60,7 +64,16 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  assertHostedPrivyAccountDeletionNotPending: async () => undefined,
   lookupHostedMemberForPrivyPrincipal: mocks.lookupHostedMemberForPrivyPrincipal,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  lookupHostedMemberIdentityByPrivyUserId: async () => {
+    const core = await mocks.lookupHostedMemberForPrivyPrincipal();
+    return core ? { core, identity: { privyUserId: "did:privy:user_123" } } : null;
+  },
+  projectHostedMemberIdentityState: mocks.projectHostedMemberIdentityState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
@@ -121,6 +134,9 @@ function mockVerifiedPrivyUser(): void {
     ],
   });
   mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(ACTIVE_MEMBER);
+  mocks.prismaClient.hostedAuthRecord.findUnique.mockResolvedValue(null);
+  mocks.prismaClient.hostedMemberIdentity.findUnique.mockResolvedValue({ memberId: ACTIVE_MEMBER.id });
+  mocks.projectHostedMemberIdentityState.mockResolvedValue({ privyUserId: "did:privy:user_123" });
   mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
     accountGroupMemberships: [],
     billingStatus: ACTIVE_MEMBER.billingStatus,
@@ -143,7 +159,7 @@ function rejectHistoricalLaunchConsent(): void {
   );
 }
 
-function signInTokenRequest(body?: unknown, bearerToken: string | null = "privy-identity-token") {
+function signInTokenRequest(body?: unknown, bearerToken: string | null = LEGACY_TOKEN) {
   const url = "https://app.example.test/api/device-sync/companion/sign-in-token";
   const init = bearerToken === null
     ? {}
@@ -155,7 +171,7 @@ function signInTokenRequest(body?: unknown, bearerToken: string | null = "privy-
 }
 
 function statusRequest(
-  bearerToken: string | null = "privy-identity-token",
+  bearerToken: string | null = LEGACY_TOKEN,
   sourceProviderSlug?: string,
 ) {
   const url = new URL("https://app.example.test/api/device-sync/companion/status");
@@ -167,7 +183,7 @@ function statusRequest(
     : createBearerRequest(url.toString(), bearerToken);
 }
 
-function healthMetadataRequest(body: unknown, bearerToken: string | null = "privy-identity-token") {
+function healthMetadataRequest(body: unknown, bearerToken: string | null = LEGACY_TOKEN) {
   const url = "https://app.example.test/api/device-sync/companion/health-metadata";
   const init = bearerToken === null
     ? {}
@@ -199,7 +215,7 @@ const validHrvObservation = {
 
 function hrvRmssdRequest(
   body: unknown,
-  bearerToken: string | null = "privy-identity-token",
+  bearerToken: string | null = LEGACY_TOKEN,
 ) {
   return createJsonPostRequest(
     "https://app.example.test/api/device-sync/companion/hrv-rmssd",
@@ -1253,7 +1269,7 @@ describe("device sync companion routes", () => {
         {
           body: `{"rrIntervals":[${rawHealthMarker}]}`,
           headers: {
-            authorization: "Bearer privy-identity-token",
+            authorization: `Bearer ${LEGACY_TOKEN}`,
             "content-type": "application/json",
           },
           method: "POST",
@@ -1488,7 +1504,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        "privy-identity-token",
+        LEGACY_TOKEN,
         "apple_health_kit",
       ));
 
@@ -1525,7 +1541,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        "privy-identity-token",
+        LEGACY_TOKEN,
         "apple_health_kit",
       ));
 
@@ -1565,7 +1581,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        "privy-identity-token",
+        LEGACY_TOKEN,
         "health_connect",
       ));
 
@@ -1627,7 +1643,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        "privy-identity-token",
+        LEGACY_TOKEN,
         "health_connect",
       ));
 
@@ -1663,7 +1679,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        "privy-identity-token",
+        LEGACY_TOKEN,
         "health_connect",
       ));
 
@@ -1698,7 +1714,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        "privy-identity-token",
+        LEGACY_TOKEN,
         "health_connect",
       ));
 
@@ -1786,7 +1802,7 @@ describe("device sync companion routes", () => {
       mocks.listMemberConnectionStatuses.mockResolvedValue([]);
 
       const response = await statusRoute.GET(statusRequest(
-        "privy-identity-token",
+        LEGACY_TOKEN,
         "health_connect",
       ));
 
@@ -2108,7 +2124,7 @@ describe("device sync companion routes", () => {
         {
           body: `{"value":${rawHealthMarker}}`,
           headers: {
-            authorization: "Bearer privy-identity-token",
+            authorization: `Bearer ${LEGACY_TOKEN}`,
             "content-type": "application/json",
           },
           method: "POST",

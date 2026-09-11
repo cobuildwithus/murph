@@ -5,10 +5,8 @@ import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
-import {
-  isHostedRuntimeShellPrewarmOrchestrationAttemptId,
-  type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   assertHostedRuntimeProcessingTimeoutMs,
@@ -102,25 +100,6 @@ const runtimeHealthDataConsentRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
-const runtimeShellPrewarmRoute = {
-  authorizeBeforeMethod: true,
-  authorization: "vercel-oidc",
-  beforeMethod(context, params) {
-    return requireBoundInternalRouteUser(context, params, "runtime-shell-prewarm");
-  },
-  async handle(context, params) {
-    return handleRuntimeShellPrewarmRoute(context, params.userId);
-  },
-  match: (pathname) => matchCloudflareHostedControlUserRoutePath(
-    "runtimeShellPrewarm",
-    pathname,
-  ),
-  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeShellPrewarm.method],
-  name: "runtime-shell-prewarm",
-  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-  wrongMethodResponse: "method-not-allowed",
-} satisfies DeclarativeRoute<WorkerRouteContext>;
-
 const userStatusRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -138,7 +117,6 @@ const userStatusRoute = {
 
 export const runtimeProcessingRoutes = [
   runtimeEnsureProcessingRoute,
-  runtimeShellPrewarmRoute,
   runtimeHealthDataConsentRoute,
 ] as const;
 
@@ -329,101 +307,6 @@ export async function handleRuntimeHealthDataConsentRoute(
     );
   }
   return json(await stub.reconcileRuntimeHealthDataConsentForUser(userId));
-}
-
-async function handleRuntimeShellPrewarmRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const shellPrewarmCloudflareRouteReceivedAtEpochMs = Date.now();
-  const userId = decodeRouteParam(encodedUserId);
-  try {
-    const payload = await readCachedRequestText(context, {
-      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-    });
-    const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
-    if (Object.keys(body).some((key) => ![
-      "orchestrationAttemptId",
-      "requestStartedAtEpochMs",
-      "source",
-    ].includes(key))) {
-      throw new TypeError("Hosted runtime shell prewarm request has unknown fields.");
-    }
-    const orchestrationAttemptId = body.orchestrationAttemptId;
-    const requestStartedAtEpochMs = body.requestStartedAtEpochMs;
-    const hasLegacyTelemetryShape = orchestrationAttemptId === undefined
-      && requestStartedAtEpochMs === undefined;
-    if (
-      !hasLegacyTelemetryShape
-      && !isHostedRuntimeShellPrewarmOrchestrationAttemptId(orchestrationAttemptId)
-    ) {
-      throw new TypeError(
-        "Hosted runtime shell prewarm orchestrationAttemptId is invalid.",
-      );
-    }
-    if (
-      !hasLegacyTelemetryShape
-      && (
-        typeof requestStartedAtEpochMs !== "number"
-        || !Number.isSafeInteger(requestStartedAtEpochMs)
-        || requestStartedAtEpochMs < 0
-      )
-    ) {
-      throw new TypeError(
-        "Hosted runtime shell prewarm requestStartedAtEpochMs is invalid.",
-      );
-    }
-    const requestDiagnostics:
-      HostedRuntimeShellPrewarmOrchestrationDiagnostics =
-      hasLegacyTelemetryShape ? {} : {
-        shellPrewarmOrchestrationAttemptId: orchestrationAttemptId,
-        shellPrewarmRequestStartedAtEpochMs: requestStartedAtEpochMs,
-      };
-    const source = body.source;
-    if (
-      source !== undefined
-      && source !== "linq-instant-start"
-      && source !== "linq-message-routing"
-      && source !== "linq-typing-started"
-    ) {
-      throw new TypeError("Hosted runtime shell prewarm source is invalid.");
-    }
-
-    const stub = context.env.USER_RUNNER.getByName(userId);
-    if (!stub.prewarmRuntimeShellForUser) {
-      throw new Error("User runner shell-prewarm RPC is unavailable.");
-    }
-    const orchestration: HostedRuntimeShellPrewarmOrchestrationDiagnostics = {
-      shellPrewarmCloudflareRouteReceivedAtEpochMs,
-      ...requestDiagnostics,
-      ...(context.runtimeControlAuthTiming === undefined ? {} : {
-        shellPrewarmRuntimeControlAuthFinishedAtEpochMs:
-          context.runtimeControlAuthTiming.runtimeControlAuthFinishedAtEpochMs,
-        shellPrewarmRuntimeControlAuthStartedAtEpochMs:
-          context.runtimeControlAuthTiming.runtimeControlAuthStartedAtEpochMs,
-      }),
-    };
-    await stub.prewarmRuntimeShellForUser(userId, source, orchestration);
-    return json({ accepted: true }, 202);
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "runtime-shell-prewarm-request-failed",
-        routeName: "runtime-shell-prewarm",
-      }, context.request, userId),
-      error,
-      level: "warn",
-      message: "Hosted worker runtime shell prewarm request failed.",
-      phase: "failed",
-      userId,
-    });
-    const classified = classifyPublicRouteError(error);
-    return json({
-      code: "invalid_request",
-      error: classified.error,
-    }, classified.status);
-  }
 }
 
 function runRuntimeEnsureProcessingForUser(input: {

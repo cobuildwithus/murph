@@ -26,3 +26,19 @@ Arm the existing idle-checkpoint publication barrier directly for this scenario 
 ## Context
 
 This produced repeated false cross-repository rollout failures and obscured whether the owner-release regression was actually exercised.
+
+## Follow-up: independent Environment ownership
+
+The default-prefix fixture also expected its snapshot-start barrier to be entered
+by a default invocation. Current reconciliation deliberately selects independent
+model-free Environment work behind that earlier row, so the system-mailbox
+invocation enters the barrier while the fixture waits for the wrong mode until
+snapshot start times out. Expect the current system-mailbox owner and explicitly
+assert that the held handled-through sequence remains below the earlier row.
+Keep the unchanged replica and no-extra-provider-request assertions.
+
+## Follow-up: seeded recovery with newly appended work
+
+A local replay passed foreground admission and checkpoint ordering but rejected successful continuation because a seeded member action appended a follow-up wake. Both imported frontiers covered the seed and a successful post-provider processing record existed, while the new wake made total lane lag nonzero. Require the seeded frontiers, no retryable block, and attributed post-provider processing without requiring subsequently generated work to finish. Preserve the exact fence and standby checks at provider start.
+
+The base subsequently extracted this observer into `hosted-local-mailbox-progress.ts`. Apply the correction at that existing helper and update its focused test to accept imported seeded work with a queued follow-up; retain the missing-frontier, malformed-sequence, blocked-work, and receipt-rejection coverage.

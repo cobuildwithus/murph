@@ -98,7 +98,7 @@ describe("runtime processing retry telemetry", () => {
       analytics: { writeDataPoint },
       orchestrationAttemptId: "web-ingress-attempt-test",
       reason: "container_busy",
-      stage: "cooperative_handoff_pending",
+      stage: "active_runtime_contention",
       userId: "member_123",
     })).toEqual({
       kind: "retry_later",
@@ -109,7 +109,7 @@ describe("runtime processing retry telemetry", () => {
       blobs: [
         HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
         "container_busy",
-        "cooperative_handoff_pending",
+        "active_runtime_contention",
       ],
       doubles: [1, 5_000],
       indexes: ["container_busy"],
@@ -124,7 +124,7 @@ describe("runtime processing retry telemetry", () => {
     expect(structuredLog.details).toMatchObject({
       orchestrationAttemptId: "web-ingress-attempt-test",
       runtimeProcessingRetryReason: "container_busy",
-      runtimeProcessingRetryStage: "cooperative_handoff_pending",
+      runtimeProcessingRetryStage: "active_runtime_contention",
     });
   });
 

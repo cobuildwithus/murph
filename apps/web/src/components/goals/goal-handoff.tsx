@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
 
+import { AuthenticatedGoalContactAction } from "@/src/components/goals/goal-contact-action";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
   type MurphContactOption,
@@ -30,15 +30,15 @@ function readNativeMessagingPlatformOnServer(): boolean | null {
   return null;
 }
 
-export type GoalHandoffKind = "guide" | "message" | "signup";
+export type GoalHandoffKind = "personal" | "message" | "signup";
 
 /**
- * Where a goal click goes. Members and uncertain sessions open the guide,
- * whose CTA resolves their own Murph line. Anonymous visitors message Murph
+ * Where a goal click goes. Members and uncertain sessions resolve their own
+ * Murph line at click time. Anonymous visitors message Murph
  * directly when the platform can, and otherwise open the signup dialog.
  */
 export type GoalHandoff =
-  | { kind: "guide" }
+  | { kind: "personal" }
   | {
       external: boolean;
       hrefFor: (prompt: string | null) => string;
@@ -57,7 +57,7 @@ export function useGoalHandoff(option: MurphContactOption): GoalHandoff {
   );
 
   if (auth.authenticated || auth.authenticationStatus === "unavailable") {
-    return { kind: "guide" };
+    return { kind: "personal" };
   }
   if (option.kind !== "text" || nativeMessaging !== false) {
     return {
@@ -71,14 +71,14 @@ export function useGoalHandoff(option: MurphContactOption): GoalHandoff {
 }
 
 /**
- * One clickable goal rendered as whatever the handoff needs: a guide link, a
+ * One clickable goal rendered as whatever the handoff needs: a private lookup, a
  * message link, or a button that opens signup. Icon-only children should pass
  * `labels`; children with visible text name themselves.
  */
 export function GoalHandoffAction({
   children,
   className,
-  guideHref,
+  errorClassName,
   handoff,
   labels,
   prompt,
@@ -87,7 +87,7 @@ export function GoalHandoffAction({
 }: {
   children: ReactNode;
   className: string;
-  guideHref: string;
+  errorClassName?: string;
   handoff: GoalHandoff;
   labels?: GoalHandoffLabels;
   prompt: string | null;
@@ -95,18 +95,18 @@ export function GoalHandoffAction({
   "data-goal-composer-send"?: boolean;
   "data-goal-composer-ready"?: boolean;
 }) {
-  if (handoff.kind === "guide") {
+  if (handoff.kind === "personal") {
     return (
-      <Link
+      <AuthenticatedGoalContactAction
         {...dataProps}
-        aria-label={labels?.guide}
+        aria-label={labels?.message}
         className={className}
-        href={guideHref}
-        prefetch={false}
+        errorClassName={errorClassName}
+        prompt={prompt}
         ref={ref}
       >
         {children}
-      </Link>
+      </AuthenticatedGoalContactAction>
     );
   }
   if (handoff.kind === "message") {

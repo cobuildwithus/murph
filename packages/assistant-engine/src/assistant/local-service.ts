@@ -154,6 +154,7 @@ import {
 } from './vault-file-send.js'
 import {
   readAssistantAcceptedTurnInputEvents,
+  resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputJournal,
   type AssistantAcceptedTurnInputItemInput,
   type AssistantAcceptedTurnInputTranscriptRef,
@@ -166,7 +167,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
-import { readAssistantInputEvent, type AssistantInputEventRecord } from './input-store.js'
+import type { AssistantInputEventRecord } from './input-store.js'
 import {
   resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
@@ -464,10 +465,9 @@ async function persistUserTurn(
   let userPersisted = false
   let userTranscriptRef: AssistantAcceptedTurnInputTranscriptRef | null = null
   const userContentReceivedAt =
-    await resolveAcceptedInputContentReceivedAt({
-      inputs: input.acceptedTurnInput?.initialInputs ?? [],
-      vault: input.vault,
-    })
+    resolveAcceptedInputContentReceivedAt(
+      input.acceptedTurnInput?.initialInputs ?? [],
+    )
   if (plan.persistUserPromptOnFailure) {
     const persisted = await appendUserTranscriptEntryForTurn({
       contentReceivedAt: userContentReceivedAt,
@@ -702,9 +702,10 @@ export async function sendAssistantMessageLocal(
               sharedPlan,
             })
           : null
+      const hostedExecutionContext = executionContext?.hosted ?? null
       const typingIndicator = startAssistantChannelTypingIndicator({
         channelDependencies:
-          executionContext?.hosted?.channelTypingDependencies ?? null,
+          hostedExecutionContext?.channelTypingDependencies ?? null,
         input,
         session: resolved.session,
         sharedPlan,
@@ -806,6 +807,7 @@ export async function sendAssistantMessageLocal(
                     ...event,
                     turnId: receipt.turnId,
                   })
+                typingIndicator?.recordAcceptedInputs(event.acceptedInputs.map((item) => item.id))
                 preProviderSteerAcceptedInputJournals.set(
                   JSON.stringify(event.acceptedInputs.map((item) => item.id)),
                   acceptedInputJournal,
@@ -872,7 +874,7 @@ export async function sendAssistantMessageLocal(
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
-        const hostedExecutionContext = executionContext?.hosted ?? null
+        typingIndicator?.recordAcceptedInputs(initialAcceptedInputJournal.inputIds)
         let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
@@ -1269,19 +1271,19 @@ export async function sendAssistantMessageLocal(
             preProviderSteerAcceptedInputJournals.get(
               preProviderSteerJournalKey,
             )
-          if (!preProviderSteerJournal) {
+          let acceptedInputJournal = preProviderSteerJournal
+          if (!acceptedInputJournal) {
             assertAcceptedActiveTurnInputItemsAreNew({
               acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
               inputs: acceptedInputItems,
             })
-          }
-          const acceptedInputJournal =
-            preProviderSteerJournal ??
-            await runtimeState.turns.acceptedInputs.append({
+            acceptedInputJournal = await runtimeState.turns.acceptedInputs.append({
               inputs: acceptedInputItems,
               sessionId: resolved.session.sessionId,
               turnId: currentUserTurn.turnId,
             })
+            typingIndicator?.recordAcceptedInputs(acceptedInputItems.map((item) => item.id))
+          }
           preProviderSteerAcceptedInputJournals.delete(
             preProviderSteerJournalKey,
           )
@@ -2774,7 +2776,7 @@ export async function sendAssistantMessageLocal(
   } finally {
     // The automation pass owns maintenance for auto-reply turns; every
     // independently-started turn keeps a post-turn owner so direct ask/chat/
-    // assistantd use cannot grow runtime state (transcripts, event logs)
+    // direct local use cannot grow runtime state (transcripts, event logs)
     // without bound. Post-turn keeps it off the foreground reply path.
     if (input.turnTrigger !== 'automation-auto-reply') {
       await runAssistantTurnBestEffort(() =>
@@ -2982,12 +2984,11 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   })
   const refsByInputId = new Map<string, AssistantAcceptedTurnInputTranscriptRef>()
   for (const plan of transcriptPlans) {
-    const contentReceivedAt = await resolveAcceptedInputContentReceivedAt({
-      inputs: input.acceptedInputItems.filter((item) =>
+    const contentReceivedAt = resolveAcceptedInputContentReceivedAt(
+      input.acceptedInputItems.filter((item) =>
         plan.inputIds.includes(item.id)
       ),
-      vault: input.vault,
-    })
+    )
     const persisted = await appendUserTranscriptEntryForTurn({
       contentReceivedAt,
       detail:
@@ -3004,34 +3005,13 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   return refsByInputId
 }
 
-async function resolveAcceptedInputContentReceivedAt(input: {
-  inputs: readonly AssistantAcceptedTurnInputItemInput[]
-  vault: string
-}): Promise<string | null> {
-  const events = await Promise.all(
-    input.inputs
-      .filter((item) => item.source === 'assistant-input')
-      .map((item) =>
-        readAssistantInputEvent({
-          inputId: item.id,
-          vault: input.vault,
-        })
-      ),
-  )
-  let earliestMs: number | null = null
-  for (const event of events) {
-    if (!event) {
-      continue
-    }
-    const receivedAtMs = Date.parse(event.receivedAt ?? event.occurredAt)
-    if (
-      Number.isFinite(receivedAtMs)
-      && (earliestMs === null || receivedAtMs < earliestMs)
-    ) {
-      earliestMs = receivedAtMs
-    }
-  }
-  return earliestMs === null ? null : new Date(earliestMs).toISOString()
+function resolveAcceptedInputContentReceivedAt(
+  inputs: readonly AssistantAcceptedTurnInputItemInput[],
+): string | null {
+  // Accepted assistant-input timestamps have already been checked against their events.
+  return resolveAssistantAcceptedTurnInputReferenceWindow(
+    inputs.filter((item) => item.source === 'assistant-input'),
+  )?.earliestAt ?? null
 }
 
 function resolveAcceptedActiveTurnTranscriptAppendPlans(input: {

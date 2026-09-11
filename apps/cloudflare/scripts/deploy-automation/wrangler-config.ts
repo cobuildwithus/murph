@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution/hosted-email";
 
 import { HOSTED_EMAIL_SEND_BINDING_NAME } from "../../src/hosted-email/constants.ts";
+import { readSmallRunnerEnabled } from "../../src/small-runner-profile.ts";
 import type { HostedDeployAutomationEnvironment } from "./environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./secrets.ts";
 
@@ -35,6 +36,7 @@ export function buildHostedWranglerDeployConfig(
     } | null;
   } = {},
 ): Record<string, unknown> {
+  readSmallRunnerEnabled(environment.workerVars);
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
@@ -69,7 +71,9 @@ export function buildHostedWranglerDeployConfig(
       ...(input.constraints ? { constraints: input.constraints } : {}),
       image: "../../../Dockerfile.cloudflare-hosted-runner",
       image_build_context: "..",
-      instance_type: environment.containerInstanceType,
+      instance_type: input.className === "SmallRunnerContainer"
+        ? { vcpu: 1, memory_mib: 3072, disk_mb: 6000 }
+        : environment.containerInstanceType,
       max_instances: input.maxInstances,
       rollout_active_grace_period: input.rolloutActiveGracePeriodSeconds,
       // Wrangler limits the array length to max_instances. A retained zero-cap
@@ -101,7 +105,8 @@ export function buildHostedWranglerDeployConfig(
       }),
       buildRunnerContainerConfig({
         className: "NextRunnerContainer",
-        maxInstances: environment.containerMaxInstances - environment.legacyStandbyContainerMaxInstances,
+        // Staging assigns the single member budget to the live physical bank.
+        maxInstances: 0,
         rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
       buildRunnerContainerConfig({
@@ -118,6 +123,13 @@ export function buildHostedWranglerDeployConfig(
         maxInstances: environment.legacyStandbyContainerMaxInstances,
         rolloutActiveGracePeriodSeconds:
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
+      buildRunnerContainerConfig({
+        className: "SmallRunnerContainer",
+        // Immutable replacement targets need admission headroom while the
+        // provider releases previous capacity. This is a ceiling, not prewarm.
+        maxInstances: 10,
+        rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
     ],
     durable_objects: {
@@ -158,6 +170,7 @@ export function buildHostedWranglerDeployConfig(
           name: "STANDBY_RUNNER_CONTAINER",
           class_name: "StandbyRunnerContainer",
         },
+        { name: "SMALL_RUNNER_CONTAINER", class_name: "SmallRunnerContainer" },
       ],
     },
     version_metadata: {
@@ -199,6 +212,7 @@ export function buildHostedWranglerDeployConfig(
         tag: "v8",
         new_sqlite_classes: ["NextRunnerContainer"],
       },
+      { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],

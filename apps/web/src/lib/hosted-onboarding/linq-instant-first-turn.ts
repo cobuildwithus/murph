@@ -50,6 +50,7 @@ import {
   type HostedLinqSendResult,
 } from "./linq-client";
 import type { HostedLinqFirstContactAdmissionRequest } from "./linq-first-contact-admission";
+import { lockHostedLinqMessageReceiptsTx } from "./linq-message-receipt-lock";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -940,6 +941,10 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
   );
 
   await input.prisma.$transaction(async (tx) => {
+    await lockHostedLinqMessageReceiptsTx({
+      messageIds: [input.providerMessageId],
+      prisma: tx,
+    });
     const milestone = await markHostedLinqDeliveryAcceptedTx({
       acceptedAt: input.acceptedAt,
       idempotencyKey,

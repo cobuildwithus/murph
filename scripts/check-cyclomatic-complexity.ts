@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -49,6 +50,7 @@ const excludedDirectoryNames = new Set([
 const excludedFilePattern = /(?:^|\.)(?:gen|generated|spec|test)\.[cm]?[jt]sx?$/u;
 
 export interface FunctionComplexity {
+  readonly syntaxFingerprint: string;
   readonly column: number;
   readonly complexity: number;
   readonly line: number;
@@ -70,6 +72,8 @@ export interface FileComplexityComparison {
   readonly headPath: string | null;
   readonly headSummary: SourceComplexitySummary;
   readonly maximumComplexityDelta: number;
+  readonly movedInCount: number;
+  readonly movedOutCount: number;
   readonly status: string;
   readonly violations: readonly string[];
 }
@@ -83,6 +87,7 @@ export interface ComplexityDiffReport {
 }
 
 interface ComplexityFrame {
+  readonly syntaxFingerprint: string;
   complexity: number;
   readonly column: number;
   readonly line: number;
@@ -129,6 +134,7 @@ export function analyzeCyclomaticComplexity(
 
   const startFrame = (name: string, node: t.Node) => {
     frames.push({
+      syntaxFingerprint: fingerprintFunction(name, node),
       column: (node.loc?.start.column ?? 0) + 1,
       complexity: 1,
       line: node.loc?.start.line ?? 1,
@@ -255,12 +261,21 @@ export function compareFileComplexity(
   baseSummary: SourceComplexitySummary,
   headSummary: SourceComplexitySummary,
   threshold = DEFAULT_CYCLOMATIC_COMPLEXITY_THRESHOLD,
+  movedFunctions: ReadonlySet<FunctionComplexity> = new Set(),
 ): FileComplexityComparison {
   assertThreshold(threshold);
+  const comparedBase = summarizeFunctionComplexities(
+    baseSummary.functions.filter((entry) => !movedFunctions.has(entry)),
+    threshold,
+  );
+  const comparedHead = summarizeFunctionComplexities(
+    headSummary.functions.filter((entry) => !movedFunctions.has(entry)),
+    threshold,
+  );
   const complexityDebtDelta =
-    headSummary.complexityDebt - baseSummary.complexityDebt;
+    comparedHead.complexityDebt - comparedBase.complexityDebt;
   const maximumComplexityDelta =
-    headSummary.maximumComplexity - baseSummary.maximumComplexity;
+    comparedHead.maximumComplexity - comparedBase.maximumComplexity;
   const violations: string[] = [];
 
   if (complexityDebtDelta > 0) {
@@ -270,7 +285,7 @@ export function compareFileComplexity(
   }
   if (
     maximumComplexityDelta > 0 &&
-    headSummary.maximumComplexity > threshold
+    comparedHead.maximumComplexity > threshold
   ) {
     violations.push(
       `maximum function complexity increased by ${maximumComplexityDelta}`,
@@ -284,6 +299,8 @@ export function compareFileComplexity(
     displayPath: changedPath.headPath ?? changedPath.basePath ?? "<unknown>",
     headSummary,
     maximumComplexityDelta,
+    movedInCount: headSummary.functions.length - comparedHead.functions.length,
+    movedOutCount: baseSummary.functions.length - comparedBase.functions.length,
     violations,
   };
 }
@@ -313,7 +330,7 @@ export function evaluateComplexityDiff({
     headRef,
     pathspecs,
   );
-  const files = changedPaths.map((changedPath) => {
+  const analyzedFiles = changedPaths.map((changedPath) => {
     const baseSource = changedPath.basePath
       ? readSourceAtRevision(comparisonBaseRef, changedPath.basePath)
       : null;
@@ -334,13 +351,18 @@ export function evaluateComplexityDiff({
         headSource,
         threshold,
       );
-    return compareFileComplexity(
+    return { changedPath, baseSummary, headSummary };
+  });
+  const movedFunctions = findMovedFunctions(analyzedFiles);
+  const files = analyzedFiles.map(({ changedPath, baseSummary, headSummary }) =>
+    compareFileComplexity(
       changedPath,
       baseSummary,
       headSummary,
       threshold,
-    );
-  });
+      movedFunctions,
+    )
+  );
 
   return {
     baseRef: comparisonBaseRef,
@@ -364,13 +386,17 @@ export function formatComplexityDiffReport(report: ComplexityDiffReport): string
   }
 
   for (const file of report.files) {
+    const deltaLabel = file.movedInCount + file.movedOutCount > 0 ? "unmoved " : "";
     lines.push(
       `${file.violations.length === 0 ? "PASS" : "FAIL"} ${file.displayPath}: ` +
       `debt ${file.baseSummary.complexityDebt} -> ${file.headSummary.complexityDebt} ` +
-      `(${formatDelta(file.complexityDebtDelta)}), max ` +
+      `(${deltaLabel}${formatDelta(file.complexityDebtDelta)}), max ` +
       `${file.baseSummary.maximumComplexity} -> ${file.headSummary.maximumComplexity} ` +
-      `(${formatDelta(file.maximumComplexityDelta)})`,
+      `(${deltaLabel}${formatDelta(file.maximumComplexityDelta)})`,
     );
+    if (deltaLabel) {
+      lines.push(`  exact moves: ${file.movedOutCount} out, ${file.movedInCount} in; deltas compare only unmoved functions`);
+    }
     const hotspots = file.headSummary.functions
       .filter((entry) => entry.complexity > report.threshold)
       .sort((left, right) =>
@@ -455,6 +481,60 @@ export function parseNameStatus(output: string): ChangedSourcePath[] {
     });
   }
   return changedPaths;
+}
+
+// Function nodes exclude export wrappers. Keep all syntax, including names and
+// types; ignore only parser source positions and comments when matching moves.
+const sourceMetadataKeys = new Set([
+  "start", "end", "loc", "parenStart", "trailingComma",
+  "leadingComments", "innerComments", "trailingComments",
+]);
+
+function fingerprintFunction(name: string, node: t.Node): string {
+  const syntax = JSON.stringify([name, node], (key, value: unknown) =>
+    sourceMetadataKeys.has(key) ? undefined : value
+  );
+  return createHash("sha256").update(syntax).digest("hex");
+}
+
+function matchExactFunctions(
+  baseFunctions: readonly FunctionComplexity[],
+  headFunctions: readonly FunctionComplexity[],
+): [FunctionComplexity, FunctionComplexity][] {
+  const available = new Map<string, FunctionComplexity[]>();
+  for (const entry of headFunctions) {
+    const matches = available.get(entry.syntaxFingerprint) ?? [];
+    matches.push(entry);
+    available.set(entry.syntaxFingerprint, matches);
+  }
+  const pairs: [FunctionComplexity, FunctionComplexity][] = [];
+  for (const entry of baseFunctions) {
+    const match = available.get(entry.syntaxFingerprint)?.pop();
+    if (match) {
+      pairs.push([entry, match]);
+    }
+  }
+  return pairs;
+}
+
+function findMovedFunctions(files: readonly {
+  readonly baseSummary: SourceComplexitySummary;
+  readonly headSummary: SourceComplexitySummary;
+}[]): ReadonlySet<FunctionComplexity> {
+  const removed: FunctionComplexity[] = [];
+  const added: FunctionComplexity[] = [];
+  for (const { baseSummary, headSummary } of files) {
+    // Reserve every same-file occurrence first: copies cannot become donors.
+    const unchanged = new Set(matchExactFunctions(
+      baseSummary.functions,
+      headSummary.functions,
+    ).flat());
+    removed.push(...baseSummary.functions.filter((entry) => !unchanged.has(entry)));
+    added.push(...headSummary.functions.filter((entry) => !unchanged.has(entry)));
+  }
+  // Local cancellation leaves only cross-file pairs. Each donor is consumed
+  // once, and both sides leave the ratchet so moves cannot hide other growth.
+  return new Set(matchExactFunctions(removed, added).flat());
 }
 
 function summarizeFunctionComplexities(

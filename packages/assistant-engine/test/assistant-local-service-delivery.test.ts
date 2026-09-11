@@ -371,12 +371,11 @@ test('sendAssistantMessageLocal does not volunteer support contact for an unveri
     },
     channel: 'telegram',
     deliveryPolicy: 'explicit-target-override',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: 'external-thread',
     identityId: 'stored-direct-identity',
     replyToMessageId: null,
     threadId: 'external-thread',
-    threadIsDirect: null,
   }
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     deliveryOutcome: {
@@ -451,7 +450,7 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
   )
   tempRoots.push(parentRoot)
   const plan = createSharedPlan()
-  plan.conversationPolicy.audience.effectiveThreadIsDirect = true
+  plan.conversationPolicy.audience.threadIsDirect = true
   plan.conversationPolicy.audience.threadIsDirect = true
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
     plan,
@@ -1362,11 +1361,10 @@ test('sendAssistantMessageLocal preserves email delimiter lines in delivery, tra
       target: 'email-thread',
     },
     channel: 'email',
-    effectiveThreadIsDirect: true,
+    threadIsDirect: true,
     explicitTarget: 'email-thread',
     identityId: 'email-identity',
     threadId: 'email-thread',
-    threadIsDirect: true,
   }
   const finalResponse = 'Final one.\n---\nFinal two?'
   const precedingResponse = 'Preceding one.\n---\nPreceding two.'
@@ -2222,12 +2220,11 @@ test('sendAssistantMessageLocal carries the provider reaction patch into the no-
     },
     channel: 'linq',
     deliveryPolicy: 'binding-target-only',
-    effectiveThreadIsDirect: false,
+    threadIsDirect: false,
     explicitTarget: 'linq-chat-1',
     identityId: 'linq-account',
     replyToMessageId: 'linq-message-newer-ineligible',
     threadId: 'thread-1',
-    threadIsDirect: false,
   }
   const reactionOutcome: AssistantDeliveryOutcome = {
     error: null,

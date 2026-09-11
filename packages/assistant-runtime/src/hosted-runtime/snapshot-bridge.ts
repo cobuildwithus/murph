@@ -22,7 +22,6 @@ import {
   collectHostedWorkspaceSnapshotArchivePlan,
   createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics,
   type HostedWorkspaceSnapshotArchiveEntry,
-  type HostedWorkspaceSnapshotArchiveExtraPath,
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
@@ -41,6 +40,7 @@ import {
 import {
   type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
+import { isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
@@ -83,12 +83,6 @@ import {
 import type {
   HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "./workspace-runner.ts";
-import {
-  clearLegacyWorkspaceRefsForV2SnapshotMaterialization,
-  materializeLegacyWorkspaceRefsForV2Snapshot,
-  prepareLegacyWorkspaceRefsForV2SnapshotMaterialization,
-  type LegacyWorkspaceRefsForV2SnapshotMaterializationPlan,
-} from "./legacy-snapshot-materialization.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
@@ -286,6 +280,9 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const request = requireHostedWorkspaceBridgeSnapshotCheckpointRequest(input.request);
+  if (input.currentSnapshotRef !== null && !isHostedWorkspaceSnapshotV2Ref(input.currentSnapshotRef)) {
+    throw new Error("Hosted workspace checkpoint requires a v2 snapshot reference.");
+  }
   return await withCanonicalWriteLock(input.vaultRoot, async () => {
     return await createHostedWorkspaceV2Snapshot({
       ...input,
@@ -349,7 +346,6 @@ async function createHostedWorkspaceV2Snapshot(
 
   let snapshotRef: HostedWorkspaceSnapshotV2Ref;
   let checkpoint: HostedWorkspaceCheckpointResponse | undefined;
-  let legacyMaterialization: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan | null = null;
   let encryptedByteSize = 0;
   let workspaceSnapshotFileCount = 0;
   let workspaceSnapshotPlainBytes = 0;
@@ -373,15 +369,6 @@ async function createHostedWorkspaceV2Snapshot(
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    const legacyMaterializationPlan =
-      await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
-        artifactStore: input.platform.artifactStore,
-        currentSnapshotRef: input.currentSnapshotRef,
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
-      });
-    legacyMaterialization = legacyMaterializationPlan;
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     startedAt = Date.now();
     snapshotStage = "session";
     if (!workspaceSnapshotPort) {
@@ -402,6 +389,9 @@ async function createHostedWorkspaceV2Snapshot(
       key: "snapshotSessionStartElapsedMs",
       run: async () => await workspaceSnapshotPort.startSnapshotSession({
         expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
+        ...(input.currentSnapshotRef === null || isHostedWorkspaceSnapshotV2Ref(input.currentSnapshotRef)
+          ? { replacedSnapshotRef: input.currentSnapshotRef }
+          : {}),
         inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
         nextWakeAt: input.request.nextWakeAt,
         nextWakeReason: input.request.nextWakeReason,
@@ -433,14 +423,6 @@ async function createHostedWorkspaceV2Snapshot(
       });
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    await materializeLegacyWorkspaceRefsForV2Snapshot({
-      artifactStore: input.platform.artifactStore,
-      operatorHomeRoot,
-      plan: legacyMaterializationPlan,
-      scratchRoot: resolveWorkspaceScratchRoot(input.vaultRoot),
-      signal: input.signal,
-      vaultRoot: input.vaultRoot,
-    });
     try {
       terminalWriteOperationPruneResult = await pruneTerminalWriteOperationRecords({
         checkpointedAfter: input.previousWorkspaceCheckpointedAt,
@@ -599,15 +581,6 @@ async function createHostedWorkspaceV2Snapshot(
       });
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    const legacySnapshotExtraFiles: HostedWorkspaceSnapshotArchiveExtraPath[] = [];
-    for (const file of legacyMaterializationPlan.skippedInlineFiles) {
-      if (file.root === "operator-home" || file.root === "vault") {
-        legacySnapshotExtraFiles.push({
-          path: file.path,
-          root: file.root,
-        });
-      }
-    }
     const mediaReferences =
       await publishHostedWorkspaceMediaReferencesForLoggedSnapshot({
         platform: input.platform,
@@ -623,7 +596,6 @@ async function createHostedWorkspaceV2Snapshot(
           codexHomeSnapshotHashSecret: input.snapshotDiagnosticsHashSecret,
           durableRoot,
           excludedVaultPaths: mediaReferences.excludedVaultPaths,
-          extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
@@ -760,26 +732,7 @@ async function createHostedWorkspaceV2Snapshot(
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
-    try {
-      await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
-        plan: legacyMaterializationPlan,
-        vaultRoot: input.vaultRoot,
-      });
-      localWorkspaceCleanForWarmReuse = true;
-    } catch (clearError) {
-      localWorkspaceCleanForWarmReuse = false;
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
-        },
-        error: clearError,
-        level: "warn",
-        message: "Hosted workspace legacy snapshot manifest cleanup failed.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-    }
+    localWorkspaceCleanForWarmReuse = true;
   } catch (error) {
     snapshotFailureObserved = true;
     const activeInterruptionError = input.signal?.aborted === true
@@ -857,7 +810,6 @@ async function createHostedWorkspaceV2Snapshot(
         ...createAssistantRuntimeResiduePruneLogDetails(
           assistantRuntimeResiduePruneResult,
         ),
-        ...createHostedWorkspaceSnapshotPlanLogDetails(legacyMaterialization),
         ...snapshotTimings,
         ...(workspaceSnapshotFileCount > 0
           ? { workspaceSnapshotFileCount }
@@ -944,7 +896,6 @@ async function createHostedWorkspaceV2Snapshot(
     assistantRuntimeResiduePruneResult,
     encryptedByteSize,
     fileCount: workspaceSnapshotFileCount,
-    legacyMaterialization,
     leaseCheckCount,
     plainByteSize: workspaceSnapshotPlainBytes,
     platform: input.platform,
@@ -1330,21 +1281,6 @@ function createHostedWorkspaceSnapshotSizeDiagnosticLogDetails(
   };
 }
 
-function createHostedWorkspaceSnapshotPlanLogDetails(
-  plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan | null,
-): HostedRuntimeRedactedJson {
-  if (!plan) {
-    return {};
-  }
-
-  return {
-    currentSnapshotRefPresent: plan.currentSnapshotRefPresent,
-    legacyBundleRefPresent: plan.legacyBundleRefPresent,
-    preservedInlineFileCount: plan.preservedInlineFileCount,
-    skippedInlineFileCount: plan.skippedInlineFileCount,
-  };
-}
-
 function createTerminalWriteOperationPruneLogDetails(
   result: PruneTerminalWriteOperationRecordsResult | null,
 ): HostedRuntimeRedactedJson {
@@ -1508,7 +1444,6 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
   assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null;
   encryptedByteSize: number;
   fileCount: number;
-  legacyMaterialization: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan | null;
   leaseCheckCount: number;
   plainByteSize: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -1563,7 +1498,6 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
           }
         : {}
     ),
-    ...createHostedWorkspaceSnapshotPlanLogDetails(input.legacyMaterialization),
     ...input.timingDetails,
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,

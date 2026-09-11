@@ -55,6 +55,21 @@ should run `gh pr ready <number>` only after focused local proof and the parent
 candidate review are complete, the exact pushed head is the intended merge
 candidate, and no PR-specific edit is already known. That Ready event starts
 the expensive workflows automatically.
+
+Before pushing a new head to an existing owned PR, explicitly mark it Draft
+and make the push conditional on that command succeeding. From the PR's owned
+branch, use `gh pr ready <number> --undo && git push origin HEAD` (substitute the
+verified PR remote when it is not `origin`). This ordering applies to remediation,
+base reconciliation, and final plan-closeout commits as well as routine edits.
+After the push succeeds, verify the remote head and re-establish the candidate
+conditions above before running `gh pr ready <number>`.
+
+Do not rely on the delayed controller to mark Draft before calling Ready. If
+Ready is called while the PR still appears ready, it emits no new readiness
+event; the delayed reset can then leave the candidate Draft with no expensive
+CI run. If a head was already pushed while Ready, first allow its reset to
+complete, confirm the same head is Draft, and then mark it Ready after verification.
+
 The expensive pull-request workflows admit only non-draft `opened` or
 `reopened` events and `ready_for_review`; they do not run expensive proof on
 `synchronize`. A synchronize event that occurred while the PR was ready records
@@ -76,10 +91,8 @@ populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
 resolutions fail closed before the sole draft mutation. A
 synchronize event that occurred while the PR was already draft produces no
 consumable receipt, so delayed handling cannot undo a newer Ready action on the
-unchanged SHA. After a later push returns the PR to draft, re-establish the
-candidate conditions above before marking it Ready again to prove the new exact
-head. A skipped job is not exact-head success, and required check names remain
-bound to the jobs that actually execute the proof.
+unchanged SHA. A skipped job is not exact-head success, and required check names
+remain bound to the jobs that actually execute the proof.
 
 `PR Evidence` intentionally remains lightweight on `synchronize` so policy and
 rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
@@ -137,6 +150,16 @@ the loaded APT policy, one-shot Playwright status, Ubuntu caller inventory, and
 overall step-timeout contract; exact-head Actions then prove the wrapper on the
 GitHub-hosted Ubuntu runner.
 
+Before checking mergeability, refresh the remote-tracking base with an explicit
+destination refspec: `git fetch origin refs/heads/main:refs/remotes/origin/main`.
+Verify that `git rev-parse origin/main` matches the SHA returned by
+`git ls-remote origin refs/heads/main`; if the base advanced, refresh and check
+again. For another base branch, substitute its name in all three commands.
+A bare `git fetch origin main` can update only `FETCH_HEAD` when another task
+has narrowed the shared fetch mapping, leaving `origin/main` stale. Preserve
+the shared `remote.origin.fetch` configuration and use the verified base for
+the merge-tree proof.
+
 For readiness, the exact PR head is the commit that contains the PR-authored
 change; it does not need to be repeatedly merged with a moving base. Keep green
 required CI on that head and prove current-base mergeability with
@@ -165,11 +188,9 @@ statuses. The trusted default-branch controllers run on staggered six-hour
 schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
 dispatch is the scheduler-drop recovery path, but its event ref must be
 `refs/heads/main` and its exact event SHA must still equal current `main` when
-the selection job runs. Each cheap selection job reads the latest completed
-scheduled outcome for its own workflow and skips the native job only when that
-outcome succeeded at the selected protected-`main` SHA. Missing history, a
-newer SHA, or a latest failure admits the canary. An explicit rerun of the same
-trusted controller attempt bypasses the no-change skip. Reviewed native source pins live in
+the selection job runs. Every scheduled admission executes the actual native
+journey, including unchanged revisions; a prior successful scheduling result is
+never reused as provider evidence. Reviewed native source pins live in
 `.github/native-hosted-e2e-controller.json`, so a source rotation advances the
 protected-main checkpoint.
 
@@ -247,6 +268,35 @@ keeps the existing isolated provider-key route. Read every printed synthetic
 reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
+
+The separate `.github/workflows/assistant-real-model.yml` acceptance lane runs
+only on protected `main` pushes or manual dispatch from protected `main`. Before
+enabling it, configure the `assistant-real-model-sandbox` GitHub Environment to
+allow only `main` and set its `ASSISTANT_REAL_MODEL_SANDBOX_OPENAI_API_KEY` to a
+dedicated budgeted test-project credential. Do not use a production credential.
+The runner `pnpm exec tsx scripts/run-assistant-real-model-gate.ts` pins
+`gpt-5.6-terra`, the production Responses websocket-enabled provider setting,
+three exact scenario names, serial execution, zero test retries, and a twelve
+minute outer deadline per scenario. Codex's ordinary bounded transport retries
+remain enabled. Missing configuration, missing selection, skipped assertions,
+and absent or invalid execution reports fail the lane. The retained artifact
+contains only commit/run/model/configured-transport and scenario status metadata;
+raw replies and Vitest reports are discarded.
+
+These journeys use production assistant planning and the shipped `vault-cli`
+against synthetic canonical vaults. They prove meal save and fresh-conversation
+readback after assistant process restart and vault snapshot restore; recurring
+reminder save, scheduler fire, outbox acknowledgement/reconciliation and cancel;
+and group privacy refusal, silence, and absence of unauthorized canonical effects.
+The Linq route metadata and delivery sink are synthetic external boundaries.
+The model-created reminder is not patched before execution. Native launch
+arguments add the named permission profiles from the production builder while
+preserving the selected Codex authentication home. This lane does not prove
+managed-container restart, private Worker egress, Temporal, or actual
+messaging-provider delivery.
+It is post-merge acceptance evidence, separate from PR checks and deploy gates.
+Local subscription runs prove the same owned effects but retain the selected
+local Codex configuration; they do not certify the protected provider transport.
 
 If the default subscription home cannot run the focused journey before any
 provider action because of authentication, quota, startup, or connection
@@ -382,16 +432,23 @@ remain external to the checkout.
 
 ## Live Junction Garmin Canary Verification
 
-The public live wearable canary is a protected-main external-provider proof,
-not a pull-request check. Its focused hermetic owner proof is:
+The public live wearable workflow dispatches protected-main source to the
+private hosted-runtime executor. It runs after main pushes, daily, and on manual
+recovery; it accepts only an exact completed canonical-data receipt. The public
+controller has no provider credentials, private checkout, or artifact access.
+See [Live provider canaries](live-provider-canaries.md) for the execution,
+credential-provisioning, and safe migration contract.
+
+Its focused controller and browser boundary proof is:
 
 ```bash
+node --test scripts/github-wearable-canary.test.mjs
 pnpm --dir packages/hosted-local-harness exec vitest run \
   --config vitest.config.ts --no-coverage \
   test/junction-wearable-canary-workflow.test.ts
 ```
 
-The workflow must expose and smoke-check the exact workspace Codex CLI installed
+The private executor must expose and smoke-check the exact workspace Codex CLI installed
 by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned
 `Dockerfile.cloudflare-hosted-runner-base` pin; both owners remain visible in
@@ -406,6 +463,14 @@ login state: old tabs can point at retired hosted-local servers, and CDP
 attachment waits for every existing target to initialize. A failed attachment
 also runs a constant-return probe through Kernel's server-side transport and
 reports only responsive/unavailable before the existing owned cleanup.
+Tunnel readiness navigates that remote browser page to the existing same-origin
+`/api/internal/health` endpoint and requires HTTP 200 at that exact URL within the
+unchanged 60-second cap and five-second probe attempts. The connect page then
+gets one navigation with its normal configured browser timeout, so a slow page
+cannot be mistaken for failed transport. These two failure stages omit URLs and
+raw navigation errors. The existing headed Chromium smoke lane proves this with
+a real HTTP server, including a connect response slower than five seconds,
+non-200 health, an exited tunnel child, and a bounded connect failure.
 Headed Chromium is the narrow
 mitigation that cleared the provider challenge observed in headless automation;
 only a successful protected-main run proves the complete result. On Garmin's
@@ -424,6 +489,11 @@ if Garmin departs during that asynchronous sample, the current route wins over
 the stale pre-sample observation and the callback proof continues. After the
 persisted-state reload, the runner waits for the page load boundary before
 clicking Disconnect so server-rendered state cannot outrun its client handler.
+Authorization-click failures retain the fixed action and timeout category,
+plus allowlisted host-family and route categories sampled before and after the
+click. The runner captures the original stage and diagnostic message before
+browser cleanup; cleanup cannot replace that evidence with a closed-page
+location. These diagnostics contain no raw URL, provider page text, or screenshot.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual
@@ -433,7 +503,7 @@ falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
 [CDP](https://www.kernel.sh/docs/browsers/cdp), and
 [stealth](https://www.kernel.sh/docs/browsers/bot-detection/stealth) contracts.
-Keep those setup steps free of Environment secrets; only the final
+Keep those setup steps free of Environment secrets; only the private executor
 browser-canary step may receive Kernel authority, Junction sandbox authority,
 and the dedicated Garmin login. A real authorization proof remains available
 only after the exact workflow reaches protected `main`, where non-canceling
@@ -689,7 +759,6 @@ a redundant root `pnpm typecheck`.
 | Changes under `packages/health-commons` | `pnpm --dir packages/health-commons verify` | Use the package-local verify lane for authored content, generator, schema, or package test changes. Root acceptance regenerates the ignored catalog for app/typecheck consumers, but it is not a replacement for the package-local Health Commons verification surface. |
 | Changes under `packages/assistant-engine`, `packages/assistant-cli`, `packages/setup-cli`, `packages/gateway-core`, `packages/vault-usecases`, `packages/cloudflare-hosted-control`, `packages/messaging-ingress`, or `packages/inbox-services` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus the edited package's `pnpm --dir packages/<name> test:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched package owner and reverse dependents. If there is no truthful diff-aware lane for the task, run the edited package's package-local `test:coverage` command directly before handoff. Keep the scoped fallback coverage-bearing instead of dropping to a no-coverage package loop. |
 | Changes under `packages/device-syncd` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/device-syncd test:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched device-syncd files. Otherwise run the package-local coverage command directly before handoff. Repo-wide acceptance is still appropriate when the task broadens beyond a narrow package slice. |
-| Changes under `packages/assistantd` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/assistantd test:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched assistantd files. Otherwise run the package-local coverage command directly before handoff. Repo checks typecheck/build the daemon in the workspace graph, execute its loopback-auth/routing tests plus the direct owner-package boundary regressions for `@murphai/assistant-engine` and CLI daemon-routing coverage through the root multi-project Vitest suite, and keep the single-vault loopback plus bearer-token trust boundary documented alongside the CLI runtime it fronts. |
 | Changes under `apps/web` | `pnpm verify:acceptance`, or `pnpm test:diff <path ...>` when that diff-aware lane already covers the touched app slice truthfully | `apps/web test` is now the fast hosted-web Vitest lane for local iteration, split into five serial-safe workspace buckets with app-local worker caps defaulting to `MURPH_APP_VITEST_MAX_WORKERS`, then `MURPH_VITEST_MAX_WORKERS`, then `50%` locally or `25%` in CI. File-level Vitest parallelism is enabled locally by default, disabled in CI by default, and in-file suite concurrency is opt-in unless `MURPH_VITEST_SUITE_CONCURRENCY` explicitly enables it. `MURPH_VITEST_FILE_PARALLELISM` still overrides file parallelism, and `MURPH_VITEST_MAX_CONCURRENCY` / `MURPH_CLI_VITEST_MAX_CONCURRENCY` still cap concurrent tests within a file when suite concurrency is enabled. Full repo acceptance still reaches the heavier app-local lint, cold-boot `next dev` smoke under `apps/web/.next-smoke`, and production build under `apps/web/.next` through `pnpm test:apps` and the package-local `apps/web verify` script. For `apps/web`-scoped verification, lint is a standing required check now rather than an optional side effect of `verify`; use `pnpm --dir apps/web verify` as the preferred package-level superset when the lane is otherwise applicable. That hosted lane regenerates the ignored Health Commons catalog, performs one explicit `prisma generate`, and completes the root TypeScript 7 source check before starting the heavier checks. Next then uses the web-local TypeScript 5 compatibility compiler to validate its freshly generated route and page contracts, so both the guarded build and direct `next build` remain fail-closed. The local lane then starts `next build`, `pnpm dev:smoke`, `pnpm test`, and `pnpm lint` as sibling background jobs. CI keeps serial hosted-web substeps unless `MURPH_VERIFY_STEP_PARALLEL=1` is set, and `pnpm --dir apps/web verify:parallel` forces the same local parallel path explicitly. The dev-smoke helper now checks route types and Turbopack cache paths directly instead of recursively walking the whole `.next-smoke` tree, polls readiness every 250ms, and reuses its local Turbopack smoke cache by default; CI still prunes the cache, and `MURPH_HOSTED_WEB_SMOKE_PRUNE_CACHE=1` forces a cold local smoke when needed. It still covers route-type stub bootstrap from the tracked `next-env.d.ts` import, focused Vitest coverage for browser-auth/session helpers, hosted AI usage record import and local allowance accounting, the hosted verified-email sync route and Privy linked-account helpers, durable hosted execution outbox coverage across device-sync/onboarding dispatches, Privy-backed hosted onboarding routes, subscription onboarding Checkout, fixed one-time usage-credit Checkout, webhook-only credit fulfillment, usage blocking/settlement, and Stripe billing recovery paths, hosted Linq ingress routes, interactive-dev isolation under `apps/web/.next-dev`, and source-based workspace package resolution through the shared `config/workspace-source-resolution.ts` helper. Until `apps/web` exposes a narrower owner-level coverage script, keep app edits on `pnpm verify:acceptance` whenever `pnpm test:diff <path ...>` is not already a truthful coverage-bearing lane. |
 | Changes under `apps/cloudflare` | `pnpm verify:acceptance`, or `pnpm test:diff <path ...>` when that diff-aware lane already covers the touched app slice truthfully | Repo checks now include hosted-runner app typecheck plus the focused hosted-runner verification surface under `apps/cloudflare verify`, which runs app-local typecheck once and then both the fast Node lane (`apps/cloudflare test`) and the smaller Workers-runtime Vitest lane (`apps/cloudflare test:workers`). That verify surface now runs through `apps/cloudflare/scripts/verify-fast.sh` and defaults locally to overlapping the Node and Workers lanes after the shared typecheck. CI keeps those substeps serial unless `MURPH_VERIFY_STEP_PARALLEL=1` is set, and `pnpm --dir apps/cloudflare verify:parallel` forces the same parallel path explicitly. The Node lane is now split into three serial-safe workspace buckets with the same app-local worker-cap fallback chain (`MURPH_APP_VITEST_MAX_WORKERS`, then `MURPH_VITEST_MAX_WORKERS`, then `50%` locally or `25%` in CI) so local runs can overlap safely without fully serializing the app; the `cloudflare-node-platform` bucket disables file-level parallelism because its container entrypoint tests exercise the shared HTTP server and hosted invocation lifecycle state. File-level Vitest parallelism remains enabled locally by default for other Cloudflare Node buckets, disabled in CI by default, and in-file suite concurrency is opt-in unless `MURPH_VITEST_SUITE_CONCURRENCY` explicitly enables it. `MURPH_VITEST_FILE_PARALLELISM` still overrides file parallelism where a bucket has not explicitly disabled it, and `MURPH_VITEST_MAX_CONCURRENCY` / `MURPH_CLI_VITEST_MAX_CONCURRENCY` still cap concurrent tests within a file when suite concurrency is enabled. That combined Cloudflare verification covers signed dispatch verification, `/health` plus internal route aliases, per-user runner retry/poison state transitions, mailbox-driven `member.activated` workspace initialization, hosted assistant profile seeding/adoption inside the restored runtime, fail-closed hosted assistant config errors, direct-R2 hosted workspace snapshot start/complete metadata routes with presigned PUT session wiring, legacy encrypted bundle/artifact restore compatibility, separate per-user runner env control/persistence handling, keyring-aware hosted ciphertext reads by stored `keyId`, direct Durable Object RPC/alarm coverage inside workerd, and the bounded hosted workspace invocation path that restores the hosted workspace snapshot, imports mailbox input, runs best-effort projection/enrichment, and then runs inbox/parser/assistant/device-sync seams through `@murphai/assistant-runtime`. The app-local no-emit typecheck includes the container-entrypoint and direct-invocation paths. The repo still does not verify a live `wrangler` deploy or Cloudflare-managed native-container provisioning path, but `pnpm --dir apps/cloudflare test:e2e:runner-python:local` now provides a targeted final-image Python PATH E2E that assembles the hosted-runner workspace closure, prepares the cached native base image, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, and checks as the non-root `runner` user from immutable `/app` with the baked runner PATH. `pnpm --dir apps/cloudflare runner:docker:smoke` remains the broader local final-image smoke: it overlays smoke entrypoints into a derived bundle, runs a smoke-local child process inside the container against a restored fixture vault, starts Codex App Server with the hosted shell env allowlist, exercises `vault-cli` through `command/exec` for default vault reads, explicit raw `--vault`, measurement and scheduled-measurement writes, representative list commands, and hidden-vault schema/LLM metadata, resolves and runs `python` / `python3` from the runner `PATH`, exercises the shared `@murphai/parsers` ffmpeg audio normalization/preparation pre-step, and separately proves the Poppler/file PDF toolchain (`file`, `pdfinfo`, `pdftotext`, and `pdftoppm`) against the restored smoke PDF under rebound `HOME`/`VAULT`, while recording metadata-only CLI proof counts rather than only proving those tools in a manual shell; hosted transcription is Worker-mediated Workers AI with no in-image speech model. The path-scoped `.github/workflows/cloudflare-runner-permission-sandbox.yml` lane rebuilds that production image on native `ubuntu-24.04` whenever the Codex permission, runner image, bundle, or smoke surfaces change, so the named-profile filesystem, network, and environment denial proof cannot be accepted only under ARM64 AMD64 emulation where inner seccomp installation is unavailable. For manual local E2E proof, root `pnpm hosted-local e2e` is the canonical hosted-local full suite, `pnpm hosted-local e2e <scenario ...>` runs one or more named scenarios in one prepared suite, `pnpm hosted-local e2e foreground-reply-priority --profile e2e:stub` runs the production-idle-floor foreground priority regression, and `pnpm hosted-local e2e vault-persistence --profile e2e:live` runs the opt-in real Codex app-server vault persistence scenario across a hosted-local restart with a `gpt-5.5` default overrideable through `MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL`. `pnpm --dir apps/cloudflare test:e2e:local` adds the Workers-runtime lane after the generic hosted-local package alias. Private Murph Cloud wires targeted hosted-local E2E jobs into its `Public Murph Integration` workflow with loopback `postgres:17` services and explicit `pg_isready -U postgres -d murph_test` health checks via root `pnpm hosted-local e2e device-connect`, `pnpm hosted-local e2e codex-image-media-delivery`, `pnpm hosted-local e2e linq-delivery`, `pnpm hosted-local e2e linq-webhook`, `pnpm hosted-local e2e linq-scheduled-reminder`, `pnpm hosted-local e2e telegram`, `pnpm hosted-local e2e idle-checkpoint-deferred-progress`, `pnpm hosted-local e2e direct-r2-presigned-put`, `pnpm hosted-local e2e temporal-orchestration`, `pnpm hosted-local e2e foreground-reply-priority`, and `pnpm hosted-local e2e device-sync-junction-wearable-direct-resource-replay`, covering the hosted device-connect smoke, Codex image media delivery, Linq delivery, signed Linq webhook text/PDF/image handling, Linq scheduled reminder, Telegram delivery, idle-checkpoint deferred progress, direct-R2 presigned upload, Temporal orchestration, foreground reply priority, and Junction wearable replay guard flows on every private pull request and private `main` push; manual dispatch targets exact public refs. Compatible scenarios share one suite invocation and runner-image/smoke preparation; the routine Linq reminder/onboarding leg uses the explicit fast timing profile on pull requests and `main`, while the protected deployment gate leaves `MURPH_HOSTED_LOCAL_E2E_FAST_GATE` unset to retain the full profile. Both scheduled-reminder profiles use a 90-second setup lead; fast uses a 1ms idle checkpoint, full preserves the production-like 10-second idle checkpoint, and the scenario enforces at least 5 seconds of remaining runway before Temporal scheduling. Every leg keeps uploading per-job logs and redacted hosted-local state files instead of broadening the default `apps/cloudflare verify` surface to the entire serial E2E bundle or uploading every harness artifact. Until `apps/cloudflare` exposes a narrower owner-level coverage script, keep app edits on `pnpm verify:acceptance` whenever `pnpm test:diff <path ...>` is not already a truthful coverage-bearing lane. |
 | Changes under `packages/assistant-runtime` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/assistant-runtime test:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched assistant-runtime files. Otherwise run the package-local coverage command directly before handoff. Repo checks include the package-local no-emit typecheck through the workspace scripts, plus package-local Vitest coverage through the root multi-project suite and the focused Cloudflare hosted-runner lanes that exercise the package through direct in-process hosted workspace execution, including hosted verified-email self-target reconciliation, the direct owner-package boundary checks for `@murphai/assistant-engine` and `@murphai/operator-config`, explicit runtime-env projection, Cloudflare-managed proxy env preservation, invocation-local writable cache/temp roots, and runtime wake coalescing. This package is the headless hosted execution surface for Cloudflare and should carry explicit runtime context rather than ambient process configuration. |
@@ -1082,10 +1151,9 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
 - `vault-cli assistant status` and `vault-cli assistant doctor`, plus the root `vault-cli status` and `vault-cli doctor` shorthands, are read-only local diagnostics over assistant session files, transcripts, receipts, runtime automation state, outbox intents, diagnostics snapshots, and persisted status snapshots; they must tolerate missing or partially corrupted assistant runtime files without mutating vault data.
 - `vault-cli assistant stop`, plus the root `vault-cli stop` shorthand, is the supported operator recovery path when `assistant run` / `murph run` is already active for the same vault. It targets the recorded run-lock PID with `SIGTERM`, escalates only if needed, and clears stale run-lock state when the recorded process is already gone.
 - `vault-cli device ...` targets the local device control plane, defaults to `DEVICE_SYNC_BASE_URL` or `http://localhost:8788`, authenticates with `DEVICE_SYNC_CONTROL_TOKEN`, rejects non-loopback base URLs whenever that bearer path is used, and can now start or reuse a Murph-managed local daemon for the selected vault when no explicit control-plane target is provided. `vault-cli device daemon start|status|stop` is the explicit lifecycle surface for that managed process, and managed bearer reuse comes from the separate local secret file rather than persisted launcher JSON.
-- `vault-cli assistant chat` uses an Ink-based stderr UI and expects `react` and `ink` to be installed in the CLI workspace.
 - The built `vault-cli` binary can be exercised locally with `node packages/cli/dist/bin.js ...` when a change requires an end-to-end runtime check beyond the standard repo scripts. Installed `murph` / `vault-cli` shims are intentionally thin repo-root resolvers that `exec` the built entrypoint without wrapper-owned auto-build or stdio/signal mediation, but direct built-entry execution is still the clearest debugging path for stdin-sensitive behavior such as `--input -` because installed shims can lag until setup refreshes them.
 - A dedicated onboarding entrypoint exists at `node packages/cli/dist/bin.js onboard ...`; it is routed from `packages/cli/src/bin.ts` instead of the main `vault-cli` manifest so installer-style host provisioning can happen without reshaping the data-plane command graph.
-- The built CLI package shape exposes a `murph` bin alias that targets the same built entrypoint as `vault-cli`; `murph`, `murph --help`, and `murph onboard ...` route to the onboarding surface, while other commands continue through the main operator surface. Interactive TTY onboarding now opens a compact assistant/channel/wearable stepper with inline readiness badges for Telegram, Garmin, Oura, Strava, and WHOOP, restores canonical wearable selections from `bank/preferences.json`, can prompt for missing runtime credentials for the current onboarding run without persisting them, persists the selected wearable providers back into that canonical preferences singleton, opens any selected wearable connect flow that is ready before handoff, defers scheduled-update preset installation until the operator later binds an explicit outbound destination, and then routes to `assistant run` when a configured auto-reply channel remains enabled. The repo's release flow now publishes only `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core` under one shared version and one git tag. Workspace-private runtime and owner packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/runtime-state`, `@murphai/assistantd`, and `@murphai/device-syncd` remain installable from a checkout and are bundled into the relevant public tarballs when needed. The tag-driven GitHub Actions publish job relies on npm trusted publishing for that smaller package set, and npm trust is package-level rather than repo-level, so live npm publication depends on each public `@murphai/*` package being bound to `cobuildwithus/murph` and `.github/workflows/release.yml`. The repo ships `pnpm release:trust:github` to bootstrap those package-level bindings from an npm-authenticated maintainer shell; if a package is already bound incorrectly in npm, maintainers must revoke that package's existing trust entry before rerunning the bootstrap helper.
+- The built CLI package shape exposes a `murph` bin alias that targets the same built entrypoint as `vault-cli`; `murph`, `murph --help`, and `murph onboard ...` route to the onboarding surface, while other commands continue through the main operator surface. Interactive TTY onboarding now opens a compact assistant/channel/wearable stepper with inline readiness badges for Telegram, Garmin, Oura, Strava, and WHOOP, restores canonical wearable selections from `bank/preferences.json`, can prompt for missing runtime credentials for the current onboarding run without persisting them, persists the selected wearable providers back into that canonical preferences singleton, opens any selected wearable connect flow that is ready before handoff, defers scheduled-update preset installation until the operator later binds an explicit outbound destination, and then routes to `assistant run` when a configured auto-reply channel remains enabled. The repo's release flow now publishes only `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core` under one shared version and one git tag. Workspace-private runtime and owner packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/runtime-state`, and `@murphai/device-syncd` remain installable from a checkout and are bundled into the relevant public tarballs when needed. The tag-driven GitHub Actions publish job relies on npm trusted publishing for that smaller package set, and npm trust is package-level rather than repo-level, so live npm publication depends on each public `@murphai/*` package being bound to `cobuildwithus/murph` and `.github/workflows/release.yml`. The repo ships `pnpm release:trust:github` to bootstrap those package-level bindings from an npm-authenticated maintainer shell; if a package is already bound incorrectly in npm, maintainers must revoke that package's existing trust entry before rerunning the bootstrap helper.
 - Repo-local host bootstrap is handled by `scripts/setup-host.sh`, which delegates to the existing Homebrew-based `scripts/setup-macos.sh` path on macOS and can reuse or download Node 24.14.1+ locally on Linux before activating `pnpm` through corepack, installing workspace dependencies, building the workspace, and delegating to the built setup entrypoint. `scripts/setup-macos.sh` still hard-fails off macOS, `scripts/setup-linux.sh` hard-fails off non-Linux hosts, and `--dry-run` remains a wrapper-only planning mode for those shell entrypoints.
 - GitHub Actions host-support CI runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-24.04` and `macos-latest`. Its Ubuntu release gate preserves the `pnpm release:check` surface and the stable `Release checks (ubuntu)` required owner. In full mode, a lightweight exact-candidate job executes `scripts/release-verification-plan.mjs` without installing dependencies and publishes the validated six-shard package and four-shard Web-test matrices; documentation mode requires that job to remain skipped. Package coverage remains exhaustive and unique: CLI and Assistant Engine are singleton jobs, the current measured platform owners are divided across two jobs, and Health Commons plus Hosted Local Harness remain singleton jobs. Commands are unchanged and serial within each two-core runner, generated Health Commons preparation remains per checkout, CLI runtime/package-shape proof remains CLI-only, and release build/typecheck owns the prepared Messaging Ingress, Inboxd, and Hosted Local Harness package-boundary checks exactly once. This bounds runner fanout while allowing the measured long package owners to proceed independently; organization-level GitHub concurrency can still queue jobs.
 - Ubuntu app verification is split only at existing ownership seams. A Web build lane retains legal-PDF generation, Prisma and Health Commons preparation, lint, measured production Next build, dev smoke, and output-dependent tests. Four release-plan-owned Web test lanes retain the complete Vitest surface and each provision loopback PostgreSQL 17 with `MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL`, preserving the transactional supplement-search corpus. Cloudflare retains one complete verification lane plus pinned Codex upstream-source proof. Web and Cloudflare never execute in the same job or runner, avoiding the memory contention and indefinite stalls documented by Frog #2656; each lane retains a 45-minute bound and frozen install. The final aggregator requires the plan and every app/package/build/fixture/bundle result in full mode, while documentation mode still requires its exact-candidate docs proof and requires the plan plus every runtime-heavy branch to remain skipped. Focused policy mutations reject missing or duplicate owners, same-runner Web/Cloudflare recombination, incorrect Web lanes, package-boundary duplication, and any omitted aggregator dependency.
@@ -1143,6 +1211,5 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   database/crypto/control-plane boundary is a prerequisite; production Web or
   production stateful secrets are never a preview bootstrap fallback.
 - `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, filters the native bundled Codex catalog to exactly `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, adds OpenAI Flex support, forces mixed `tool_mode: code_mode`, and validates both properties for every entry. Mixed mode preserves the code executor while exposing native `tool_search`; dynamic-tool `deferLoading` remains the owner of which broad schemas stay out of the initial model-visible surface. The image then copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app` and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
-- The local assistant daemon entrypoint lives under `packages/assistantd`; `murph-assistantd` binds to one vault, rejects non-loopback hosts, requires a bearer token on every route, sets `MURPH_ASSISTANTD_DISABLE_CLIENT=1` in its own process so daemon-local calls do not recurse back through HTTP, and now fronts the steady-state assistant session/message/options flows plus session/status/outbox/cron inspection and serializable automation control whenever the CLI invocation does not need local-only hooks such as live provider events, foreground inbox events, abort propagation, or local session/transcript snapshots.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

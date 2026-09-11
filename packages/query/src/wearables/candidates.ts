@@ -1316,10 +1316,11 @@ export function createMetricCandidateBase(
   sourceFamily: WearableCandidateSourceFamily,
   sourceKind: string,
 ): Omit<WearableMetricCandidate, "metric" | "unit" | "value"> {
+  const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
   return {
     candidateId: buildCandidateId([
       provider,
-      wearableDataOriginKey(readWearableDataOrigin(entity.attributes.dataOrigin, externalRef)),
+      wearableDataOriginKey(dataOrigin),
       date,
       sourceFamily,
       sourceKind,
@@ -1328,7 +1329,7 @@ export function createMetricCandidateBase(
       externalRef?.facet ?? "",
       normalizeNullableString(entity.occurredAt) ?? normalizeNullableString(entity.attributes.recordedAt) ?? "",
     ]),
-    dataOrigin: readWearableDataOrigin(entity.attributes.dataOrigin, externalRef),
+    dataOrigin,
     date,
     externalRef,
     occurredAt: entity.occurredAt ?? null,
@@ -2052,6 +2053,7 @@ function readWearableDataOrigin(
 }
 
 function normalizeDeviceDataOrigin(value: unknown): DeviceDataOrigin | null {
+  if (value === undefined || value === null) return null;
   const parsed = deviceDataOriginSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }

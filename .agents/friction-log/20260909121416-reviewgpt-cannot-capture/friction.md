@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT cannot capture a submitted review with a WEB-prefixed conversation URL'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3105'
 ---
 
 ## Expected Behavior

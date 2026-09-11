@@ -94,6 +94,13 @@ export const HOSTED_LOCAL_CLOUDFLARE_ACCOUNT_ID =
 export const webDir = path.join(repoRoot, "apps", "web");
 export const cloudflareDir = path.join(repoRoot, "apps", "cloudflare");
 export const cloudflareDevVarsPath = path.join(cloudflareDir, ".dev.vars");
+export const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
+  repoRoot,
+  "apps",
+  "cloudflare",
+  ".deploy",
+  "runner-bundle",
+);
 export const vercelLinkCandidatePaths = [
   path.join(webDir, ".vercel", "project.json"),
   path.join(webDir, ".vercel", "repo.json"),

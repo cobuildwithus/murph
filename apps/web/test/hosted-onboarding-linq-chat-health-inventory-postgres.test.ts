@@ -379,7 +379,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("preserves the newer projection when opposite current key versions concurrently migrate one legacy chat", async () => {
+    it("preserves the newer projection when old and new key versions concurrently update one legacy chat", async () => {
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const applicationSuffix = randomUUID().slice(0, 8);
@@ -399,12 +399,6 @@ describe.skipIf(!runPostgresProof)(
         entries: { v1: TEST_KEYRING_ENTRIES.v1 },
       });
       const legacyChatLookupKey = createHostedLinqChatLookupKey(chatId);
-      restoreV1();
-      const restoreV2 = configureHostedContactPrivacyKeyringForTest({
-        currentVersion: "v2",
-        entries: TEST_KEYRING_ENTRIES,
-      });
-      const currentChatLookupKey = createHostedLinqChatLookupKey(chatId);
       const olderProjection = prepareHostedLinqChatHealthInventoryProjection([{
         chatId,
         isGroup: false,
@@ -413,11 +407,12 @@ describe.skipIf(!runPostgresProof)(
         providerUpdatedAt: new Date("2026-08-11T14:01:00.000Z"),
         service: "older",
       }]);
-      restoreV2();
-      const restoreV1WithReadCandidates = configureHostedContactPrivacyKeyringForTest({
-        currentVersion: "v1",
+      restoreV1();
+      const restoreV2 = configureHostedContactPrivacyKeyringForTest({
+        currentVersion: "v2",
         entries: TEST_KEYRING_ENTRIES,
       });
+      const currentChatLookupKey = createHostedLinqChatLookupKey(chatId);
       const newerProjection = prepareHostedLinqChatHealthInventoryProjection([{
         chatId,
         isGroup: false,
@@ -434,7 +429,7 @@ describe.skipIf(!runPostgresProof)(
         providerUpdatedAt: new Date("2026-08-11T14:02:00.000Z"),
         service: "stale-observation",
       }]);
-      restoreV1WithReadCandidates();
+      restoreV2();
       if (!legacyChatLookupKey || !currentChatLookupKey) {
         await Promise.all([
           blocker.$disconnect(),
@@ -504,7 +499,7 @@ describe.skipIf(!runPostgresProof)(
         ]);
 
         await expect(observer.hostedLinqChatHealth.findUnique({
-          where: { linqChatLookupKey: legacyChatLookupKey },
+          where: { linqChatLookupKey: currentChatLookupKey },
           select: {
             providerStatus: true,
             providerUpdatedAt: true,
@@ -516,7 +511,7 @@ describe.skipIf(!runPostgresProof)(
           service: "newer",
         });
         await expect(observer.hostedLinqChatHealth.findUnique({
-          where: { linqChatLookupKey: currentChatLookupKey },
+          where: { linqChatLookupKey: legacyChatLookupKey },
         })).resolves.toBeNull();
         await expect(applyPreparedProjection({
           chats: staleProjection,
@@ -524,7 +519,7 @@ describe.skipIf(!runPostgresProof)(
           prisma: olderWriter,
         })).resolves.toBe(0);
         await expect(observer.hostedLinqChatHealth.findUnique({
-          where: { linqChatLookupKey: legacyChatLookupKey },
+          where: { linqChatLookupKey: currentChatLookupKey },
           select: {
             providerStatus: true,
             providerUpdatedAt: true,

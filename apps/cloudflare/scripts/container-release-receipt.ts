@@ -409,6 +409,8 @@ export function buildContainerReleaseEntries(input: {
           if (rolloutTarget) {
             releasedImage = rolloutTarget.image;
             releasedVersion = rolloutTarget.version;
+          } else if (completedPendingRollout(before, after)) {
+            // An accepted rollout can finish during a later deployment attempt.
           } else if (before.activeRollout
             || (before.version === after.version && before.image === after.image)) {
             throw invalidReleaseTransition();
@@ -797,4 +799,10 @@ function invalidProviderState(): TypeError {
 
 function invalidReleaseTransition(): TypeError {
   return new TypeError("Container release evidence did not form an exact provider transition.");
+}
+
+function completedPendingRollout(before: CloudflareContainerApplicationIdentity, after: CloudflareContainerApplicationIdentity): boolean {
+  return !!before.activeRollout && !after.activeRollout
+    && before.activeRollout.targetVersion === after.version
+    && before.activeRollout.targetImage === after.image;
 }

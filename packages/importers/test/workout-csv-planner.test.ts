@@ -19,6 +19,131 @@ const STRONG_HEADER = [
 ].join(",");
 
 describe("planWorkoutCsvImport", () => {
+  test.each([
+    { column: "Reps", value: "0", expected: { reps: 0 } },
+    { column: "Weight", value: "0", expected: undefined },
+    { column: "Weight Unit", value: "kg", expected: undefined },
+    { column: "Seconds", value: "0", expected: undefined },
+    { column: "Seconds", value: "0.1", expected: { durationSeconds: 0 } },
+    { column: "Distance", value: "0", expected: undefined },
+    { column: "RPE", value: "0", expected: { rpe: 0 } },
+    { column: "Bodyweight", value: "0", expected: { bodyweightKg: 0 } },
+    { column: "Assistance", value: "0", expected: { assistanceKg: 0 } },
+    { column: "Added Weight", value: "0", expected: { addedWeightKg: 0 } },
+    { column: "Reps", value: "", expected: undefined },
+    { column: "Weight", value: "10 kg", expected: { weight: 10, weightUnit: "kg" } },
+    { column: "Distance", value: "1 km", expected: { distanceMeters: 1000 } },
+    { column: "Bodyweight", value: "10 kg", expected: { bodyweightKg: 10 } },
+    { column: "Assistance", value: "10 kg", expected: { assistanceKg: 10 } },
+    { column: "Added Weight", value: "10 kg", expected: { addedWeightKg: 10 } },
+  ])("preserves sparse set shape for $column=$value", ({ column, value, expected }) => {
+    const plan = planWorkoutCsvImport({
+      text: [
+        `Workout Name,Date,Exercise Name,${column}`,
+        `Morning,2026-03-12 07:00:00,Press,${value}`,
+      ].join("\n"),
+      timeZone: "UTC",
+      source: "hevy",
+    });
+
+    assert.equal(plan.importable, true);
+    assert.equal(plan.requiresWeightUnit, false);
+    assert.equal(plan.requiresDistanceUnit, false);
+    assert.deepEqual(
+      plan.sessions[0]?.workout.exercises.flatMap((exercise) => exercise.sets),
+      expected === undefined ? [] : [{ order: 1, type: "normal", ...expected }],
+    );
+  });
+
+  test.each(["Reps", "Weight", "Distance", "Bodyweight", "Assistance", "Added Weight"])(
+    "rejects malformed or negative %s before checking units",
+    (column) => {
+      for (const value of ["invalid", "-1"]) {
+        const plan = planWorkoutCsvImport({
+          text: [
+            `Workout Name,Date,Exercise Name,Weight Unit,${column}`,
+            `Morning,2026-03-12 07:00:00,Press,kg,${value}`,
+          ].join("\n"),
+          timeZone: "UTC",
+          source: "hevy",
+          weightUnit: "lb",
+        });
+        assert.equal(plan.importable, false);
+        assert.deepEqual(plan.sessions, []);
+        assert.deepEqual(plan.skipReasons, [{ reason: "invalid numeric set value", count: 1 }]);
+      }
+    },
+  );
+
+  test("preserves conflict precedence and the phase that records unitless warnings", () => {
+    const fixtures = [
+      {
+        columns: "Weight Kg,Weight Unit,Bodyweight Kg",
+        values: "10 lb,kg,20 lb",
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Weight,Bodyweight Kg",
+        values: "10 kg,20 lb",
+        weightUnit: "lb" as const,
+        reason: "explicit weight unit conflicts with CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Weight,Bodyweight Kg",
+        values: "10,20 lb",
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: true,
+      },
+      {
+        columns: "Bodyweight Kg,Assistance Kg",
+        values: "20,10 lb",
+        weightUnit: "lb" as const,
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Bodyweight,Assistance Kg",
+        values: "20,10 lb",
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Bodyweight,Distance",
+        values: "20,1 km",
+        distanceUnit: "mi" as const,
+        reason: "explicit distance unit conflicts with CSV metadata",
+        requiresWeightUnit: true,
+      },
+      {
+        columns: "Weight,Bodyweight Kg,RPE",
+        values: "10,20 lb,11",
+        reason: "invalid numeric set value",
+        requiresWeightUnit: false,
+      },
+    ];
+    for (const fixture of fixtures) {
+      const plan = planWorkoutCsvImport({
+        text: [
+          `Workout Name,Date,Exercise Name,${fixture.columns}`,
+          `Morning,2026-03-12 07:00:00,Press,${fixture.values}`,
+        ].join("\n"),
+        timeZone: "UTC",
+        source: "hevy",
+        weightUnit: fixture.weightUnit,
+        distanceUnit: fixture.distanceUnit,
+      });
+
+      assert.equal(plan.importable, false, fixture.columns);
+      assert.equal(plan.skippedRowCount, 1, fixture.columns);
+      assert.deepEqual(plan.sessions, [], fixture.columns);
+      assert.deepEqual(plan.skipReasons, [{ reason: fixture.reason, count: 1 }], fixture.columns);
+      assert.equal(plan.requiresWeightUnit, fixture.requiresWeightUnit, fixture.columns);
+      assert.equal(plan.requiresDistanceUnit, false, fixture.columns);
+    }
+  });
+
   test("maps Strong rows in the vault timezone and preserves set tags and notes", () => {
     const plan = planWorkoutCsvImport({
       text: [

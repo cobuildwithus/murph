@@ -4,7 +4,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActivePrivyMemberAuthFromBearerToken: mocks.auth }));
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
 vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedWorkspace: mocks.workspace }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => ({ createBrowserVaultSession: mocks.control }) }));

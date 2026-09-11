@@ -85,23 +85,24 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const assertion = await getPrisma().$transaction(async (tx) => {
-    await assertHostedAssistantNotificationRouteAuthority({
+  const result = await getPrisma().$transaction(async (tx) => {
+    const threadIsDirect = await assertHostedAssistantNotificationRouteAuthority({
       authority,
       prisma: tx,
     });
-    if (!assistantAskCompletion) {
-      return;
-    }
-    return await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
-      ...assistantAskCompletion,
-      boundRuntimeMemberId: memberId,
-      tx,
-    });
+    const assertion = assistantAskCompletion
+      ? await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+          ...assistantAskCompletion,
+          boundRuntimeMemberId: memberId,
+          tx,
+        })
+      : undefined;
+    return { threadIsDirect, assertion };
   });
   return jsonOk({
     authorized: true,
-    ...(assertion?.assistantAskFallbackRequired
+    threadIsDirect: result.threadIsDirect,
+    ...(result.assertion?.assistantAskFallbackRequired
       ? { assistantAskFallbackRequired: true }
       : {}),
   });

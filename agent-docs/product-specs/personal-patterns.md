@@ -187,6 +187,27 @@ remain unchanged; an older backend leaves the native section retryable.
 ## Proactive messages
 
 The managed Personal Patterns automation checks each day at 13:00 local time.
+Its model target is Luna with high reasoning, using the common Flex-first cron
+policy and Standard retries after failures. Before a clean scheduled model attempt,
+the exact managed recipe reads the current calculated report and the existing
+notification ledger. It skips model entry when the first digest is complete, every
+current factor was reviewed, and every current graded identity retains its reviewed
+grade. Extra observations, effect-size changes within a grade, and the report date
+do not alone require another daily model pass. New factors, identities, or grades
+remain eligible. Manual runs, retries, edited instructions, and missing, legacy,
+invalid, or degraded history retain ordinary model review.
+
+The existing `personal-pattern-notifications` Knowledge page uses version 1 JSON:
+`initialDigestSent`, `reviewedFactorIds`, `mutedFactorIds`, and `results`. Each result
+stores `factorId`, `outcomeId`, `comparisonBasis`, `lagDays`, `lastSeenGrade`,
+`firstSharedDate` (date or null), and `muted`. Identity includes the outcome's lag,
+falling back to the report lag. Duplicate identities or unknown fields cannot prove
+that a report is reviewed. The model converts legacy history only when all existing
+history and preferences can be preserved; otherwise it retains that history and
+normal model review. No second ledger, cache, or scheduler is added. First-digest
+import completeness and vocabulary/alias normalization remain with the existing
+model instructions; pending imports therefore retain model review.
+
 It sends at most one private message per run. Partial initial imports stay
 quiet. When source coverage proves the first report is complete, Murph sends
 one first digest with at most three grade A-D highlights. If that report has no

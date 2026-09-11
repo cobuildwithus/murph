@@ -12,23 +12,17 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedBrowserVaultReplicaRef,
-  HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-} from "@murphai/hosted-execution/contracts";
+import type { HostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import type {
   HostedRuntimeLogEntry,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -105,7 +99,7 @@ describe("hosted local snapshot stress e2e", () => {
 
     const snapshot = await createSnapshotStressFixture();
     const checkpoint = await seedHostedWorkspaceCheckpointForTest({
-      browserVaultReplicaRef: createBrowserVaultReplicaRef(snapshot.hash),
+      browserVaultReplicaRef: createBrowserVaultReplicaRef(snapshot.archive.encryptedObjectSha256),
       environment: requireScenario().runtimeEnv,
       redactedStatusJson: {
         seededSnapshotStress: true,
@@ -115,14 +109,10 @@ describe("hosted local snapshot stress e2e", () => {
         stressVaultFileBytes,
         stressVaultFileCount,
       },
-      snapshotRef: createSnapshotBundleRef({
-        hash: snapshot.hash,
-        size: snapshot.bytes.byteLength,
-      }),
+      snapshotRef: snapshot,
       userId,
     });
     expect(checkpoint.status).toBe("updated");
-    await uploadHostedSnapshotArtifact(snapshot);
 
     await requireScenario().runWake(
       buildHostedExecutionMemberActivatedWake({
@@ -274,43 +264,24 @@ async function startScenario(): Promise<void> {
   });
 }
 
-async function createSnapshotStressFixture(): Promise<{
-  bytes: Uint8Array;
-  hash: string;
-}> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-snapshot-stress-"));
-  const operatorHomeRoot = `${vaultRoot}-operator-home`;
-  cleanupPaths.push(vaultRoot, operatorHomeRoot);
+async function createSnapshotStressFixture(): Promise<HostedWorkspaceSnapshotV2Ref> {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-hosted-snapshot-stress-"));
+  const vaultRoot = path.join(root, "vault");
+  const operatorHomeRoot = path.join(root, "operator-home");
+  cleanupPaths.push(root);
 
   await writeSyntheticVaultMetadata(vaultRoot);
   await writeSyntheticVaultFiles(vaultRoot);
   await writeSyntheticAssistantRuntimeState(vaultRoot);
   await writeSyntheticCodexContinuity(operatorHomeRoot);
 
-  const snapshot = await snapshotHostedExecutionContext({
+  return await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId,
     vaultRoot,
   });
-  return {
-    bytes: snapshot.bundle,
-    hash: sha256HostedBundleHex(snapshot.bundle),
-  };
-}
-
-async function uploadHostedSnapshotArtifact(input: {
-  bytes: Uint8Array;
-  hash: string;
-}): Promise<void> {
-  await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${input.hash}`,
-    {
-      body: new Blob([new Uint8Array(input.bytes)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "PUT",
-    },
-  );
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
@@ -457,18 +428,6 @@ async function writeSyntheticCodexContinuity(operatorHomeRoot: string): Promise<
       "utf8",
     );
   }
-}
-
-function createSnapshotBundleRef(input: {
-  hash: string;
-  size: number;
-}): HostedExecutionSnapshotRef {
-  return {
-    hash: input.hash,
-    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
-    size: input.size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(

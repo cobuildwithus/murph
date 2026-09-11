@@ -63,6 +63,7 @@ describe("hosted group sponsorship contracts", () => {
 
   it("strictly parses the optional expiring group-bit sidecar", () => {
     const response = {
+      assistantProvider: "openai",
       fetchedAt: "2026-07-27T12:00:00.000Z",
       groupRunningBit: {
         expiresAt: "2026-07-28T12:00:00.000Z",

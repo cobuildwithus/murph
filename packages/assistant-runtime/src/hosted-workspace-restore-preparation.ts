@@ -191,7 +191,6 @@ export function startHostedWorkspaceRestorePreparation(
       const workspaceRestoreDoneAt = new Date().toISOString();
       phaseLogger.emit({
         details: {
-          materializedArtifactPathCount: restored.materializedArtifactPaths.size,
           restoreMode: restored.mode,
           restoreWasCold: restored.restoreWasCold,
         },

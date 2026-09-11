@@ -22,6 +22,7 @@ import {
 import { createCloudflareWorkspaceSnapshotPort } from "../src/runtime-platform/workspace-snapshot-port.ts";
 import {
   createEncryptedWorkspaceSnapshotFile,
+  type EncryptedWorkspaceSnapshotFile,
   type WorkspaceSnapshotArchiveEntryInput,
 } from "../src/workspace-snapshot-local.ts";
 
@@ -34,6 +35,12 @@ function setting(name: string, fallback: number, minimum: number, maximum: numbe
   return value;
 }
 const bundleMiB = setting("MURPH_BENCH_BUNDLE_MIB", 50, 1, 256);
+const operation = process.env.MURPH_BENCH_OPERATION ?? "restore";
+assert.ok(operation === "restore" || operation === "create", "MURPH_BENCH_OPERATION");
+const plainMiB = process.env.MURPH_BENCH_PLAIN_MIB === undefined
+  ? null : setting("MURPH_BENCH_PLAIN_MIB", 125, 1, 1023);
+assert.ok(plainMiB === null || plainMiB >= bundleMiB,
+  "MURPH_BENCH_PLAIN_MIB must be at least MURPH_BENCH_BUNDLE_MIB");
 const fileCount = setting("MURPH_BENCH_FILES", 1000, 1, 10000);
 const iterations = setting("MURPH_BENCH_ITERATIONS", 7, 1, 100);
 const networkMiBps = setting("MURPH_BENCH_NETWORK_MIBPS", 0, 0, 1000);
@@ -51,29 +58,8 @@ const digests = new Map<string, string>();
 const server = createServer();
 let objectRequests = 0;
 
-try {
-  await mkdir(sourceRoot, { recursive: true });
-  // Deterministic incompressible bytes plus repeated records approximate a
-  // 50 MiB compressed / 125 MiB unpacked workspace without private fixtures.
-  const entropy = createCipheriv("aes-256-ctr", Buffer.alloc(32, 3), Buffer.alloc(16, 5));
-  const entries: WorkspaceSnapshotArchiveEntryInput[] = [];
-  const entropyBytes = Math.ceil(bundleMiB * mib / fileCount);
-  const repeated = Buffer.alloc(Math.ceil(entropyBytes * 1.5), "synthetic workspace record\n");
-  for (let index = 0; index < fileCount; index += 1) {
-    const archivePath = `record-${String(index).padStart(5, "0")}.bin`;
-    const absolutePath = path.join(sourceRoot, archivePath);
-    const content = Buffer.concat([entropy.update(Buffer.alloc(entropyBytes)), repeated]);
-    await writeFile(absolutePath, content, { mode: 0o600 });
-    digests.set(archivePath, createHash("sha256").update(content).digest("hex"));
-    entries.push({ absolutePath, archivePath, kind: "file" });
-  }
-  entropy.final();
-  const encrypted = await createEncryptedWorkspaceSnapshotFile({
-    aad, archiveEntries: entries, dataKey: encodedDataKey, durableRoot: sourceRoot,
-    ivBase64: "AQIDBAUGBwgJCgsM", maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-    outputDir: path.join(root, "archive"),
-  });
-  const ref: HostedWorkspaceSnapshotV2Ref = {
+function snapshotRef(encrypted: EncryptedWorkspaceSnapshotFile): HostedWorkspaceSnapshotV2Ref {
+  return {
     archive: {
       compression: encrypted.compression, encryptedByteSize: encrypted.encryptedByteSize,
       encryptedObjectSha256: encrypted.encryptedObjectSha256, fileCount: encrypted.fileCount,
@@ -88,7 +74,42 @@ try {
     objectKey, schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA, snapshotId,
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND, userId,
   };
+}
+
+try {
+  await mkdir(sourceRoot, { recursive: true });
+  // Deterministic incompressible bytes plus repeated records approximate a
+  // 50 MiB compressed / 125 MiB unpacked workspace without private fixtures.
+  const entropy = createCipheriv("aes-256-ctr", Buffer.alloc(32, 3), Buffer.alloc(16, 5));
+  const entries: WorkspaceSnapshotArchiveEntryInput[] = [];
+  const defaultEntropyBytes = Math.ceil(bundleMiB * mib / fileCount);
+  const totalEntropyBytes = plainMiB === null ? defaultEntropyBytes * fileCount : bundleMiB * mib;
+  const totalPlainBytes = plainMiB === null
+    ? (defaultEntropyBytes + Math.ceil(defaultEntropyBytes * 1.5)) * fileCount
+    : plainMiB * mib;
+  function fileBytes(total: number, index: number): number {
+    return Math.floor(total / fileCount) + Number(index < total % fileCount);
+  }
+  for (let index = 0; index < fileCount; index += 1) {
+    const archivePath = `record-${String(index).padStart(5, "0")}.bin`;
+    const absolutePath = path.join(sourceRoot, archivePath);
+    const content = Buffer.concat([
+      entropy.update(Buffer.alloc(fileBytes(totalEntropyBytes, index))),
+      Buffer.alloc(fileBytes(totalPlainBytes - totalEntropyBytes, index), "synthetic workspace record\n"),
+    ]);
+    await writeFile(absolutePath, content, { mode: 0o600 });
+    digests.set(archivePath, createHash("sha256").update(content).digest("hex"));
+    entries.push({ absolutePath, archivePath, kind: "file" });
+  }
+  entropy.final();
+  const createInput = {
+    aad, archiveEntries: entries, dataKey: encodedDataKey, durableRoot: sourceRoot,
+    ivBase64: "AQIDBAUGBwgJCgsM", maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+    outputDir: path.join(root, "archive"),
+  };
+  let encrypted = operation === "restore" ? await createEncryptedWorkspaceSnapshotFile(createInput) : null;
   server.on("request", (_request, response) => {
+    assert.ok(encrypted);
     objectRequests += 1;
     response.writeHead(200, { "content-length": encrypted.encryptedByteSize });
     const source = createReadStream(encrypted.encryptedFilePath, { highWaterMark: chunkBytes });
@@ -121,54 +142,87 @@ try {
     assert.equal(url, getUrl);
     return fetch(resource, init);
   };
-  const factories = [{ label: "candidate", create: createCloudflareWorkspaceSnapshotPort }];
+  const factories = [{ label: "candidate", createPort: createCloudflareWorkspaceSnapshotPort,
+    createSnapshot: createEncryptedWorkspaceSnapshotFile }];
   const baselineModulePath = process.env.MURPH_BENCH_BASELINE_MODULE;
   if (baselineModulePath) {
     const loaded = await import(pathToFileURL(path.resolve(baselineModulePath)).href);
-    assert.equal(typeof loaded.createCloudflareWorkspaceSnapshotPort, "function");
-    // This opt-in module is a locally built copy of the same production port.
-    factories.unshift({ label: "baseline", create: loaded.createCloudflareWorkspaceSnapshotPort });
+    // The baseline exports the production owner selected by the operation.
+    const exportName = operation === "create"
+      ? "createEncryptedWorkspaceSnapshotFile" : "createCloudflareWorkspaceSnapshotPort";
+    assert.equal(typeof loaded[exportName], "function", exportName);
+    factories.unshift({ label: "baseline",
+      createSnapshot: operation === "create" ? loaded[exportName] : createEncryptedWorkspaceSnapshotFile,
+      createPort: operation === "restore" ? loaded[exportName] : createCloudflareWorkspaceSnapshotPort,
+    });
   }
-  const variants = factories.map(({ label, create }) => ({
+  const variants = factories.map(({ label, createPort, createSnapshot }) => ({
     label, samples: [] as number[], durableRoot: path.join(root, label),
-    port: create({
+    createSnapshot,
+    port: createPort({
       boundUserId: userId, fetchImpl, timeoutMs: 30_000,
       workspaceCheckpointBridge: { readCurrentLease: () => ({
         attemptId: "attempt_synthetic", leaseGeneration: "1", userId, workspaceVersion: "1",
       }) },
     }),
   }));
-  console.log(JSON.stringify({ benchmark: "fixture", bundleMiB, fileCount, networkMiBps,
-    chunkBytes, encryptedBytes: encrypted.encryptedByteSize, plainBytes: encrypted.totalPlainBytes,
+  console.log(JSON.stringify({ benchmark: "fixture", operation, bundleMiB, plainMiB, fileCount, networkMiBps,
+    chunkBytes, encryptedBytes: encrypted?.encryptedByteSize, plainBytes: totalPlainBytes,
     platform: process.platform, arch: process.arch, node: process.version }));
   let restoreCount = 0;
   for (let iteration = 0; iteration <= iterations; iteration += 1) {
-    // Alternate order within one container using the exact same encrypted
-    // object, reducing fixture/setup cost and drift from host contention.
+    // Alternate order using the same fixture. Each variant gets one warmup;
+    // archive validation and creation round trips stay outside the timer.
     const ordered = iteration % 2 === 0 ? variants : [...variants].reverse();
     for (const variant of ordered) {
       const cpu = process.cpuUsage();
       const started = performance.now();
-      const timing = await variant.port.restoreWorkspaceSnapshot({ durableRoot: variant.durableRoot, ref });
+      let timing;
+      if (operation === "create") {
+        encrypted = await variant.createSnapshot(createInput);
+      } else {
+        assert.ok(encrypted);
+        timing = await variant.port.restoreWorkspaceSnapshot({
+          durableRoot: variant.durableRoot, ref: snapshotRef(encrypted),
+        });
+      }
       const wallMs = performance.now() - started;
       const used = process.cpuUsage(cpu);
+      assert.ok(encrypted);
+      if (operation === "create") {
+        assert.equal(encrypted.fileCount, fileCount);
+        assert.equal(encrypted.totalPlainBytes, totalPlainBytes);
+        const encryptedHash = createHash("sha256");
+        let encryptedBytes = 0;
+        for await (const chunk of createReadStream(encrypted.encryptedFilePath)) {
+          encryptedBytes += chunk.length;
+          encryptedHash.update(chunk);
+        }
+        assert.equal(encryptedBytes, encrypted.encryptedByteSize);
+        assert.equal(encryptedHash.digest("hex"), encrypted.encryptedObjectSha256);
+        // Both creation variants use the current production restore owner.
+        await variant.port.restoreWorkspaceSnapshot({
+          durableRoot: variant.durableRoot, ref: snapshotRef(encrypted),
+        });
+      }
       for (const [relativePath, digest] of digests) {
         assert.equal(createHash("sha256").update(await readFile(path.join(variant.durableRoot, relativePath))).digest("hex"), digest);
       }
       restoreCount += 1;
       assert.equal(objectRequests, restoreCount);
-      console.log(JSON.stringify({ benchmark: "restore", variant: variant.label,
+      console.log(JSON.stringify({ benchmark: operation, variant: variant.label,
         iteration, warmup: iteration === 0, wallMs,
         nodeCpuMs: (used.user + used.system) / 1000, rssBytes: process.memoryUsage().rss,
-        verifiedFiles: digests.size, timing }));
+        verifiedFiles: digests.size, encryptedBytes: encrypted.encryptedByteSize, timing }));
       if (iteration > 0) variant.samples.push(wallMs);
+      if (operation === "create") await rm(encrypted.temporaryDirectoryPath, { recursive: true, force: true });
     }
   }
   for (const variant of variants) {
     const samples = variant.samples.sort((a, b) => a - b);
     const midpoint = Math.floor(samples.length / 2);
     const medianMs = (samples[midpoint]! + samples[Math.ceil(samples.length / 2) - 1]!) / 2;
-    console.log(JSON.stringify({ benchmark: "summary", variant: variant.label, samples: samples.length,
+    console.log(JSON.stringify({ benchmark: "summary", operation, variant: variant.label, samples: samples.length,
       medianMs, minMs: samples[0], maxMs: samples.at(-1) }));
   }
 } finally {

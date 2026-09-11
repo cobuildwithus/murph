@@ -54,9 +54,6 @@
     },
     {
       "path": "../health-commons"
-    },
-    {
-      "path": "../assistantd"
     }
   ],
   "include": [

@@ -349,7 +349,7 @@ async function runColdStartTrial(
   if (!acceptedReply) {
     throw new Error("Expected one accepted benchmark reply.");
   }
-  expect(acceptedReply.authorizationStatus).toBe("hosted-sentinel");
+  expect(acceptedReply.authorizationStatus).toBe("expected");
 
   const finalStatus = await completionPromise;
   expect(finalStatus.lastErrorCode ?? null).toBeNull();

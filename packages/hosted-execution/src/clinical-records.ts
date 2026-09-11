@@ -15,6 +15,11 @@ import {
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS,
+  HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGES,
@@ -37,6 +42,11 @@ export {
   HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
   HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS,
+  HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_MAX_PAGES,
@@ -147,11 +157,47 @@ export const hostedClinicalRecordsFetchPageRequestSchema = z.object({
 }).strict();
 
 
+export const hostedClinicalRecordsDocumentDescriptorSchema = z.object({
+  parentPageSha256: sha256Schema,
+  resourceType: z.enum(["DocumentReference", "DiagnosticReport"]),
+  resourceId: z.string().regex(/^[A-Za-z0-9.-]{1,200}$/u),
+  attachmentIndex: z.number().int().nonnegative().max(1_999),
+  ticket: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS).nullable(),
+  errorCode: errorCodeSchema.optional(),
+}).strict();
+export type HostedClinicalRecordsDocumentDescriptor = z.infer<typeof hostedClinicalRecordsDocumentDescriptorSchema>;
+
+export const hostedClinicalRecordsFetchDocumentRequestSchema = z.object({
+  runId: identifierSchema,
+  generation: z.number().int().min(1),
+  ticket: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS),
+}).strict();
+export type HostedClinicalRecordsFetchDocumentRequest = z.infer<typeof hostedClinicalRecordsFetchDocumentRequestSchema>;
+
+export const hostedClinicalRecordsFetchDocumentResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("document"),
+    contentBase64: z.string().max(Math.ceil(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES / 3) * 4),
+    mediaType: z.string().min(1).max(255),
+    sha256: sha256Schema,
+    byteLength: z.number().int().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES),
+  }).strict(),
+  z.object({status: z.literal("unavailable"), errorCode: errorCodeSchema, retryable: z.boolean()}).strict(),
+]);
+export type HostedClinicalRecordsFetchDocumentResponse = z.infer<typeof hostedClinicalRecordsFetchDocumentResponseSchema>;
+export function parseHostedClinicalRecordsFetchDocumentResponse(value: unknown): HostedClinicalRecordsFetchDocumentResponse {
+  return hostedClinicalRecordsFetchDocumentResponseSchema.parse(value);
+}
+export function parseHostedClinicalRecordsFetchDocumentRequest(value: unknown): HostedClinicalRecordsFetchDocumentRequest {
+  return hostedClinicalRecordsFetchDocumentRequestSchema.parse(value);
+}
+
 export const hostedClinicalRecordsFetchPageResponseSchema = z.discriminatedUnion("status", [
   z.object({
     body: z.string().max(HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS),
     nextCursor: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS).nullable(),
     pageUrlHash: sha256Schema.optional(),
+    documents: z.array(hostedClinicalRecordsDocumentDescriptorSchema).max(HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS).optional(),
     status: z.literal("page"),
   }).strict(),
   z.object({

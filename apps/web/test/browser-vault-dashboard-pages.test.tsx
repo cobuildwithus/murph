@@ -40,12 +40,8 @@ import { ExperimentsPageClient } from "../app/(dashboard)/experiments/experiment
 import { metadata as environmentMetadata } from "../app/(dashboard)/environment/page";
 import EnvironmentPage from "../app/(dashboard)/environment/page";
 import { EnvironmentPrintPageClient } from "../app/(dashboard)/environment/print/environment-print-page-client";
-import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
-import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import JournalPageClient from "../app/(dashboard)/journal/journal-page-client";
 import { metadata as journalMetadata } from "../app/(dashboard)/journal/layout";
-import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
-import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client";
 import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout";
 import { EnvironmentPrintStudy } from "../app/design/environment-print-study";
@@ -97,20 +93,10 @@ beforeEach(async () => {
 });
 
 test("dashboard routes define page-specific metadata with the shared preview image", () => {
-  assert.equal(overviewMetadata.title, "Overview — Murph");
-  assert.equal(
-    overviewMetadata.description,
-    "A quick read on your recent notes, experiments, and tracked trends.",
-  );
   assert.equal(patternsMetadata.title, "Patterns — Murph");
   assert.equal(
     patternsMetadata.description,
     "See which repeated actions and next-day outcomes tend to move together.",
-  );
-  assert.equal(historyMetadata.title, "History — Murph");
-  assert.equal(
-    historyMetadata.description,
-    "Recent notes, events, assessments, and daily summaries.",
   );
   assert.equal(journalMetadata.title, "Journal | Murph");
   assert.equal(
@@ -139,9 +125,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   assert.deepEqual(environmentMetadata.twitter?.images, [environmentImage]);
 
   for (const routeMetadata of [
-    overviewMetadata,
     patternsMetadata,
-    historyMetadata,
     journalMetadata,
     experimentsMetadata,
   ]) {
@@ -177,18 +161,6 @@ test("dashboard no longer ships a signals app route", async () => {
   );
 });
 
-test("OverviewPage renders the dashboard overview", () => {
-  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
-
-  assert.match(
-    markup,
-    /A quick read on your recent notes, experiments, and tracked trends\./,
-  );
-  assert.match(markup, /Morning walk/);
-  assert.match(markup, /Travel recovery note/);
-  assert.doesNotMatch(markup, /What tends to move together/);
-  assert.match(markup, /Weekly changes/);
-});
 
 test("PatternsPage renders personal comparisons on their own route", () => {
   const markup = renderToStaticMarkup(createElement(PatternsPageClient));
@@ -1135,71 +1107,7 @@ test("PatternsPage local diagnostics distinguishes a factor missing before selec
   assert.match(markup, />None</u);
 });
 
-test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {
-  const activeExperiments = Array.from({ length: 25 }, (_, index) => {
-    const day = String(30 - index).padStart(2, "0");
-    return createEntity("experiment", `active_extra_${index}`, {
-      body: `Active experiment ${index}.\n`,
-      date: `2026-04-${day}`,
-      experimentSlug: `active-extra-${index}`,
-      occurredAt: `2026-04-${day}T08:00:00.000Z`,
-      status: "active",
-      title: `Active extra ${index}`,
-    });
-  });
-  const overviewClient = await createFixtureClient({
-    extraEntities: [
-      ...activeExperiments,
-      createEntity("experiment", "finished_old", {
-        body: "Finished hydration experiment.\n",
-        date: "2026-04-01",
-        experimentSlug: "finished-hydration",
-        occurredAt: "2026-04-01T08:00:00.000Z",
-        status: "completed",
-        title: "Finished hydration",
-      }),
-      createEntity("experiment", "paused_old", {
-        body: "Paused experiment.\n",
-        date: "2026-03-31",
-        experimentSlug: "paused-baseline",
-        occurredAt: "2026-03-31T08:00:00.000Z",
-        status: "paused",
-        title: "Paused baseline",
-      }),
-    ],
-  });
-  mocks.useBrowserVault.mockReturnValue({
-    client: overviewClient,
-    dataVersion: overviewClient.replica.source.dataVersion,
-    error: null,
-    ref: null,
-    refresh: async () => {},
-    status: "ready",
-  });
 
-  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
-
-  assert.match(markup, /Active now[\s\S]*>27<\/div>/);
-  assert.match(markup, /Recently finished[\s\S]*>1<\/div>/);
-  assert.match(markup, /Finished hydration started/);
-  const recentExperimentsMarkup =
-    markup.match(/Recent experiments[\s\S]*?Weekly changes/)?.[0] ?? "";
-  assert.match(recentExperimentsMarkup, /Active extra 0/);
-  assert.doesNotMatch(recentExperimentsMarkup, /Finished hydration/);
-  assert.doesNotMatch(recentExperimentsMarkup, /Paused baseline/);
-});
-
-test("HistoryPage renders recent timeline entries", () => {
-  const markup = renderToStaticMarkup(createElement(HistoryPageClient));
-
-  assert.match(markup, /Travel recovery note/);
-  assert.match(
-    markup,
-    /Recent notes, events, assessments, and daily summaries/,
-  );
-  assert.match(markup, /sleep_duration_minutes daily summary/);
-  assert.doesNotMatch(markup, /history\/sample\/sample_1\.md/);
-});
 
 test("EnvironmentPage renders private habitat facts from Browser Vault", async () => {
   const markup = renderToStaticMarkup(await EnvironmentPage());
@@ -1427,71 +1335,8 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
   assert.doesNotMatch(markup, /Red Light Glasses Before Bed/);
 });
 
-test("OverviewPage preserves stale data when a refresh fails", () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: clientFixture,
-    dataVersion: clientFixture.replica.source.dataVersion,
-    error: "The latest refresh failed.",
-    ref: null,
-    refresh: async () => {},
-    status: "error",
-  });
 
-  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
 
-  assert.match(markup, /Could not load your overview/);
-  assert.match(markup, /The latest refresh failed\./);
-  assert.match(markup, /Morning walk/);
-  assert.match(markup, /Travel recovery note/);
-});
-
-test("dashboard empty pages show preparing copy while a replica refresh is pending", () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: null,
-    dataVersion: null,
-    error: null,
-    ref: null,
-    refreshPending: true,
-    refresh: async () => {},
-    status: "empty",
-  });
-
-  const overviewMarkup = renderToStaticMarkup(
-    createElement(OverviewPageClient),
-  );
-  const historyMarkup = renderToStaticMarkup(createElement(HistoryPageClient));
-
-  assert.match(overviewMarkup, /Preparing overview\./);
-  assert.match(overviewMarkup, /Preparing your dashboard/);
-  assert.match(overviewMarkup, /role="status"/);
-  assert.match(overviewMarkup, /aria-live="polite"/);
-  assert.doesNotMatch(overviewMarkup, /Your dashboard is ready for data/);
-  assert.doesNotMatch(overviewMarkup, /No overview available yet/);
-
-  assert.match(historyMarkup, /Preparing timeline\./);
-  assert.match(historyMarkup, /Preparing your timeline/);
-  assert.match(historyMarkup, /role="status"/);
-  assert.match(historyMarkup, /aria-live="polite"/);
-  assert.doesNotMatch(historyMarkup, /No timeline entries yet/);
-  assert.doesNotMatch(historyMarkup, /No history available yet/);
-});
-
-test("OverviewPage renders an error state instead of an empty state when the hosted snapshot is unavailable", () => {
-  mocks.useBrowserVault.mockReturnValue({
-    client: null,
-    dataVersion: null,
-    error: "Your dashboard data is not available right now.",
-    ref: null,
-    refresh: async () => {},
-    status: "error",
-  });
-
-  const markup = renderToStaticMarkup(createElement(OverviewPageClient));
-
-  assert.match(markup, /Could not load your overview/);
-  assert.match(markup, /Your dashboard data is not available right now\./);
-  assert.doesNotMatch(markup, /Your dashboard is ready for data/);
-});
 
 function createExperimentsPageClientElement() {
   return createElement(ExperimentsPageClient, {

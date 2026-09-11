@@ -81,6 +81,7 @@ describe("hosted onboarding Telegram webhook route", () => {
       signal: request.signal,
     });
     expect(mocks.handleHostedOnboardingTelegramWebhook).toHaveBeenCalledWith({
+      webhookReceivedAt: expect.any(Date),
       rawBody,
       scheduleAfterResponse: expect.any(Function),
       secretToken: "telegram-secret",

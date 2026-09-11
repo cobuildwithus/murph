@@ -1,4 +1,3 @@
-import { maybeRunAssistantAutomationViaDaemon } from '../../assistant-daemon-client.js'
 import {
   runAssistantAutomation as runAssistantAutomationLocal,
   type RunAssistantAutomationInput,
@@ -28,33 +27,6 @@ async function dropLegacyLocalLinqAutoReplyState(vault: string): Promise<void> {
 export async function runAssistantAutomation(
   input: RunAssistantAutomationInput,
 ) {
-  const canUseDaemonClient =
-    input.executionContext === undefined &&
-    input.inboxServices === undefined &&
-    input.inputSource === undefined &&
-    input.onEvent === undefined &&
-    input.onInboxEvent === undefined &&
-    input.signal === undefined &&
-    input.vaultServices === undefined
-  if (canUseDaemonClient) {
-    const remote = await maybeRunAssistantAutomationViaDaemon(
-      {
-        allowSelfAuthored: input.allowSelfAuthored,
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        drainOutbox: input.drainOutbox,
-        maxPerScan: input.maxPerScan,
-        once: input.once,
-        requestId: input.requestId ?? null,
-        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-        startDaemon: input.startDaemon,
-        vault: input.vault,
-      },
-    )
-    if (remote) {
-      return remote
-    }
-  }
-
   await dropLegacyLocalLinqAutoReplyState(input.vault)
   return runAssistantAutomationLocal(input)
 }

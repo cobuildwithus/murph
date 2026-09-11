@@ -31,6 +31,7 @@ import {
   readHostedSystemMailboxState,
   resolveHostedSystemMailboxHandledThroughSeq,
   type HostedSystemMailboxPendingItem,
+  recoverHostedSystemMailboxClaims,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedRuntimeResolvedConfig,
@@ -188,6 +189,8 @@ describe("hosted group context handoff expiry", () => {
         now: EXPIRES_AT,
         state: before,
       })).toBe("0");
+
+      await recoverHostedSystemMailboxClaims(workspace.vaultRoot);
 
       const result = await prepareHostedSystemMailboxItemForCheckpoint({
         executionContext: EXECUTION_CONTEXT,

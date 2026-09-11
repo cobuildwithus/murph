@@ -1,3 +1,4 @@
+import { withCanonicalWriteLock } from "@murphai/core";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { isDefaultProjectedQueryEntity, isSearchIndexedQueryEntity } from "../query-visibility.ts";
@@ -10,6 +11,7 @@ import {
   buildMetricProjection,
 } from "../metrics/projection.ts";
 import {
+  listCanonicalSourceManifest,
   readVaultSourceStrict,
   type QuerySourceManifestEntry,
   type VaultSourceSnapshot,
@@ -40,74 +42,79 @@ import {
   insertWearableSummaryRows,
 } from "./wearable-summary-store.ts";
 
-export async function rebuildQueryProjectionWithManifest(
+export async function rebuildQueryProjectionFromCanonicalSource(
   vaultRoot: string,
-  currentManifest: readonly QuerySourceManifestEntry[],
   location: QueryProjectionLocation = currentQueryProjectionLocation(vaultRoot),
   readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
 ): Promise<RebuildQueryProjectionResult> {
-  await resetUnsupportedQueryProjection(location);
-  const snapshot = await readSource(vaultRoot);
-  const projectedEntities = snapshot.entities.filter(isDefaultProjectedQueryEntity);
-  const snapshotReadModel = createVaultReadModel({
-    metadata: snapshot.metadata,
-    vaultRoot,
-    entities: snapshot.entities,
-  });
-  const wearableDataset = collectWearableDataset(snapshotReadModel, {});
-  const metricProjection = buildMetricProjection(snapshotReadModel, {
-    wearableDataset,
-  });
-  const dailySampleSummaries = metricProjection.dailySampleSummaries;
-  const metricPoints = metricProjection.metricPoints;
-  const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
-  const wearableSummaries = buildWearableSummaryProjectionFromDataset(wearableDataset);
-  const searchableEntities = projectedEntities.filter(isSearchIndexedQueryEntity);
-  const searchDocuments = [
-    ...materializeSearchDocuments(searchableEntities),
-    ...materializeSummaryDocuments(dailySampleSummaries),
-  ];
-  const database = openQueryProjectionDatabase(location, { create: true });
-
-  try {
-    ensureQueryProjectionSchema(database);
-    const builtAt = withImmediateTransaction(database, () => {
-      database.exec(`
-        DELETE FROM query_entities;
-        DELETE FROM query_metric_points;
-        DELETE FROM query_metric_targets;
-        DELETE FROM query_wearable_summaries;
-        DELETE FROM query_source_manifest;
-        DELETE FROM query_search_document;
-      `);
-
-      insertQueryEntities(database, projectedEntities);
-      insertMetricPoints(database, metricPoints);
-      insertMetricTargets(database, metricTargets);
-      insertWearableSummaryRows(database, wearableSummaries);
-      insertQuerySourceManifest(database, currentManifest);
-      insertSearchDocuments(database, searchDocuments);
-
-      const builtAt = new Date().toISOString();
-      writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
-      writeMeta(database, "built_at", builtAt);
-      writeMeta(database, "metadata_json", JSON.stringify(snapshot.metadata ?? null));
-      return builtAt;
+  // Source files and their manifest must describe one committed state. Hold the
+  // existing cross-process writer boundary through publication so a query cannot
+  // expose a partially applied import, rollback data, or overwrite a newer view.
+  return await withCanonicalWriteLock(vaultRoot, async () => {
+    await resetUnsupportedQueryProjection(location);
+    const currentManifest = await listCanonicalSourceManifest(vaultRoot);
+    const snapshot = await readSource(vaultRoot);
+    const projectedEntities = snapshot.entities.filter(isDefaultProjectedQueryEntity);
+    const snapshotReadModel = createVaultReadModel({
+      metadata: snapshot.metadata,
+      vaultRoot,
+      entities: snapshot.entities,
     });
+    const wearableDataset = collectWearableDataset(snapshotReadModel, {});
+    const metricProjection = buildMetricProjection(snapshotReadModel, {
+      wearableDataset,
+    });
+    const dailySampleSummaries = metricProjection.dailySampleSummaries;
+    const metricPoints = metricProjection.metricPoints;
+    const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
+    const wearableSummaries = buildWearableSummaryProjectionFromDataset(wearableDataset);
+    const searchableEntities = projectedEntities.filter(isSearchIndexedQueryEntity);
+    const searchDocuments = [
+      ...materializeSearchDocuments(searchableEntities),
+      ...materializeSummaryDocuments(dailySampleSummaries),
+    ];
+    const database = openQueryProjectionDatabase(location, { create: true });
 
-    return {
-      dbPath: location.dbPath,
-      exists: true,
-      schemaVersion: QUERY_PROJECTION_SCHEMA_ID,
-      builtAt,
-      entityCount: projectedEntities.length,
-      searchDocumentCount: searchDocuments.length,
-      fresh: true,
-      rebuilt: true,
-    };
-  } finally {
-    database.close();
-  }
+    try {
+      ensureQueryProjectionSchema(database);
+      const builtAt = withImmediateTransaction(database, () => {
+        database.exec(`
+          DELETE FROM query_entities;
+          DELETE FROM query_metric_points;
+          DELETE FROM query_metric_targets;
+          DELETE FROM query_wearable_summaries;
+          DELETE FROM query_source_manifest;
+          DELETE FROM query_search_document;
+        `);
+
+        insertQueryEntities(database, projectedEntities);
+        insertMetricPoints(database, metricPoints);
+        insertMetricTargets(database, metricTargets);
+        insertWearableSummaryRows(database, wearableSummaries);
+        insertQuerySourceManifest(database, currentManifest);
+        insertSearchDocuments(database, searchDocuments);
+
+        const builtAt = new Date().toISOString();
+        writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
+        writeMeta(database, "built_at", builtAt);
+        writeMeta(database, "metadata_json", JSON.stringify(snapshot.metadata ?? null));
+        return builtAt;
+      });
+
+      return {
+        dbPath: location.dbPath,
+        exists: true,
+        schemaVersion: QUERY_PROJECTION_SCHEMA_ID,
+        builtAt,
+        entityCount: projectedEntities.length,
+        searchDocumentCount: searchDocuments.length,
+        fresh: true,
+        rebuilt: true,
+      };
+    } finally {
+      database.close();
+    }
+  });
 }
 
 function insertQuerySourceManifest(

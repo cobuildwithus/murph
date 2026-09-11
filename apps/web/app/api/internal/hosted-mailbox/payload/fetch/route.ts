@@ -50,16 +50,14 @@ export const POST = withJsonError(async (request: Request) => {
     dedupeKey: body.dedupeKey,
     userId,
   });
+  const item = mailboxItem?.id === body.mailboxItemId ? mailboxItem : null;
   await requireHostedRuntimeMailboxPayloadAiUsageAccess({
-    item: mailboxItem?.id === body.mailboxItemId ? mailboxItem : null,
+    item,
     userId,
   });
   const response = await fetchHostedMailboxPayload({
-    dedupeKey: body.dedupeKey,
-    mailboxItemId: body.mailboxItemId,
+    item,
     ...("payloadRef" in body ? { payloadRef: body.payloadRef } : {}),
-    requestId: body.requestId,
-    userId,
   });
 
   return jsonOk(parseHostedMailboxPayloadFetchResponse(response));

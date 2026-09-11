@@ -1,20 +1,15 @@
+import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { gzipSync } from "node:zlib";
 
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  encodeHostedBundleBase64,
   sha256HostedBundleHex,
   writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 import {
   createHostedArtifactStore,
-  createHostedBundleStore,
-  describeHostedBase64BundleRef,
-  describeHostedBundleBytesRef,
-  writeHostedBundleBytesIfChanged,
-  type HostedBundleStore,
 } from "../src/bundle-store.js";
 import {
   buildHostedStorageAad,
@@ -24,54 +19,12 @@ import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
-describe("writeHostedBundleBytesIfChanged", () => {
-  it("reuses the current ref when the payload identity is unchanged", async () => {
-    const plaintext = Uint8Array.from([1, 2, 3]);
-    const currentRef = {
-      ...describeHostedBundleBytesRef("vault", plaintext),
-      updatedAt: "2026-03-31T00:00:00.000Z",
-    };
-    const bundleStore: HostedBundleStore = {
-      deleteBundle: vi.fn(async () => undefined),
-      readBundle: vi.fn(async () => null),
-      writeBundle: vi.fn(async () => {
-        throw new Error("writeBundle should not be called when the bundle payload is unchanged.");
-      }),
-    };
-
-    const result = await writeHostedBundleBytesIfChanged({
-      bundleStore,
-      currentRef,
-      kind: "vault",
-      plaintext,
-    });
-
-    expect(result).toBe(currentRef);
-    expect(bundleStore.writeBundle).not.toHaveBeenCalled();
-  });
-});
-
-describe("describeHostedBase64BundleRef", () => {
-  it("derives payload identity without manufacturing updatedAt metadata", () => {
-    const plaintext = Uint8Array.from([7, 8, 9]);
-    const described = describeHostedBase64BundleRef({
-      kind: "vault",
-      value: encodeHostedBundleBase64(plaintext),
-    });
-
-    expect(described).not.toBeNull();
-    expect(described?.plaintext).toEqual(plaintext);
-    expect(described?.ref).toEqual(describeHostedBundleBytesRef("vault", plaintext));
-    expect(Object.hasOwn(described!.ref, "updatedAt")).toBe(false);
-  });
-});
-
 describe("hosted bundle reads", () => {
   const bundleKey = Uint8Array.from({ length: 32 }, () => 9);
 
   it("fails closed when stored bundle bytes no longer match the recorded ref size", async () => {
     const bucket = createBucketStore();
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: bucket.api,
       key: bundleKey,
       keyId: "v1",
@@ -144,7 +97,7 @@ describe("HostedBundleGarbageCollector", () => {
       keyId: "v1",
       userId: "member_123",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
@@ -193,13 +146,13 @@ describe("HostedBundleGarbageCollector", () => {
 
   it("keeps another user's distinct bundle object alive after one user cleans up a superseded ref", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    const firstUserStore = createHostedBundleStore({
+    const firstUserStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
       userId: "member_a",
     });
-    const secondUserStore = createHostedBundleStore({
+    const secondUserStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
@@ -235,13 +188,13 @@ describe("HostedBundleGarbageCollector", () => {
 
   it("keeps another user's identical bundle bytes alive after one user cleans up a superseded ref", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    const firstUserStore = createHostedBundleStore({
+    const firstUserStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
       userId: "member_a",
     });
-    const secondUserStore = createHostedBundleStore({
+    const secondUserStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
@@ -279,13 +232,13 @@ describe("HostedBundleGarbageCollector", () => {
 
   it("refuses bundle cleanup when the ref belongs to another user's namespace", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    const firstUserStore = createHostedBundleStore({
+    const firstUserStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
       userId: "member_a",
     });
-    const secondUserStore = createHostedBundleStore({
+    const secondUserStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
@@ -328,7 +281,7 @@ describe("HostedBundleGarbageCollector", () => {
       keyId: "v1",
       userId: "member_123",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
@@ -378,7 +331,7 @@ describe("HostedBundleGarbageCollector", () => {
 
   it("fails closed and preserves an artifact-free previous bundle when the authoritative next bundle is missing", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket,
       key: bundleKey,
       keyId: "v1",
@@ -425,7 +378,7 @@ describe("HostedBundleGarbageCollector", () => {
       keyId: "v1",
       userId: "member_123",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: bucket.api,
       key: bundleKey,
       keyId: "v1",
@@ -485,7 +438,7 @@ describe("HostedBundleGarbageCollector", () => {
 
   it("fails closed and preserves an artifact-free previous bundle when the authoritative next bundle cannot be decrypted", async () => {
     const bucket = createBucketStore();
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: bucket.api,
       key: bundleKey,
       keyId: "v1",
@@ -541,7 +494,7 @@ describe("HostedBundleGarbageCollector", () => {
       keyId: "v1",
       userId: "member_123",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: bucket.api,
       key: bundleKey,
       keyId: "v1",
@@ -597,7 +550,7 @@ describe("HostedBundleGarbageCollector", () => {
       keyId: "v1",
       userId: "member_123",
     });
-    const bundleStore = createHostedBundleStore({
+    const bundleStore = createLegacyHostedBundleFixtureStore({
       bucket: bucket.api,
       key: bundleKey,
       keyId: "v1",

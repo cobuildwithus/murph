@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "wearable-import-completion",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Wearable imports finish more reliably",
+    "summary": "Repeated background notifications no longer delay the final step of a completed wearable import.",
+    "details": "Interrupted imports resume from saved progress, and new messages still take priority while Murph finishes syncing your data.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3196,
+      3207,
+      3226
+    ]
+  }
+}

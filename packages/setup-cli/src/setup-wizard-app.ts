@@ -11,13 +11,9 @@ import {
 } from '@murphai/operator-config/setup-runtime-env'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  buildSetupWizardAssistantMethodBadges,
   buildSetupWizardAssistantProviderBadges,
-  doesSetupWizardAssistantProviderRequireMethod,
-  findSetupWizardAssistantMethodIndex,
   inferSetupWizardAssistantMethod,
   inferSetupWizardAssistantProvider,
-  listSetupWizardAssistantMethodOptions,
   listSetupWizardAssistantProviderOptionsForCurrent,
   resolveSetupAssistantWizardInitialProvider,
   resolveSetupWizardAssistantMethodForProvider,
@@ -146,12 +142,6 @@ export function SetupWizardApp(
       initialAssistantProvider,
     ),
   )
-  const [assistantMethodIndex, setAssistantMethodIndex] = React.useState(
-    findSetupWizardAssistantMethodIndex(
-      initialAssistantProvider,
-      initialAssistantMethod,
-    ),
-  )
   const [scheduledUpdateIndex, setScheduledUpdateIndex] = React.useState(0)
   const [channelIndex, setChannelIndex] = React.useState(0)
   const [wearableIndex, setWearableIndex] = React.useState(0)
@@ -188,9 +178,6 @@ export function SetupWizardApp(
     deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
   })
   const includePublicUrlStep = publicUrlReview.enabled
-  const includeAssistantMethodStep = doesSetupWizardAssistantProviderRequireMethod(
-    selectedAssistantProvider,
-  )
   const publicUrlGuidance = publicUrlReview.enabled
     ? describeSetupWizardPublicUrlStrategyChoice({
         review: publicUrlReview,
@@ -218,18 +205,6 @@ export function SetupWizardApp(
     latestWearablesRef.current = selectedWearables
   }, [selectedWearables])
 
-  React.useEffect(() => {
-    setAssistantMethodIndex(
-      findSetupWizardAssistantMethodIndex(
-        selectedAssistantProvider,
-        selectedAssistantMethod,
-      ),
-    )
-  }, [selectedAssistantMethod, selectedAssistantProvider])
-
-  const assistantMethodOptions = listSetupWizardAssistantMethodOptions(
-    selectedAssistantProvider,
-  )
   const selectionSteps: Record<SetupWizardSelectionStep, SetupWizardSelectionConfig> =
     {
       'assistant-provider': {
@@ -245,9 +220,7 @@ export function SetupWizardApp(
           title: option.title,
         })),
         marker: 'radio',
-        nextStep: includeAssistantMethodStep
-          ? 'assistant-method'
-          : 'scheduled-updates',
+        nextStep: 'scheduled-updates',
         previousStep: 'intro',
         selectCurrentOnEnter: true,
         setIndex: setAssistantProviderIndex,
@@ -268,40 +241,6 @@ export function SetupWizardApp(
           })
           setSelectedAssistantProvider(activeProvider)
           setSelectedAssistantMethod(nextMethod)
-          setAssistantMethodIndex(
-            findSetupWizardAssistantMethodIndex(activeProvider, nextMethod),
-          )
-        },
-      },
-      'assistant-method': {
-        lines: assistantMethodOptions.map((option, index) => ({
-          active: index === assistantMethodIndex,
-          badges: buildSetupWizardAssistantMethodBadges({
-            currentMethod: initialAssistantMethod,
-            method: option.method,
-            optionBadges: option.badges,
-          }),
-          description: option.description,
-          detail: option.detail,
-          key: option.method,
-          selected: option.method === selectedAssistantMethod,
-          title: option.title,
-        })),
-        marker: 'radio',
-        nextStep: 'scheduled-updates',
-        previousStep: 'assistant-provider',
-        selectCurrentOnEnter: true,
-        setIndex: setAssistantMethodIndex,
-        step: 'assistant-method',
-        stepIntro: formatSetupWizardStepIntro(
-          'assistant-method',
-          selectedAssistantProvider,
-        ),
-        toggleCurrent: () => {
-          const activeMethod = assistantMethodOptions[assistantMethodIndex]?.method
-          if (activeMethod) {
-            setSelectedAssistantMethod(activeMethod)
-          }
         },
       },
       'scheduled-updates': {
@@ -318,9 +257,7 @@ export function SetupWizardApp(
         })),
         marker: 'checkbox',
         nextStep: 'channels',
-        previousStep: includeAssistantMethodStep
-          ? 'assistant-method'
-          : 'assistant-provider',
+        previousStep: 'assistant-provider',
         selectCurrentOnEnter: false,
         setIndex: setScheduledUpdateIndex,
         step: 'scheduled-updates',
@@ -459,19 +396,6 @@ export function SetupWizardApp(
       }
 
       if (key.return) {
-        if (selectionStep.step === 'assistant-provider') {
-          const activeProvider =
-            assistantProviderOptions[assistantProviderIndex]?.provider ??
-            selectedAssistantProvider
-          selectionStep.toggleCurrent()
-          setStep(
-            doesSetupWizardAssistantProviderRequireMethod(activeProvider)
-              ? 'assistant-method'
-              : 'scheduled-updates',
-          )
-          return
-        }
-
         if (selectionStep.selectCurrentOnEnter) {
           selectionStep.toggleCurrent()
         }
@@ -588,7 +512,6 @@ export function SetupWizardApp(
   if (
     hasSetupWizardStepPassed({
       currentStep: step,
-      includeAssistantMethodStep,
       includePublicUrlStep,
       stepToCheck: 'assistant-provider',
     })
@@ -608,33 +531,8 @@ export function SetupWizardApp(
   }
 
   if (
-    includeAssistantMethodStep &&
     hasSetupWizardStepPassed({
       currentStep: step,
-      includeAssistantMethodStep,
-      includePublicUrlStep,
-      stepToCheck: 'assistant-method',
-    })
-  ) {
-    completedBlocks.push(
-      createSetupWizardAnsweredBlock(
-        {
-          label: formatSetupWizardPromptTitle(
-            'assistant-method',
-            selectedAssistantProvider,
-          ),
-          value: assistantSelection.methodLabel ?? 'Skip',
-          detail: assistantSelection.detail,
-        },
-        'completed-assistant-method',
-      ),
-    )
-  }
-
-  if (
-    hasSetupWizardStepPassed({
-      currentStep: step,
-      includeAssistantMethodStep,
       includePublicUrlStep,
       stepToCheck: 'scheduled-updates',
     })
@@ -656,7 +554,6 @@ export function SetupWizardApp(
   if (
     hasSetupWizardStepPassed({
       currentStep: step,
-      includeAssistantMethodStep,
       includePublicUrlStep,
       stepToCheck: 'channels',
     })
@@ -675,7 +572,6 @@ export function SetupWizardApp(
   if (
     hasSetupWizardStepPassed({
       currentStep: step,
-      includeAssistantMethodStep,
       includePublicUrlStep,
       stepToCheck: 'wearables',
     })
@@ -695,7 +591,6 @@ export function SetupWizardApp(
     includePublicUrlStep &&
     hasSetupWizardStepPassed({
       currentStep: step,
-      includeAssistantMethodStep,
       includePublicUrlStep,
       stepToCheck: 'public-url',
     })

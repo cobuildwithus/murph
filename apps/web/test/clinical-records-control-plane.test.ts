@@ -350,23 +350,28 @@ describe("Clinical Records authorization persistence", () => {
               sliceId: "whole",
             }),
             expect.objectContaining({
-              coverage: "bounded-window",
+              coverage: "whole-family",
               queryScopeId: "observation-assessments",
               resourceType: "Observation",
             }),
             expect.objectContaining({
-              coverage: "bounded-window",
+              coverage: "whole-family",
               queryScopeId: "observation-sdoh-assessments",
               resourceType: "Observation",
             }),
             expect.objectContaining({
-              coverage: "bounded-window",
+              coverage: "whole-family",
               queryScopeId: "observation-social-history",
               resourceType: "Observation",
             }),
             expect.objectContaining({
-              coverage: "bounded-window",
+              coverage: "whole-family",
               queryScopeId: "vital-sign-observations",
+              resourceType: "Observation",
+            }),
+            expect.objectContaining({
+              coverage: "whole-family",
+              queryScopeId: "outside-vital-sign-observations",
               resourceType: "Observation",
             }),
           ],
@@ -380,8 +385,7 @@ describe("Clinical Records authorization persistence", () => {
       retrievalPlanJson: { slices: Array<{ coverage: string; to?: string }> };
     };
     expect(retrievalRun.retrievalPlanJson.slices
-      .filter((slice) => slice.coverage === "bounded-window")
-      .every((slice) => slice.to === retrievalRun.createdAt.toISOString())).toBe(true);
+      .every((slice) => slice.coverage === "whole-family" && slice.to === undefined)).toBe(true);
     expect(harness.connectionCreate).toHaveBeenCalledTimes(1);
     expect(harness.retrievalRunCreate).toHaveBeenCalledTimes(1);
     expect(harness.connectIntentUpdateMany).toHaveBeenCalledTimes(1);

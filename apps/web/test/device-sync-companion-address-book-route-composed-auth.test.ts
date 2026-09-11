@@ -4,24 +4,34 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
-  lookupHostedMemberForPrivyPrincipal: vi.fn(),
-  prisma: { label: "address-book-composed-auth-prisma" },
+  lookupHostedMemberIdentityByPrivyUserId: vi.fn(),
+  prisma: {
+    label: "address-book-composed-auth-prisma",
+    hostedAuthRecord: { findUnique: vi.fn() },
+    hostedMemberIdentity: { findUnique: vi.fn() },
+  },
+  projectHostedMemberIdentityState: vi.fn(),
   readHostedAddressBookStatus: vi.fn(),
-  resolveHostedPrivySessionFromBearerToken: vi.fn(),
+  verifyHostedPrivyIdentityToken: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
-  resolveHostedPrivySessionFromBearerToken:
-    mocks.resolveHostedPrivySessionFromBearerToken,
+vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+  verifyHostedPrivyIdentityToken:
+    mocks.verifyHostedPrivyIdentityToken,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  lookupHostedMemberForPrivyPrincipal:
-    mocks.lookupHostedMemberForPrivyPrincipal,
+  assertHostedPrivyAccountDeletionNotPending: async () => undefined,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  projectHostedMemberIdentityState: mocks.projectHostedMemberIdentityState,
+  lookupHostedMemberIdentityByPrivyUserId:
+    mocks.lookupHostedMemberIdentityByPrivyUserId,
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", async (importOriginal) => ({
@@ -39,12 +49,9 @@ const IDENTITY = {
   userId: "did:privy:composed-address-book-auth",
   wallet: null,
 };
-const MEMBER = { id: "member-composed-address-book-auth" };
-const SESSION = {
-  identity: IDENTITY,
-  linkedAccounts: [],
-  verifiedPrivyUser: { id: IDENTITY.userId },
-};
+const MEMBER = { core: { id: "member-composed-address-book-auth", suspendedAt: null }, identity: { privyUserId: IDENTITY.userId } };
+const SESSION = { id: IDENTITY.userId };
+const TOKEN = `header.${Buffer.from(JSON.stringify({ exp: 4_000_000_000 })).toString("base64url")}.signature`;
 const STATUS = {
   enabled: false,
   lastReplacedAt: null,
@@ -64,8 +71,11 @@ describe("device sync companion address-book composed auth diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue(SESSION);
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(MEMBER);
+    mocks.prisma.hostedAuthRecord.findUnique.mockResolvedValue(null);
+    mocks.prisma.hostedMemberIdentity.findUnique.mockResolvedValue({ memberId: MEMBER.core.id });
+    mocks.projectHostedMemberIdentityState.mockResolvedValue({ privyUserId: IDENTITY.userId });
+    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue(SESSION);
+    mocks.lookupHostedMemberIdentityByPrivyUserId.mockResolvedValue(MEMBER);
     mocks.readHostedAddressBookStatus.mockResolvedValue(STATUS);
   });
 
@@ -78,13 +88,14 @@ describe("device sync companion address-book composed auth diagnostics", () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     let resolveSession!: (value: typeof SESSION) => void;
-    mocks.resolveHostedPrivySessionFromBearerToken.mockReturnValue(
+    mocks.verifyHostedPrivyIdentityToken.mockReturnValue(
       new Promise((resolve) => {
         resolveSession = resolve;
       }),
     );
     const request = new Request(
       "https://app.example.test/api/device-sync/companion/address-book",
+      { headers: { authorization: `Bearer ${TOKEN}` } },
     );
 
     const responsePromise = route.GET(request);
@@ -97,7 +108,7 @@ describe("device sync companion address-book composed auth diagnostics", () => {
         stage: "identity_token_verification",
       },
     );
-    expect(mocks.lookupHostedMemberForPrivyPrincipal).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberIdentityByPrivyUserId).not.toHaveBeenCalled();
 
     resolveSession(SESSION);
     await expect(responsePromise).resolves.toMatchObject({ status: 200 });
@@ -107,13 +118,14 @@ describe("device sync companion address-book composed auth diagnostics", () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     let resolveMember!: (value: typeof MEMBER) => void;
-    mocks.lookupHostedMemberForPrivyPrincipal.mockReturnValue(
+    mocks.lookupHostedMemberIdentityByPrivyUserId.mockReturnValue(
       new Promise((resolve) => {
         resolveMember = resolve;
       }),
     );
     const request = new Request(
       "https://app.example.test/api/device-sync/companion/address-book",
+      { headers: { authorization: `Bearer ${TOKEN}` } },
     );
 
     const responsePromise = route.GET(request);

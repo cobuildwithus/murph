@@ -176,6 +176,8 @@ export interface HostedLocalFullStackScenario {
     userId: string,
     input?: {
       pollIntervalMs?: number;
+      /** Require new work since the last completion; defaults to true. */
+      requireProgress?: boolean;
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
@@ -421,7 +423,10 @@ async function startHostedLocalFullStackScenarioAttempt(
 
     harness = await startHostedLocalDevHarness({
       abortSignal,
-      env: runtimeEnv,
+      env: {
+        ...runtimeEnv,
+        ...buildHostedLocalFullStackHostProcessEnvOverrides(runtimeEnv),
+      },
       persistDirOverride: input.persistDirOverride,
       persistDirPrefix: input.persistDirPrefix,
       resetPersistDir: input.resetPersistDir,
@@ -432,7 +437,7 @@ async function startHostedLocalFullStackScenarioAttempt(
       streamLogs: input.streamLogs,
       testControls,
       webProcessEnvOverrides: {
-        ...buildHostedLocalFullStackWebProcessEnvOverrides(runtimeEnv),
+        ...buildHostedLocalFullStackHostProcessEnvOverrides(runtimeEnv),
         ...(input.webProcessEnvOverrides ?? {}),
         HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
       },
@@ -488,7 +493,11 @@ async function startHostedLocalFullStackScenarioAttempt(
             request.body,
             providerRequestBodyFingerprintSecret,
           ),
+          fixtureMatch: request.fixtureMatch ?? "not_applicable",
           method: request.method,
+          queuedResponseCount: request.queuedResponseCount ?? null,
+          requestKind: request.requestKind ?? "unknown",
+          responseStatus: request.responseStatus ?? null,
           url: request.url,
         }));
         const recentLogs = status ? summarizeHostedRecentLogsForFailure(status) : [];
@@ -653,7 +662,11 @@ async function startHostedLocalFullStackScenarioAttempt(
       waitForHostedCompletion: async (userId, waitInput) => {
         const progressWasAlreadyObserved = observedProgressUsers.delete(userId);
         const previousCompletion = lastCompletedStatusByUser.get(userId);
-        if (!progressWasAlreadyObserved && previousCompletion !== undefined) {
+        if (
+          waitInput?.requireProgress !== false
+          && !progressWasAlreadyObserved
+          && previousCompletion !== undefined
+        ) {
           await scenarioHarness.waitForHostedProgress(userId, {
             afterStatus: previousCompletion,
             pollIntervalMs: waitInput?.pollIntervalMs,
@@ -739,7 +752,7 @@ function isHostedLocalPortBindCollision(error: unknown): boolean {
     || /\bport \d+ is already in use\b/ui.test(error.message);
 }
 
-export function buildHostedLocalFullStackWebProcessEnvOverrides(
+export function buildHostedLocalFullStackHostProcessEnvOverrides(
   source: Readonly<NodeJS.ProcessEnv>,
 ): NodeJS.ProcessEnv {
   const overrides: NodeJS.ProcessEnv = {};
@@ -760,9 +773,9 @@ export function buildHostedLocalFullStackWebProcessEnvOverrides(
     return overrides;
   }
 
-  // The Linq E2E stub listens on one host port. Runner containers reach that
-  // port through Docker's host alias, while the host web process must use
-  // loopback on Linux. Keep the runner URL authoritative everywhere else.
+  // Web and Workerd run on the host and share the loopback Linq upstream.
+  // The container environment owner separately projects canonical provider
+  // HTTPS URLs so runner requests still cross production interception.
   if (linqBaseUrl.protocol !== "http:" || linqBaseUrl.hostname !== "host.docker.internal") {
     return overrides;
   }

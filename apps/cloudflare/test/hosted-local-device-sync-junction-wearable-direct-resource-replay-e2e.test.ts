@@ -67,6 +67,7 @@ import {
 import {
   expectJunctionWearableBiomarkerExpectationsToMatchProduction,
 } from "./helpers/junction-wearable-biomarker-contract.js";
+import { waitForHostedJunctionReplayCompletion } from "./helpers/hosted-local-junction-replay-completion.js";
 
 const runId = randomUUID().replace(/-/gu, "").slice(0, 16);
 const userId = `member_local_junction_wearable_${runId}`;
@@ -281,7 +282,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(experimentAdherenceChatId)}/messages`;
-    const setupOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    const setupOutboundBaseline = requireLinqStub().countAcceptedSends(replyPath);
     activeScenario.queueAssistantResponses(
       buildExperimentAdherenceSetupResponses(activityPlan),
       { matchInputContains: experimentSetupText },
@@ -296,7 +297,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       },
     ));
     expect(setupResponse.status).toBe(202);
-    const setupReply = await requireLinqStub().waitForAdditionalSend({
+    const setupReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: setupOutboundBaseline,
       expectedPath: replyPath,
       scenario: activeScenario,
@@ -333,7 +334,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       startAt: triggeredRunningStart.toISOString(),
     });
 
-    const nudgeOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    const nudgeOutboundBaseline = requireLinqStub().countAcceptedSends(replyPath);
     const nudgeProviderBaseline = countAssistantResponsesApiRequests();
     activeScenario.queueAssistantResponses([
       buildAssistantProviderVaultCliCall([
@@ -390,7 +391,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       userId: experimentAdherenceUserId,
     });
 
-    const nudge = await requireLinqStub().waitForAdditionalSend({
+    const nudge = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: nudgeOutboundBaseline,
       expectedPath: replyPath,
       scenario: activeScenario,
@@ -399,12 +400,21 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(requireLinqStub().readObservedMessageText(nudge)).toBe(
       experimentActivityNudgeReplyText,
     );
+    const nudgePayload = JSON.parse(nudge.body) as { message: { idempotency_key?: string } };
+    expect(nudgePayload.message.idempotency_key?.length, "Activity nudge provider idempotency key length").toBeLessThanOrEqual(255);
+    expect(requireLinqStub().countAcceptedSends(replyPath), "Activity nudge must be accepted by the provider").toBe(nudgeOutboundBaseline + 1);
     const finalStatus = await activeScenario.waitForHostedIdle(
       experimentAdherenceUserId,
     );
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(nudgeOutboundBaseline + 1);
-    expect(countAssistantResponsesApiRequests()).toBe(nudgeProviderBaseline + 2);
+    const nudgeProviderRequestCount = countAssistantResponsesApiRequests();
+    const nudgeProviderFailure = nudgeProviderRequestCount === nudgeProviderBaseline + 2
+      ? undefined
+      : await activeScenario.buildFailureMessage(experimentAdherenceUserId, [
+          "Hosted Junction activity nudge made an unexpected number of model requests.",
+        ]);
+    expect(nudgeProviderRequestCount, nudgeProviderFailure).toBe(nudgeProviderBaseline + 2);
 
     const nudgeProviderText = collectAssistantProviderRequestTextSince(nudgeProviderBaseline);
     expect(nudgeProviderText).toContain(experimentAdherenceSlug);
@@ -440,6 +450,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
   }, 720_000);
 
   it("imports direct-resource replay jobs through hosted device-sync and publishes /biomarkers data", async () => {
+    const testDeadlineAtMs = Date.now() + 540_000;
     await expectJunctionWearableBiomarkerExpectationsToMatchProduction(
       JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
     );
@@ -484,8 +495,16 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       userId,
       { timeoutMs: 420_000 },
     );
-    const deviceSyncStatus = await activeScenario.waitForHostedCompletion(userId, {
-      timeoutMs: 420_000,
+    const deviceSyncStatus = await waitForHostedJunctionReplayCompletion({
+      assertNoJobFailures: (status) => assertNoHostedDeviceSyncJobFailures({
+        scenario: activeScenario,
+        status,
+        userId,
+      }),
+      connectionId: seed.connectionId,
+      deadlineAtMs: Math.min(testDeadlineAtMs, Date.now() + 420_000),
+      memberId: userId,
+      scenario: activeScenario,
     });
     if (deviceSyncStatus.lastErrorCode ?? null) {
       throw new Error(await activeScenario.buildFailureMessage(userId, [

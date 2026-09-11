@@ -197,7 +197,7 @@ describe("system mailbox delegated direction state", () => {
   });
 
   it.each(["sending", "recording"] as const)(
-    "keeps an expired %s handoff ordered and handled-frontier blocking",
+    "keeps an expired %s handoff handled-prefix blocking without reselecting a claimed attempt",
     (status) => {
       const handoff = { ...createGroupHandoffItem("2"), status };
       const state: HostedSystemMailboxState = {
@@ -207,7 +207,7 @@ describe("system mailbox delegated direction state", () => {
         allowedRouteActions: null,
         now: EXPIRES_AT,
         state,
-      })).toEqual(handoff);
+      })).toEqual(status === "sending" ? state.pending[1] : handoff);
       expect(resolveHostedSystemMailboxHandledThroughSeq({
         importedSeq: "9",
         now: EXPIRES_AT,

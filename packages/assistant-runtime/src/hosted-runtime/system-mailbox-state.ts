@@ -81,6 +81,7 @@ export type HostedSystemMailboxRouteAction =
   | "run-assistant-ask"
   | "continue-assistant-ask"
   | "run-clinical-records-sync"
+  | "apply-clinical-enrichment"
   | "run-device-sync-wake"
   | "run-environment-interview"
   | "run-environment-voice"
@@ -139,6 +140,20 @@ export async function readHostedSystemMailboxHandledThroughSeq(input: {
   vaultRoot: string;
 }): Promise<string> {
   return (await readHostedSystemMailboxProgress(input)).handledThroughSeq;
+}
+
+/** The new fenced invocation owns the workspace; previous in-process attempts are gone. */
+export async function recoverHostedSystemMailboxClaims(vaultRoot: string): Promise<void> {
+  await updateHostedSystemMailboxState(vaultRoot, (state) => {
+    if (!state.pending.some((item) => item.status === "sending")) {
+      return { result: undefined, write: false };
+    }
+    return {
+      pending: state.pending.map((item) => item.status === "sending"
+        ? { ...item, status: "pending" as const }
+        : item),
+    };
+  });
 }
 
 export async function readHostedSystemMailboxProgress(input: {
@@ -578,22 +593,12 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     now,
     state: remainingStateBeforeAdmission,
   });
-  const wakeOwnerState = projectHostedSystemMailboxWakeOwnerFrontier(
-    remainingState,
-    input.continuationItemIds,
-  );
-  const modelFreeFrontierState = projectHostedSystemMailboxModelFreeFrontier(
-    remainingState,
-    input.continuationItemIds,
-  );
-  const modelFreeProjectedState = shouldProjectHostedSystemMailboxModelFreeFrontier({
+  const coverage = projectHostedDeviceHintCoverage({ now, pending: remainingState.pending });
+  const eligibleDirtyHintIds = projectHostedEligibleDirtyHintIds({ ...input, state: remainingState });
+  const modelFreeProjectedState = usesHostedModelFreeSystemMailboxSelection({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
-  })
-    ? modelFreeFrontierState
-    : input.allowedRouteActions == null
-      ? wakeOwnerState
-      : remainingState;
+  }) ? selectHostedModelFreeSystemMailboxItems(remainingState) : remainingState;
   const selectionState = input.allowedWakeKinds == null
     ? modelFreeProjectedState
     : {
@@ -605,56 +610,20 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     allowedRouteActions: input.allowedRouteActions ?? null,
     state: selectionState,
   });
-  const readyItem = findNextHostedSystemMailboxQueueItem({
+  const ready = findHostedRunnableSystemMailboxItem({
     allowedRouteActions: input.allowedRouteActions ?? null,
-    now,
+    continuationItemIds: input.continuationItemIds, coverage, eligibleDirtyHintIds, now,
     state: selectionState,
   });
-  const readyItemAcrossAllRoutes = findNextHostedSystemMailboxQueueItem({
-    allowedRouteActions: null,
-    now,
-    state: wakeOwnerState,
-  });
-  const runnableModelFreeFrontier = findNextHostedSystemMailboxQueueItem({
-    allowedRouteActions: null,
-    now,
-    state: modelFreeFrontierState,
-  });
-  const defaultWakeOwnerState = runnableModelFreeFrontier !== null
-      && systemMailboxItemIsDue(runnableModelFreeFrontier, now)
-      && (
-        readyItemAcrossAllRoutes === null
-        || !isHostedApprovedContinuationSystemMailboxItem(
-          readyItemAcrossAllRoutes,
-        )
-      )
-    ? {
-        // Keep execution eligibility unchanged. Only the independently
-        // published default wake yields to a runnable model-free owner;
-        // explicitly approved continuations retain foreground priority.
-        pending: wakeOwnerState.pending.filter(
-          isHostedApprovedContinuationSystemMailboxItem,
-        ),
-      }
-    : wakeOwnerState;
   const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
     allowedRouteActions: null,
-    state: defaultWakeOwnerState,
-  }).filter((item) =>
-    resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
-  );
-  const readyDefaultOwnedItem = readyItemAcrossAllRoutes !== null
-      && resolveHostedSystemMailboxItemExecutionClass(readyItemAcrossAllRoutes)
-        === "default_owned"
-      && defaultWakeOwnerState.pending.some((item) =>
-        item.itemId === readyItemAcrossAllRoutes.itemId
-      )
-    ? readyItemAcrossAllRoutes
-    : findNextHostedSystemMailboxQueueItem({
-        allowedRouteActions: null,
-        now,
-        state: { pending: defaultOwnedItems },
-      });
+    state: remainingState,
+  }).filter((item) => resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned");
+  const readyDefaultOwnedItem = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: null,
+    now,
+    state: { pending: defaultOwnedItems },
+  });
   const defaultOwned = readyDefaultOwnedItem === null
     ? selectHostedRuntimeWakeCandidate(defaultOwnedItems.map((item) =>
         createHostedRuntimeWakeCandidate(
@@ -666,13 +635,13 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
         resolveSystemMailboxItemNextWakeAt(readyDefaultOwnedItem, now),
         resolveHostedSystemMailboxItemWakeReason(readyDefaultOwnedItem),
       );
-  const next: HostedSystemMailboxWakeCandidate = readyItem !== null
+  const next: HostedSystemMailboxWakeCandidate = ready !== null
     ? {
       ...createHostedRuntimeWakeCandidate(
-        resolveSystemMailboxItemNextWakeAt(readyItem, now),
-        resolveHostedSystemMailboxItemWakeReason(readyItem),
+        now,
+        resolveHostedSystemMailboxItemWakeReason(ready),
       ),
-      executionClass: resolveHostedSystemMailboxItemExecutionClass(readyItem),
+      executionClass: resolveHostedSystemMailboxItemExecutionClass(ready),
     }
     : {
       ...selectHostedRuntimeWakeCandidate(items.map((item) =>
@@ -692,17 +661,16 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
 function resolveHostedSystemMailboxItemExecutionClass(
   item: HostedSystemMailboxPendingItem,
 ): "default_owned" | "model_free" {
-  return (
-      item.mailboxLaneSeq !== null
-      || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
-    )
-      && isHostedSystemMailboxModelFreeFrontierItem(item)
+  // Local timers have no Web lane sequence, but use the same execution owner
+  // as imported work. Sequence numbers track handling, not execution class.
+  return isHostedModelFreeSystemMailboxItem(item)
     ? "model_free"
     : "default_owned";
 }
 
 export function findNextHostedSystemMailboxQueueItem(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  pendingOnly?: boolean;
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
@@ -715,7 +683,9 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   });
   if (input.allowedRouteActions == null) {
     const approvedContinuation = state.pending.find((item) =>
-      systemMailboxItemIsDue(item, input.now)
+      item.status !== "sending"
+      && systemMailboxItemIsDue(item, input.now)
+      && (!input.pendingOnly || item.status === "pending")
       && isHostedPendingEffectsContinuationSystemMailboxItem(item)
     ) ?? null;
     if (approvedContinuation) {
@@ -724,6 +694,7 @@ export function findNextHostedSystemMailboxQueueItem(input: {
 
     const delegatedItem = findNextHostedSystemMailboxQueueItemByOrder({
       allowedRouteActions: null,
+      pendingOnly: input.pendingOnly,
       now: input.now,
       state: {
         pending: state.pending.filter(isHostedUserInvokedDelegatedSystemMailboxItem),
@@ -738,6 +709,56 @@ export function findNextHostedSystemMailboxQueueItem(input: {
     ...input,
     state,
   });
+}
+
+export function findHostedRunnableSystemMailboxItem(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  pendingOnly?: boolean;
+  continuationItemIds: ReadonlySet<string>;
+  coverage: ReadonlyMap<string, HostedDeviceHintCoverage>;
+  eligibleDirtyHintIds: ReadonlySet<string>;
+  now: string;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxPendingItem | null {
+  const selected = findNextHostedSystemMailboxQueueItem(input);
+  if (selected) {
+    const canYield = input.continuationItemIds.has(selected.itemId)
+      && selected.status === "pending" && selected.postCheckpointRecord === null;
+    const independent = canYield ? findNextHostedSystemMailboxQueueItem({
+      ...input,
+      state: { pending: input.state.pending.filter((item) => !input.continuationItemIds.has(item.itemId)) },
+    }) : null;
+    return independent && independent.wake.kind !== "device-sync.wake" ? independent : selected;
+  }
+  const owner = input.state.pending.find((item) =>
+    input.continuationItemIds.has(item.itemId)
+    && item.status !== "sending"
+    && (!input.pendingOnly || item.status === "pending")
+    && systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)
+    && item.nextAttemptAt !== null
+    && !systemMailboxItemIsDue(item, input.now)
+    && Date.parse(item.occurredAt) <= Date.parse(input.now)
+    && [...(input.coverage.get(item.itemId)?.coveredHintIds ?? [])]
+      .some((id) => input.eligibleDirtyHintIds.has(id))
+  );
+  // Canonical dirty work is runnable now even when the owner's stored job retry
+  // is later. A returned item is runnable now; its stored retry remains intact
+  // and must not be used to re-derive the admission time by the wake publisher.
+  return owner ?? null;
+}
+
+export function projectHostedEligibleDirtyHintIds(input: {
+  allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
+  eligibleItemIds?: ReadonlySet<string>;
+  state: HostedSystemMailboxState;
+}): ReadonlySet<string> {
+  return new Set(input.state.pending.filter((item) =>
+    item.wake.kind === "device-sync.wake" && item.wake.reason === "webhook_hint"
+    && systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions ?? null)
+    && (input.allowedWakeKinds == null || input.allowedWakeKinds.includes(item.wake.kind))
+    && (input.eligibleItemIds === undefined || input.eligibleItemIds.has(item.itemId))
+  ).map((item) => item.itemId));
 }
 
 export function projectHostedSystemMailboxRetainedDeviceWakeAdmission(input: {
@@ -810,6 +831,90 @@ export function isHostedPlainDeviceSyncWakeHintReason(reason: string | null | un
     || reason === "companion_hrv_rmssd";
 }
 
+export interface HostedDeviceHintCoverage {
+  coveredHintIds: ReadonlySet<string>;
+  coveredScheduleIds: ReadonlySet<string>;
+}
+
+type HostedDeviceHintCoverageOwner = HostedSystemMailboxPendingItem & {
+  mailboxLaneSeq: string;
+  wake: Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }>;
+};
+
+export function projectHostedDeviceHintCoverage(input: {
+  now: string;
+  pending: readonly HostedSystemMailboxPendingItem[];
+}): ReadonlyMap<string, HostedDeviceHintCoverage> {
+  const coverage = new Map<string, HostedDeviceHintCoverage>();
+  const activeByConnection = new Map<string, {
+    owner: HostedDeviceHintCoverageOwner;
+    coveredHintIds: Set<string>;
+    coveredScheduleIds: Set<string>;
+    scheduleBlocked: boolean;
+  }>();
+  for (const item of input.pending) {
+    if (item.wake.kind !== "device-sync.wake" || !item.wake.connectionId) continue;
+    const connectionId = item.wake.connectionId;
+    if (isHostedDeviceHintCoverageOwner(item)) {
+      const active = {
+        owner: item, coveredHintIds: new Set<string>(),
+        coveredScheduleIds: new Set<string>(), scheduleBlocked: false,
+      };
+      // Another owner is a barrier for the preceding owner on this connection.
+      activeByConnection.set(connectionId, active);
+      coverage.set(item.itemId, {
+        coveredHintIds: active.coveredHintIds,
+        coveredScheduleIds: active.coveredScheduleIds,
+      });
+      continue;
+    }
+    const active = activeByConnection.get(connectionId);
+    if (!active) continue;
+    if (!isHostedDeviceHintCoveredByOwner(active.owner, item, input.now)) {
+      activeByConnection.delete(connectionId);
+      continue;
+    }
+    active.coveredHintIds.add(item.itemId);
+    // Dirty work needs an executing owner. Idle schedule retirement cannot
+    // cross it, even when later schedules would otherwise be superseded.
+    if (item.wake.reason === "webhook_hint") active.scheduleBlocked = true;
+    if (!active.scheduleBlocked) active.coveredScheduleIds.add(item.itemId);
+  }
+  return coverage;
+}
+
+function isHostedDeviceHintCoverageOwner(
+  item: HostedSystemMailboxPendingItem,
+): item is HostedDeviceHintCoverageOwner {
+  return item.deviceSyncContinuationOwner === true
+    && item.status === "pending"
+    && item.postCheckpointRecord === null
+    && item.wake.kind === "device-sync.wake"
+    && Boolean(item.wake.connectionId)
+    && Boolean(item.wake.expectedConnectedAt)
+    && item.mailboxLaneSeq !== null
+    && item.mailboxDedupeKey === item.wake.eventId;
+}
+
+function isHostedDeviceHintCoveredByOwner(
+  owner: HostedDeviceHintCoverageOwner,
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): boolean {
+  const wake = item.wake;
+  if (wake.kind !== "device-sync.wake" || !isHostedPlainDeviceSyncWakeHint(item)) return false;
+  const cadence = wake.hint?.nextReconcileAt;
+  const ownerCadence = owner.wake.hint?.nextReconcileAt;
+  return item.mailboxLaneSeq !== null
+    && BigInt(item.mailboxLaneSeq) > BigInt(owner.mailboxLaneSeq)
+    && wake.userId === owner.wake.userId
+    && wake.provider === owner.wake.provider
+    && wake.expectedConnectedAt === owner.wake.expectedConnectedAt
+    && (wake.reason !== "reconcile_due" || cadence != null)
+    && (cadence == null || (ownerCadence != null && Date.parse(cadence) < Date.parse(ownerCadence)))
+    && Date.parse(wake.occurredAt) <= Date.parse(now);
+}
+
 export function isHostedRetainedDeviceScheduledAdmission(
   owner: HostedSystemMailboxPendingItem,
   item: HostedSystemMailboxPendingItem,
@@ -870,6 +975,7 @@ function withHostedLegacyDeviceSyncContinuationOwnership(
 
 function findNextHostedSystemMailboxQueueItemByOrder(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  pendingOnly?: boolean;
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
@@ -879,7 +985,9 @@ function findNextHostedSystemMailboxQueueItemByOrder(input: {
     if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
     }
-    const isDue = systemMailboxItemIsDue(item, input.now);
+    const isDue = item.status !== "sending"
+      && (!input.pendingOnly || item.status === "pending")
+      && systemMailboxItemIsDue(item, input.now);
     const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
     if (blockedSerializationKeys.has(serializationKey)) {
       continue;
@@ -1008,7 +1116,7 @@ export function isHostedSystemMailboxModelFreeExactNotificationItem(
     });
 }
 
-export function isHostedSystemMailboxModelFreeFrontierItem(
+export function isHostedModelFreeSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
   if (
@@ -1024,60 +1132,10 @@ export function isHostedSystemMailboxModelFreeFrontierItem(
     || isHostedSystemMailboxModelFreeExactNotificationItem(item);
 }
 
-export function projectHostedSystemMailboxModelFreeFrontier(
-  state: HostedSystemMailboxState,
-  continuationItemIds: ReadonlySet<string> = new Set(),
-): HostedSystemMailboxState {
-  const durableFrontier = findHostedSystemMailboxDurableFrontierItem(
-    state.pending.filter((item) => !continuationItemIds.has(item.itemId)),
-  );
-  return {
-    // Transferred device operations keep their own retry and connection order.
-    // Only untransferred work participates in the global mailbox frontier.
-    pending: state.pending.filter((item) =>
-      continuationItemIds.has(item.itemId)
-      || (item.itemId === durableFrontier?.itemId
-        && isHostedSystemMailboxModelFreeFrontierItem(item))
-    ),
-  };
-}
-
-export function projectHostedSystemMailboxWakeOwnerFrontier(
-  state: HostedSystemMailboxState,
-  continuationItemIds: ReadonlySet<string> = new Set(),
-): HostedSystemMailboxState {
-  const modelFreeItemIds = new Set(projectHostedSystemMailboxModelFreeFrontier(
-    state, continuationItemIds,
-  ).pending.map((item) => item.itemId));
-  return {
-    pending: state.pending.filter((item) =>
-      resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
-      || modelFreeItemIds.has(item.itemId)
-      || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
-    ),
-  };
-}
-
-export function projectHostedSystemMailboxModelFreeNotificationFrontier(
+export function selectHostedModelFreeSystemMailboxItems(
   state: HostedSystemMailboxState,
 ): HostedSystemMailboxState {
-  const durableFrontier = findHostedSystemMailboxDurableFrontierItem(state.pending);
-  if (
-    !durableFrontier
-    || durableFrontier.wake.kind !== "assistant.notification.requested"
-  ) {
-    return {
-      pending: state.pending.filter((item) =>
-        item.wake.kind !== "assistant.notification.requested"
-      ),
-    };
-  }
-
-  return {
-    pending: isHostedSystemMailboxModelFreeExactNotificationItem(durableFrontier)
-      ? [durableFrontier]
-      : [],
-  };
+  return { pending: state.pending.filter(isHostedModelFreeSystemMailboxItem) };
 }
 
 export function mergeHostedSystemMailboxRollbackItems(input: {
@@ -1227,6 +1285,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-assistant-ask"
     || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
+    || value === "apply-clinical-enrichment"
     || value === "run-device-sync-wake"
     || value === "run-environment-interview"
     || value === "run-environment-voice"
@@ -1542,7 +1601,7 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   return items;
 }
 
-function shouldProjectHostedSystemMailboxModelFreeFrontier(input: {
+export function usesHostedModelFreeSystemMailboxSelection(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds: readonly HostedExecutionSystemWake["kind"][] | null;
 }): boolean {
@@ -1556,25 +1615,6 @@ function shouldProjectHostedSystemMailboxModelFreeFrontier(input: {
     && input.allowedWakeKinds?.includes(
       "assistant.notification.requested",
     ) === true;
-}
-
-export function findHostedSystemMailboxDurableFrontierItem(
-  pending: readonly HostedSystemMailboxPendingItem[],
-): HostedSystemMailboxPendingItem | null {
-  let frontier: HostedSystemMailboxPendingItem | null = null;
-  let frontierSeq: bigint | null = null;
-  for (const item of pending) {
-    if (item.mailboxLaneSeq === null) {
-      continue;
-    }
-
-    const seq = BigInt(item.mailboxLaneSeq);
-    if (frontierSeq === null || seq < frontierSeq) {
-      frontier = item;
-      frontierSeq = seq;
-    }
-  }
-  return frontier;
 }
 
 function systemMailboxItemRouteActionAllowed(
@@ -1616,10 +1656,9 @@ function resolveSystemMailboxItemNextWakeAt(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): string | null {
-  // A detached assistant ask owns its own in-process completion signal while
-  // it is sending. Re-projecting that claimed item as an immediate runtime
-  // wake would spin the foreground runner without making mailbox progress.
-  if (item.routeAction === "run-assistant-ask" && item.status === "sending") {
+  // Claimed attempts notify the invocation on completion. They cannot be
+  // selected again or projected as immediate work while execution is in flight.
+  if (item.status === "sending") {
     return null;
   }
 
@@ -1647,7 +1686,7 @@ function resolveHostedSystemMailboxItemWakeReason(
     return HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
   }
 
-  return isHostedSystemMailboxModelFreeFrontierItem(item)
+  return isHostedModelFreeSystemMailboxItem(item)
     ? "mailbox"
     : HOSTED_ASSISTANT_WAKE_REASON;
 }

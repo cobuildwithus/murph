@@ -1,6 +1,6 @@
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readJsonObject } from "@/src/lib/http";
-import { requirePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   issueIMessageMiniAppEnrollment,
   revokeIMessageMiniAppCredential,
@@ -13,7 +13,7 @@ export const POST = withJsonError(async (request: Request) => {
     limitBytes: 1_024,
   }));
   const prisma = getPrisma();
-  const auth = await requirePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireHostedMemberAuthFromBearerToken(request, prisma);
 
   return jsonOk(await issueIMessageMiniAppEnrollment({
     memberId: auth.member.id,

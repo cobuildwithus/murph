@@ -197,6 +197,7 @@ describe("hosted ops growth metrics", () => {
     });
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.executeRaw.mockResolvedValue(0);
+    mocks.queryRaw.mockResolvedValue([]);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
     mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValue(0);
@@ -322,7 +323,6 @@ describe("hosted ops growth metrics", () => {
       payingFamilyGroups: [
         {
           billingRef: {
-            billedSeatCount: 4,
             currentBillingPhase: "paid",
           },
           id: "group_family",
@@ -385,6 +385,34 @@ describe("hosted ops growth metrics", () => {
     expect(metrics.mrrUsdCents)
       .toBe(800 + 2_000 + 5_000 + 2 * 700 + 1_900 + 4_900);
     expect(metrics.unpricedPaidMembers).toBe(1);
+  });
+
+  it("counts Family capacity without a legacy total and excludes missing tier rows", () => {
+    const group = {
+      billingRef: { currentBillingPhase: "paid" },
+      id: "group_family",
+      memberships: [{ memberId: "member_family" }],
+      planCapacities: [{ billedQuantity: 2, planCode: "pulse" }],
+    };
+    const unprojectedGroup = {
+      ...group,
+      billingRef: { ...group.billingRef, billedSeatCount: 4 },
+      id: "group_unprojected",
+      planCapacities: [],
+    };
+    const metrics = calculateHostedGrowthCurrentMetrics({
+      payingFamilyGroups: [group, unprojectedGroup],
+      payingIndividuals: [],
+      statusCounts: zeroStatusCounts,
+      totalMembers: 2,
+      trialCandidates: [],
+      windowEnd: new Date("2026-07-06T12:00:00.000Z"),
+    });
+
+    expect(metrics.payingFamilyGroups).toBe(1);
+    expect(metrics.payingFamilySeats).toBe(2);
+    expect(metrics.coveredMembers).toBe(1);
+    expect(metrics.familyMrrUsdCents).toBe(1_400);
   });
 
   it("uses shared trial state logic for active or paused unsuspended trial members", () => {
@@ -1027,7 +1055,7 @@ describe("hosted ops growth metrics", () => {
     const markup = renderToStaticMarkup(await growthPage.default());
 
     expect(markup).toContain("Recent member retention");
-    expect(markup).toContain("No real member signups yet.");
+    expect(markup).toContain("No real member accounts yet.");
     expect(markup).toContain("Referral link usage");
     expect(markup).toContain("MRR growth per week");
     expect(markup).toContain("Total messages sent");
@@ -1061,13 +1089,11 @@ describe("hosted ops growth metrics", () => {
                 group: {
                   billingRef: {
                     is: {
-                      billedSeatCount: {
-                        gte: 1,
-                      },
                       currentBillingPhase: "paid",
                     },
                   },
                   billingStatus: HostedBillingStatus.active,
+                  planCapacities: { some: {} },
                   suspendedAt: null,
                 },
                 status: "active",
@@ -1119,13 +1145,11 @@ describe("hosted ops growth metrics", () => {
                     group: {
                       billingRef: {
                         is: {
-                          billedSeatCount: {
-                            gte: 1,
-                          },
                           currentBillingPhase: "paid",
                         },
                       },
                       billingStatus: HostedBillingStatus.active,
+                      planCapacities: { some: {} },
                       suspendedAt: null,
                     },
                     status: "active",
@@ -1403,7 +1427,7 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("counts distinct senders across personal chats and group containers", async () => {
+  it.each([false, true])("counts distinct senders and supplements recent members from provider receipts (%s)", async (includeProviderActivity) => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     const unregisteredPhone = requireLinqContact("phone", "+15550000002");
@@ -1528,6 +1552,10 @@ describe("hosted ops growth metrics", () => {
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
+    if (includeProviderActivity) mocks.queryRaw.mockResolvedValue([
+      { memberId: "member_no_recent_activity", messagesLast7Days: 2, messagesToday: 2, lastMessageAt: new Date("2026-07-06T11:45:00Z") },
+      { memberId: "member_direct", messagesLast7Days: 1, messagesToday: 0, lastMessageAt: new Date("2026-07-05T11:00:00Z") },
+    ]);
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
@@ -1545,11 +1573,11 @@ describe("hosted ops growth metrics", () => {
       members: [
         {
           createdAt: "2026-07-06T11:30:00.000Z",
-          lastMessageAt: null,
+          lastMessageAt: includeProviderActivity ? "2026-07-06T11:45:00.000Z" : null,
           maskedPhoneNumberHint: "*** 0630",
           memberId: "member_no_recent_activity",
-          messagesLast7Days: 0,
-          messagesToday: 0,
+          messagesLast7Days: includeProviderActivity ? 2 : 0,
+          messagesToday: includeProviderActivity ? 2 : 0,
           onboardingCompleted: false,
           suspended: false,
         },
@@ -1558,7 +1586,7 @@ describe("hosted ops growth metrics", () => {
           lastMessageAt: "2026-07-06T11:30:00.000Z",
           maskedPhoneNumberHint: null,
           memberId: "member_direct",
-          messagesLast7Days: 7,
+          messagesLast7Days: includeProviderActivity ? 8 : 7,
           messagesToday: 4,
           onboardingCompleted: true,
           suspended: false,
@@ -2865,7 +2893,6 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
       {
         billingRef: {
-          billedSeatCount: 2,
           currentBillingPhase: "paid",
         },
         id: "group_family",
@@ -3423,13 +3450,11 @@ describe("hosted ops growth metrics", () => {
       where: {
         billingRef: {
           is: {
-            billedSeatCount: {
-              gte: 1,
-            },
             currentBillingPhase: "paid",
           },
         },
         billingStatus: HostedBillingStatus.active,
+        planCapacities: { some: {} },
         suspendedAt: null,
       },
       select: {
@@ -3550,7 +3575,6 @@ function queueCurrentMetricMocks(input: { includeMax?: boolean } = {}) {
   mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
     {
       billingRef: {
-        billedSeatCount: 1,
         currentBillingPhase: "paid",
       },
       id: "group_family",

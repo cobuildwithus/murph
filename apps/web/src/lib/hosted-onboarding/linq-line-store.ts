@@ -131,8 +131,6 @@ export function prepareHostedLinqLinePhones(input: {
 }
 
 export async function upsertHostedLinqLineForPhoneTx(input: {
-  /** @deprecated Additive-rollout compatibility; assignment does not read it. */
-  activeMemberLimit?: number | null;
   observedAt: Date;
   phoneNumber: string;
   prisma: HostedLinqLineClient;
@@ -152,8 +150,6 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
 }
 
 async function upsertHostedLinqLineForPhoneInTransaction(input: {
-  /** @deprecated Additive-rollout compatibility; assignment does not read it. */
-  activeMemberLimit?: number | null;
   observedAt: Date;
   phoneNumber: string;
   prisma: HostedLinqLineClient;
@@ -218,7 +214,6 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
 
   const createData = {
     assignmentWeight: 100,
-    ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
     configuredAt: input.source === "configured" ? input.observedAt : null,
     egressPolicy: "enabled",
     healthStatus: "unknown",
@@ -262,22 +257,6 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     });
   }
 
-  if (
-    input.source === "configured"
-    && input.activeMemberLimit !== undefined
-    && input.activeMemberLimit !== null
-  ) {
-    await input.prisma.hostedLinqLine.updateMany({
-      where: {
-        activeMemberLimit: null,
-        phoneNumberLookupKey: line.phoneNumberLookupKey,
-      },
-      data: {
-        activeMemberLimit: input.activeMemberLimit,
-      },
-    });
-  }
-
   return line;
 }
 
@@ -308,12 +287,6 @@ function chooseHostedLinqLineWriteLookupKey(
 }
 
 export async function syncHostedLinqConfiguredLinesTx(input: {
-  /**
-   * Additive-rollout compatibility for previous application builds only.
-   * Weighted assignment never reads this value; remove the column and env
-   * seam after no rollback target still owns the legacy direct-member policy.
-   */
-  activeMemberLimit: number | null;
   observedAt?: Date;
   phoneNumbers: readonly string[];
   prisma: HostedLinqLineClient;
@@ -330,7 +303,6 @@ export async function syncHostedLinqConfiguredLinesTx(input: {
   const apply = (prisma: HostedLinqLineClient) =>
     prisma.$queryRaw<Array<{ syncedCount: bigint }>>(
       buildHostedLinqConfiguredLineSnapshotQuery({
-        activeMemberLimit: input.activeMemberLimit,
         lines,
         observedAt,
       }),
@@ -346,7 +318,6 @@ export async function syncHostedLinqConfiguredLinesTx(input: {
 }
 
 function buildHostedLinqConfiguredLineSnapshotQuery(input: {
-  activeMemberLimit: number | null;
   lines: readonly PreparedHostedLinqLinePhone[];
   observedAt: Date;
 }): Prisma.Sql {
@@ -396,7 +367,6 @@ function buildHostedLinqConfiguredLineSnapshotQuery(input: {
         configured_at,
         health_status,
         egress_policy,
-        active_member_limit,
         assignment_weight,
         created_at,
         updated_at
@@ -409,7 +379,6 @@ function buildHostedLinqConfiguredLineSnapshotQuery(input: {
         ${observedAt},
         'unknown',
         'enabled',
-        ${input.activeMemberLimit},
         100,
         CURRENT_TIMESTAMP,
         CURRENT_TIMESTAMP
@@ -420,12 +389,6 @@ function buildHostedLinqConfiguredLineSnapshotQuery(input: {
         phone_number_hint = EXCLUDED.phone_number_hint,
         source = 'configured',
         configured_at = EXCLUDED.configured_at,
-        active_member_limit = CASE
-          WHEN hosted_linq_line.active_member_limit IS NULL
-            AND EXCLUDED.active_member_limit IS NOT NULL
-            THEN EXCLUDED.active_member_limit
-          ELSE hosted_linq_line.active_member_limit
-        END,
         updated_at = CURRENT_TIMESTAMP
       RETURNING phone_number_lookup_key
     )

@@ -909,8 +909,8 @@ describe("hosted browser-vault replica refresh preparation", () => {
 
   it("force refreshes a metadata-current replica when web reported it unreadable", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
-    const { hashCanonicalQuerySources } = await import("@murphai/query");
     const {
+      hashHostedBrowserVaultReplicaSources,
       refreshHostedBrowserVaultReplicaFromRuntime,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
     const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
@@ -930,12 +930,13 @@ describe("hosted browser-vault replica refresh preparation", () => {
         path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md"),
         "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Trial\n",
       );
-      const sourceHash = await hashCanonicalQuerySources(vaultRoot);
+      const sourceHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
       const workspace = createWorkspaceState({
         browserVaultReplicaRef: {
           byteLength: 128,
           dataVersion: "browser-data-v1",
           generatedAt: "2026-05-10T00:01:00.000Z",
+          generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
           keyId: "browser-vault-replica:key",
           objectKey: "users/browser-vault-replicas/member_123/missing.json",
           replicaSchema: "murph.browser-vault-replica",
@@ -945,15 +946,26 @@ describe("hosted browser-vault replica refresh preparation", () => {
         },
       });
 
+      const platform = createPlatform({
+        browserVaultReplicaPort: {
+          publishRef,
+          write,
+        },
+      });
+      const current = await refreshHostedBrowserVaultReplicaFromRuntime({
+        generatedAt: "2026-05-10T00:01:30.000Z",
+        platform,
+        vaultRoot,
+        workspace,
+      });
+      expect(current.status).toBe("skipped_current");
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
       const result = await refreshHostedBrowserVaultReplicaFromRuntime({
         force: true,
         generatedAt: "2026-05-10T00:01:30.000Z",
-        platform: createPlatform({
-          browserVaultReplicaPort: {
-            publishRef,
-            write,
-          },
-        }),
+        platform,
         vaultRoot,
         workspace,
       });

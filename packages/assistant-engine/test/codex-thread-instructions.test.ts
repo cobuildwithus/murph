@@ -164,7 +164,6 @@ describe('Codex thread instructions', () => {
       .calls[0]?.[0]
     expect(appServerInput.baseInstructions).toBe(MURPH_CODEX_BASE_INSTRUCTIONS)
     expect(appServerInput.developerInstructions).toBe('Stable Murph instructions.')
-    expect(appServerInput.excludeResumeTurns).toBe(true)
     expect(appServerInput.prompt).toBe(
       [
         'Current Murph runtime context.',
@@ -364,7 +363,6 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.developerInstructions).toBe(
       'Stable Murph instructions.',
     )
-    expect(appServerInput.excludeResumeTurns).toBe(true)
     expect(appServerInput.prompt).toBe(
       ['Current Murph runtime context.', 'User message:\nContinue.'].join('\n\n'),
     )

@@ -1,17 +1,30 @@
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   addCaptureWithLookup,
+  applyHostedCanonicalWriteReceipt,
   findCaptureByLookup,
   initializeVault,
   readJsonlRecords,
   runGeneratedImageCaptureRetention,
   validateVault,
+  withHostedCanonicalWritePort,
+  type HostedCanonicalWritePersistenceInput,
+  VaultError,
 } from "@murphai/core";
+
+const emptyBlockedCaptureCounts = {
+  GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_MISSING: 0,
+  GENERATED_IMAGE_RETENTION_MANIFEST_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED: 0,
+  VAULT_FILE_MISSING: 0,
+};
 
 const cleanupPaths: string[] = [];
 
@@ -88,12 +101,106 @@ async function readLookupIndex(vaultRoot: string): Promise<{
 }
 
 describe("generated image capture retention", () => {
+  it("retires a due image reported missing by the materializer without counting absent bytes", async () => {
+    const vaultRoot = await createTempVault();
+    const capture = await addGeneratedCapture({
+      lookupKey: "generated:expired-hosted-image",
+      recordedAt: "2026-07-01T12:00:00.000Z",
+      vaultRoot,
+    });
+    const attachmentRef = capture.event.attachments![0]!.relativePath;
+    await rm(path.join(vaultRoot, attachmentRef));
+    const replayRoot = await createTempVault();
+    await cp(vaultRoot, replayRoot, { recursive: true });
+    const persisted: HostedCanonicalWritePersistenceInput[] = [];
+    const input = {
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      vaultRoot,
+      materializeCandidatePaths: async () => ({ missingStoredPaths: [attachmentRef] }),
+    };
+
+    await expect(withHostedCanonicalWritePort({
+      async persistCanonicalWrite(write) { persisted.push(write); },
+    }, () => runGeneratedImageCaptureRetention(input))).resolves.toMatchObject({
+      blockedCaptureCount: 0,
+      retiredByteCount: 0,
+      retiredCaptureCount: 1,
+      nextEligibleAt: null,
+    });
+    await expect(findCaptureByLookup({
+      vaultRoot,
+      lookupKey: "generated:expired-hosted-image",
+    })).resolves.toMatchObject({ status: "deleted" });
+    const tombstone = JSON.parse(await readFile(path.join(vaultRoot, attachmentRef), "utf8"));
+    expect(tombstone.reason).toBe("generated_image_retention");
+    expect((await validateVault({ vaultRoot })).valid).toBe(true);
+    expect(persisted).toHaveLength(1);
+    const write = persisted[0]!;
+    expect(write.receipt.actions[0]).toMatchObject({
+      kind: "text_upsert", targetRelativePath: attachmentRef, effect: "create", allowRaw: true,
+    });
+    const replay = () => applyHostedCanonicalWriteReceipt({
+      vaultRoot: replayRoot,
+      receipt: write.receipt,
+      readPayload: async (ref) => write.payloads.find((payload) => payload.sha256 === ref.sha256)?.bytes ?? null,
+    });
+    await replay();
+    await replay();
+    expect(await findCaptureByLookup({ vaultRoot: replayRoot, lookupKey: "generated:expired-hosted-image" }))
+      .toMatchObject({ status: "deleted" });
+    await writeFile(path.join(replayRoot, attachmentRef), "unexpected bytes");
+    await expect(replay()).rejects.toMatchObject({ code: "HOSTED_CANONICAL_WRITE_RAW_CONFLICT" });
+    expect(await readFile(path.join(replayRoot, attachmentRef), "utf8")).toBe("unexpected bytes");
+    await expect(runGeneratedImageCaptureRetention(input)).resolves.toMatchObject({
+      blockedCaptureCount: 0,
+      retiredCaptureCount: 0,
+      nextEligibleAt: null,
+    });
+  });
+
+  it.each(["unreported", "changed", "manifest-hash", "manifest-owner"])(
+    "does not let the missing-path report bypass %s validation",
+    async (scenario) => {
+      const vaultRoot = await createTempVault();
+      const lookupKey = `generated:missing-${scenario}`;
+      const capture = await addGeneratedCapture({
+        lookupKey, recordedAt: "2026-07-01T12:00:00.000Z", vaultRoot,
+      });
+      const attachmentRef = capture.event.attachments![0]!.relativePath;
+      if (scenario === "changed") {
+        await writeFile(path.join(vaultRoot, attachmentRef), "changed bytes");
+      } else {
+        await rm(path.join(vaultRoot, attachmentRef));
+      }
+      const manifestPath = path.join(vaultRoot, capture.manifestPath!);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      if (scenario === "manifest-hash") manifest.artifacts[0].sha256 = "0".repeat(64);
+      if (scenario === "manifest-owner") manifest.owner.id = "another-capture";
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      const result = await runGeneratedImageCaptureRetention({
+        vaultRoot, now: new Date("2026-07-15T12:00:00.000Z"),
+        materializeCandidatePaths: async () => ({
+          missingStoredPaths: scenario === "unreported" ? ["raw/unrelated.png"] : [attachmentRef],
+        }),
+      });
+      expect(result).toMatchObject({ blockedCaptureCount: 1, retiredCaptureCount: 0 });
+      expect(await findCaptureByLookup({ vaultRoot, lookupKey })).toMatchObject({ status: "live" });
+      expect(await readFile(manifestPath, "utf8")).toBe(JSON.stringify(manifest));
+      if (scenario === "changed") {
+        expect(await readFile(path.join(vaultRoot, attachmentRef), "utf8")).toBe("changed bytes");
+      } else {
+        await expect(readFile(path.join(vaultRoot, attachmentRef))).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    },
+  );
+
   it("is a no-op when an empty checkpoint workspace has no lookup index", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-empty-retention-"));
     cleanupPaths.push(vaultRoot);
 
     await expect(runGeneratedImageCaptureRetention({ vaultRoot })).resolves.toEqual({
       blockedCaptureCount: 0,
+      blockedCaptureCounts: emptyBlockedCaptureCounts,
       hasMoreEligibleCaptures: false,
       nextEligibleAt: null,
       retiredByteCount: 0,
@@ -120,6 +227,8 @@ describe("generated image capture retention", () => {
     const result = await runGeneratedImageCaptureRetention({ now, vaultRoot });
 
     expect(result).toMatchObject({
+      blockedCaptureCount: 0,
+      blockedCaptureCounts: emptyBlockedCaptureCounts,
       hasMoreEligibleCaptures: false,
       nextEligibleAt: null,
       retiredByteCount: Buffer.byteLength(originalContent),
@@ -169,7 +278,12 @@ describe("generated image capture retention", () => {
     expect((await validateVault({ vaultRoot })).valid).toBe(true);
 
     await expect(runGeneratedImageCaptureRetention({ now, vaultRoot }))
-      .resolves.toMatchObject({ retiredCaptureCount: 0, scannedCaptureCount: 0 });
+      .resolves.toMatchObject({
+        blockedCaptureCount: 0,
+        blockedCaptureCounts: emptyBlockedCaptureCounts,
+        retiredCaptureCount: 0,
+        scannedCaptureCount: 0,
+      });
   });
 
   it("leaves fresh generated captures and unrelated lookup-backed captures untouched", async () => {
@@ -202,6 +316,7 @@ describe("generated image capture retention", () => {
 
     expect(result).toEqual({
       blockedCaptureCount: 0,
+      blockedCaptureCounts: emptyBlockedCaptureCounts,
       hasMoreEligibleCaptures: false,
       nextEligibleAt: "2026-07-24T00:00:00.000Z",
       retiredByteCount: 0,
@@ -250,6 +365,8 @@ describe("generated image capture retention", () => {
     });
 
     expect(first).toMatchObject({
+      blockedCaptureCount: 0,
+      blockedCaptureCounts: emptyBlockedCaptureCounts,
       hasMoreEligibleCaptures: true,
       nextEligibleAt: "2026-07-16T00:00:00.000Z",
       retiredCaptureCount: 2,
@@ -261,6 +378,8 @@ describe("generated image capture retention", () => {
       vaultRoot,
     });
     expect(second).toMatchObject({
+      blockedCaptureCount: 0,
+      blockedCaptureCounts: emptyBlockedCaptureCounts,
       hasMoreEligibleCaptures: false,
       nextEligibleAt: "2026-07-16T00:00:00.000Z",
       retiredCaptureCount: 1,
@@ -271,7 +390,7 @@ describe("generated image capture retention", () => {
     })).resolves.toMatchObject({ status: "live" });
   });
 
-  it("retires valid captures when a neighboring capture loses canonical integrity", async () => {
+  it("distinguishes missing events from changed bytes while retiring a valid neighbor", async () => {
     const vaultRoot = await createTempVault();
     const first = await addGeneratedCapture({
       lookupKey: "generated:atomic-one",
@@ -283,6 +402,21 @@ describe("generated image capture retention", () => {
       recordedAt: "2026-06-01T00:00:00.000Z",
       vaultRoot,
     });
+    const missing: Awaited<ReturnType<typeof addGeneratedCapture>>[] = [];
+    for (const suffix of ["one", "two"]) {
+      missing.push(await addGeneratedCapture({
+        lookupKey: `generated:missing-${suffix}`,
+        recordedAt: "2026-06-01T00:00:00.000Z",
+        vaultRoot,
+      }));
+    }
+    const missingIds = new Set(missing.map((capture) => capture.eventId));
+    const records = await readJsonlRecords({ relativePath: first.ledgerFile, vaultRoot });
+    await writeFile(
+      path.join(vaultRoot, first.ledgerFile),
+      records.filter((record) => !missingIds.has(String(record.id)))
+        .map((record) => `${JSON.stringify(record)}\n`).join(""),
+    );
     const firstRef = first.event.attachments![0]!.relativePath;
     const secondRef = second.event.attachments![0]!.relativePath;
     await writeFile(path.join(vaultRoot, secondRef), "tampered-image");
@@ -292,15 +426,28 @@ describe("generated image capture retention", () => {
       now,
       vaultRoot,
     })).resolves.toMatchObject({
-      blockedCaptureCount: 1,
+      blockedCaptureCount: 3,
+      blockedCaptureCounts: {
+        ...emptyBlockedCaptureCounts,
+        GENERATED_IMAGE_RETENTION_EVENT_MISSING: 2,
+        GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED: 1,
+      },
+      hasMoreEligibleCaptures: false,
       nextEligibleAt: "2026-07-16T00:00:00.000Z",
+      retiredByteCount: Buffer.byteLength("image:generated:atomic-one"),
       retiredCaptureCount: 1,
+      scannedCaptureCount: 4,
     });
 
     await expect(readFile(path.join(vaultRoot, firstRef), "utf8"))
       .resolves.toContain("generated_image_retention");
     await expect(readFile(path.join(vaultRoot, secondRef), "utf8"))
       .resolves.toBe("tampered-image");
+    for (const capture of missing) {
+      await expect(readFile(
+        path.join(vaultRoot, capture.event.attachments![0]!.relativePath), "utf8",
+      )).resolves.toMatch(/^image:generated:missing-/u);
+    }
     const index = await readLookupIndex(vaultRoot);
     expect(Object.values(index.entries).filter((entry) => entry.retiredAt === now.toISOString()))
       .toHaveLength(1);
@@ -312,5 +459,111 @@ describe("generated image capture retention", () => {
       lookupKey: "generated:atomic-two",
       vaultRoot,
     })).resolves.toMatchObject({ status: "live" });
+  });
+
+  it.each([
+    "GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID",
+    "GENERATED_IMAGE_RETENTION_EVENT_INVALID",
+    "GENERATED_IMAGE_RETENTION_EVENT_MISSING",
+    "GENERATED_IMAGE_RETENTION_MANIFEST_INVALID",
+    "GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED",
+    "VAULT_FILE_MISSING",
+  ])("counts the recognized VaultError %s without retaining its payload", async (code) => {
+    const vaultRoot = await createTempVault();
+    const capture = await addGeneratedCapture({
+      lookupKey: "generated:blocked-code",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      vaultRoot,
+    });
+    const attachmentRef = capture.event.attachments![0]!.relativePath;
+    const now = new Date("2026-07-15T00:00:00.000Z");
+    const result = await runGeneratedImageCaptureRetention({
+      materializeCandidatePaths: async (storedPaths) => {
+        if (storedPaths.includes(attachmentRef)) {
+          throw new VaultError(code, "synthetic private error detail", {
+            eventId: capture.eventId,
+            relativePath: attachmentRef,
+          });
+        }
+      },
+      now,
+      vaultRoot,
+    });
+    expect(result).toEqual({
+      blockedCaptureCount: 1,
+      blockedCaptureCounts: { ...emptyBlockedCaptureCounts, [code]: 1 },
+      hasMoreEligibleCaptures: false,
+      nextEligibleAt: "2026-07-16T00:00:00.000Z",
+      retiredByteCount: 0,
+      retiredCaptureCount: 0,
+      scannedCaptureCount: 1,
+    });
+    await expect(readFile(path.join(vaultRoot, attachmentRef), "utf8"))
+      .resolves.toBe("image:generated:blocked-code");
+    // Counts belong to one pass, not the vault or a prior result.
+    await expect(runGeneratedImageCaptureRetention({ now, vaultRoot }))
+      .resolves.toMatchObject({
+        blockedCaptureCount: 0,
+        blockedCaptureCounts: emptyBlockedCaptureCounts,
+        nextEligibleAt: null,
+        retiredCaptureCount: 1,
+      });
+  });
+
+  it.each([
+    new Error("synthetic unexpected failure"),
+    new VaultError("GENERATED_IMAGE_RETENTION_LOOKUP_INVALID", "synthetic lookup failure"),
+    new VaultError("__proto__", "synthetic unknown code"),
+    { code: "GENERATED_IMAGE_RETENTION_EVENT_MISSING", message: "not a VaultError" },
+  ])("propagates an unrecognized error unchanged (%#)", async (error) => {
+    const vaultRoot = await createTempVault();
+    const capture = await addGeneratedCapture({
+      lookupKey: "generated:unknown-error",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      vaultRoot,
+    });
+    const attachmentRef = capture.event.attachments![0]!.relativePath;
+    await expect(runGeneratedImageCaptureRetention({
+      materializeCandidatePaths: async (storedPaths) => {
+        if (storedPaths.includes(attachmentRef)) {
+          throw error;
+        }
+      },
+      now: new Date("2026-07-15T00:00:00.000Z"),
+      vaultRoot,
+    })).rejects.toBe(error);
+    await expect(readFile(path.join(vaultRoot, attachmentRef), "utf8"))
+      .resolves.toBe("image:generated:unknown-error");
+  });
+
+  it("keeps abort precedence over recognized errors and aborts before materialization", async () => {
+    const vaultRoot = await createTempVault();
+    const capture = await addGeneratedCapture({
+      lookupKey: "generated:aborted",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+      vaultRoot,
+    });
+    const attachmentRef = capture.event.attachments![0]!.relativePath;
+    const controller = new AbortController();
+    const reason = new Error("synthetic retention abort");
+    const materializeCandidatePaths = vi.fn(async (storedPaths: readonly string[]) => {
+      if (storedPaths.includes(attachmentRef)) {
+        controller.abort(reason);
+        throw new VaultError("GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED", "synthetic failure");
+      }
+    });
+    const input = {
+      materializeCandidatePaths,
+      now: new Date("2026-07-15T00:00:00.000Z"),
+      signal: controller.signal,
+      vaultRoot,
+    };
+    await expect(runGeneratedImageCaptureRetention(input)).rejects.toBe(reason);
+    expect(materializeCandidatePaths).toHaveBeenCalledTimes(2);
+    materializeCandidatePaths.mockClear();
+    await expect(runGeneratedImageCaptureRetention(input)).rejects.toBe(reason);
+    expect(materializeCandidatePaths).not.toHaveBeenCalled();
+    await expect(readFile(path.join(vaultRoot, attachmentRef), "utf8"))
+      .resolves.toBe("image:generated:aborted");
   });
 });

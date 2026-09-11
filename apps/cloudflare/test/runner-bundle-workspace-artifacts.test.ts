@@ -226,7 +226,6 @@ describe("runner bundle runtime artifact staging", () => {
     expect(stagedPackageJson.dependencies).toEqual({
       "@murphai/assistant-cli": "workspace:*",
       "@murphai/assistant-engine": "workspace:*",
-      "@murphai/assistantd": "workspace:*",
       "@murphai/clinical-records": "workspace:*",
       "@murphai/core": "workspace:*",
       "@murphai/device-syncd": "workspace:*",

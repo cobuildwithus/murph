@@ -105,13 +105,8 @@ export interface HostedOnboardingEnvironment {
   linqFirstContactAdmissionModel: string;
   linqFirstContactAdmissionOpenAiApiKey: string | null;
   linqInstantStartPhonePrefixes: readonly string[];
+  linqSmsInstantStartEnabled: boolean;
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
-  /**
-   * @deprecated Rollback compatibility for application builds that still
-   * populate HostedLinqLine.activeMemberLimit. Weighted assignment does not
-   * read this value.
-   */
-  linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
   privyAppId: string | null;
@@ -160,15 +155,11 @@ export function readHostedOnboardingEnvironment(
     linqFirstContactAdmissionOpenAiApiKey:
       readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY")
       ?? readEnv(source, "OPENAI_API_KEY"),
+    linqSmsInstantStartEnabled: readEnv(source, "HOSTED_ONBOARDING_LINQ_SMS_INSTANT_START_ENABLED") === "1",
     linqInstantStartPhonePrefixes:
       readHostedLinqInstantStartPhonePrefixes(source),
     linqLocalAllowedInboundPhoneNumbers:
       readHostedLinqLocalAllowedInboundPhoneNumbers(source, isProduction),
-    linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
-      readEnv(source, "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER"),
-      1000,
-      "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER",
-    ),
     linqWebhookSecret: linq.webhookSecret,
     linqWebhookTimestampToleranceMs: linq.webhookTimestampToleranceMs,
     privyAppId: readEnv(source, "NEXT_PUBLIC_PRIVY_APP_ID"),

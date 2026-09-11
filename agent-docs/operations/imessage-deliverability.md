@@ -73,27 +73,40 @@ Read and apply this guide when touching any of these surfaces:
 ## Production conversation canary
 
 The hourly Linq canary uses one explicitly configured Photon identity that
-exists only to contact Murph. It is a reciprocal three-turn private
+exists only to contact Murph. It is a reciprocal five-turn private
 conversation, not a source of new-recipient outreach: Photon sends one greeting,
 waits for Murph, and sends each later turn only after Murph replies. Runs are
 serialized and never canceled in flight. Automatic admission comes from one
 staggered hourly schedule; manual dispatch remains available for recovery. Every
-run first proves the scheduled protected-main revision is the exact current
-Vercel production deployment, then resets only that exact identity through the
+run first resolves the actual Vercel production deployment, verifies exact
+deployment identity and protected-main ancestry, then resets only that identity through the
 fixed-target production route. The recreated canary member uses its existing
 assistant-model preference to keep all runtime turns on GPT-5.6 Luna.
 
 The canary must not log phone numbers, message text, chat or message ids, SDK
 errors, or provider bodies. It reports only bounded reset counts and per-turn
-latency. A successful first turn must equal Murph's package-owned welcome; later
-turns must be non-empty and must not repeat it. All three replies must arrive in
-under twenty seconds. The existing deterministic hosted-local full-stack journey
+latency and canonical outcome counts. A successful first turn must equal Murph's
+package-owned welcome; later turns must be non-empty and must not repeat it.
+After the identity turn, the canary observes a fresh zero-count baseline, asks
+Murph to save the fixed synthetic walking goal, and requires one canonical goal
+with one valid distinct ID and no additional goals. A later reciprocal turn asks
+Murph to read its saved title and requires both the delivered title and a fresh one-goal canonical
+readback. Observation waits for checkpointed conversation input and current
+replica publication, outside the reply latency budget. This proves canonical
+goal cardinality, not physical message delivery exactly once. Every reply must
+arrive in under twenty seconds. The existing deterministic hosted-local full-stack journey
 owns onboarding follow-up behavior. Do not hold this shared live identity open
 for the multi-day follow-up window or add a second reset lifecycle to the
 hourly canary; a separately authorized live follow-up proof must be run in a
 serialized maintenance window.
 
 ## Assistant response media
+
+The Linq adapter preserves idempotency keys up to the provider's 255-character
+limit. Longer internal keys are SHA-256 compacted only in the serialized provider
+body, after any rich-link or fallback suffix is added. Persisted outbox keys keep
+their complete automation authority metadata; retries derive the same wire key.
+See Linq's [idempotency contract](https://docs.linqapp.com/channel/imessage/guides/messaging/sending-messages/).
 
 Linq's messaging contract allows up to 100 total parts and up to 40 public-URL
 media parts in one message, but Murph does not treat that provider ceiling as a

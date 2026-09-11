@@ -53,6 +53,8 @@ export interface HostedStripeSubscriptionTruth {
   currentPeriodEnd: Date | null;
   currentPeriodStart: Date | null;
   customerDefaultPaymentMethodPresent: boolean;
+  latestInvoiceBillingReason: string | null;
+  latestInvoiceId: string | null;
   latestInvoicePaid: boolean;
   latestInvoiceStatus: string | null;
   pendingUpdatePresent: boolean;
@@ -227,8 +229,15 @@ export class HostedStripeBillingSandbox {
     memberId: string;
     plan: "edge" | "pulse";
     scenario: string;
+    useTestClock?: boolean;
   }): Promise<HostedStripeSubscriptionFixture> {
-    const customer = await this.createCustomer({ scenario: input.scenario });
+    const testClock = input.useTestClock
+      ? await this.createTestClock(input.scenario)
+      : null;
+    const customer = await this.createCustomer({
+      scenario: input.scenario,
+      testClockId: testClock?.id,
+    });
     const paymentMethod = await this.callStripe("payment_method.attach", () =>
       this.stripe.paymentMethods.attach("pm_card_visa", {
         customer: customer.id,
@@ -266,8 +275,60 @@ export class HostedStripeBillingSandbox {
       customerId: customer.id,
       paymentMethodId: paymentMethod.id,
       subscriptionId: subscription.id,
-      testClockId: null,
+      testClockId: testClock?.id ?? null,
     };
+  }
+
+  async createTestClock(scenario: string): Promise<Stripe.TestHelpers.TestClock> {
+    const clock = await this.callStripe("test_clock.create", () =>
+      this.stripe.testHelpers.testClocks.create({
+        frozen_time: Math.floor(Date.now() / 1_000),
+        name: `murph-${buildHostedStripeRunCorrelationToken(this.runId)}-${scenario}`,
+      })
+    );
+    assertTestClockOwnership(clock, this.runId);
+    this.tracked.testClockIds.add(clock.id);
+    return clock;
+  }
+
+  async advanceTestClock(input: {
+    frozenTime: Date;
+    testClockId: string;
+  }): Promise<Date> {
+    const frozenTime = input.frozenTime.getTime() / 1_000;
+    if (
+      !Number.isSafeInteger(frozenTime)
+      || !this.tracked.testClockIds.has(input.testClockId)
+    ) {
+      throw new HostedStripeBillingLiveError(
+        "Stripe clock advancement requires an owned clock and an exact Unix second.",
+      );
+    }
+    const clock = await this.callStripe("test_clock.retrieve.before_advance", () =>
+      this.stripe.testHelpers.testClocks.retrieve(input.testClockId)
+    );
+    assertTestClockOwnership(clock, this.runId);
+    if (clock.status !== "ready" || frozenTime <= clock.frozen_time) {
+      throw new HostedStripeBillingLiveError(
+        "Stripe clock advancement requires a ready clock and a later frozen time.",
+      );
+    }
+    await this.callStripe("test_clock.advance", () =>
+      this.stripe.testHelpers.testClocks.advance(clock.id, { frozen_time: frozenTime })
+    );
+    const advanced = await this.callStripe("test_clock.wait_for_advance", () =>
+      waitForOwnedStripeTestClock({
+        runId: this.runId,
+        stripe: this.stripe,
+        testClockId: clock.id,
+      })
+    );
+    if (advanced.frozen_time !== frozenTime) {
+      throw new HostedStripeBillingLiveError(
+        "Stripe clock completed at an unexpected frozen time.",
+      );
+    }
+    return new Date(advanced.frozen_time * 1_000);
   }
 
   async adoptCheckoutSession(
@@ -433,6 +494,8 @@ export class HostedStripeBillingSandbox {
         : null,
       customerDefaultPaymentMethodPresent:
         readExpandedCustomerDefaultPaymentMethod(subscription) !== null,
+      latestInvoiceBillingReason: invoice?.billing_reason ?? null,
+      latestInvoiceId: invoice?.id ?? null,
       latestInvoicePaid: invoice?.status === "paid",
       latestInvoiceStatus: invoice?.status ?? null,
       pendingUpdatePresent: subscription.pending_update !== null,
@@ -661,6 +724,9 @@ export class HostedStripeBillingSandbox {
     try {
       return await run();
     } catch (error) {
+      if (error instanceof HostedStripeBillingLiveError) {
+        throw error;
+      }
       throw new HostedStripeBillingLiveError(
         `Stripe operation ${operation} failed (${formatStripeErrorDetails(
           readStripeErrorDetails(error),
@@ -920,6 +986,18 @@ async function cleanupTrackedStripeResources(input: {
     testClocksDeleted: 0,
   };
 
+  // A failed scenario can leave clock-owned subscriptions mid-advancement.
+  // Settle that provider operation before canceling or deleting its resources.
+  for (const testClockId of input.tracked.testClockIds) {
+    await ignoreMissingStripeResource(async () => {
+      await waitForOwnedStripeTestClock({
+        runId: input.runId,
+        stripe: input.stripe,
+        testClockId,
+      });
+    });
+  }
+
   const runPaymentMethods = await input.stripe.paymentMethods.list({
     limit: CLEANUP_PAGE_LIMIT,
     type: "card",
@@ -984,22 +1062,53 @@ async function cleanupTrackedStripeResources(input: {
 
   for (const testClockId of input.tracked.testClockIds) {
     await ignoreMissingStripeResource(async () => {
-      const clock = await input.stripe.testHelpers.testClocks.retrieve(testClockId);
-      if (!clock.name?.startsWith(
-        `murph-${buildHostedStripeRunCorrelationToken(input.runId)}-`,
-      )) {
-        throw new HostedStripeBillingLiveError(
-          "Refused to delete a Stripe Test Clock not owned by this run.",
-        );
-      }
-      if (clock.status === "ready") {
-        await input.stripe.testHelpers.testClocks.del(clock.id);
-        summary.testClocksDeleted += 1;
-      }
+      const clock = await waitForOwnedStripeTestClock({
+        runId: input.runId,
+        stripe: input.stripe,
+        testClockId,
+      });
+      await input.stripe.testHelpers.testClocks.del(clock.id);
+      summary.testClocksDeleted += 1;
     });
   }
 
   return summary;
+}
+
+function assertTestClockOwnership(
+  clock: Stripe.TestHelpers.TestClock,
+  runId: string,
+): void {
+  if (
+    clock.livemode
+    || !clock.name?.startsWith(`murph-${buildHostedStripeRunCorrelationToken(runId)}-`)
+  ) {
+    throw new HostedStripeBillingLiveError(
+      "Refused to mutate a Stripe Test Clock not owned by this test run.",
+    );
+  }
+}
+
+async function waitForOwnedStripeTestClock(input: {
+  runId: string;
+  stripe: Stripe;
+  testClockId: string;
+}): Promise<Stripe.TestHelpers.TestClock> {
+  const deadline = Date.now() + STRIPE_POLL_TIMEOUT_MS;
+  while (true) {
+    const clock = await input.stripe.testHelpers.testClocks.retrieve(input.testClockId);
+    assertTestClockOwnership(clock, input.runId);
+    if (clock.status === "ready") {
+      return clock;
+    }
+    if (clock.status === "internal_failure") {
+      throw new HostedStripeBillingLiveError("Stripe Test Clock entered internal_failure.");
+    }
+    if (Date.now() >= deadline) {
+      throw new HostedStripeBillingLiveError("Timed out waiting for Stripe Test Clock readiness.");
+    }
+    await delay(STRIPE_POLL_INTERVAL_MS);
+  }
 }
 
 function assertCheckoutOwnership(

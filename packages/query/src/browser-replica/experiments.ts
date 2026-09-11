@@ -48,6 +48,7 @@ import type {
   BrowserVaultSummaryConfidence,
 } from "./shared.ts";
 import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
+import { cloneJson, isBrowserSafeJson } from "./json-values.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -2029,17 +2030,15 @@ function buildProgressResult(
   occurrenceCounts: CalendarAdherenceSessionCounts | null,
 ): BrowserVaultExperimentProgressResult {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
-  const hasAmbiguousTargets = context.adherenceTargets.length > 1 && !rollupTarget;
-  const hasUnsupportedExplicitTargets = context.unsupportedExplicitAdherenceTargets;
-  const targetSessions =
-    hasUnsupportedExplicitTargets ? null :
-    rollupTarget?.rollup?.targetCompletions ??
-    (hasAmbiguousTargets ? null : context.run.runPlan.targetSessions);
-  const minimumUsefulSessions =
-    hasUnsupportedExplicitTargets ? null :
-    rollupTarget?.rollup?.minimumUsefulCompletions ??
-    (hasAmbiguousTargets ? null : context.run.runPlan.minimumUsefulSessions);
-  const progressTarget = hasUnsupportedExplicitTargets || hasAmbiguousTargets
+  const hasUnknownAdherence = context.unsupportedExplicitAdherenceTargets ||
+    (context.adherenceTargets.length > 1 && !rollupTarget);
+  const targetSessions = hasUnknownAdherence
+    ? null
+    : rollupTarget?.rollup?.targetCompletions ?? context.run.runPlan.targetSessions;
+  const minimumUsefulSessions = hasUnknownAdherence
+    ? null
+    : rollupTarget?.rollup?.minimumUsefulCompletions ?? context.run.runPlan.minimumUsefulSessions;
+  const progressTarget = hasUnknownAdherence
     ? null
     : rollupTarget ?? context.adherenceTargets[0] ?? null;
   const progressObservations = progressTarget
@@ -2059,34 +2058,13 @@ function buildProgressResult(
           windows: context.run.windows,
         })
       : null);
-  const completedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
-    ? 0
-    : occurrenceCounts
-      ? occurrenceCounts.completedSessions
-      : progressTarget?.calendar
-        ? schedule?.completedSessions ?? 0
-        : progressCounts?.completedSessions ?? 0;
-  const partialSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
-    ? 0
-    : occurrenceCounts
-      ? occurrenceCounts.partialSessions
-      : progressTarget?.calendar
-        ? schedule?.partialSessions ?? 0
-        : progressCounts?.partialSessions ?? 0;
-  const missedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
-    ? 0
-    : occurrenceCounts
-      ? occurrenceCounts.missedSessions
-      : progressTarget?.calendar
-        ? schedule?.missedSessions ?? 0
-        : progressCounts?.missedSessions ?? 0;
-  const skippedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
-    ? 0
-    : occurrenceCounts
-      ? occurrenceCounts.skippedSessions
-      : progressTarget?.calendar
-        ? schedule?.skippedSessions ?? 0
-        : progressCounts?.skippedSessions ?? 0;
+  const sessionCounts = hasUnknownAdherence
+    ? null
+    : occurrenceCounts ?? (progressTarget?.calendar ? schedule : progressCounts);
+  const completedSessions = sessionCounts?.completedSessions ?? 0;
+  const partialSessions = sessionCounts?.partialSessions ?? 0;
+  const missedSessions = sessionCounts?.missedSessions ?? 0;
+  const skippedSessions = sessionCounts?.skippedSessions ?? 0;
   const loggedSessions = completedSessions + partialSessions;
   const progressSchedule = progressTarget?.calendar && rollupTarget && schedule
     ? {
@@ -2094,7 +2072,7 @@ function buildProgressResult(
         cells: schedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
       }
     : progressTarget?.calendar ? schedule : null;
-  const confidenceCounts = hasUnsupportedExplicitTargets || hasAmbiguousTargets
+  const confidenceCounts = hasUnknownAdherence
     ? { sensedSessions: 0, confirmedSessions: 0, assumedSessions: 0 }
     : occurrenceCounts ??
       (progressTarget?.calendar
@@ -2108,7 +2086,7 @@ function buildProgressResult(
             assumedSessions: 0,
           });
   const scheduledExpectedSessionsByNow =
-    hasUnsupportedExplicitTargets || hasAmbiguousTargets
+    hasUnknownAdherence
       ? null
       : computeExpectedSessionsByNow(
           context.run,
@@ -2159,7 +2137,7 @@ function buildProgressResult(
       partialSessions,
       ...(confidenceCounts.sensedSessions > 0 ? { sensedSessions: confidenceCounts.sensedSessions } : {}),
       skippedSessions,
-      status: hasUnsupportedExplicitTargets || hasAmbiguousTargets
+      status: hasUnknownAdherence
         ? "unknown"
         : classifyAdherenceStatus({
             expectedSessionsByNow,
@@ -2920,27 +2898,6 @@ function cloneRecord(record: JsonRecord): JsonRecord {
   }
 
   return output;
-}
-
-function cloneJson(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function isBrowserSafeJson(value: unknown): boolean {
-  if (value === null) {
-    return true;
-  }
-
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-
-  if (Array.isArray(value)) {
-    return value.every(isBrowserSafeJson);
-  }
-
-  const record = readRecord(value);
-  return record ? Object.values(record).every(isBrowserSafeJson) : false;
 }
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {

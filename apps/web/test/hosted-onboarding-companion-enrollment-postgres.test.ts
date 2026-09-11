@@ -22,7 +22,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 vi.mock("server-only", () => ({}));
 
 const boundaries = vi.hoisted(() => ({
-  sendSignupWelcomeEmail: vi.fn(),
+  sendEmail: vi.fn(async () => ({ providerMessageId: "test-email" })),
   signalMailboxAppend: vi.fn(async () => ({
     signalAccepted: true as const,
     workflowId: "hosted-user-runtime:test",
@@ -36,9 +36,11 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async (importOriginal) 
   signalHostedMailboxAppendRuntime: boundaries.signalMailboxAppend,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", () => ({
-  sendHostedSignupWelcomeEmailForMemberBestEffort:
-    boundaries.sendSignupWelcomeEmail,
+vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/resend-plain-text-email")
+  >()),
+  sendHostedResendPlainTextEmail: boundaries.sendEmail,
 }));
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -94,12 +96,12 @@ describe.skipIf(!runPostgresProof)(
       const currentDayUtc = new Date();
       currentDayUtc.setUTCHours(0, 0, 0, 0);
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
-      const restoreEnvironment = configureLocalCryptoForTest();
+      const restoreEnvironment = configureLocalEnrollmentEnvironmentForTest();
       const lineLookupKey = requirePhoneLookupKey(linePhone);
       let memberCreated = false;
       let lineCreated = false;
 
-      boundaries.sendSignupWelcomeEmail.mockClear();
+      boundaries.sendEmail.mockClear();
       boundaries.signalMailboxAppend.mockClear();
       setHostedSecureBoxStringTestCodecForTests({
         decrypt: ({ value }) => value,
@@ -254,7 +256,7 @@ describe.skipIf(!runPostgresProof)(
           },
         })).resolves.toBe(1);
         expect(boundaries.signalMailboxAppend).toHaveBeenCalledOnce();
-        expect(boundaries.sendSignupWelcomeEmail).not.toHaveBeenCalled();
+        expect(boundaries.sendEmail).not.toHaveBeenCalled();
 
         await expect(ensureHostedStarterUsageEnrollment({
           inviteCode,
@@ -270,7 +272,11 @@ describe.skipIf(!runPostgresProof)(
           where: { beneficiaryMemberId: memberId },
         })).resolves.toBe(1);
         expect(boundaries.signalMailboxAppend).toHaveBeenCalledTimes(2);
-        expect(boundaries.sendSignupWelcomeEmail).not.toHaveBeenCalled();
+        expect(boundaries.sendEmail).not.toHaveBeenCalled();
+        await expect(prisma.hostedMember.findUniqueOrThrow({
+          select: { signupWelcomeEmailAttemptedAt: true },
+          where: { id: memberId },
+        })).resolves.toEqual({ signupWelcomeEmailAttemptedAt: null });
 
         if (!scenario.expectedRoute) {
           if (scenario.lineState === "missing") {
@@ -441,7 +447,7 @@ function requirePhoneLookupKey(phoneNumber: string): string {
   return lookupKey;
 }
 
-const LOCAL_CRYPTO_ENV_KEYS = [
+const LOCAL_ENROLLMENT_ENV_KEYS = [
   "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
   "HOSTED_CONTACT_PRIVACY_KEYS",
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
@@ -453,11 +459,14 @@ const LOCAL_CRYPTO_ENV_KEYS = [
   "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME",
   "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
   "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
+  "HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME",
+  "HOSTED_SIGNUP_WELCOME_EMAIL_FROM",
+  "RESEND_API_KEY",
 ] as const;
 
-function configureLocalCryptoForTest(): () => void {
+function configureLocalEnrollmentEnvironmentForTest(): () => void {
   const previous = new Map(
-    LOCAL_CRYPTO_ENV_KEYS.map((key) => [key, process.env[key]]),
+    LOCAL_ENROLLMENT_ENV_KEYS.map((key) => [key, process.env[key]]),
   );
   const authorityKey = generateKeyPairSync("ec", {
     namedCurve: "prime256v1",
@@ -478,15 +487,18 @@ function configureLocalCryptoForTest(): () => void {
       JSON.stringify(automationKey.publicKey),
     HOSTED_CRYPTO_ENV: "test",
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
     HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
     HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/web-wrap",
     HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
       JSON.stringify(authorityKey.privateKey),
     HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY:
       Buffer.alloc(32, 7).toString("base64"),
+    HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Test Founder",
+    HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "welcome@example.test",
+    RESEND_API_KEY: "test-resend-key",
   });
   return () => {
     for (const [key, value] of previous) {

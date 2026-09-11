@@ -15,8 +15,8 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  requireActivePrivyMemberAuthFromBearerToken,
-  requirePrivyMemberAuthFromBearerToken,
+  requireActiveHostedMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   readCurrentHostedMemberDirectRoute,
@@ -26,7 +26,7 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   await assertHostedHistoricalLaunchConsentGranted({
     memberId: auth.member.id,
     prisma,
@@ -72,7 +72,7 @@ export const DELETE = withJsonError(async (request: Request) => {
   // Revocation reduces authority, so it intentionally remains available when
   // billing or launch consent is inactive. Identity verification and member
   // ownership are still required.
-  const auth = await requirePrivyMemberAuthFromBearerToken(request, prisma);
+  const auth = await requireHostedMemberAuthFromBearerToken(request, prisma);
   const revocationRequest = parseMealPhotoCaptureRevocationRequest(
     await readOptionalJsonObject(request),
   );

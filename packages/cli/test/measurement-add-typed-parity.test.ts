@@ -659,7 +659,7 @@ test('measurement entry list returns primary, legacy, and device-observation sca
       measurementIndex: 0,
       occurredAt: '2026-07-03T07:30:00.000Z',
       source: 'manual',
-      metric: 'height',
+      metric: 'body-height',
       value: 175,
       unit: 'cm',
     },

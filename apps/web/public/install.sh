@@ -1082,7 +1082,7 @@ main() {
   ui_success "Murph install complete"
   echo
   echo "Next useful commands:"
-  echo "  murph assistant chat"
+  echo '  murph assistant ask "Hello"'
   echo "  murph assistant run"
   echo "  murph assistant doctor"
 }

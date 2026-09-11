@@ -1,10 +1,5 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 
-import {
-  parseSerializableConfiguredDeviceSyncProviderConfigs,
-  type SerializableConfiguredDeviceSyncProviderConfigs,
-} from "./config/serializable-provider-configs.ts";
-
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
@@ -447,8 +442,6 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   generatedAt: string;
   /** Null only when the current bounded page exhausted matching authority. */
   nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
-  /** Invocation-scoped client configuration for current app-bound connections. */
-  providerConfigs?: SerializableConfiguredDeviceSyncProviderConfigs;
   userId: string;
 }
 
@@ -1072,14 +1065,6 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
                 "Hosted device-sync runtime snapshot response nextCursor",
               ),
         }),
-    ...(record.providerConfigs === undefined
-      ? {}
-      : {
-          providerConfigs: parseSerializableConfiguredDeviceSyncProviderConfigs(
-            record.providerConfigs,
-            "Hosted device-sync runtime snapshot response providerConfigs",
-          ),
-        }),
     userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
   };
 }
@@ -1654,11 +1639,10 @@ function parseHostedExecutionDeviceSyncJobHintPayload(
   const next: Record<string, unknown> = {};
 
   for (const [field, rawValue] of Object.entries(record)) {
-    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
-
-    if (!kind) {
+    if (!Object.hasOwn(HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS, field)) {
       throw new TypeError(`${label}.${field} is not supported.`);
     }
+    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
 
     if (kind === "string" && rawValue === "") {
       continue;

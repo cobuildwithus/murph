@@ -51,6 +51,7 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
 let cleanupRender: (() => Promise<void>) | null = null;
 
 type TelegramSyncPayload = {
+  ok: true;
   botLink: string;
   runTriggered: boolean;
   telegramUserId: string;
@@ -78,6 +79,7 @@ describe("ConnectTelegram", () => {
       linkedAccounts: [],
     });
     mocks.requestHostedOnboardingJson.mockResolvedValue({
+      ok: true,
       botLink: "https://t.me/murph_bot?start=connect",
       runTriggered: true,
       telegramUserId: "12345",
@@ -141,6 +143,7 @@ describe("ConnectTelegram", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "12345",
         },
@@ -157,6 +160,7 @@ describe("ConnectTelegram", () => {
 
     await act(async () => {
       backgroundSync.resolveSync({
+        ok: true,
         botLink: "https://t.me/murph_bot?start=connect",
         runTriggered: true,
         telegramUserId: "12345",
@@ -274,6 +278,7 @@ describe("ConnectTelegram", () => {
       user: null,
     });
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      ok: true,
       botLink: "https://t.me/murph_bot?start=connect",
       runTriggered: true,
       telegramUserId: "telegram-test-user",
@@ -294,6 +299,7 @@ describe("ConnectTelegram", () => {
     expect(container.textContent).toContain("@murph_test");
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "telegram-test-user",
         },
@@ -367,6 +373,7 @@ describe("ConnectTelegram", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "12345",
         },
@@ -408,6 +415,7 @@ describe("ConnectTelegram", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "67890",
         },
@@ -417,6 +425,7 @@ describe("ConnectTelegram", () => {
 
     await act(async () => {
       relinkSync.resolveSync({
+        ok: true,
         botLink: "https://t.me/murph_bot?start=connect",
         runTriggered: true,
         telegramUserId: "67890",
@@ -431,6 +440,7 @@ describe("ConnectTelegram", () => {
 
     await act(async () => {
       backgroundSync.resolveSync({
+        ok: true,
         botLink: "https://t.me/murph_bot?start=connect",
         runTriggered: true,
         telegramUserId: "12345",
@@ -492,6 +502,7 @@ describe("ConnectTelegram", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "67890",
         },
@@ -517,6 +528,7 @@ describe("HostedTelegramCardSettings", () => {
       ],
     });
     mocks.requestHostedOnboardingJson.mockResolvedValue({
+      ok: true,
       botLink: "https://t.me/murph_bot?start=connect",
       runTriggered: true,
       telegramUserId: "67890",
@@ -583,6 +595,7 @@ describe("HostedTelegramCardSettings", () => {
       "@/src/components/settings/hosted-telegram-card-settings"
     );
     mocks.requestHostedOnboardingJson.mockResolvedValue({
+      ok: true,
       botLink: "https://t.me/murph_bot?start=connect",
       runTriggered: true,
       telegramUserId: "12345",
@@ -622,6 +635,7 @@ describe("HostedTelegramCardSettings", () => {
       "@/src/components/settings/hosted-telegram-card-settings"
     );
     mocks.requestHostedOnboardingJson.mockResolvedValue({
+      ok: true,
       botLink: "https://t.me/murph_bot?start=connect",
       runTriggered: true,
       telegramUserId: "12345",
@@ -640,6 +654,7 @@ describe("HostedTelegramCardSettings", () => {
       },
     });
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      ok: true,
       botLink: "https://t.me/murph_bot?start=connect",
       runTriggered: true,
       telegramUserId: "12345",
@@ -711,6 +726,7 @@ describe("HostedTelegramCardSettings", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "67890",
         },
@@ -893,6 +909,7 @@ describe("HostedTelegramCardSettings", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "67890",
         },
@@ -904,6 +921,7 @@ describe("HostedTelegramCardSettings", () => {
 
     await act(async () => {
       autoLinkSync.resolveSync({
+        ok: true,
         botLink: "https://t.me/murph_bot?start=connect",
         runTriggered: true,
         telegramUserId: "67890",
@@ -960,6 +978,7 @@ describe("HostedTelegramCardSettings", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "67890",
         },
@@ -970,6 +989,7 @@ describe("HostedTelegramCardSettings", () => {
 
     await act(async () => {
       manualSync.resolveSync({
+        ok: true,
         botLink: "https://t.me/murph_bot?start=connect",
         runTriggered: true,
         telegramUserId: "67890",
@@ -1045,6 +1065,7 @@ describe("HostedTelegramCardSettings", () => {
 
       await vi.waitFor(() => {
         expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+          fetchImpl: fetch,
           payload: {
             expectedTelegramUserId: "67890",
           },
@@ -1055,6 +1076,7 @@ describe("HostedTelegramCardSettings", () => {
 
       await act(async () => {
         autoLinkSync.resolveSync({
+          ok: true,
           botLink: "https://t.me/murph_bot?start=connect",
           runTriggered: true,
           telegramUserId: "67890",
@@ -1140,6 +1162,7 @@ describe("HostedTelegramCardSettings", () => {
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        fetchImpl: fetch,
         payload: {
           expectedTelegramUserId: "67890",
         },

@@ -147,7 +147,7 @@ async function createFixture(): Promise<Fixture> {
     resourceCategory: "sleep",
     resources: [{
       count: 1,
-      jobKind: "delete",
+      jobKind: "resource",
       payload: { objectId: "sleep-reconnect-ack" },
       resource: "sleep",
       resourceCategory: "sleep",
@@ -161,10 +161,6 @@ async function createFixture(): Promise<Fixture> {
   const payload = await observer.deviceSyncDirtyPayload.findFirstOrThrow({
     select: { id: true },
     where: { connectionId: connection.id },
-  });
-  await observer.deviceSyncDirtyPayload.update({
-    data: { credentialIndependent: null },
-    where: { id: payload.id },
   });
 
   return {
@@ -246,7 +242,7 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
 describe.skipIf(!runPostgresProof)(
   "device-sync reconnect and acknowledgement PostgreSQL lock ordering",
   () => {
-    it("waits behind acknowledgement's dirty marker before classifying nullable rows", async () => {
+    it("waits behind acknowledgement's dirty marker before discarding credential-scoped work", async () => {
       const fixture = await createFixture();
       const payloadDeleteReached = createDeferred();
       const allowPayloadDelete = createDeferred();
@@ -314,16 +310,12 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("holds the dirty marker through reconnect classification before acknowledgement", async () => {
+    it("holds the dirty marker through reconnect cleanup before acknowledgement", async () => {
       const fixture = await createFixture();
       const payloadLocked = createDeferred();
       const releasePayload = createDeferred();
-      const decryptStarted = createDeferred();
       const acknowledgementDelete = vi.fn();
-      const decrypt = vi.fn((input: { value: string }) => {
-        decryptStarted.resolve();
-        return input.value;
-      });
+      const decrypt = vi.fn((input: { value: string }) => input.value);
       let holderOutcome: Promise<unknown> | null = null;
       let acknowledgementOutcome: Promise<unknown> | null = null;
       let reconnectOutcome: Promise<unknown> | null = null;
@@ -344,13 +336,17 @@ describe.skipIf(!runPostgresProof)(
           await releasePayload.promise;
         }, transactionOptions);
         await payloadLocked.promise;
+        const reconnectPid = await readBackendPid(fixture.reconnect);
 
         reconnectOutcome = fixture.reconnectStore.upsertConnection(buildConnectionInput({
           connectedAt: "2026-07-16T12:03:00.000Z",
           externalAccountId: fixture.externalAccountId,
           userId: fixture.userId,
         }));
-        await decryptStarted.promise;
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: reconnectPid,
+        });
 
         const acknowledgementStore = new PrismaHostedDirtyConnectionStore(
           wrapInteractiveTransactions({
@@ -378,7 +374,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(holderOutcome).resolves.toBeUndefined();
         await expect(reconnectOutcome).resolves.toMatchObject({ id: fixture.connectionId });
         await expect(acknowledgementOutcome).resolves.toMatchObject({ stillDirty: false });
-        expect(decrypt).toHaveBeenCalledTimes(1);
+        expect(decrypt).not.toHaveBeenCalled();
         expect(acknowledgementDelete).toHaveBeenCalledTimes(1);
         await expect(fixture.observer.deviceConnection.findUniqueOrThrow({
           select: { connectedAt: true, status: true },

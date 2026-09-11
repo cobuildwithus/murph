@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const sourceFiles: readonly string[] = [
-  "apps/web/src/lib/health-commons/experiment-detail.ts",
   "apps/web/src/lib/health-commons/experiment-browse.ts",
   "apps/web/src/lib/health-commons/generated-experiment-artifacts.ts",
   "apps/web/src/lib/health-commons/generated-biomarker-artifacts.ts",

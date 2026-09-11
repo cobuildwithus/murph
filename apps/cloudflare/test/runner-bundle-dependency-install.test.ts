@@ -12,6 +12,7 @@ import {
   installPackedRunnerDependencies,
   pinInstalledDependencyVersions,
   pruneRunnerBundleUnsupportedPlatformPackages,
+  restrictRunnerBundleResolutionLockfile,
   stripPnpmLockfileImporters,
   writeRunnerBundlePnpmInstallConfig,
 } from "../scripts/runner-bundle/dependency-install.js";
@@ -27,6 +28,30 @@ afterEach(async () => {
 });
 
 describe("runner bundle dependency pinning", () => {
+  it("excludes Web-only versions while retaining runtime peer snapshots and optional dependencies", () => {
+    const lockfile = [
+      "lockfileVersion: '9.0'", "importers:", "  apps/web:", "    dependencies: {}",
+      "packages:",
+      "  zod@4.4.3:", "    resolution: {integrity: sha512-runtime}",
+      "  zod@4.5.4:", "    resolution: {integrity: sha512-web}",
+      "  optional-platform@1.0.0:", "    resolution: {integrity: sha512-optional}",
+      "  consumer@1.0.0:", "    resolution: {integrity: sha512-consumer}",
+      "snapshots:", "  zod@4.5.4: {}", "  zod@4.4.3: {}",
+      "  optional-platform@1.0.0: {}",
+      "  consumer@1.0.0(zod@4.4.3):", "    dependencies:", "      zod: 4.4.3",
+      "    optionalDependencies:", "      optional-platform: 1.0.0", "",
+    ].join("\n");
+    const result = restrictRunnerBundleResolutionLockfile(lockfile, new Set([
+      "zod@4.4.3", "optional-platform@1.0.0", "consumer@1.0.0",
+    ]));
+    expect(result).not.toContain("4.5.4");
+    expect(result).not.toContain("importers:");
+    expect(result).toContain("  zod@4.4.3: {}");
+    expect(result).toContain("  consumer@1.0.0(zod@4.4.3):");
+    expect(result).toContain("    optionalDependencies:\n      optional-platform: 1.0.0");
+    expect(result).toContain("resolution: {integrity: sha512-runtime}");
+  });
+
   it("pins required direct dependencies from the runtime package root", async () => {
     const runtimePackageRoot = await createRuntimePackageRoot();
     const dependencies = {
@@ -215,6 +240,10 @@ describe("runner bundle pnpm install config", () => {
         "};",
         "const command = process.argv.slice(2).join(' ');",
         "appendFileSync(logPath, `${command} SHARP_IGNORE_GLOBAL_LIBVIPS=${process.env.SHARP_IGNORE_GLOBAL_LIBVIPS ?? ''}\\n`, 'utf8');",
+        "if (process.argv.includes('list')) {",
+        "  console.log(JSON.stringify([{ dependencies: { jose: { version: '6.2.2' }, incur: { version: '0.5.1' }, 'runtime-wrapper': { version: '1.0.0' } } }]));",
+        "  process.exit(0);",
+        "}",
         "if (command === 'install --prod --lockfile-only') {",
         "  const seedLockfile = readFileSync('pnpm-lock.yaml', 'utf8');",
         "  if (seedLockfile.includes('apps/web')) {",
@@ -295,7 +324,7 @@ describe("runner bundle pnpm install config", () => {
     const pnpmStorePathLines = pnpmLogLines.filter((line) =>
       line.startsWith("store path "),
     );
-    expect([0, 3]).toContain(pnpmStorePathLines.length);
+    expect([0, 4]).toContain(pnpmStorePathLines.length);
     expect(
       pnpmStorePathLines.every(
         (line) => line === "store path --silent SHARP_IGNORE_GLOBAL_LIBVIPS=",

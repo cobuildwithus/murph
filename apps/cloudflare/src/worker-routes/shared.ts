@@ -1,15 +1,11 @@
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
-  HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -58,11 +54,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;
-  prewarmRuntimeShellForUser?(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
@@ -105,6 +96,7 @@ export interface WorkerEnvironmentSource
   extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
   NEXT_RUNNER_CONTAINER?: HostedExecutionContainerNamespaceLike;
+  SMALL_RUNNER_CONTAINER?: HostedExecutionContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE: HostedExecutionContainerNamespaceLike;
   STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;

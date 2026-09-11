@@ -798,12 +798,11 @@ describe('assistant turn shared plan', () => {
         bindingDelivery: null,
         channel: 'telegram',
         deliveryPolicy: 'binding-target-only',
-        effectiveThreadIsDirect: true,
+        threadIsDirect: true,
         explicitTarget: null,
         identityId: 'bound-identity',
         replyToMessageId: null,
         threadId: 'bound-thread',
-        threadIsDirect: true,
       },
       operatorAuthority: 'direct-operator',
     })
@@ -830,12 +829,11 @@ describe('assistant turn shared plan', () => {
           bindingDelivery: null,
           channel: 'telegram',
           deliveryPolicy: 'binding-target-only',
-          effectiveThreadIsDirect: true,
+          threadIsDirect: true,
           explicitTarget: null,
           identityId: 'bound-identity',
           replyToMessageId: null,
           threadId: 'bound-thread',
-          threadIsDirect: true,
         },
         operatorAuthority: 'direct-operator',
       },
@@ -856,7 +854,7 @@ describe('assistant turn shared plan', () => {
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
   })
 
-  it('derives first-contact state doc ids from the conversation policy audience and session binding fallbacks', async () => {
+  it.each([true, null])('keeps audience directness %s when deriving first-contact state', async (threadIsDirect) => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
@@ -868,12 +866,11 @@ describe('assistant turn shared plan', () => {
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'explicit-target-override',
-        effectiveThreadIsDirect: true,
+        threadIsDirect,
         explicitTarget: 'bound-actor',
         identityId: null,
         replyToMessageId: 'message-1',
         threadId: null,
-        threadIsDirect: null,
       },
       operatorAuthority: 'direct-operator',
     })
@@ -915,7 +912,7 @@ describe('assistant turn shared plan', () => {
       channel: 'telegram',
       identityId: 'bound-identity',
       threadId: 'bound-thread',
-      threadIsDirect: true,
+      threadIsDirect,
     })
     expect(turnPlanMocks.isAssistantOnboardingOpen).toHaveBeenCalledWith(
       '/tmp/turn-plan-vault',
@@ -942,12 +939,11 @@ describe('assistant turn shared plan', () => {
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'binding-target-only',
-        effectiveThreadIsDirect: true,
+        threadIsDirect: null,
         explicitTarget: null,
         identityId: null,
         replyToMessageId: null,
         threadId: null,
-        threadIsDirect: null,
       },
       operatorAuthority: 'direct-operator',
     })
@@ -1014,12 +1010,11 @@ describe('assistant turn shared plan', () => {
         bindingDelivery: null,
         channel: 'telegram',
         deliveryPolicy: 'binding-target-only',
-        effectiveThreadIsDirect: true,
+        threadIsDirect: true,
         explicitTarget: null,
         identityId: 'bound-identity',
         replyToMessageId: null,
         threadId: 'bound-thread',
-        threadIsDirect: true,
       },
       operatorAuthority: 'direct-operator',
     })

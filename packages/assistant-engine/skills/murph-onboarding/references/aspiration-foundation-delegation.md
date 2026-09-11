@@ -158,25 +158,25 @@ internal storage or call it the user's permanent “main direction.”
 
 Then explicitly explain the ordering without foregrounding a refusal to help.
 For a casual user who named strength and sleep as the threads, confidence and
-energy as the reason, and has not resolved the data-source checkpoint, a
-complete reply can be:
+energy as the reason, the reflection can be:
 
 ```text
-got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app?
+got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits.
 ```
 
 Treat this as a worked example, not fixed copy. Substitute the user's actual
-threads and reason, match their register, and ask the first unresolved
-foundation question rather than repeating the wearable question when that
-checkpoint is already known. Before sending the data-source question, make it
+threads and reason, match their register, then apply the data-source evidence
+check below before appending the first unresolved foundation question rather
+than repeating the wearable question when that checkpoint is already known. Before sending the data-source question, make it
 concrete from live capability guidance. The current prompt's “Hosted wearable
 connection links are available for …” line is the sole source of provider
 examples. Append a short “like …” clause using only labels from that line: one
 when only one is available and a few when more are available. If the line is
 absent, omit provider examples rather than inventing or recalling names. Keep
 Apple Health out of this provider-example clause; it is offered only through
-the separate native-app relay after a clear “none,” never as a `murph.device`
-provider.
+the separate native-app relay after a clear “none” when it is not already
+connected, never as a `murph.device` connect provider. This does not restrict
+acknowledging an existing Apple Health connection.
 
 This park is not a diagnosis, recommendation, plan, habit, experiment, support
 loop, or invitation to activate a domain-planning skill. Do not provide any of
@@ -263,17 +263,46 @@ Do not wait for schema inspection, label research, or canonical readback. If
 spawning is unavailable, the parent falls back to one compact bounded save for
 the supplied facts before replying and leaves optional label details unknown.
 
-1. **Data sources and wearables.** Check visible context and the resume
-   snapshot first. When connection state is unclear, use `murph.device` with
-   `action: list_accounts` when available. Only in a non-hosted local-operator
-   route, use `vault-cli device account list --format json` when the prompt
-   explicitly grants that command for the current turn. A hosted runtime must
-   not use the device CLI as fallback. Otherwise continue from visible and
-   saved evidence without pretending a device action is available. Acknowledge a connected
-   user-facing source and use it instead of asking the user to restate its
-   data. If none is visible, ask whether they use a wearable or health app and
-   explain that connecting one can reduce manual reporting and improve later
-   interpretation. Build its example clause only from labels on the current
+1. **Data sources and wearables.** Before asking, check visible conversation,
+   saved context, and current connection evidence. Never repeat a wearable
+   question already answered, including an explicit none, skip, or deferral.
+   If current connection state is missing, empty only in the resume snapshot,
+   or errored, call `murph.device` with unfiltered `action: list_accounts`
+   once this turn when available, before the user-facing question. A hosted
+   resume snapshot's device-account error does not mean no connections. Only
+   in a non-hosted local-operator route, use
+   `vault-cli device account list --format json` when the prompt explicitly
+   grants it. Never use the device CLI as a hosted fallback. If the lookup
+   fails or is unavailable, keep the state unknown, briefly say you could not
+   check it, and continue from known facts without claiming disconnection,
+   offering reconnection, or retrying in this turn. For this optional
+   onboarding lookup, a tool error's generic retry hint does not override the
+   one-read limit: after any result, use that result and reply without another
+   `list_accounts` call.
+
+   Acknowledge any established user-facing source, including Apple Health,
+   before asking for missing context. An active connection does not prove
+   that data has arrived or is current. A known wearable resolves device
+   discovery; advance to the next unresolved foundation area without asking
+   which wearable they use or offering to connect it again.
+
+   Apple Health alone does not establish whether the user wears a device.
+   When it is connected and wearable use is still unknown, ask once in this
+   shape, matching the user's register:
+
+   ```text
+   I can see Apple Health is connected. Do you also use a watch or ring?
+   ```
+
+   If visible or saved context already answers that question, including no
+   wearable, acknowledge the connection and advance. Their answer or skip
+   ends this follow-up; never make wearable ownership or another connection
+   a requirement. Do not repeat the generic wearable-or-health-app question
+   or offer Apple Health setup when Apple Health is already connected.
+
+   When no source is known after the available check, ask whether they use
+   a wearable or health app and explain that connecting one can reduce manual
+   reporting and improve later interpretation. Build its example clause only from labels on the current
    prompt's hosted wearable connection line: one label when only one exists and
    a few when several do. If that line is absent, omit provider examples; never
    supply remembered names. Keep Apple Health separate for the post-“none”
@@ -290,8 +319,9 @@ the supplied facts before replying and leaves optional label details unknown.
    checkpoint until the user returns or the connection is visible. A clear
    “none,” “not relevant,” or skip resolves
    the checkpoint. After a clear “none,” when the current prompt includes the
-   Apple Health relay, make one optional conditional offer unless context
-   already rules out an iPhone or the user declined connection help:
+   Apple Health relay, make one optional conditional offer unless Apple Health
+   is already connected, context already rules out an iPhone, or the user
+   declined connection help:
 
    ```text
    no wearable is totally fine. if you use an iPhone, you can connect Apple Health in the Murph app so i can start using the daily steps your phone sends. want the app link?

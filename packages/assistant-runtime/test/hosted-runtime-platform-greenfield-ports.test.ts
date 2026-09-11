@@ -61,6 +61,7 @@ test("hosted runtime platform can fetch mailbox items through an injected fake p
 
   assert.deepEqual(mailboxFetchRequests, [request]);
   assert.deepEqual(response, {
+    assistantProvider: "openai",
     fetchedAt: TEST_NOW,
     items: [secondItem],
     maxSeqByLane: [
@@ -205,6 +206,7 @@ function createFakeHostedRuntimePlatform(input: {
       async fetch(request) {
         mailboxFetchRequests.push(request);
         return {
+          assistantProvider: "openai",
           fetchedAt: TEST_NOW,
           items: request.lanes.flatMap((cursor) =>
             mailboxItems

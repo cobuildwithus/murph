@@ -153,6 +153,7 @@ export interface DeviceBatchImportPayload {
 }
 
 export interface DeviceBatchImportExecutionOptions {
+  signal?: AbortSignal | null;
   onTiming?: (timing: DeviceBatchImportTiming) => void;
   session?: DeviceBatchImportSession;
 }

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 201,
+  "item": {
+    "id": "device-sync-reminder-fairness",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Reminders alongside device updates",
+    "summary": "Scheduled reminders can run while Murph continues downloading device data.",
+    "details": "Device updates retain their saved progress and duplicate-import protection.",
+    "relevanceTags": ["devices", "messages"],
+    "sourcePullRequests": [3281]
+  }
+}

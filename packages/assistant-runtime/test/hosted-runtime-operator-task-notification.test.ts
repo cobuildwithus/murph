@@ -36,7 +36,13 @@ beforeEach(() => {
 });
 
 describe("hosted operator task notification", () => {
-  it("revalidates before provider and outbox, then completes after one queued intent", async () => {
+  it.each([
+    ["hosted-openai", "hosted-openai"],
+    ["venice", "hosted-openai"],
+    ["hosted-custom-inference", "hosted-openai"],
+    ["hosted-chatgpt-openai", "hosted-chatgpt-openai"],
+    ["venice-local-test", "openai-local-test"],
+  ])("revalidates before provider and outbox, then completes one queued intent using %s authentication", async (memberProvider, operatorProvider) => {
     const recordUsage = vi.fn().mockResolvedValue(undefined);
     const usageRecord = parseAssistantUsageRecord({ schema: "murph.assistant-usage.v1", usageId: "turn_synthetic.attempt-1", turnId: "turn_synthetic", sessionId: "session_synthetic", provider: "codex-cli", credentialSource: "platform", attemptCount: 1, occurredAt: "2036-08-25T18:01:00.000Z", usageExtractionVersion: "test" });
     const controlOperatorTask = vi.fn()
@@ -77,7 +83,15 @@ describe("hosted operator task notification", () => {
 
     const outcome = await executeHostedAssistantNotificationWake({
       effectsPort: { controlOperatorTask },
-      executionContext: { hosted: { ...EXECUTION_CONTEXT.hosted!, usageRecorder: { recordUsage } } },
+      executionContext: { hosted: {
+        ...EXECUTION_CONTEXT.hosted!,
+        defaultTarget: {
+          adapter: "codex-cli", approvalPolicy: "never", codexCommand: null,
+          model: "gpt-5.6-luna", modelProvider: memberProvider,
+          oss: false, profile: null, reasoningEffort: "low", sandbox: "danger-full-access",
+        },
+        usageRecorder: { recordUsage },
+      } },
       forceQueueOnly: true,
       sourceMailboxItemId: EVENT_ID,
       vaultRoot: "/synthetic-vault",
@@ -85,7 +99,7 @@ describe("hosted operator task notification", () => {
     });
 
     expect(mocks.sendAssistantNotification.mock.calls[0]?.[0].assistantTargetOverride)
-      .toEqual({ model: "gpt-5.6-sol", modelProvider: "openai" });
+      .toEqual({ model: "gpt-5.6-sol", modelProvider: operatorProvider });
     expect(recordUsage).toHaveBeenCalledWith({ ...usageRecord, operatorTaskId: TASK_ID }, undefined);
     expect(usageRecord).not.toHaveProperty("operatorTaskId");
     expect(outcome.deliveryIntentIds).toEqual(["intent_operator_synthetic"]);

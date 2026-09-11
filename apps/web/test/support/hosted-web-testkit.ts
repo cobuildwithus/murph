@@ -9,6 +9,7 @@ export {
 export {
   issueHostedWebInviteForTest,
   readHostedBillingProjectionForTest,
+  readHostedBillingUsageGateForTest,
   readHostedFamilyProjectionForTest,
   seedHostedBillingMemberForTest,
   waitForHostedBillingProjectionForTest,
@@ -783,6 +784,8 @@ interface HostedActionApprovalModuleForTest {
   decideHostedActionApprovalTx(input: {
     approval: HostedActionApprovalIdentityForTest;
     challenge: {
+      credentialWrite: { memberId: string; expectedEncrypted: null; nextEncrypted: null };
+      passkeys: [];
       bindingHash: string;
       expiresAt: Date;
       kind: "assistant.action.approve";
@@ -1731,6 +1734,8 @@ export async function approveHostedActionAndSignalRuntimeForTest(input: {
       await actionApproval.decideHostedActionApprovalTx({
         approval,
         challenge: {
+          credentialWrite: { memberId: input.memberId, expectedEncrypted: null, nextEncrypted: null },
+          passkeys: [],
           bindingHash: approval.bindingHash,
           expiresAt: approval.expiresAt,
           kind: "assistant.action.approve",

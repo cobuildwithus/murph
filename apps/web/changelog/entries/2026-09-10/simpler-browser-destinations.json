@@ -1,0 +1,24 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "simpler-browser-destinations",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer places to find your health history",
+    "summary": "Old Overview and History links now take you to Home and Journal.",
+    "details": "The experimental Labs page has retired. You can still ask Murph privately to explore lab tests and nearby collection options. Your saved health records remain available.",
+    "relevanceTags": [
+      "web",
+      "journal",
+      "labs"
+    ],
+    "sourcePullRequests": [
+      3167
+    ],
+    "tryIt": {
+      "label": "Open Journal",
+      "href": "/journal"
+    }
+  }
+}

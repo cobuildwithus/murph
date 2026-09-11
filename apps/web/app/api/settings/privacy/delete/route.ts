@@ -5,7 +5,7 @@ import {
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  buildHostedAppSessionClearCookie,
+  buildHostedAppSessionClearCookies,
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES } from "@/src/lib/hosted-privacy/account-data-shared";
@@ -34,6 +34,6 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const response = jsonOk({ ok: true, result });
-  response.headers.append("Set-Cookie", buildHostedAppSessionClearCookie());
+  for (const cookie of buildHostedAppSessionClearCookies()) response.headers.append("Set-Cookie", cookie);
   return response;
 });

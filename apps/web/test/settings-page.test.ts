@@ -1156,6 +1156,8 @@ test("SettingsPage reads the app session and persisted account settings into the
       prisma: mocks.prisma,
     });
     expect(mocks.readHostedSecureApprovalStatus).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
       privyUserId: "did:privy:user_123",
     });
     expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);

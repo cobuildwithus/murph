@@ -13,6 +13,7 @@ import {
   assertHostedCryptoStandbyKeyringJsons,
 } from "@murphai/runtime-state";
 
+import { CONTAINER_ROLLOUT_MODE_ERROR, readContainerRolloutMode } from "./container-rollout-policy.ts";
 import { readHostedDeployAutomationTimeouts } from "./deploy-automation/environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
 import {
@@ -53,7 +54,6 @@ const HOSTED_DEPLOY_CONTEXTS = [
 ] as const;
 const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
 const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
-const STATE_ISOLATION_CONTAINER_ROLLOUT = "immediate";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -323,10 +323,11 @@ export function listHostedDeployEnvironmentInvariantErrors(
   const hostedAssistantReasoningEffort = normalizeOptionalString(
     source.HOSTED_ASSISTANT_REASONING_EFFORT,
   );
-  const hostedExecutionContainerRollout = readHostedExecutionContainerRollout(
-    source.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
-    deployContext,
-  );
+  try {
+    readContainerRolloutMode(source.HOSTED_EXECUTION_CONTAINER_ROLLOUT);
+  } catch {
+    errors.push(CONTAINER_ROLLOUT_MODE_ERROR);
+  }
   const hostedAssistantModelIsPriced = hostedAssistantModel
     ? isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)
     : false;
@@ -403,12 +404,6 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push(
       `production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=${PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT}.`,
-    );
-  }
-
-  if (![STATE_ISOLATION_CONTAINER_ROLLOUT, "worker-only"].includes(hostedExecutionContainerRollout)) {
-    errors.push(
-      `production runner image changes must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; compatible Worker-only deploys may use worker-only; rollback floor is the audience-key, selector-scope, and runner-schema-v16 media-effect bundle.`,
     );
   }
 
@@ -638,14 +633,6 @@ function normalizeHostedOidcEnvironment(value: string | undefined): HostedDeploy
   }
 
   return normalized as HostedDeployContext;
-}
-
-function readHostedExecutionContainerRollout(
-  value: string | undefined,
-  deployContext: HostedDeployContext | null,
-): string {
-  return normalizeOptionalString(value)
-    ?? (deployContext === "production" ? STATE_ISOLATION_CONTAINER_ROLLOUT : "gradual");
 }
 
 function readProductionDeployUrl(

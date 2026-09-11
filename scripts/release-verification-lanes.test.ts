@@ -191,7 +191,6 @@ describe("release verification executable lanes", () => {
         "assistant-engine": ["packages/assistant-engine"],
         "platform-a": [
           "packages/assistant-runtime",
-          "packages/assistantd",
           "packages/cloudflare-hosted-control",
           "packages/exercise-library",
           "packages/gateway-core",

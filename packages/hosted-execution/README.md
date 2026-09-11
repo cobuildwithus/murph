@@ -24,6 +24,12 @@ and workspace invocation contracts from
 `@murphai/hosted-execution/runtime-control`. Temporal processing/status
 contracts live in `@murphai/hosted-execution/orchestration-control`. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
+Runtime log and redacted-status validation is owned by
+`src/parsers/runtime-log.ts`, exported through `@murphai/hosted-execution/parsers`.
+Workspace checkpoints and runner/Web status compose that same validator;
+receipt-specific reserved keys remain with checkpoint parsing. Shared scalar
+checks stay in `src/parsers/assertions.ts`, while `src/observability.ts` owns
+producer sanitization.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
 The v2 turn profile may include `knowledgeCounts` on the `vault-cli knowledge`

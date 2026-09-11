@@ -16,7 +16,7 @@ const serviceMocks = vi.hoisted(() => ({
   createComposioConnectedAppsClient: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncRegistry: vi.fn(),
-  createHostedDeviceSyncRegistryWithProviderConfigs: vi.fn(),
+
   deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   decryptHostedWebNullableFields:
@@ -38,12 +38,9 @@ const serviceMocks = vi.hoisted(() => ({
   prepareHostedMemberChannelsUpdatedForSnapshot: vi.fn(),
   resolveHostedMemberEmailLinked: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
-  isHostedPulseTrialSubscriptionForKnownPolicy: vi.fn(),
   pendingHostedAccountDeletionCleanupResult: vi.fn(),
   persistHostedAccountDeletionCleanupTx: vi.fn(),
   prepareHostedAccountDeletionCleanup: vi.fn(),
-  requireHostedStripeBillingPlanConfig: vi.fn(),
-  retrieveHostedPulseTrialCleanupTarget: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
   readHostedPrivyUserById: vi.fn(),
   reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
@@ -64,7 +61,7 @@ const serviceMocks = vi.hoisted(() => ({
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirement: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
-  resolveDeviceProviderApplicationForConnection: vi.fn(),
+
   revokeStravaDeviceSyncAccess: vi.fn(),
 }));
 
@@ -130,14 +127,7 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 vi.mock("@/src/lib/device-sync/providers", () => ({
   createHostedDeviceSyncRegistry: serviceMocks.createHostedDeviceSyncRegistry,
-  createHostedDeviceSyncRegistryWithProviderConfigs:
-    serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs,
-}));
 
-vi.mock("@/src/lib/device-sync/provider-applications", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/src/lib/device-sync/provider-applications")>()),
-  resolveDeviceProviderApplicationForConnection:
-    serviceMocks.resolveDeviceProviderApplicationForConnection,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
@@ -193,22 +183,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
 vi.mock("@/src/lib/hosted-onboarding/runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/runtime")>()),
   getHostedOnboardingStripe: serviceMocks.getHostedOnboardingStripe,
-  requireHostedStripeBillingPlanConfig:
-    serviceMocks.requireHostedStripeBillingPlanConfig,
 }));
-
-vi.mock(
-  "@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup",
-  async (importOriginal) => ({
-    ...(await importOriginal<
-      typeof import("@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup")
-    >()),
-    isHostedPulseTrialSubscriptionForKnownPolicy:
-      serviceMocks.isHostedPulseTrialSubscriptionForKnownPolicy,
-    retrieveHostedPulseTrialCleanupTarget:
-      serviceMocks.retrieveHostedPulseTrialCleanupTarget,
-  }),
-);
 
 vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx:
@@ -246,7 +221,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { DeviceProviderApplicationError } from "@/src/lib/device-sync/provider-applications";
+
 import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
 } from "@/src/lib/hosted-execution/product-feedback";
@@ -337,7 +312,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_vault_share",
   "prisma.device_connection",
   "prisma.device_source_no_data_outreach_preference",
-  "prisma.device_provider_application",
+
   "prisma.device_sync_companion_capture_receipt",
   "prisma.device_sync_dirty_connection",
   "prisma.device_sync_dirty_payload",
@@ -445,7 +420,7 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.device_agent_session",
   "prisma.device_browser_assertion_nonce",
   "prisma.hosted_web_internal_request_nonce",
-  "prisma.device_provider_application",
+
   "prisma.hosted_member",
 ] as const;
 
@@ -496,12 +471,7 @@ beforeEach(() => {
   serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
     get: vi.fn(() => null),
   });
-  serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockReset();
-  serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockReturnValue({
-    get: vi.fn(() => null),
-  });
-  serviceMocks.resolveDeviceProviderApplicationForConnection.mockReset();
-  serviceMocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue(null);
+
   serviceMocks.revokeStravaDeviceSyncAccess.mockReset();
   serviceMocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
   serviceMocks.deleteHostedPrivyUser.mockReset();
@@ -568,12 +538,6 @@ beforeEach(() => {
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
   serviceMocks.getHostedOnboardingStripe.mockReset();
   serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
-  serviceMocks.isHostedPulseTrialSubscriptionForKnownPolicy.mockReset();
-  serviceMocks.isHostedPulseTrialSubscriptionForKnownPolicy.mockReturnValue(
-    true,
-  );
-  serviceMocks.requireHostedStripeBillingPlanConfig.mockReset();
-  serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockReset();
   serviceMocks.pendingHostedAccountDeletionCleanupResult.mockReset();
   serviceMocks.pendingHostedAccountDeletionCleanupResult.mockImplementation(
     (errorCode = "ACCOUNT_DELETION_CLEANUP_PENDING") => makeCleanupRunResult({
@@ -629,7 +593,6 @@ beforeEach(() => {
   serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockReset();
   serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockResolvedValue({
     rawFingerprint: "prepared-fingerprint",
-    sourceBillingRef: null,
     sourceIdentity: null,
     sourceMemberId: "member_123",
     targetIdentity: null,
@@ -637,7 +600,6 @@ beforeEach(() => {
   });
   serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockReset();
   serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-    autoTrialBilling: null,
     sourceMemberId: "member_123",
   });
   serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockReset();
@@ -831,43 +793,6 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
   });
 });
 
-function makeExactPhoneTransferStripeSubscription(
-  overrides: Record<string, unknown> = {},
-) {
-  return {
-    cancel_at: null,
-    cancel_at_period_end: false,
-    collection_method: "charge_automatically",
-    customer: {
-      default_source: null,
-      deleted: false,
-      id: "cus_delete_123",
-      invoice_settings: {
-        default_payment_method: null,
-      },
-      object: "customer",
-    },
-    default_payment_method: null,
-    default_source: null,
-    ended_at: null,
-    id: "sub_delete_123",
-    pause_collection: null,
-    pending_invoice_item_interval: null,
-    pending_setup_intent: null,
-    pending_update: null,
-    schedule: null,
-    status: "trialing",
-    trial_end: 2_000_000_000,
-    trial_settings: {
-      end_behavior: {
-        missing_payment_method: "pause",
-      },
-    },
-    ...overrides,
-  };
-}
-
-
 describe("deleteHostedAccountData", () => {
   it("stops before external cleanup when sponsorship cancellation cannot commit", async () => {
     const sponsorshipError = new Error("sponsorship cancellation unavailable");
@@ -1011,7 +936,6 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
       retirement: {
-        autoTrialBilling: null,
         sourceMemberId: "member_123",
       },
       targetMember: {
@@ -1046,20 +970,17 @@ describe("deleteHostedAccountData", () => {
     expect(onTransaction).toHaveBeenCalledTimes(4);
   });
 
-  it("atomically retires the transfer source after cleanup-owned billing changes", async () => {
+  it("atomically retires an untouched Starter transfer source without Stripe effects", async () => {
     const order: string[] = [];
-    let billingCleanupCompleted = false;
     serviceMocks.readHostedPrivyUserById.mockImplementation(async () => {
       order.push("privy:read");
       return { id: "did:privy:target" };
     });
     serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirement.mockImplementation(
       async () => {
-        expect(billingCleanupCompleted).toBe(false);
         order.push("transfer:prepare");
         return {
           rawFingerprint: "prepared-fingerprint",
-          sourceBillingRef: null,
           sourceIdentity: null,
           sourceMemberId: "member_123",
           targetIdentity: null,
@@ -1069,20 +990,14 @@ describe("deleteHostedAccountData", () => {
     );
     serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockImplementation(
       async () => {
-        expect(billingCleanupCompleted).toBe(false);
         order.push("transfer:recheck");
         return {
-          autoTrialBilling: {
-            stripeCustomerId: "cus_delete_123",
-            stripeSubscriptionId: "sub_delete_123",
-          },
           sourceMemberId: "member_123",
         };
       },
     );
     serviceMocks.assertHostedPrivyPhoneTransferSourceRetirementFenceTx.mockImplementation(
       async () => {
-        expect(billingCleanupCompleted).toBe(true);
         order.push("transfer:fence");
       },
     );
@@ -1114,30 +1029,6 @@ describe("deleteHostedAccountData", () => {
         order.push("transfer:phone-locks");
       },
     );
-    const stripe = {
-      subscriptions: {
-        cancel: vi.fn(async () => {
-          billingCleanupCompleted = true;
-          order.push("stripe:subscription-cancel");
-          return makeExactPhoneTransferStripeSubscription({
-            ended_at: 1_900_000_000,
-            pending_setup_intent: "seti_trial_123",
-            status: "canceled",
-          });
-        }),
-      },
-    };
-    serviceMocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
-      priceId: "price_launch_monthly",
-      stripe,
-    });
-    // Stripe attaches a pending SetupIntent to every automatic-collection
-    // trial without a payment method; the unused-surface check must accept it.
-    serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue(
-      makeExactPhoneTransferStripeSubscription({
-        pending_setup_intent: "seti_trial_123",
-      }),
-    );
     serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
       order.push("persist:cleanup");
     });
@@ -1150,7 +1041,11 @@ describe("deleteHostedAccountData", () => {
         return { mailboxItemId: "mailbox_target" };
       },
     );
-    const vendorRows = await makeVendorAccountRowsForTest("member_123");
+    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+      stripeCheckoutSessionId: null,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
       onTransaction: () => order.push("prisma"),
@@ -1161,10 +1056,6 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
       retirement: {
-        autoTrialBilling: {
-          stripeCustomerId: "cus_delete_123",
-          stripeSubscriptionId: "sub_delete_123",
-        },
         sourceMemberId: "member_123",
       },
       targetMember: {
@@ -1212,41 +1103,13 @@ describe("deleteHostedAccountData", () => {
     ).toHaveBeenCalledWith(expect.objectContaining({
       prepared: {
         rawFingerprint: "prepared-fingerprint",
-        sourceBillingRef: null,
         sourceIdentity: null,
         sourceMemberId: "member_123",
         targetIdentity: null,
         targetMemberId: "member_target",
       },
     }));
-    expect(order.indexOf("transfer:recheck")).toBeLessThan(
-      order.indexOf("stripe:subscription-cancel"),
-    );
-    expect(
-      serviceMocks.retrieveHostedPulseTrialCleanupTarget,
-    ).toHaveBeenCalledWith({
-      expandCustomer: true,
-      expectedCustomerId: "cus_delete_123",
-      memberId: "member_123",
-      priceId: "price_launch_monthly",
-      requestOptions: {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-      stripe,
-      subscriptionId: "sub_delete_123",
-    });
-    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
-      "sub_delete_123",
-      { expand: ["customer"] },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
-    expect(order.indexOf("stripe:subscription-cancel")).toBeLessThan(
-      finalTransactionStart,
-    );
+    expect(serviceMocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
     expect(finalTransactionOrder.slice(0, 4)).toEqual([
       "transfer:phone-locks",
       "queryRaw",
@@ -1277,126 +1140,17 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it.each([
-    [
-      "active",
-      makeExactPhoneTransferStripeSubscription({ status: "active" }),
-      undefined,
-    ],
-    [
-      "past due",
-      makeExactPhoneTransferStripeSubscription({ status: "past_due" }),
-      undefined,
-    ],
-    [
-      "unpaid",
-      makeExactPhoneTransferStripeSubscription({ status: "unpaid" }),
-      undefined,
-    ],
-    [
-      "paused",
-      makeExactPhoneTransferStripeSubscription({ status: "paused" }),
-      undefined,
-    ],
-    [
-      "incomplete",
-      makeExactPhoneTransferStripeSubscription({ status: "incomplete" }),
-      undefined,
-    ],
-    [
-      "trialing without an end",
-      makeExactPhoneTransferStripeSubscription({ trial_end: null }),
-      undefined,
-    ],
-    [
-      "trialing at the cancellation boundary",
-      makeExactPhoneTransferStripeSubscription({
-        trial_end: Math.floor(Date.now() / 1_000) + 10,
-      }),
-      undefined,
-    ],
-    [
-      "card-backed",
-      makeExactPhoneTransferStripeSubscription({
-        default_payment_method: "pm_continue_123",
-      }),
-      undefined,
-    ],
-    [
-      "configured for manual invoicing",
-      makeExactPhoneTransferStripeSubscription({
-        collection_method: "send_invoice",
-      }),
-      undefined,
-    ],
-    [
-      "scheduled for another mutation",
-      makeExactPhoneTransferStripeSubscription({
-        schedule: "sub_sched_123",
-      }),
-      undefined,
-    ],
-    [
-      "canceled after the trial",
-      makeExactPhoneTransferStripeSubscription({
-        ended_at: 2_000_000_000,
-        status: "canceled",
-        trial_end: 1_900_000_000,
-      }),
-      undefined,
-    ],
-    ["mismatched provider authority", null, undefined],
-    [
-      "missing local subscription authority",
-      makeExactPhoneTransferStripeSubscription(),
-      null,
-    ],
-    [
-      "different local subscription authority",
-      makeExactPhoneTransferStripeSubscription(),
-      "sub_other",
-    ],
-  ] as const)(
-    "does not cancel or retire a transfer source that is %s",
-    async (_label, subscription, localSubscriptionId) => {
+  it.each(["sub_delete_123", "sub_other"])(
+    "does not cancel or retire a transfer source retaining subscription %s",
+    async (stripeSubscriptionId) => {
       const operationOrder: string[] = [];
       const cancel = vi.fn();
-      const stripe = {
-        subscriptions: {
-          cancel,
-        },
-      };
-      serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-        autoTrialBilling: {
-          stripeCustomerId: "cus_delete_123",
-          stripeSubscriptionId: "sub_delete_123",
-        },
-        sourceMemberId: "member_123",
+      serviceMocks.getHostedOnboardingStripe.mockReturnValue({
+        subscriptions: { cancel },
       });
-      serviceMocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
-        priceId: "price_launch_monthly",
-        stripe,
+      const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+        stripeSubscriptionId,
       });
-      if (subscription === null) {
-        serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockRejectedValue(
-          new HostedOnboardingError({
-            code: "HOSTED_PULSE_TRIAL_CLEANUP_TARGET_CHANGED",
-            httpStatus: 409,
-            message: "Trial authority changed.",
-            retryable: true,
-          }),
-        );
-      } else {
-        serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue(
-          subscription,
-        );
-      }
-      const vendorRows = await makeVendorAccountRowsForTest(
-        "member_123",
-        localSubscriptionId === undefined
-          ? undefined
-          : { stripeSubscriptionId: localSubscriptionId },
-      );
       const prisma = createHostedAccountDeletionPrismaForTest({
         ...vendorRows,
         onTransaction: () => undefined,
@@ -1406,13 +1160,7 @@ describe("deleteHostedAccountData", () => {
       await expect(deleteHostedPrivyPhoneTransferSourceAccountData({
         prisma,
         request: new Request("https://join.example.test/settings"),
-        retirement: {
-          autoTrialBilling: {
-            stripeCustomerId: "cus_delete_123",
-            stripeSubscriptionId: "sub_delete_123",
-          },
-          sourceMemberId: "member_123",
-        },
+        retirement: { sourceMemberId: "member_123" },
         targetMember: {
           billingStatus: "active",
           createdAt: new Date("2026-07-30T12:00:00.000Z"),
@@ -1433,303 +1181,10 @@ describe("deleteHostedAccountData", () => {
 
       expect(cancel).not.toHaveBeenCalled();
       expect(operationOrder).not.toContain("delete:hostedMember");
-      expect(
-        serviceMocks.reconcileHostedPrivyIdentityOnMemberTx,
-      ).not.toHaveBeenCalled();
-      expect(
-        serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
-      ).not.toHaveBeenCalled();
-      if (localSubscriptionId !== undefined) {
-        expect(
-          serviceMocks.retrieveHostedPulseTrialCleanupTarget,
-        ).not.toHaveBeenCalled();
-      }
+      expect(serviceMocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
+      expect(serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).not.toHaveBeenCalled();
     },
   );
-
-  it.each([
-    [
-      "a different subscription",
-      makeExactPhoneTransferStripeSubscription({
-        ended_at: 1_900_000_000,
-        id: "sub_changed_123",
-        status: "canceled",
-      }),
-    ],
-    [
-      "new payment authority",
-      makeExactPhoneTransferStripeSubscription({
-        default_payment_method: "pm_changed_123",
-        ended_at: 1_900_000_000,
-        status: "canceled",
-      }),
-    ],
-    [
-      "manual invoice authority",
-      makeExactPhoneTransferStripeSubscription({
-        collection_method: "send_invoice",
-        ended_at: 1_900_000_000,
-        status: "canceled",
-      }),
-    ],
-    [
-      "a cancellation after the trial",
-      makeExactPhoneTransferStripeSubscription({
-        ended_at: 2_000_000_000,
-        status: "canceled",
-        trial_end: 1_900_000_000,
-      }),
-    ],
-  ] as const)(
-    "does not retire the source when cancellation returns %s",
-    async (_label, canceledSubscription) => {
-      const operationOrder: string[] = [];
-      const cancel = vi.fn().mockResolvedValue(canceledSubscription);
-      const stripe = {
-        subscriptions: {
-          cancel,
-        },
-      };
-      serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-        autoTrialBilling: {
-          stripeCustomerId: "cus_delete_123",
-          stripeSubscriptionId: "sub_delete_123",
-        },
-        sourceMemberId: "member_123",
-      });
-      serviceMocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
-        priceId: "price_launch_monthly",
-        stripe,
-      });
-      serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue(
-        makeExactPhoneTransferStripeSubscription(),
-      );
-      const vendorRows = await makeVendorAccountRowsForTest("member_123");
-      const prisma = createHostedAccountDeletionPrismaForTest({
-        ...vendorRows,
-        onTransaction: () => undefined,
-        operationOrder,
-      });
-
-      await expect(deleteHostedPrivyPhoneTransferSourceAccountData({
-        prisma,
-        request: new Request("https://join.example.test/settings"),
-        retirement: {
-          autoTrialBilling: {
-            stripeCustomerId: "cus_delete_123",
-            stripeSubscriptionId: "sub_delete_123",
-          },
-          sourceMemberId: "member_123",
-        },
-        targetMember: {
-          billingStatus: "active",
-          createdAt: new Date("2026-07-30T12:00:00.000Z"),
-          id: "member_target",
-          suspendedAt: null,
-          updatedAt: new Date("2026-07-30T12:00:00.000Z"),
-        },
-        targetPhoneNumberBeforeTransfer: null,
-        targetPrivyUserId: "did:privy:target",
-        transfer: {
-          phoneNumber: "+15551234567",
-          sourceMemberId: "member_123",
-          sourcePrivyUserId: "did:privy:source",
-        },
-      })).rejects.toMatchObject({
-        code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
-      });
-
-      expect(cancel).toHaveBeenCalledTimes(1);
-      expect(operationOrder).not.toContain("delete:hostedMember");
-      expect(
-        serviceMocks.reconcileHostedPrivyIdentityOnMemberTx,
-      ).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([
-    [
-      "canceled",
-      makeExactPhoneTransferStripeSubscription({
-        ended_at: 1_900_000_000,
-        status: "canceled",
-      }),
-    ],
-    [
-      "incomplete_expired",
-      makeExactPhoneTransferStripeSubscription({
-        status: "incomplete_expired",
-      }),
-    ],
-  ] as const)(
-    "retires an exact transfer source whose trial is already %s without recanceling",
-    async (_status, subscription) => {
-      const operationOrder: string[] = [];
-      const cancel = vi.fn();
-      const stripe = {
-        subscriptions: {
-          cancel,
-        },
-      };
-      serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-        autoTrialBilling: {
-          stripeCustomerId: "cus_delete_123",
-          stripeSubscriptionId: "sub_delete_123",
-        },
-        sourceMemberId: "member_123",
-      });
-      serviceMocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
-        priceId: "price_launch_monthly",
-        stripe,
-      });
-      serviceMocks.retrieveHostedPulseTrialCleanupTarget.mockResolvedValue(
-        subscription,
-      );
-      const vendorRows = await makeVendorAccountRowsForTest("member_123");
-      const prisma = createHostedAccountDeletionPrismaForTest({
-        ...vendorRows,
-        onTransaction: () => undefined,
-        operationOrder,
-      });
-
-      const result = await deleteHostedPrivyPhoneTransferSourceAccountData({
-        prisma,
-        request: new Request("https://join.example.test/settings"),
-        retirement: {
-          autoTrialBilling: {
-            stripeCustomerId: "cus_delete_123",
-            stripeSubscriptionId: "sub_delete_123",
-          },
-          sourceMemberId: "member_123",
-        },
-        targetMember: {
-          billingStatus: "active",
-          createdAt: new Date("2026-07-30T12:00:00.000Z"),
-          id: "member_target",
-          suspendedAt: null,
-          updatedAt: new Date("2026-07-30T12:00:00.000Z"),
-        },
-        targetPhoneNumberBeforeTransfer: null,
-        targetPrivyUserId: "did:privy:target",
-        transfer: {
-          phoneNumber: "+15551234567",
-          sourceMemberId: "member_123",
-          sourcePrivyUserId: "did:privy:source",
-        },
-      });
-
-      expect(cancel).not.toHaveBeenCalled();
-      expect(operationOrder).toContain("delete:hostedMember");
-      expect(
-        serviceMocks.reconcileHostedPrivyIdentityOnMemberTx,
-      ).toHaveBeenCalledTimes(1);
-      expect(result.channelSyncDispatch).toEqual({
-        mailboxItemId: "mailbox_target",
-      });
-    },
-  );
-
-  it("retries local retirement without recanceling an already canceled trial", async () => {
-    const operationOrder: string[] = [];
-    const cancel = vi.fn(async () => ({
-      ...makeExactPhoneTransferStripeSubscription({
-        ended_at: 1_900_000_000,
-        status: "canceled",
-      }),
-    }));
-    const stripe = {
-      subscriptions: {
-        cancel,
-      },
-    };
-    serviceMocks.prepareHostedPrivyPhoneTransferSourceRetirementTx.mockResolvedValue({
-      // The classifier preserves these exact identifiers when Stripe reports
-      // canceled and the local billing phase has converged to null.
-      autoTrialBilling: {
-        stripeCustomerId: "cus_delete_123",
-        stripeSubscriptionId: "sub_delete_123",
-      },
-      sourceMemberId: "member_123",
-    });
-    serviceMocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
-      priceId: "price_launch_monthly",
-      stripe,
-    });
-    serviceMocks.retrieveHostedPulseTrialCleanupTarget
-      .mockResolvedValueOnce(makeExactPhoneTransferStripeSubscription())
-      .mockResolvedValueOnce(makeExactPhoneTransferStripeSubscription({
-        ended_at: 1_900_000_000,
-        status: "canceled",
-      }));
-    serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion
-      .mockRejectedValueOnce(new Error("local cleanup failed"))
-      .mockResolvedValue(undefined);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123");
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      onTransaction: () => undefined,
-      operationOrder,
-    });
-    const input = {
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-      retirement: {
-        autoTrialBilling: {
-          stripeCustomerId: "cus_delete_123",
-          stripeSubscriptionId: "sub_delete_123",
-        },
-        sourceMemberId: "member_123",
-      },
-      targetMember: {
-        billingStatus: "active" as const,
-        createdAt: new Date("2026-07-30T12:00:00.000Z"),
-        id: "member_target",
-        suspendedAt: null,
-        updatedAt: new Date("2026-07-30T12:00:00.000Z"),
-      },
-      targetPhoneNumberBeforeTransfer: null,
-      targetPrivyUserId: "did:privy:target",
-      transfer: {
-        phoneNumber: "+15551234567",
-        sourceMemberId: "member_123",
-        sourcePrivyUserId: "did:privy:source",
-      },
-    };
-
-    await expect(
-      deleteHostedPrivyPhoneTransferSourceAccountData(input),
-    ).rejects.toThrow("local cleanup failed");
-
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(operationOrder).not.toContain("delete:hostedMember");
-    expect(
-      serviceMocks.reconcileHostedPrivyIdentityOnMemberTx,
-    ).not.toHaveBeenCalled();
-
-    const retryVendorRows = await makeVendorAccountRowsForTest("member_123");
-    const retryPrisma = createHostedAccountDeletionPrismaForTest({
-      ...retryVendorRows,
-      onTransaction: () => undefined,
-      operationOrder,
-    });
-    const result = await deleteHostedPrivyPhoneTransferSourceAccountData({
-      ...input,
-      prisma: retryPrisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(
-      serviceMocks.retrieveHostedPulseTrialCleanupTarget,
-    ).toHaveBeenCalledTimes(2);
-    expect(operationOrder).toContain("delete:hostedMember");
-    expect(
-      serviceMocks.reconcileHostedPrivyIdentityOnMemberTx,
-    ).toHaveBeenCalledTimes(1);
-    expect(result.channelSyncDispatch).toEqual({
-      mailboxItemId: "mailbox_target",
-    });
-  });
 
   it("keeps the deletion fence when durable cleanup ownership cannot be prepared", async () => {
     const onTransaction = vi.fn();
@@ -3808,9 +3263,6 @@ describe("deleteHostedAccountData", () => {
     const dirtyStateIndex = operationOrder.indexOf("delete:deviceSyncDirtyConnection");
     const signalIndex = operationOrder.indexOf("delete:deviceSyncSignal");
     const connectionIndex = operationOrder.indexOf("delete:deviceConnection");
-    const providerApplicationIndex = operationOrder.indexOf(
-      "delete:deviceProviderApplication",
-    );
 
     expect(result.deletedCounts["prisma.device_sync_companion_capture_receipt"]).toBe(1);
     expect(result.deletedCounts["prisma.device_sync_dirty_payload"]).toBe(1);
@@ -3822,7 +3274,7 @@ describe("deleteHostedAccountData", () => {
     expect(dirtyStateIndex).toBeGreaterThan(dirtyPayloadIndex);
     expect(signalIndex).toBeGreaterThan(dirtyStateIndex);
     expect(connectionIndex).toBeGreaterThan(signalIndex);
-    expect(providerApplicationIndex).toBeGreaterThan(connectionIndex);
+
     expect(result.deletedCounts["prisma.device_source_no_data_outreach_preference"])
       .toBe(1);
     const intermediate = requireHostedAccountDeletionRawQuery(
@@ -3835,7 +3287,6 @@ describe("deleteHostedAccountData", () => {
     expect(intermediate.sql).toContain(
       "preference.user_id IN (SELECT id FROM target_members)",
     );
-    expect(result.deletedCounts["prisma.device_provider_application"]).toBe(1);
   });
 
   it("rejects a device authority set that changes after provider revocation", async () => {
@@ -3890,7 +3341,7 @@ describe("deleteHostedAccountData", () => {
       id: "dsc_credential_epoch",
       provider: "oura",
       providerAccountBlindIndex: "hbdi_epoch",
-      providerApplicationRevision: null,
+
       sources: [],
       tokenVersion: 4,
     };
@@ -3925,7 +3376,7 @@ describe("deleteHostedAccountData", () => {
       id: "dsc_refresh_in_flight",
       provider: "oura",
       providerAccountBlindIndex: "hbdi_refresh_in_flight",
-      providerApplicationRevision: null,
+
       refreshLeaseExpiresAt: new Date("2099-04-27T00:12:00.000Z"),
       refreshLeaseOwner: "refresh_owner",
       refreshLeaseTokenVersion: 4,
@@ -3971,7 +3422,7 @@ describe("deleteHostedAccountData", () => {
       id: "dsc_refresh_expired",
       provider: "oura",
       providerAccountBlindIndex: "hbdi_refresh_expired",
-      providerApplicationRevision: null,
+
       refreshLeaseExpiresAt: new Date("2020-04-27T00:12:00.000Z"),
       refreshLeaseOwner: "refresh_owner",
       refreshLeaseTokenVersion: 4,
@@ -4059,7 +3510,7 @@ describe("deleteHostedAccountData", () => {
       lastErrorCode: null as string | null,
       provider: "oura",
       providerAccountBlindIndex: "hbdi_refresh_expired",
-      providerApplicationRevision: null,
+
       refreshLeaseExpiresAt: new Date("2020-04-27T00:12:00.000Z") as Date | null,
       refreshLeaseOwner: "refresh_owner" as string | null,
       refreshLeaseTokenVersion: 1 as number | null,
@@ -4172,7 +3623,7 @@ describe("deleteHostedAccountData", () => {
       id: "dsc_refresh_race",
       provider: "oura",
       providerAccountBlindIndex: "hbdi_refresh_race",
-      providerApplicationRevision: null,
+
       sources: [],
       tokenVersion: 4,
     };
@@ -4212,7 +3663,7 @@ describe("deleteHostedAccountData", () => {
       id: "dsc_refresh_ambiguous_race",
       provider: "oura",
       providerAccountBlindIndex: "hbdi_refresh_ambiguous_race",
-      providerApplicationRevision: null,
+
       sources: [],
       status: "active",
       tokenVersion: 4,
@@ -4447,7 +3898,7 @@ describe("deleteHostedAccountData", () => {
       id: "dsc_current",
       provider: "oura",
       providerAccountBlindIndex: "hbdi_current",
-      providerApplicationRevision: null,
+
       sources: [],
       tokenVersion: 2,
     };
@@ -4656,38 +4107,6 @@ describe("deleteHostedAccountData", () => {
 
     expect(operationOrder).toContain("update:hostedMember");
     expect(operationOrder).not.toContain("delete:hostedMember");
-  });
-
-  it("skips provider hydration and lookup for canonical credential-less rows", async () => {
-    const operationOrder: string[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      deviceConnections: [{
-        credentialKind: "none",
-        id: "dsc_cleanup_complete",
-        provider: "oura",
-        providerAccountBlindIndex: "blind-index",
-        status: "reauthorization_required",
-      }],
-      onTransaction: () => undefined,
-      operationOrder,
-    });
-
-    await expect(deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    })).resolves.toMatchObject({
-      providerRevocations: [{
-        connectionId: "dsc_cleanup_complete",
-        errorCode: null,
-        status: "not_needed",
-      }],
-    });
-
-    expect(serviceMocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
-    expect(serviceMocks.resolveDeviceProviderApplicationForConnection).not.toHaveBeenCalled();
-    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
-    expect(operationOrder).toContain("delete:hostedMember");
   });
 
   it("fails closed when a legacy disconnected OAuth row has no durable credential material", async () => {
@@ -4915,167 +4334,6 @@ describe("deleteHostedAccountData", () => {
         warningCode: null,
       },
     ]);
-  });
-
-  it("revokes app-bound connections through their exact member-owned provider application", async () => {
-    const revokeAccess = vi.fn();
-    const providerConfigs = {
-      strava: {
-        clientId: "member-strava-client",
-        clientSecret: "member-strava-secret",
-      },
-    };
-    const storedAccount = {
-      accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
-      connectedAt: "2026-04-27T00:07:00.000Z",
-      createdAt: "2026-04-27T00:07:00.000Z",
-      credential: {
-        kind: "oauth_tokens" as const,
-        tokens: {
-          accessToken: "access-token",
-          accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
-          refreshToken: "refresh-token",
-        },
-      },
-      disconnectGeneration: 0,
-      displayName: "Strava",
-      externalAccountId: "strava-athlete-123",
-      id: "dsc_strava",
-      keyVersion: "key-v1",
-      lastSyncCompletedAt: null,
-      lastSyncErrorAt: null,
-      lastSyncStartedAt: null,
-      lastWebhookAt: null,
-      metadata: {},
-      nextReconcileAt: null,
-      provider: "strava",
-      scopes: ["read", "activity:read_all"],
-      setupExpiresAt: null,
-      setupPhase: null,
-      status: "active" as const,
-      tokenVersion: 1,
-      updatedAt: "2026-04-27T00:07:00.000Z",
-    };
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      deviceConnections: [{
-        credentialKind: "oauth_tokens",
-        id: "dsc_strava",
-        provider: "strava",
-        providerAccountBlindIndex: "blind-index",
-      }],
-      onTransaction: () => undefined,
-    });
-    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      store: {
-        getStoredConnectionAccountForUser: vi.fn(async () => storedAccount),
-        prisma,
-      },
-    });
-    serviceMocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue({
-      applicationId: "dpa_strava",
-      provider: "strava",
-      providerConfigs,
-      revision: 3,
-    });
-    serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockReturnValue({
-      get: vi.fn(() => ({ connectionHandler: { revokeAccess } })),
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(serviceMocks.resolveDeviceProviderApplicationForConnection).toHaveBeenCalledWith({
-      connectionId: "dsc_strava",
-      memberId: "member_123",
-      prisma,
-    });
-    expect(serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs).toHaveBeenCalledWith({
-      providerConfigs,
-    });
-    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
-    expect(revokeAccess).toHaveBeenCalledWith(storedAccount);
-    expect(result.providerRevocations).toEqual([{
-      connectionId: "dsc_strava",
-      errorCode: null,
-      providerLabel: "Strava",
-      status: "revoked",
-      warningCode: null,
-    }]);
-  });
-
-  it("uses stored Strava authority and proceeds with deletion when private credentials require repair", async () => {
-    const storedAccount = {
-      accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
-      connectedAt: "2026-04-27T00:07:00.000Z",
-      createdAt: "2026-04-27T00:07:00.000Z",
-      credential: {
-        kind: "oauth_tokens" as const,
-        tokens: {
-          accessToken: "cleanup-access-token",
-          accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
-          refreshToken: "cleanup-refresh-token",
-        },
-      },
-      disconnectGeneration: 0,
-      displayName: "Strava",
-      externalAccountId: "strava-athlete-123",
-      id: "dsc_strava",
-      keyVersion: "key-v1",
-      lastSyncCompletedAt: null,
-      lastSyncErrorAt: null,
-      lastSyncStartedAt: null,
-      lastWebhookAt: null,
-      metadata: {},
-      nextReconcileAt: null,
-      provider: "strava",
-      scopes: ["read", "activity:read_all"],
-      setupExpiresAt: null,
-      setupPhase: null,
-      status: "active" as const,
-      tokenVersion: 1,
-      updatedAt: "2026-04-27T00:07:00.000Z",
-    };
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      deviceConnections: [{
-        credentialKind: "oauth_tokens",
-        id: "dsc_strava",
-        provider: "strava",
-        providerAccountBlindIndex: "blind-index",
-      }],
-      onTransaction: () => undefined,
-    });
-    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      store: {
-        getStoredConnectionAccountForUser: vi.fn(async () => storedAccount),
-        prisma,
-      },
-    });
-    serviceMocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(
-      new DeviceProviderApplicationError(
-        "DEVICE_PROVIDER_APPLICATION_INVALID",
-        "Private provider application credentials are invalid.",
-      ),
-    );
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(serviceMocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedAccount);
-    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
-    expect(serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs).not.toHaveBeenCalled();
-    expect(result.providerRevocations).toEqual([{
-      connectionId: "dsc_strava",
-      errorCode: null,
-      providerLabel: "Strava",
-      status: "revoked",
-      warningCode: null,
-    }]);
   });
 
   it("reports provider registry failures through the account-deletion revocation policy", async () => {
@@ -5902,7 +5160,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     id: string;
     lastErrorCode?: string | null;
     provider: string;
-    providerApplicationRevision?: number | null;
+
     providerAccountBlindIndex: string;
     refreshLeaseExpiresAt?: Date | null;
     refreshLeaseOwner?: string | null;
@@ -5959,7 +5217,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     id: string;
     lastErrorCode?: string | null;
     provider: string;
-    providerApplicationRevision?: number | null;
+
     providerAccountBlindIndex: string;
     refreshLeaseExpiresAt?: Date | null;
     refreshLeaseOwner?: string | null;
@@ -6187,7 +5445,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
       count: async () => input.inFlightDeviceOauthCallbackCount ?? 0,
       findMany: async () => input.deviceOauthSessions ?? [],
     },
-    deviceProviderApplication: makeDeleteDelegate("deviceProviderApplication"),
+
     hostedComputerRun: {
       ...makeDeleteDelegate("hostedComputerRun"),
       findMany: async () => {
@@ -6367,7 +5625,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
         input.deviceConnections ?? [],
       ),
     },
-    deviceProviderApplication: makeDeleteDelegate("deviceProviderApplication"),
+
     hostedAccountGroup: {
       findMany: async () => input.familyGroups ?? [],
     },
@@ -6755,7 +6013,7 @@ type HostedAccountDeletionPrismaTransactionFake = {
       state: string;
     }>>;
   };
-  deviceProviderApplication: HostedAccountDeletionPrismaDeleteDelegate;
+
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };

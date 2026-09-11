@@ -82,10 +82,10 @@ import {
   HOSTED_RUNTIME_MEDIA_SHA256_HEADER,
 } from "./runner-outbound/headers.ts";
 import {
-  requireRunnerRuntimeWriteFenceWrite,
+  requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
-  type RunnerRuntimeWriteFenceWriteAuthority,
+  type RunnerRuntimeWriteFenceHeaders,
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
@@ -647,7 +647,7 @@ async function handleRunnerMediaDeleteRequest(input: {
   mediaId: string;
   mediaStore: RunnerMediaStore;
   userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<Response> {
   const forgotten = await forgetHostedMediaAsset({
     env: input.env,
@@ -714,7 +714,7 @@ async function handleRunnerMediaRecordRequest(input: {
   emitCompleted: RunnerMediaRequestCompletedEmitter;
   env: RunnerOutboundEnvironmentSource;
   userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<Response> {
   const recorded = await recordHostedMediaAsset({
     descriptor: input.descriptor,
@@ -741,7 +741,7 @@ async function handleRunnerMediaPutRequest(input: {
   mediaStore: RunnerMediaStore;
   request: Request;
   userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<Response> {
   const bytes = new Uint8Array(await input.request.arrayBuffer());
   await input.mediaStore.writeMedia({
@@ -827,9 +827,9 @@ async function readRunnerMediaWriteAuthority(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
-}): Promise<RunnerRuntimeWriteFenceWriteAuthority | null> {
+}): Promise<RunnerRuntimeWriteFenceHeaders | null> {
   try {
-    return await requireRunnerRuntimeWriteFenceWrite(input);
+    return await requireRunnerRuntimeWriteFence(input);
   } catch (error) {
     if (error instanceof RunnerRuntimeWriteFenceError) {
       return null;
@@ -858,7 +858,7 @@ async function recordHostedMediaAsset(input: {
   descriptor: NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
   env: RunnerOutboundEnvironmentSource;
   userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<boolean> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   requireRunnerOutboundUserStubMethod(stub, "recordHostedMediaAsset");
@@ -878,7 +878,7 @@ async function forgetHostedMediaAsset(input: {
   env: RunnerOutboundEnvironmentSource;
   mediaId: string;
   userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<boolean> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   requireRunnerOutboundUserStubMethod(stub, "forgetHostedMediaAsset");
@@ -1106,7 +1106,7 @@ async function handleRunnerArtifactRequest(input: {
         if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
           return false;
         }
-        await requireRunnerRuntimeWriteFenceWrite(input);
+        await requireRunnerRuntimeWriteFence(input);
         input.request.signal.throwIfAborted();
         if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
           return false;
@@ -1271,9 +1271,25 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
             ),
           };
         }
+        const replacedSnapshotRef = body.replacedSnapshotRef === undefined
+          ? undefined
+          : body.replacedSnapshotRef === null
+            ? null
+            : parseHostedWorkspaceSnapshotV2Ref(body.replacedSnapshotRef);
+        if (replacedSnapshotRef && !await isHostedWorkspaceSnapshotV2RefOwnedByUser({
+          snapshotRef: replacedSnapshotRef,
+          userId: input.userId,
+        })) {
+          return {
+            kind: "rejected" as const,
+            outcome: "unauthorized" as const,
+            response: jsonError("Hosted workspace replaced snapshot is outside the bound user namespace.", 403),
+          };
+        }
         return {
           expectedWorkspaceVersion,
           kind: "valid" as const,
+          replacedSnapshotRef,
           writeFence,
         };
       },
@@ -1345,6 +1361,9 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
           expiresAt,
           leaseGeneration: validation.writeFence.generation,
           objectKey: crypto.objectKey,
+          ...(validation.replacedSnapshotRef === undefined
+            ? {}
+            : { replacedSnapshotRef: validation.replacedSnapshotRef }),
           schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
           snapshotId: crypto.snapshotId,
           userId: input.userId,
@@ -2459,15 +2478,18 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   };
 
   let preCheckpointReplacedSnapshotRef: HostedExecutionSnapshotRefValue | null = null;
-  try {
-    const preCheckpointWorkspace = await readCurrentHostedWorkspace({
-      environment: input.environment,
-      fetchImpl: fetch,
-      userId: input.userId,
-    });
-    preCheckpointReplacedSnapshotRef = preCheckpointWorkspace?.snapshotRef ?? null;
-  } catch {
-    return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
+  // Legacy snapshots and warm older producers omit this baseline.
+  if (session.replacedSnapshotRef === undefined) {
+    try {
+      const preCheckpointWorkspace = await readCurrentHostedWorkspace({
+        environment: input.environment,
+        fetchImpl: fetch,
+        userId: input.userId,
+      });
+      preCheckpointReplacedSnapshotRef = preCheckpointWorkspace?.snapshotRef ?? null;
+    } catch {
+      return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
+    }
   }
   if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
@@ -2475,7 +2497,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (
     preCheckpointReplacedSnapshotRef
     && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
-    && !session.replacedSnapshotRef
   ) {
     try {
       const remembered = await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
@@ -3374,9 +3395,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  let writeAuthority: Awaited<ReturnType<typeof requireRunnerRuntimeWriteFenceWrite>>;
+  let writeAuthority: Awaited<ReturnType<typeof requireRunnerRuntimeWriteFence>>;
   try {
-    writeAuthority = await requireRunnerRuntimeWriteFenceWrite({
+    writeAuthority = await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
@@ -3507,7 +3528,7 @@ async function writeRequestOwnsRuntimeWriteFence(input: {
   userId: string;
 }): Promise<boolean> {
   try {
-    await requireRunnerRuntimeWriteFenceWrite({
+    await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,

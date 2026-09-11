@@ -1,9 +1,9 @@
+import { createHash } from "node:crypto";
 import type {
   HostedExecutionClinicalRecordsSyncRequestedWake,
 } from "@murphai/hosted-execution/contracts";
 import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
-  CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFhirRetrievalSliceSchema,
   clinicalSourceSystemSchema,
@@ -12,8 +12,6 @@ import {
 } from "@murphai/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-  HOSTED_CLINICAL_RECORDS_MAX_PAGES,
-  HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
   parseHostedClinicalRecordsFetchPageResponse,
   parseHostedClinicalRecordsReadRunResponse,
   type HostedClinicalRecordsOutcomeCounts,
@@ -35,6 +33,9 @@ import type {
 import {
   createHostedBackgroundMaintenanceCancellation,
 } from "./background-maintenance-cancellation.ts";
+
+import { fetchPendingClinicalDocuments, stageClinicalPageDocuments } from "./clinical-records-maintenance-documents.ts";
+import { admitHostedClinicalEnrichmentWake } from "./clinical-enrichment-wake.ts";
 
 const CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER =
   "@murphai/vault-usecases/clinical-records";
@@ -176,6 +177,11 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
   }
 
   await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+  const fetchDocuments = () => fetchPendingClinicalDocuments({
+    checkpoint, generation: checkpointIdentity.generation, runId: checkpointIdentity.runId, port, signal: input.signal,
+    persist: () => persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule }),
+    throwIfPreempted: () => throwIfPreempted(input),
+  });
   const retrievalWork = checkpointIdentity.retrievalSlices;
   const sourceSystem = clinicalSourceSystemSchema.parse(checkpointIdentity.sourceSystem);
   if (checkpoint.currentResourceIndex > retrievalWork.length) {
@@ -193,6 +199,77 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     throwIfPreempted(input);
   }
 
+  const flushBatch = async () => {
+    if (checkpoint.pages.length === 0) return;
+    await fetchDocuments();
+    const page = checkpoint.pages[0]!;
+    const scope = retrievalWork.find((slice) => slice.queryScopeId === page.queryScopeId && slice.sliceId === page.sliceId);
+    if (!scope) throw new HostedClinicalRecordsRuntimeError("CLINICAL_RECORDS_SCOPE_UNAVAILABLE", "Clinical page scope is unavailable.");
+    const nextPageUrlHash = clinicalPageNextUrlHash(page.content);
+    const result = await (input.importSnapshot ?? vaultModule.importClinicalFhirSnapshot)({
+      assertCurrent: () => assertClinicalRecordsRunCurrent({ allowAuthorizationRequired: checkpoint.authorizationRequired, input, port }),
+      attachments: checkpoint.attachments,
+      documentAttachments: checkpoint.documentAttachments,
+      batch: {
+        runId: checkpointIdentity.retrievalJobId,
+        index: checkpoint.batchIndex,
+        ...(checkpoint.previousBatch ? { previous: checkpoint.previousBatch } : {}),
+        ...(nextPageUrlHash ? { continuesWith: { queryScopeId: page.queryScopeId, sliceId: page.sliceId, pageUrlHash: nextPageUrlHash } } : {}),
+      },
+      completedRetrievalSlices: [],
+      connectionId: checkpointIdentity.connectionId,
+      fetchedAt: checkpointIdentity.fetchedAt,
+      fhirBaseUrlHash: checkpointIdentity.fhirBaseUrlHash,
+      grantedScopes: checkpointIdentity.grantedScopes,
+      pages: checkpoint.pages,
+      patientIdHash: checkpointIdentity.patientIdHash,
+      ...(checkpointIdentity.providerDirectoryEntryId ? { providerDirectoryEntryId: checkpointIdentity.providerDirectoryEntryId } : {}),
+      requestedScopes: checkpointIdentity.requestedScopes,
+      retrievalJobId: `${checkpointIdentity.retrievalJobId}-batch-${checkpoint.batchIndex}`,
+      retrievalProtocol: checkpointIdentity.retrievalProtocol,
+      retrievalSlices: [scope],
+      signal: input.signal,
+      sourceSystem,
+      vaultRoot: input.vaultRoot,
+    });
+    if (checkpoint.documentAttachments.some((attachment) => attachment.status === "downloaded")) {
+      const { enqueueClinicalEnrichment } = await import("@murphai/vault-usecases/clinical-enrichment");
+      const { jobId } = await enqueueClinicalEnrichment({
+        vaultRoot: input.vaultRoot,
+        manifestPath: result.manifestPath,
+        manifestSha256: result.manifestSha256,
+      });
+      // Publish durable work before advancing the retrieval cursor. Replaying a
+      // saved batch therefore repairs a crash between evidence and admission.
+      await admitHostedClinicalEnrichmentWake({
+        vaultRoot: input.vaultRoot,
+        userId: input.wake.userId,
+        jobId,
+        occurredAt: input.wake.occurredAt,
+      });
+    }
+    checkpoint.importedCounts.createdCount += result.canonical.createdCount;
+    checkpoint.importedCounts.retractedCount += result.canonical.retractedCount;
+    checkpoint.importedCounts.skippedExistingCount += result.canonical.skippedExistingCount;
+    checkpoint.importedCounts.supersededCount += result.canonical.supersededCount;
+    checkpoint.importedCounts.executableDecisionCount += result.executableDecisionCount;
+    checkpoint.importedCounts.labResultCount += result.labResultCount;
+    checkpoint.importedCounts.rawFileCount += result.rawFileCount;
+    checkpoint.importedCounts.reviewDecisionCount += result.reviewDecisionCount;
+    checkpoint.importedCounts.incompleteRevisionCount += result.incompleteRevisionCount;
+    checkpoint.previousBatch = { manifestPath: result.manifestPath, sha256: result.manifestSha256 };
+    checkpoint.batchIndex += 1;
+    checkpoint.pages = [];
+    checkpoint.attachments = [];
+    checkpoint.documentAttachments = [];
+    checkpoint.totalBodyBytes = 0;
+    checkpoint.totalResourceCount = 0;
+    checkpoint.resourcePageStartIndex = 0;
+    await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+    throwIfPreempted(input);
+  };
+  try {
+    await flushBatch();
   retrieval: for (
     let resourceIndex = checkpoint.currentResourceIndex;
     resourceIndex < retrievalWork.length;
@@ -213,11 +290,6 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
 
     while (!completed) {
       throwIfPreempted(input);
-      if (checkpoint.pageFetchCount >= HOSTED_CLINICAL_RECORDS_MAX_PAGES) {
-        finishIncompleteRetrieval({ checkpoint, retrievalWork, code: "page_limit_exceeded" });
-        await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
-        break retrieval;
-      }
       if (checkpoint.cursor && checkpoint.seenCursors.includes(checkpoint.cursor)) {
         return await terminalFailureAfterClearingCheckpoint({
           checkpoint,
@@ -307,18 +379,6 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
         break retrieval;
       }
-      if (
-        checkpoint.totalResourceCount + pageResourceCount >
-        CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES
-      ) {
-        finishIncompleteRetrieval({
-          checkpoint,
-          retrievalWork,
-          code: "snapshot_resource_limit_exceeded",
-        });
-        await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
-        break retrieval;
-      }
       if (response.pageUrlHash && checkpoint.seenPageUrlHashes.includes(response.pageUrlHash)) {
         return await terminalFailureAfterClearingCheckpoint({
           checkpoint,
@@ -327,14 +387,6 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           input,
           vaultModule,
         });
-      }
-      if (
-        checkpoint.totalBodyBytes + pageBodyBytes >
-        HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES
-      ) {
-        finishIncompleteRetrieval({ checkpoint, retrievalWork, code: "snapshot_size_exceeded" });
-        await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
-        break retrieval;
       }
       if (
         clinicalFhirPageHasIncompleteSearchOutcome(response.body) &&
@@ -361,6 +413,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         ...retrievalIdentityFields(scope),
         resourceType: scope.resourceType,
       });
+      stageClinicalPageDocuments({ body: response.body, checkpoint, documents: response.documents });
       if (requestedCursor) {
         checkpoint.seenCursors.push(requestedCursor);
       }
@@ -377,6 +430,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         checkpoint.seenPageUrlHashes = [];
       }
       await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+      await flushBatch();
       throwIfPreempted(input);
     }
 
@@ -385,55 +439,11 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     }
   }
 
-  throwIfPreempted(input);
-  const boundError = checkpoint.errors.find((error) => error.code.endsWith("_exceeded"));
-  if (checkpoint.completedRetrievalSlices.length === 0 && boundError) {
-    return terminalFailureAfterClearingCheckpoint({
-      checkpoint,
-      checkpointIdentity,
-      errorCode: boundError.code,
-      input,
-      vaultModule,
-    });
-  }
-  const importSnapshot = input.importSnapshot ?? vaultModule.importClinicalFhirSnapshot;
-  let result: ClinicalFhirSnapshotImportResult;
-  try {
-    result = await importSnapshot({
-      assertCurrent: async () => {
-        await assertClinicalRecordsRunCurrent({
-          allowAuthorizationRequired: checkpoint.authorizationRequired,
-          input,
-          port,
-        });
-      },
-      completedRetrievalSlices: checkpoint.completedRetrievalSlices,
-      connectionId: checkpointIdentity.connectionId,
-      ...(checkpoint.errors.length > 0 ? { errors: checkpoint.errors } : {}),
-      fetchedAt: checkpointIdentity.fetchedAt,
-      fhirBaseUrlHash: checkpointIdentity.fhirBaseUrlHash,
-      grantedScopes: checkpointIdentity.grantedScopes,
-      pages: checkpoint.pages,
-      patientIdHash: checkpointIdentity.patientIdHash,
-      ...(checkpointIdentity.providerDirectoryEntryId
-        ? { providerDirectoryEntryId: checkpointIdentity.providerDirectoryEntryId }
-        : {}),
-      requestedScopes: checkpointIdentity.requestedScopes,
-      retrievalJobId: checkpointIdentity.retrievalJobId,
-      retrievalProtocol: checkpointIdentity.retrievalProtocol,
-      retrievalSlices: checkpointIdentity.retrievalSlices,
-      signal: input.signal,
-      sourceSystem,
-      vaultRoot: input.vaultRoot,
-    });
   } catch (error) {
     if (isClinicalFhirSnapshotRejectedError(error)) {
       await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
       const failure = terminalFailure({
-        counts: fetchCounts(
-          checkpoint.successfulPageCount,
-          completedResourceFamilyCount(checkpoint, checkpointIdentity),
-        ),
+        counts: checkpointOutcomeCounts(checkpoint, checkpointIdentity),
         checkpointIdentity,
         errorCode: "snapshot_rejected",
       });
@@ -450,20 +460,14 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     throw error;
   }
   await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
+  const { incompleteRevisionCount, ...importedCounts } = checkpoint.importedCounts;
   const counts: HostedClinicalRecordsOutcomeCounts = {
-    createdCount: result.canonical.createdCount,
-    executableDecisionCount: result.executableDecisionCount,
+    ...importedCounts,
     fetchedPageCount: checkpoint.successfulPageCount,
     fetchedResourceFamilyCount: completedResourceFamilyCount(checkpoint, checkpointIdentity),
-    labResultCount: result.labResultCount,
-    rawFileCount: result.rawFileCount,
-    retractedCount: result.canonical.retractedCount,
-    reviewDecisionCount: result.reviewDecisionCount,
-    skippedExistingCount: result.canonical.skippedExistingCount,
-    supersededCount: result.canonical.supersededCount,
   };
   const status =
-    checkpoint.errors.length > 0 || result.incompleteRevisionCount > 0
+    checkpoint.errors.length > 0 || incompleteRevisionCount > 0
       ? "partial"
       : "completed";
   const outcome = {
@@ -472,7 +476,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       ? { errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE }
       : checkpoint.errors[0]
         ? { errorCode: checkpoint.errors[0].code }
-        : result.incompleteRevisionCount > 0
+        : incompleteRevisionCount > 0
           ? { errorCode: "incomplete-source-revision" }
           : {}),
     generation: checkpointIdentity.generation,
@@ -491,6 +495,11 @@ async function loadClinicalRecordsVaultModule(): Promise<ClinicalRecordsVaultMod
 
 function emptyRetrievalCheckpoint(): ClinicalFhirRetrievalCheckpoint {
   return {
+    batchIndex: 0,
+    importedCounts: { createdCount: 0, executableDecisionCount: 0, labResultCount: 0, rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0, incompleteRevisionCount: 0 },
+    attachments: [],
+    documentAttachments: [],
+    pendingDocuments: [],
     authorizationRequired: false,
     completedRetrievalSlices: [],
     currentResourceIndex: 0,
@@ -524,7 +533,7 @@ function finishIncompleteRetrieval(input: {
   code: string;
 }): void {
   const remaining = input.retrievalWork.slice(input.checkpoint.currentResourceIndex);
-  input.checkpoint.pages.splice(input.checkpoint.resourcePageStartIndex);
+
   input.checkpoint.currentResourceIndex = input.retrievalWork.length;
   input.checkpoint.cursor = null;
   input.checkpoint.resourcePageStartIndex = input.checkpoint.pages.length;
@@ -593,10 +602,7 @@ async function terminalFailureAfterClearingCheckpoint(input: {
 }): Promise<HostedClinicalRecordsSyncMetrics> {
   await clearRetrievalCheckpoint(input);
   return terminalFailure({
-    counts: fetchCounts(
-      input.checkpoint.successfulPageCount,
-      completedResourceFamilyCount(input.checkpoint, input.checkpointIdentity),
-    ),
+    counts: checkpointOutcomeCounts(input.checkpoint, input.checkpointIdentity),
     checkpointIdentity: input.checkpointIdentity,
     errorCode: input.errorCode,
   });
@@ -677,6 +683,7 @@ function terminalFailure(input: {
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode: string;
 }): HostedClinicalRecordsSyncMetrics {
+  const status = input.counts.rawFileCount > 0 ? "partial" : "failed";
   return {
     counts: input.counts,
     outcome: {
@@ -685,9 +692,9 @@ function terminalFailure(input: {
       generation: input.checkpointIdentity.generation,
       ...retrievalOutcomeIdentity(input.checkpointIdentity),
       runId: input.checkpointIdentity.runId,
-      status: "failed",
+      status,
     },
-    status: "failed",
+    status,
   };
 }
 
@@ -714,14 +721,12 @@ function isClinicalFhirSnapshotRejectedError(error: unknown): error is Error & {
     && error.code === "CLINICAL_FHIR_SNAPSHOT_REJECTED";
 }
 
-function fetchCounts(
-  fetchedPageCount: number,
-  fetchedResourceFamilyCount: number,
-): HostedClinicalRecordsOutcomeCounts {
+function checkpointOutcomeCounts(checkpoint: ClinicalFhirRetrievalCheckpoint, identity: ClinicalFhirRetrievalCheckpointIdentity): HostedClinicalRecordsOutcomeCounts {
+  const { incompleteRevisionCount: _incompleteRevisionCount, ...counts } = checkpoint.importedCounts;
   return {
-    ...emptyCounts(),
-    fetchedPageCount,
-    fetchedResourceFamilyCount,
+    ...counts,
+    fetchedPageCount: checkpoint.successfulPageCount,
+    fetchedResourceFamilyCount: completedResourceFamilyCount(checkpoint, identity),
   };
 }
 
@@ -751,4 +756,15 @@ class HostedClinicalRecordsRuntimeError extends Error {
     this.code = code;
     this.name = "HostedClinicalRecordsRuntimeError";
   }
+}
+
+function clinicalPageNextUrlHash(content: string): string | undefined {
+  const page: unknown = JSON.parse(content);
+  if (!page || typeof page !== "object" || !("link" in page) || !Array.isArray(page.link)) return undefined;
+  for (const link of page.link) {
+    if (link && typeof link === "object" && "relation" in link && link.relation === "next" && "url" in link && typeof link.url === "string") {
+      return createHash("sha256").update(link.url, "utf8").digest("hex");
+    }
+  }
+  return undefined;
 }

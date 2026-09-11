@@ -18,7 +18,7 @@ export async function sendPendingHostedLinqAlertsBestEffort(input: {
   alertIds: readonly string[];
   env?: HostedLinqAlertEmailEnv;
   fetchImpl?: typeof fetch;
-  prisma?: PrismaClient;
+  prisma?: Pick<PrismaClient, "hostedLinqAlert">;
 }): Promise<void> {
   if (input.alertIds.length === 0) {
     return;
@@ -37,7 +37,7 @@ export async function sendRecoverableHostedLinqAlertsBestEffort(input: {
   env?: HostedLinqAlertEmailEnv;
   fetchImpl?: typeof fetch;
   now?: Date;
-  prisma?: PrismaClient;
+  prisma?: Pick<PrismaClient, "hostedLinqAlert">;
 } = {}): Promise<void> {
   try {
     await sendPendingHostedLinqAlerts({
@@ -58,7 +58,7 @@ async function sendPendingHostedLinqAlerts(input: {
   fetchImpl?: typeof fetch;
   includeRecoverableSending?: boolean;
   now?: Date;
-  prisma?: PrismaClient;
+  prisma?: Pick<PrismaClient, "hostedLinqAlert">;
 }): Promise<void> {
   const config = readHostedOperationalAlertEmailConfig(
     input.env ?? process.env,
@@ -95,7 +95,7 @@ async function sendHostedLinqAlertEmail(input: {
   alert: HostedLinqAlert;
   config: HostedOperationalAlertEmailConfig;
   fetchImpl?: typeof fetch;
-  prisma: PrismaClient;
+  prisma: Pick<PrismaClient, "hostedLinqAlert">;
 }): Promise<void> {
   const claim = await input.prisma.hostedLinqAlert.updateMany({
     where: {
@@ -184,6 +184,9 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
   const details = alert.detailsJson && typeof alert.detailsJson === "object"
     ? alert.detailsJson as Record<string, unknown>
     : {};
+  if (alert.kind === "runtime_warm_typing_slow" || alert.kind === "runtime_cold_typing_slow") {
+    return buildHostedTypingAlertEmailText(alert.id, details);
+  }
   const independentProviderStatusPresent =
     typeof details.providerServiceStatus === "string"
     || typeof details.providerReputationStatus === "string";
@@ -216,4 +219,26 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
 
 function buildHostedLinqAlertEmailIdempotencyKey(alertId: string): string {
   return `hosted-linq-alert/${alertId}`.slice(0, 256);
+}
+
+function buildHostedTypingAlertEmailText(alertId: string, details: Record<string, unknown>): string {
+  return [
+    "Murph message typing latency alert.",
+    "",
+    `Alert ID: ${alertId}`,
+    `Channel: ${details.source}`,
+    `Workspace: ${details.workspaceState}`,
+    `Webhook received: ${details.webhookReceivedAt}`,
+    details.typingAcceptedAt === null
+      ? "Typing acceptance: not observed when checked"
+      : `First typing accepted: ${details.typingAcceptedAt}`,
+    details.typingAcceptedAt === null
+      ? `Time since webhook without recorded typing acceptance: ${details.elapsedMs} ms`
+      : `Webhook-to-typing wait: ${details.elapsedMs} ms`,
+    `Threshold: strictly greater than ${details.thresholdMs} ms`,
+    ...(details.workspaceState === "unconfirmed"
+      ? ["Workspace warmth was not confirmed; the 10-second cold-start cutoff applies."] : []),
+    "",
+    "This is one inbound message. Rollouts and other slow messages do not suppress this alert.",
+  ].join("\n");
 }

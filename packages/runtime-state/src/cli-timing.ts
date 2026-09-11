@@ -18,6 +18,35 @@ export const CLI_TIMING_PHASES = [
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
 export type CliTimingOutcome = "ok" | "error" | "unknown";
 
+// Exact, source-owned vocabularies only. Never admit arbitrary provider codes,
+// names or stages by pattern; adding a value requires consumer-first rollout.
+export const CLI_TIMING_MAX_FAILURES = 8;
+export const CLI_TIMING_FAILURE_CODES = [
+  "unknown", "invalid_option", "invalid_payload", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
+  "not_found", "conflict", "permission_denied", "invalid_path", "storage_unavailable",
+  "knowledge_page_not_found", "knowledge_page_conflict", "knowledge_duplicate_slug", "knowledge_page_invalid",
+  "QUERY_SOURCE_INVALID", "query_source_invalid", "unsupported_format",
+  "ENOENT", "EACCES", "EPERM", "EISDIR", "ENOTDIR", "ENOSPC", "EPIPE",
+  "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ABORT_ERR",
+  "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET",
+] as const;
+export const CLI_TIMING_FAILURE_STAGES = [
+  "unknown", "authorization", "configuration", "conflict", "filesystem", "integrity",
+  "persistence", "read", "render", "response", "transport", "validation", "write", "command", "query_source",
+] as const;
+export interface CliFailureTiming {
+  code: typeof CLI_TIMING_FAILURE_CODES[number];
+  stage: typeof CLI_TIMING_FAILURE_STAGES[number];
+  count: number;
+}
+export function cliTimingFailureCode(value: unknown): CliFailureTiming["code"] {
+  return CLI_TIMING_FAILURE_CODES.find((code) => code === value) ?? "unknown";
+}
+export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"] {
+  return CLI_TIMING_FAILURE_STAGES.find((stage) => stage === value) ?? "unknown";
+}
+
+
 // Registered paths from the source-owned CLI catalog (incur.generated.ts).
 // New names require consumer-first admission here; until then they become other.
 // The CLI test compares this vocabulary to the real registered command tree.
@@ -104,6 +133,9 @@ export interface CliCommandTiming {
   outcome: CliTimingOutcome;
   calls: number;
   phases: CliPhaseTiming[];
+  failures?: CliFailureTiming[];
+  /** Diagnostic observations omitted by the per-command cap, not extra calls. */
+  droppedFailures?: number;
 }
 export interface CliTiming {
   schema: typeof CLI_TIMING_SCHEMA;
@@ -156,6 +188,43 @@ function normalizePhaseTiming(value: unknown): CliPhaseTiming | null {
   return validPhaseHistogram(timing) ? timing : null;
 }
 
+type CommandFailures = Pick<CliCommandTiming, "failures" | "droppedFailures">;
+
+/** Optional diagnostics fail independently of otherwise-valid timing/accounting. */
+function normalizeCommandFailures(command: {
+  outcome?: unknown; calls?: unknown; failures?: unknown; droppedFailures?: unknown;
+}): CommandFailures {
+  try {
+    if (command.outcome === "ok") return {};
+    const input = command.failures;
+    const dropped = command.droppedFailures ?? 0;
+    const calls = command.calls;
+    const entries = input === undefined ? [] : input;
+    if (!Array.isArray(entries) || !integer(dropped) || !integer(calls) || dropped > calls) return {};
+    const length = entries.length;
+    if (!integer(length) || length > CLI_TIMING_MAX_FAILURES) return {};
+    const failures: CliFailureTiming[] = [];
+    let observations = dropped;
+    // Bound indexed reads; do not trust a supplied array iterator or reread a
+    // property after validation (accessors could return a different value).
+    for (let index = 0; index < length; index += 1) {
+      const entry = record(entries[index]);
+      if (!entry) return {};
+      const count = entry.count;
+      if (!integer(count) || count < 1) return {};
+      observations += count;
+      // Nonnegative integer counts stay safe while bounded by the safe call count.
+      if (observations > calls) return {};
+      const code = cliTimingFailureCode(entry.code);
+      const stage = cliTimingFailureStage(entry.stage);
+      const current = failures.find((item) => item.code === code && item.stage === stage);
+      if (current) current.count += count;
+      else failures.push({ code, stage, count });
+    }
+    return { ...(failures.length ? { failures } : {}), ...(dropped ? { droppedFailures: dropped } : {}) };
+  } catch { return {}; }
+}
+
 function normalizeCommandTiming(value: unknown): CliCommandTiming | null {
   const command = record(value);
   if (!command || typeof command.command !== "string" ||
@@ -171,7 +240,8 @@ function normalizeCommandTiming(value: unknown): CliCommandTiming | null {
     names.add(phase.phase);
     phases.push(phase);
   }
-  return { command: command.command, outcome: command.outcome, calls: command.calls, phases };
+  return { command: command.command, outcome: command.outcome, calls: command.calls, phases,
+    ...normalizeCommandFailures(command) };
 }
 
 /** Strip extras and reject malformed optional telemetry, never legacy accounting. */
@@ -221,6 +291,19 @@ export function addCliPhaseSample(phases: CliPhaseTiming[], phase: CliTimingPhas
 export function incrementCliTimingDrop(value: number, count = 1): number {
   return Math.min(Number.MAX_SAFE_INTEGER, value + count);
 }
+function mergeCommandFailures(current: CliCommandTiming | undefined, incoming: CliCommandTiming): CommandFailures {
+  const left = current ? normalizeCommandFailures(current) : {};
+  const right = normalizeCommandFailures(incoming);
+  const failures = left.failures ?? [];
+  let dropped = (left.droppedFailures ?? 0) + (right.droppedFailures ?? 0);
+  for (const entry of right.failures ?? []) {
+    const existing = failures.find((item) => item.code === entry.code && item.stage === entry.stage);
+    if (existing) existing.count += entry.count;
+    else if (failures.length < CLI_TIMING_MAX_FAILURES) failures.push(entry);
+    else dropped += entry.count;
+  }
+  return { ...(failures.length ? { failures } : {}), ...(dropped ? { droppedFailures: dropped } : {}) };
+}
 /** Merge bounded summaries atomically per command; an overflow drops that command. */
 export function mergeCliTiming(target: CliTiming, source: CliTiming): void {
   target.reportCount = incrementCliTimingDrop(target.reportCount, source.reportCount);
@@ -237,12 +320,14 @@ export function mergeCliTiming(target: CliTiming, source: CliTiming): void {
       if (target.commands.length >= CLI_TIMING_MAX_COMMANDS) {
         target.droppedCalls = incrementCliTimingDrop(target.droppedCalls, entry.calls);
       } else {
-        target.commands.push({ ...entry, phases: entry.phases.map((phase) =>
-          ({ ...phase, buckets: [...phase.buckets] })) });
+        target.commands.push({ command: entry.command, outcome: entry.outcome, calls: entry.calls,
+          phases: entry.phases.map((phase) => ({ ...phase, buckets: [...phase.buckets] })),
+          ...mergeCommandFailures(undefined, entry) });
       }
       continue;
     }
-    const merged = { ...current, calls: current.calls + entry.calls,
+    const merged: CliCommandTiming = { command: current.command, outcome: current.outcome,
+      calls: current.calls + entry.calls,
       phases: current.phases.map((phase) => ({ ...phase, buckets: [...phase.buckets] })) };
     let valid = integer(merged.calls);
     for (const phase of entry.phases) {
@@ -254,7 +339,7 @@ export function mergeCliTiming(target: CliTiming, source: CliTiming): void {
       old.buckets = old.buckets.map((count, index) => count + phase.buckets[index]!);
       valid &&= integer(old.count) && integer(old.sumUs) && old.buckets.every(integer);
     }
-    if (valid) target.commands[index] = merged;
+    if (valid) target.commands[index] = { ...merged, ...mergeCommandFailures(current, entry) };
     else target.droppedCalls = incrementCliTimingDrop(target.droppedCalls, entry.calls);
   }
 }

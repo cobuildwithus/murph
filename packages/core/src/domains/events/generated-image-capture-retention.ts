@@ -50,8 +50,22 @@ const GENERATED_IMAGE_RETENTION_TOMBSTONE_SCHEMA =
 const GENERATED_IMAGE_RETENTION_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_GENERATED_IMAGE_RETENTION_BATCH_SIZE = 100;
 
+const EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS = {
+  GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_MISSING: 0,
+  GENERATED_IMAGE_RETENTION_MANIFEST_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED: 0,
+  VAULT_FILE_MISSING: 0,
+};
+
+type GeneratedImageRetentionBlockedCaptureCode =
+  keyof typeof EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS;
+
 export interface RunGeneratedImageCaptureRetentionInput {
-  materializeCandidatePaths?: ((storedPaths: readonly string[]) => Promise<unknown>) | null;
+  materializeCandidatePaths?: ((
+    storedPaths: readonly string[],
+  ) => Promise<{ missingStoredPaths?: Iterable<string> } | void>) | null;
   maxCaptures?: number;
   now?: Date;
   protectedCaptureIds?: Iterable<string>;
@@ -62,6 +76,7 @@ export interface RunGeneratedImageCaptureRetentionInput {
 
 export interface RunGeneratedImageCaptureRetentionResult {
   blockedCaptureCount: number;
+  blockedCaptureCounts: Record<GeneratedImageRetentionBlockedCaptureCode, number>;
   hasMoreEligibleCaptures: boolean;
   nextEligibleAt: string | null;
   retiredByteCount: number;
@@ -82,7 +97,7 @@ interface GeneratedImageRetentionCandidate {
   lookupKeyHash: string;
   manifest: ManifestSnapshot;
   nextEventRecord: EventRecord | null;
-  originalReceipt: CommittedPayloadReceipt;
+  originalReceipt: CommittedPayloadReceipt | null;
   tombstoneContent: string;
 }
 
@@ -150,6 +165,7 @@ async function runGeneratedImageCaptureRetentionLocked(
   ).toISOString();
   const ledgerRecords = new Map<string, EventRecord[]>();
   let blockedCaptureCount = 0;
+  const blockedCaptureCounts = { ...EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS };
   let hasMoreEligibleCaptures = false;
   let nextEligibleAt: string | null = null;
   let retiredByteCount = 0;
@@ -219,14 +235,11 @@ async function runGeneratedImageCaptureRetentionLocked(
         hasMoreEligibleCaptures = true;
         break;
       }
-      await input.materializeCandidatePaths?.([
-        lookup.attachmentRef,
-        ...(lookup.manifestPath ? [lookup.manifestPath] : []),
-      ]);
       candidate = await prepareRetentionCandidate({
         latest: latest.record,
         lookup,
         lookupKeyHash,
+        materializeCandidatePaths: input.materializeCandidatePaths,
         now: input.now,
         origin,
         signal: input.signal,
@@ -238,6 +251,7 @@ async function runGeneratedImageCaptureRetentionLocked(
         throw error;
       }
       blockedCaptureCount += 1;
+      blockedCaptureCounts[error.code] += 1;
       nextEligibleAt = selectEarlierTimestamp(nextEligibleAt, recheckAt);
       continue;
     }
@@ -252,7 +266,7 @@ async function runGeneratedImageCaptureRetentionLocked(
     });
     lookupIndex = committed.lookupIndex;
     lookupReceipt = committed.lookupReceipt;
-    retiredByteCount += candidate.originalReceipt.byteLength;
+    retiredByteCount += candidate.originalReceipt?.byteLength ?? 0;
     retiredCaptureCount += 1;
     if (candidate.nextEventRecord) {
       ledgerRecords.get(candidate.ledgerFile)?.push(candidate.nextEventRecord);
@@ -261,6 +275,7 @@ async function runGeneratedImageCaptureRetentionLocked(
 
   return {
     blockedCaptureCount,
+    blockedCaptureCounts,
     hasMoreEligibleCaptures,
     nextEligibleAt,
     retiredByteCount,
@@ -299,8 +314,9 @@ async function commitRetentionCandidate(input: {
         input.candidate.tombstoneContent,
         {
           allowRaw: true,
-          expectedTargetReceipt: input.candidate.originalReceipt,
-          overwrite: true,
+          ...(input.candidate.originalReceipt
+            ? { expectedTargetReceipt: input.candidate.originalReceipt, overwrite: true }
+            : { overwrite: false }),
         },
       );
       await batch.stageTextWrite(
@@ -358,11 +374,16 @@ async function prepareRetentionCandidate(input: {
   latest: EventRecord;
   lookup: StoredCaptureLookup;
   lookupKeyHash: string;
+  materializeCandidatePaths: RunGeneratedImageCaptureRetentionInput["materializeCandidatePaths"];
   now: Date;
   origin: EventRecord;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<GeneratedImageRetentionCandidate> {
+  const materialized = await input.materializeCandidatePaths?.([
+    input.lookup.attachmentRef,
+    ...(input.lookup.manifestPath ? [input.lookup.manifestPath] : []),
+  ]);
   throwIfGeneratedImageRetentionAborted(input.signal);
   const attachment = input.origin.attachments?.find(
     (candidate) => candidate.relativePath === input.lookup.attachmentRef,
@@ -379,8 +400,9 @@ async function prepareRetentionCandidate(input: {
     input.lookup.attachmentRef,
   );
   if (
-    !originalIntegrity ||
-    originalIntegrity.sha256 !== attachment.sha256
+    originalIntegrity
+      ? originalIntegrity.sha256 !== attachment.sha256
+      : !new Set(materialized?.missingStoredPaths).has(input.lookup.attachmentRef)
   ) {
     throw new VaultError(
       "GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED",
@@ -399,8 +421,8 @@ async function prepareRetentionCandidate(input: {
   if (
     !artifact ||
     artifact.relativePath !== input.lookup.attachmentRef ||
-    artifact.byteSize !== originalIntegrity.byteSize ||
-    artifact.sha256 !== originalIntegrity.sha256
+    (originalIntegrity !== null && artifact.byteSize !== originalIntegrity.byteSize) ||
+    artifact.sha256 !== attachment.sha256
   ) {
     throw new VaultError(
       "GENERATED_IMAGE_RETENTION_MANIFEST_INVALID",
@@ -439,7 +461,7 @@ async function prepareRetentionCandidate(input: {
     nextEventRecord: isDeletedEventSpineRecord(input.latest)
       ? null
       : buildDeletedEventTombstone(input.latest, input.now),
-    originalReceipt: toCommittedReceipt(originalIntegrity),
+    originalReceipt: originalIntegrity ? toCommittedReceipt(originalIntegrity) : null,
     tombstoneContent,
   };
 }
@@ -609,20 +631,17 @@ function throwIfGeneratedImageRetentionAborted(signal?: AbortSignal | null): voi
   signal?.throwIfAborted();
 }
 
-function isGeneratedImageRetentionBlockedCaptureError(error: unknown): boolean {
-  return isVaultError(error) && [
-    "GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID",
-    "GENERATED_IMAGE_RETENTION_EVENT_INVALID",
-    "GENERATED_IMAGE_RETENTION_EVENT_MISSING",
-    "GENERATED_IMAGE_RETENTION_MANIFEST_INVALID",
-    "GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED",
-    "VAULT_FILE_MISSING",
-  ].includes(error.code);
+function isGeneratedImageRetentionBlockedCaptureError(
+  error: unknown,
+): error is VaultError & { code: GeneratedImageRetentionBlockedCaptureCode } {
+  return isVaultError(error) &&
+    Object.keys(EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS).includes(error.code);
 }
 
 function emptyRetentionResult(): RunGeneratedImageCaptureRetentionResult {
   return {
     blockedCaptureCount: 0,
+    blockedCaptureCounts: { ...EMPTY_GENERATED_IMAGE_RETENTION_BLOCKED_CAPTURE_COUNTS },
     hasMoreEligibleCaptures: false,
     nextEligibleAt: null,
     retiredByteCount: 0,

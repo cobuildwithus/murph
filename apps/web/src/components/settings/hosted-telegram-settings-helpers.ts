@@ -6,8 +6,6 @@ import {
 
 import {
   isRecord,
-  readJsonErrorDetails,
-  readOptionalJsonObject,
   retrySyncOperation,
   toErrorMessage,
 } from "./hosted-settings-sync-helpers";
@@ -202,55 +200,18 @@ async function syncHostedTelegramConnection(input: {
 }): Promise<HostedTelegramSyncResult> {
   const { expectedTelegramUserId, fetchImpl } = input;
 
-  if (fetchImpl === fetch) {
-    try {
-      const payload = await requestHostedOnboardingJson<{
-        botLink?: string | null;
-        runTriggered?: boolean;
-        telegramUserId: string;
-        telegramUsername?: string | null;
-      }>({
-        payload: {
-          expectedTelegramUserId,
-        },
-        url: "/api/settings/telegram/sync",
-      });
-
-      return {
-        botLink: typeof payload.botLink === "string" ? payload.botLink : null,
-        runTriggered: payload.runTriggered === true,
-        telegramUserId: payload.telegramUserId,
-        telegramUsername: typeof payload.telegramUsername === "string" ? payload.telegramUsername : null,
-      };
-    } catch (error) {
-      if (error instanceof HostedOnboardingApiError) {
-        throw new HostedTelegramSyncError(
-          error.code,
-          error.message,
-        );
-      }
-      throw error;
+  let payload: unknown;
+  try {
+    payload = await requestHostedOnboardingJson<unknown>({
+      fetchImpl,
+      payload: { expectedTelegramUserId },
+      url: "/api/settings/telegram/sync",
+    });
+  } catch (error) {
+    if (error instanceof HostedOnboardingApiError) {
+      throw new HostedTelegramSyncError(error.code, error.message);
     }
-  }
-
-  const response = await fetchImpl("/api/settings/telegram/sync", {
-    body: JSON.stringify({
-      expectedTelegramUserId,
-    }),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    method: "POST",
-  });
-  const payload = await readOptionalJsonObject(response);
-
-  if (!response.ok) {
-    const errorDetails = readJsonErrorDetails(payload);
-
-    throw new HostedTelegramSyncError(
-      errorDetails.code,
-      errorDetails.message ?? "We couldn't finish connecting Telegram to Murph yet.",
-    );
+    throw error;
   }
 
   if (

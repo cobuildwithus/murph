@@ -362,7 +362,6 @@ describe("hosted runner container image contract", () => {
       "@murphai/assistant-cli",
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
-      "@murphai/assistantd",
       "@murphai/clinical-records",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",

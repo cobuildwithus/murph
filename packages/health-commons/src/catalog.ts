@@ -35,6 +35,18 @@ export const HEALTH_COMMONS_INDEXABLE_GOAL_REQUIRED_HEADINGS = [
   "## Sources",
 ] as const;
 
+const relationTargetTypes = new Map<
+  string,
+  HealthCommonsPageFrontmatter["entityType"]
+>([
+  ["primary_biomarker", "biomarker"],
+  ["secondary_biomarker", "biomarker"],
+  ["safety_outcome", "biomarker"],
+  ["default_measurement_method", "measurement_method"],
+  ["optional_measurement_method", "measurement_method"],
+  ["measurement_upgrade", "measurement_method"],
+]);
+
 export async function buildHealthCommonsCatalog(
   options: BuildHealthCommonsCatalogOptions,
 ): Promise<HealthCommonsCatalog> {
@@ -65,18 +77,16 @@ export function buildHealthCommonsCatalogFromContent(
 }
 
 export function validateHealthCommonsContent(content: HealthCommonsContentSet): void {
-  const keys = new Map<string, string>();
   const aliases = new Map<string, string>();
   const pagesByKey = new Map<string, HealthCommonsSourcePage>();
 
   for (const page of content.pages) {
-    const existingPath = keys.get(page.frontmatter.key);
+    const existingPath = pagesByKey.get(page.frontmatter.key)?.relativePath;
     if (existingPath) {
       if (page.frontmatter.entityType !== "source_artifact") {
         throw new Error(`Duplicate health commons key ${page.frontmatter.key} in ${existingPath} and ${page.relativePath}.`);
       }
     } else {
-      keys.set(page.frontmatter.key, page.relativePath);
       pagesByKey.set(page.frontmatter.key, page);
     }
 
@@ -101,57 +111,30 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   }
 
   assertUniqueSourceIdentities(content.pages);
-  collectSourceFindingIds(content.pages, keys, pagesByKey);
-  validateEvidenceAppraisals(
-    content.evidenceAppraisals,
-    keys,
-    pagesByKey,
-  );
+  validateSourceFindings(content.pages, pagesByKey);
+  validateEvidenceAppraisals(content.evidenceAppraisals, pagesByKey);
 
   for (const page of content.pages) {
-    validateGoalTemplateReferences(page, keys, pagesByKey);
+    validateGoalTemplateReferences(page, pagesByKey);
 
     for (const relation of page.frontmatter.relations ?? []) {
-      assertTargetExists(keys, relation.target, `${page.frontmatter.key} relation ${relation.type}`);
-      if (
-        relation.type === "primary_biomarker"
-        || relation.type === "secondary_biomarker"
-        || relation.type === "safety_outcome"
-      ) {
-        assertTargetEntityType(
-          pagesByKey,
-          relation.target,
-          "biomarker",
-          `${page.frontmatter.key} relation ${relation.type}`,
-        );
-      }
-      if (
-        relation.type === "default_measurement_method"
-        || relation.type === "optional_measurement_method"
-        || relation.type === "measurement_upgrade"
-      ) {
-        assertTargetEntityType(
-          pagesByKey,
-          relation.target,
-          "measurement_method",
-          `${page.frontmatter.key} relation ${relation.type}`,
-        );
-      }
-      if (relation.type === "measures" && page.frontmatter.entityType === "measurement_method") {
-        assertTargetEntityType(
-          pagesByKey,
-          relation.target,
-          "biomarker",
-          `${page.frontmatter.key} relation measures`,
-        );
-      }
+      const expectedEntityType =
+        relation.type === "measures" && page.frontmatter.entityType === "measurement_method"
+          ? "biomarker"
+          : relationTargetTypes.get(relation.type);
+      assertTargetExists(
+        pagesByKey,
+        relation.target,
+        `${page.frontmatter.key} relation ${relation.type}`,
+        expectedEntityType,
+      );
     }
     for (const option of page.frontmatter.options ?? []) {
-      assertTargetExists(keys, option.key, `${page.frontmatter.key} disambiguation option`);
+      assertTargetExists(pagesByKey, option.key, `${page.frontmatter.key} disambiguation option`);
     }
     for (const claim of page.frontmatter.claims ?? []) {
       for (const sourceKey of claim.sourceKeys ?? []) {
-        assertTargetExists(keys, sourceKey, `${page.frontmatter.key} claim ${claim.claimId}`);
+        assertTargetExists(pagesByKey, sourceKey, `${page.frontmatter.key} claim ${claim.claimId}`);
       }
     }
     for (const group of page.frontmatter.researchLandscape?.groups ?? []) {
@@ -161,95 +144,69 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         );
       }
       for (const sourceKey of group.sourceKeys) {
-        assertTargetExists(keys, sourceKey, `${page.frontmatter.key} researchLandscape group ${group.id}`);
+        assertTargetExists(pagesByKey, sourceKey, `${page.frontmatter.key} researchLandscape group ${group.id}`);
       }
     }
     for (const plan of page.frontmatter.testPlans ?? []) {
-      assertTargetExists(keys, plan.primaryBiomarkerKey, `${page.frontmatter.key} test plan ${plan.planId}`);
+      assertTargetExists(pagesByKey, plan.primaryBiomarkerKey, `${page.frontmatter.key} test plan ${plan.planId}`);
       assertTargetEntityType(
         pagesByKey,
         plan.primaryBiomarkerKey,
         "biomarker",
         `${page.frontmatter.key} test plan ${plan.planId} primaryBiomarkerKey`,
       );
-      for (const biomarkerKey of plan.secondaryBiomarkerKeys ?? []) {
-        if (resolveHealthCommonsKey(keys, biomarkerKey)) {
+      for (const field of ["secondaryBiomarkerKeys", "safetyOutcomeKeys"] as const) {
+        for (const target of plan[field] ?? []) {
           assertTargetEntityType(
             pagesByKey,
-            biomarkerKey,
+            target,
             "biomarker",
-            `${page.frontmatter.key} test plan ${plan.planId} secondaryBiomarkerKeys`,
-          );
-        }
-      }
-      for (const safetyOutcomeKey of plan.safetyOutcomeKeys ?? []) {
-        if (resolveHealthCommonsKey(keys, safetyOutcomeKey)) {
-          assertTargetEntityType(
-            pagesByKey,
-            safetyOutcomeKey,
-            "biomarker",
-            `${page.frontmatter.key} test plan ${plan.planId} safetyOutcomeKeys`,
+            `${page.frontmatter.key} test plan ${plan.planId} ${field}`,
           );
         }
       }
     }
     for (const signal of page.frontmatter.expectedSignalDescriptions ?? []) {
-      assertTargetExists(keys, signal.biomarkerKey, `${page.frontmatter.key} expected signal description`);
-      assertTargetEntityType(
+      assertTargetExists(
         pagesByKey,
         signal.biomarkerKey,
-        "biomarker",
         `${page.frontmatter.key} expected signal description`,
+        "biomarker",
       );
     }
     for (const measuredBiomarkerKey of page.frontmatter.measurementMethod?.measuredBiomarkerKeys ?? []) {
-      assertTargetExists(keys, measuredBiomarkerKey, `${page.frontmatter.key} measurementMethod.measuredBiomarkerKeys`);
-      assertTargetEntityType(
+      assertTargetExists(
         pagesByKey,
         measuredBiomarkerKey,
-        "biomarker",
         `${page.frontmatter.key} measurementMethod.measuredBiomarkerKeys`,
+        "biomarker",
       );
     }
     for (const output of page.frontmatter.measurementMethod?.outputs ?? []) {
       if (!output.mapsToBiomarkerKey) {
         continue;
       }
-      assertTargetExists(keys, output.mapsToBiomarkerKey, `${page.frontmatter.key} measurementMethod output ${output.outputId}`);
-      assertTargetEntityType(
+      assertTargetExists(
         pagesByKey,
         output.mapsToBiomarkerKey,
-        "biomarker",
         `${page.frontmatter.key} measurementMethod output ${output.outputId}`,
+        "biomarker",
       );
     }
     for (const path of page.frontmatter.measurementPlan?.paths ?? []) {
-      for (const methodKey of path.methodKeys) {
-        assertTargetExists(keys, methodKey, `${page.frontmatter.key} measurementPlan path ${path.pathId} methodKeys`);
-        assertTargetEntityType(
-          pagesByKey,
-          methodKey,
-          "measurement_method",
-          `${page.frontmatter.key} measurementPlan path ${path.pathId} methodKeys`,
-        );
-      }
-      for (const outcomeKey of path.outcomeKeys ?? []) {
-        assertTargetExists(keys, outcomeKey, `${page.frontmatter.key} measurementPlan path ${path.pathId} outcomeKeys`);
-        assertTargetEntityType(
-          pagesByKey,
-          outcomeKey,
-          "biomarker",
-          `${page.frontmatter.key} measurementPlan path ${path.pathId} outcomeKeys`,
-        );
-      }
-      for (const safetyOutcomeKey of path.safetyOutcomeKeys ?? []) {
-        assertTargetExists(keys, safetyOutcomeKey, `${page.frontmatter.key} measurementPlan path ${path.pathId} safetyOutcomeKeys`);
-        assertTargetEntityType(
-          pagesByKey,
-          safetyOutcomeKey,
-          "biomarker",
-          `${page.frontmatter.key} measurementPlan path ${path.pathId} safetyOutcomeKeys`,
-        );
+      for (const [field, targets, entityType] of [
+        ["methodKeys", path.methodKeys, "measurement_method"],
+        ["outcomeKeys", path.outcomeKeys ?? [], "biomarker"],
+        ["safetyOutcomeKeys", path.safetyOutcomeKeys ?? [], "biomarker"],
+      ] as const) {
+        for (const target of targets) {
+          assertTargetExists(
+            pagesByKey,
+            target,
+            `${page.frontmatter.key} measurementPlan path ${path.pathId} ${field}`,
+            entityType,
+          );
+        }
       }
     }
     const onboardingTestPlanId = page.frontmatter.experimentOnboarding?.planDefaults?.testPlanId;
@@ -261,12 +218,12 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         `${page.frontmatter.key} experimentOnboarding planDefaults.testPlanId points to missing test plan ${onboardingTestPlanId}.`,
       );
     }
-    validateExperimentOnboardingAdaptationPolicy(page, keys, pagesByKey);
+    validateExperimentOnboardingAdaptationPolicy(page, pagesByKey);
     if (page.frontmatter.lineage?.forkOf) {
-      assertTargetExists(keys, page.frontmatter.lineage.forkOf, `${page.frontmatter.key} lineage forkOf`);
+      assertTargetExists(pagesByKey, page.frontmatter.lineage.forkOf, `${page.frontmatter.key} lineage forkOf`);
     }
     for (const sourcePersonKey of page.frontmatter.attribution?.sourcePersonKeys ?? []) {
-      assertTargetExists(keys, sourcePersonKey, `${page.frontmatter.key} attribution sourcePersonKeys`);
+      assertTargetExists(pagesByKey, sourcePersonKey, `${page.frontmatter.key} attribution sourcePersonKeys`);
     }
   }
 
@@ -274,16 +231,16 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   validateGoalBodyLinks(content.pages, content.redirects, pagesByKey);
 
   for (const redirect of content.redirects) {
-    if (keys.has(redirect.from)) {
+    if (pagesByKey.has(redirect.from)) {
       throw new Error(`Redirect source ${redirect.from} is also an active health commons page.`);
     }
-    assertTargetExists(keys, redirect.to, `redirect ${redirect.from}`);
+    assertTargetExists(pagesByKey, redirect.to, `redirect ${redirect.from}`);
   }
 
   for (const change of content.changes) {
-    assertTargetExists(keys, change.entityKey, `change ${change.changeId}`);
+    assertTargetExists(pagesByKey, change.entityKey, `change ${change.changeId}`);
     for (const sourceKey of change.sourceKeys ?? []) {
-      assertTargetExists(keys, sourceKey, `change ${change.changeId}`);
+      assertTargetExists(pagesByKey, sourceKey, `change ${change.changeId}`);
     }
   }
 
@@ -296,7 +253,7 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
       }
       artifactIds.set(artifact.artifactId, manifest.manifestKey);
       if (artifact.sourceKey) {
-        assertTargetExists(keys, artifact.sourceKey, `artifact ${artifact.artifactId}`);
+        assertTargetExists(pagesByKey, artifact.sourceKey, `artifact ${artifact.artifactId}`);
         assertTargetEntityType(pagesByKey, artifact.sourceKey, "source_artifact", `artifact ${artifact.artifactId} sourceKey`);
       }
     }
@@ -309,7 +266,6 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
 
 function validateGoalTemplateReferences(
   page: HealthCommonsSourcePage,
-  keys: ReadonlyMap<string, string>,
   pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
 ): void {
   if (page.frontmatter.entityType !== "goal_template" || !page.frontmatter.goal) {
@@ -321,22 +277,20 @@ function validateGoalTemplateReferences(
 
   const parentGoalKey = page.frontmatter.goal.parentGoalKey;
   if (parentGoalKey) {
-    assertTargetExists(keys, parentGoalKey, `${page.frontmatter.key} goal.parentGoalKey`);
-    assertTargetEntityType(
+    assertTargetExists(
       pagesByKey,
       parentGoalKey,
-      "goal_template",
       `${page.frontmatter.key} goal.parentGoalKey`,
+      "goal_template",
     );
   }
 
   for (const sourceKey of page.frontmatter.goal.evidenceSourceKeys) {
-    assertTargetExists(keys, sourceKey, `${page.frontmatter.key} goal.evidenceSourceKeys`);
-    assertTargetEntityType(
+    assertTargetExists(
       pagesByKey,
       sourceKey,
-      "source_artifact",
       `${page.frontmatter.key} goal.evidenceSourceKeys`,
+      "source_artifact",
     );
   }
 }
@@ -626,11 +580,10 @@ function computeRevision(frontmatter: HealthCommonsPageFrontmatter, body: string
   };
 }
 
-function collectSourceFindingIds(
+function validateSourceFindings(
   pages: readonly HealthCommonsSourcePage[],
-  keys: ReadonlyMap<string, string>,
   pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
-): ReadonlySet<string> {
+): void {
   const findingIds = new Map<string, string>();
 
   for (const page of pages) {
@@ -640,8 +593,12 @@ function collectSourceFindingIds(
         throw new Error(`Duplicate source finding ${finding.findingId} on ${existingPageKey} and ${page.frontmatter.key}.`);
       }
       const declaredSourceKey = stripRevision(finding.sourceKey ?? page.frontmatter.key);
-      assertTargetExists(keys, declaredSourceKey, `${page.frontmatter.key} sourceFindings ${finding.findingId} sourceKey`);
-      assertTargetEntityType(pagesByKey, declaredSourceKey, "source_artifact", `${page.frontmatter.key} sourceFindings ${finding.findingId} sourceKey`);
+      assertTargetExists(
+        pagesByKey,
+        declaredSourceKey,
+        `${page.frontmatter.key} sourceFindings ${finding.findingId} sourceKey`,
+        "source_artifact",
+      );
       if (declaredSourceKey !== page.frontmatter.key) {
         throw new Error(
           `${page.frontmatter.key} sourceFindings ${finding.findingId} belongs to ${declaredSourceKey}; source-owned findings must live on their owning source page.`,
@@ -650,8 +607,6 @@ function collectSourceFindingIds(
       findingIds.set(finding.findingId, page.frontmatter.key);
     }
   }
-
-  return new Set(findingIds.keys());
 }
 
 function assertSourceFindingArtifactReferences(
@@ -684,22 +639,24 @@ function assertSourceFindingArtifactReferences(
 
 function validateEvidenceAppraisals(
   appraisals: readonly HealthCommonsEvidenceAppraisal[],
-  keys: ReadonlyMap<string, string>,
   pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
-): ReadonlySet<string> {
+): void {
   const appraisalKeys = new Map<string, string>();
-  const appraisalMatches = new Set<string>();
 
   for (const appraisal of appraisals) {
     const existingKeyPath = appraisalKeys.get(appraisal.key);
     if (existingKeyPath) {
-      throw new Error(`Duplicate evidence appraisal key ${appraisal.key} in ${existingKeyPath} and ${keys.get(appraisal.targetKey) ?? appraisal.targetKey}.`);
+      throw new Error(`Duplicate evidence appraisal key ${appraisal.key} in ${existingKeyPath} and ${pagesByKey.get(appraisal.targetKey)?.relativePath ?? appraisal.targetKey}.`);
     }
-    appraisalKeys.set(appraisal.key, keys.get(appraisal.targetKey) ?? appraisal.targetKey);
+    appraisalKeys.set(appraisal.key, pagesByKey.get(appraisal.targetKey)?.relativePath ?? appraisal.targetKey);
 
-    assertTargetExists(keys, appraisal.sourceKey, `evidence appraisal ${appraisal.key} sourceKey`);
-    assertTargetEntityType(pagesByKey, appraisal.sourceKey, "source_artifact", `evidence appraisal ${appraisal.key} sourceKey`);
-    assertTargetExists(keys, appraisal.targetKey, `evidence appraisal ${appraisal.key} targetKey`);
+    assertTargetExists(
+      pagesByKey,
+      appraisal.sourceKey,
+      `evidence appraisal ${appraisal.key} sourceKey`,
+      "source_artifact",
+    );
+    assertTargetExists(pagesByKey, appraisal.targetKey, `evidence appraisal ${appraisal.key} targetKey`);
 
     const targetPage = pagesByKey.get(stripRevision(appraisal.targetKey));
     if (targetPage && targetPage.frontmatter.entityType !== appraisal.targetKind) {
@@ -708,23 +665,24 @@ function validateEvidenceAppraisals(
       );
     }
     for (const endpointKey of appraisal.endpointKeys ?? []) {
-      if (keys.has(stripRevision(endpointKey))) {
+      if (pagesByKey.has(stripRevision(endpointKey))) {
         assertTargetEntityType(pagesByKey, endpointKey, "biomarker", `evidence appraisal ${appraisal.key} endpointKeys`);
       }
     }
-    appraisalMatches.add(evidenceAppraisalMatchKey(appraisal.sourceKey, appraisal.targetKey, appraisal.groupId));
   }
-
-  return appraisalMatches;
 }
 
-function evidenceAppraisalMatchKey(sourceKey: string, targetKey: string, groupId: string): string {
-  return `${stripRevision(sourceKey)}\u0000${stripRevision(targetKey)}\u0000${groupId}`;
-}
-
-function assertTargetExists(keys: ReadonlyMap<string, string>, target: string, context: string): void {
-  if (!resolveHealthCommonsKey(keys, target)) {
+function assertTargetExists(
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+  target: string,
+  context: string,
+  expectedEntityType?: HealthCommonsPageFrontmatter["entityType"],
+): void {
+  if (!resolveHealthCommonsKey(pagesByKey, target)) {
     throw new Error(`${context} points to missing health commons target ${target}.`);
+  }
+  if (expectedEntityType) {
+    assertTargetEntityType(pagesByKey, target, expectedEntityType, context);
   }
 }
 
@@ -770,7 +728,6 @@ function assertTargetEntityType(
 
 function validateExperimentOnboardingAdaptationPolicy(
   page: HealthCommonsSourcePage,
-  keys: ReadonlyMap<string, string>,
   pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
 ): void {
   const onboarding = page.frontmatter.experimentOnboarding;
@@ -809,31 +766,15 @@ function validateExperimentOnboardingAdaptationPolicy(
     );
   }
 
-  for (const signalKey of measurementPlan.requiredSignals ?? []) {
-    assertTargetExists(
-      keys,
-      signalKey,
-      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.requiredSignals`,
-    );
-    assertTargetEntityType(
-      pagesByKey,
-      signalKey,
-      "biomarker",
-      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.requiredSignals`,
-    );
-  }
-  for (const signalKey of measurementPlan.optionalSignals ?? []) {
-    assertTargetExists(
-      keys,
-      signalKey,
-      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.optionalSignals`,
-    );
-    assertTargetEntityType(
-      pagesByKey,
-      signalKey,
-      "biomarker",
-      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.optionalSignals`,
-    );
+  for (const field of ["requiredSignals", "optionalSignals"] as const) {
+    for (const signalKey of measurementPlan[field] ?? []) {
+      assertTargetExists(
+        pagesByKey,
+        signalKey,
+        `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.${field}`,
+        "biomarker",
+      );
+    }
   }
 }
 

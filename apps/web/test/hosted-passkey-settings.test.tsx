@@ -111,3 +111,20 @@ test("starts passkey setup only when Privy has an authenticated client user", as
 
   await rendered.cleanup();
 });
+
+test("renders the migrated approval passkey without asking for client reauthentication", async () => {
+  mocks.hookState.ready = false;
+  const rendered = await renderClientComponent(
+    createElement(HostedPasskeySettings, {
+      authenticated: true,
+      enrollmentEnabled: true,
+      secureApprovalStatus: { status: "configured", method: "passkey" },
+    }),
+    { requireButton: false },
+  );
+  expect(rendered.container.textContent).toContain("Enabled");
+  expect(rendered.container.querySelector("button")).toBeNull();
+  expect(mocks.ensureConfigured).not.toHaveBeenCalled();
+  expect(mocks.openAuthDialog).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});

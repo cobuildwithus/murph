@@ -33,6 +33,40 @@ describe("hosted device-sync due reconcile sweeper", () => {
     });
   });
 
+  it("jitters individual scheduled wake transactions across the selected cohort", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(0);
+    try {
+      const starts: number[] = [];
+      const rows = Array.from({ length: 250 }, (_, index) => ({
+        connectionId: `synthetic-connection-${index}`,
+        connectedAt: "2026-01-01T00:00:00.000Z",
+        nextReconcileAt: "2026-01-02T00:00:00.000Z",
+        provider: "whoop",
+        userId: `synthetic-member-${index}`,
+      }));
+      mocks.appendHostedDeviceSyncScheduledReconcileWake.mockImplementation(async () => {
+        starts.push(performance.now());
+        return { wakeAccepted: true };
+      });
+      const sweep = runHostedDeviceSyncDueReconcileSweeper({
+        logger: buildLogger(), store: buildStore(rows), wakeLimit: 250,
+        now: new Date("2026-01-02T00:01:00.000Z"),
+      });
+      await vi.runAllTimersAsync();
+      expect(await sweep).toMatchObject({ wakeAccepted: 250, wakeAttempted: 250 });
+      expect(new Set(starts).size).toBeGreaterThan(230);
+      expect(Math.max(...starts) - Math.min(...starts)).toBeGreaterThan(3_000);
+      expect(Math.max(...starts)).toBeLessThanOrEqual(5_000);
+      for (const [wake] of mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls) {
+        expect(wake.nextReconcileAt).toBe("2026-01-02T00:00:00.000Z");
+        expect(wake.expectedConnectedAt).toBe("2026-01-01T00:00:00.000Z");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("requests scheduled mailbox wakes for active due connections", async () => {
     const logger = buildLogger();
     const store = buildStore([
@@ -140,7 +174,9 @@ describe("hosted device-sync due reconcile sweeper", () => {
       store,
     });
 
-    expect(mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls).toEqual([
+    expect([...mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls].sort(
+      ([left], [right]) => left.connectionId.localeCompare(right.connectionId),
+    )).toEqual([
       [{
         connectionId: "dsc_due_1",
         createdAt: "2026-05-05T00:01:00.000Z",

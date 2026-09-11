@@ -271,6 +271,7 @@ function isModelAllowedFirstContactAdmission(
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
+  webhookReceivedAt?: Date;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   signature: string | null;
   timestamp: string | null;
@@ -544,6 +545,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
       const wakeHandoff = editPlan.wakeHandoffs?.[0];
       const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
+        webhookReceivedAt: input.webhookReceivedAt,
         response: editPlan.response,
         scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
@@ -592,6 +594,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: requireHostedLinqMessageReceivedEvent(planningEvent),
         phonePrefixes:
           getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
+        smsEnabled: getHostedOnboardingEnvironment().linqSmsInstantStartEnabled,
       });
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
@@ -1178,6 +1181,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const wakeHandoffResult = await (async () => {
       try {
         return await maybeHandoffHostedExecutionWebhookWake({
+          webhookReceivedAt: input.webhookReceivedAt,
+          ingressTypingAcceptedAt: instantStartTypingHint?.started,
           response: plan.response,
           scheduleAfterResponse: input.scheduleAfterResponse,
           signal: input.signal,
@@ -1551,7 +1556,7 @@ const HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS = 2_500;
 
 type HostedLinqInstantStartTypingHint = {
   chatId: string;
-  started: Promise<void>;
+  started: Promise<Date | null>;
 };
 
 // Instant start is the sender's first-ever message and the reply waits on a
@@ -1580,12 +1585,14 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
             { httpStatus: result.status },
           );
         }
+        return result.ok ? new Date() : null;
       })
       .catch((error: unknown) => {
         logHostedOnboardingDiagnostic(
           "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
           { errorName: deriveHostedOnboardingTimingErrorName(error) },
         );
+        return null;
       });
     return { chatId, started };
   } catch (error) {
@@ -1989,6 +1996,7 @@ function buildBlockedHostedLinqFirstContactAdmissionPlan(
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
   rawBody: string;
+  webhookReceivedAt?: Date;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   secretToken: string | null;
   prisma?: PrismaClient;
@@ -2090,6 +2098,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
   try {
     await maybeHandoffHostedExecutionWebhookWake({
+      webhookReceivedAt: input.webhookReceivedAt,
       response: plan.response,
       scheduleAfterResponse: input.scheduleAfterResponse,
       signal: input.signal,

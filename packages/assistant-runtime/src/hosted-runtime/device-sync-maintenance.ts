@@ -15,9 +15,6 @@ import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
 import type {
-  SerializableConfiguredDeviceSyncProviderConfigs,
-} from "@murphai/device-syncd/config";
-import type {
   DeviceSyncJobFailureDiagnostic,
   DeviceSyncJobFailureEventOrigin,
   DeviceSyncJobRecord,
@@ -220,7 +217,6 @@ export async function runHostedDeviceSyncPass(
     deviceSyncConfig,
     deviceSyncPort,
     hasHostedConnections: (preloadedSnapshot?.connections.length ?? 0) > 0,
-    memberProviderConfigs: preloadedSnapshot?.providerConfigs ?? {},
     platformEnv,
     shouldYield,
     vaultRoot,
@@ -251,6 +247,13 @@ export async function runHostedDeviceSyncPass(
     snapshot: null,
   };
   let processedJobs = 0;
+  const yieldPass = () => buildHostedDeviceSyncYieldedPassResult({
+    processedJobs,
+    retainFollowUpWakeUntilCheckpoint: options.retainFollowUpWakeUntilCheckpoint ?? false,
+    service,
+    syncState,
+    wake,
+  });
 
   try {
     options.onStage?.("retry_fence");
@@ -401,14 +404,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     options.onStage?.("source_staleness");
@@ -418,14 +414,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     syncState = await reconcileHostedDeviceSyncPassControlPlane({
@@ -445,14 +434,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     options.onStage?.("dense_raw_retention");
@@ -468,14 +450,7 @@ export async function runHostedDeviceSyncPass(
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
 
     const serviceNextWakeAt = resolveHostedDeviceSyncServiceNextWakeAt(service);
@@ -522,14 +497,7 @@ export async function runHostedDeviceSyncPass(
     };
   } catch (error) {
     if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
-      return buildHostedDeviceSyncYieldedPassResult({
-        processedJobs,
-        retainFollowUpWakeUntilCheckpoint:
-          options.retainFollowUpWakeUntilCheckpoint ?? false,
-        service,
-        syncState,
-        wake,
-      });
+      return yieldPass();
     }
     throw error;
   } finally {
@@ -1182,6 +1150,7 @@ async function runHostedDeviceSyncDenseRawRetention(input: {
       deadlineMs: input.deadlineMs,
       maxBytes: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES,
       maxFiles: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES,
+      shouldYield: input.shouldYield ?? undefined,
       vaultRoot: input.vaultRoot,
     });
 
@@ -1616,6 +1585,10 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
               pendingRunningJobCountBefore: queueSnapshotBefore?.runningJobCount ?? null,
               queueSnapshotAfterPresent: queueSnapshotAfter !== null,
               queueSnapshotBeforePresent: queueSnapshotBefore !== null,
+              deviceSyncConnectionSourceReadCount: input.jobTimingDiagnostics.reduce(
+                (total, diagnostic) => total + diagnostic.connectionSourceReadCount,
+                0,
+              ),
               deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
               deviceSyncJobTimingSampleLimit: HOSTED_DEVICE_SYNC_JOB_TIMING_SAMPLE_LIMIT,
               deviceSyncJobTimingSummaries: jobTimingSummary.summaries,
@@ -2181,7 +2154,6 @@ function createHostedDeviceSyncRuntime(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
   hasHostedConnections: boolean;
-  memberProviderConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
   platformEnv: Readonly<Record<string, string>>;
   shouldYield?: (() => boolean) | null;
   vaultRoot: string;
@@ -2194,7 +2166,6 @@ function createHostedDeviceSyncRuntime(input: {
     createConfiguredDeviceSyncProvidersFromConfigs(
       resolveHostedRuntimeDeviceSyncProviderConfigs(
         input.deviceSyncConfig.providerConfigs,
-        input.memberProviderConfigs,
         input.platformEnv,
       ),
     ),

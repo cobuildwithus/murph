@@ -1011,6 +1011,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH",
+      "HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH",
       "HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LABS_TOOL_PATH",
@@ -1043,6 +1044,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",
       "isHostedRuntimeVaultShareDeliverContinuation",
+      "parseHostedExecutionResolvedLinqDeliveryRoute",
       "parseHostedRuntimeOwnerReleaseSearch",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(

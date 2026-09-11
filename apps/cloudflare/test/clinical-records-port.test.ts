@@ -5,6 +5,7 @@ import {
 import {
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -646,6 +647,33 @@ describe("hosted clinical records runtime port", () => {
       `response exceeded the ${HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES} byte safety limit`,
     );
     expect(cancelled).toBe(true);
+  });
+
+  it("transports linked document bytes through the bounded private callback", async () => {
+    const received: Request[] = [];
+    const document = {
+      status: "document", contentBase64: "aGVsbG8=", mediaType: "text/plain",
+      sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      byteLength: 5,
+    };
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: async (input, init) => {
+        received.push(input instanceof Request ? input : new Request(input, init));
+        return Response.json(document);
+      },
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+    await expect(port.fetchDocument?.({ generation: 1, runId: "run_1", ticket: "opaque-ticket" }))
+      .resolves.toEqual(document);
+    expect(received).toHaveLength(1);
+    expect(new URL(received[0]!.url).pathname).toBe(HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH);
+    expect(await received[0]!.json()).toEqual({ generation: 1, runId: "run_1", ticket: "opaque-ticket" });
+    expect(readHostedRunnerWebControlOperation({ method: "POST", path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH }))
+      .toBe("clinical_records_fetch_document");
+    expect(readHostedRunnerWebControlOperation({ method: "GET", path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH }))
+      .toBe("web_control_blocked");
   });
 
   it("classifies each clinical records route as an explicit POST-only operation", () => {

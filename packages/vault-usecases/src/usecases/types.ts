@@ -27,6 +27,7 @@ import type {
   VaultInitResult,
   VaultValidateResult,
 } from "@murphai/operator-config/vault-cli-contracts"
+import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts"
 import type {
   AddCaptureRecordInput,
   CaptureAddResult,
@@ -62,6 +63,13 @@ import type {
 } from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
+
+export interface IntegratedVaultServiceDependencies {
+  readAssistantOutboxIntent?: (
+    vault: string,
+    intentId: string,
+  ) => Promise<AssistantOutboxIntent | null>
+}
 
 export interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string

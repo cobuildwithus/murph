@@ -197,3 +197,66 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
     else process.env.MURPH_CLI_TIMING_ENDPOINT = old
   }
 })
+
+test('failed production scopes merge once over real loopback and survive current hosted usage parsing', async () => {
+  const { ASSISTANT_USAGE_SCHEMA, parseAssistantUsageRecord } = await import('@murphai/hosted-execution/assistant-usage')
+  const receiver = createCodexCliTimingReceiver()
+  const transport = endpoint(receiver)
+  const previous = process.env.MURPH_CLI_TIMING_ENDPOINT
+  try {
+    await delay(10)
+    const finish = receiver.begin()
+    process.env.MURPH_CLI_TIMING_ENDPOINT = transport.value
+    for (const code of ['invalid_payload', 'conflict', 'invalid_payload'] as const) {
+      const original = Object.assign(new Error('PRIVATE_SENTINEL'), { code, context: { stage: 'validation', extra: 'PRIVATE_SENTINEL' } })
+      await assert.rejects(withCliTiming(() => timeCliDispatch('experiment session log', async () => { throw original })),
+        (error) => error === original)
+      await delay(10)
+    }
+    await withCliTiming(() => timeCliDispatch('experiment session log', async () => {}))
+    await delay(10)
+    const report = timing(finish('turn-synthetic'))
+    assert.equal(report.reportCount, 4)
+    assert.equal(report.commands.length, 2)
+    assert.equal(report.commands[0]!.calls, 3)
+    assert.deepEqual(report.commands[0]!.failures, [
+      { code: 'invalid_payload', stage: 'validation', count: 2 },
+      { code: 'conflict', stage: 'validation', count: 1 },
+    ])
+    assert.equal(report.commands[1]!.failures, undefined)
+    const parsed = parseAssistantUsageRecord({ schema: ASSISTANT_USAGE_SCHEMA, provider: 'codex-cli',
+      credentialSource: 'platform', occurredAt: '2026-09-10T12:00:00.000Z', sessionId: 'synthetic',
+      turnId: 'turn-synthetic', usageId: 'turn-synthetic.attempt-1', attemptCount: 1, inputTokens: 17, outputTokens: 11,
+      turnProfileJson: { schema: 'murph.assistant-turn-profile.v2', modelContextWindow: null,
+        requestCount: 0, requests: [], requestsTruncated: false, tools: [], toolsTruncated: false, cliTiming: report } })
+    assert.deepEqual(parsed.turnProfileJson?.cliTiming, report)
+    assert.equal(parsed.inputTokens, 17)
+    assert.equal(JSON.stringify(report).includes('PRIVATE_SENTINEL'), false)
+    assert.equal(JSON.stringify(report).includes(transport.key!), false)
+  } finally {
+    receiver.close()
+    if (previous === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT
+    else process.env.MURPH_CLI_TIMING_ENDPOINT = previous
+  }
+})
+
+test('receiver discards malformed optional failure detail, not a valid timing packet', async () => {
+  const receiver = createCodexCliTimingReceiver()
+  const { port, key } = endpoint(receiver)
+  try {
+    await delay(10)
+    const finish = receiver.begin()
+    const packet = envelope(key)
+    packet.timing.commands[0]!.outcome = 'error'
+    const malformed = { ...packet, timing: { ...packet.timing, commands: [
+      { ...packet.timing.commands[0], failures: [{ code: 'PRIVATE_SENTINEL', stage: 'PRIVATE_SENTINEL', count: 2 }] },
+    ] } }
+    await send(port, malformed)
+    const report = timing(finish('turn-synthetic'))
+    assert.equal(report.reportCount, 1)
+    assert.equal(report.commands[0]!.outcome, 'error')
+    assert.equal(report.commands[0]!.calls, 1)
+    assert.equal(report.commands[0]!.failures, undefined)
+    assert.equal(JSON.stringify(report).includes('PRIVATE_SENTINEL'), false)
+  } finally { receiver.close() }
+})

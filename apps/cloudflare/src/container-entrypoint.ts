@@ -400,6 +400,8 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
+        const wakeReceivedAtEpochMs = Date.now();
+        response.setHeader("x-runtime-wake-received-at-ms", String(wakeReceivedAtEpochMs));
         const rejectRuntimeWakeAfterShutdown = (): boolean => {
           if (!containerShutdownController.signal.aborted) {
             return false;
@@ -526,6 +528,8 @@ export async function startHostedContainerEntrypoint(input: {
             runtimeWakeAbsent: absent,
             runtimeWakeMismatch: mismatch,
             runtimeWakePending: pending,
+            runtimeWakeReceivedAtEpochMs: wakeReceivedAtEpochMs,
+            runtimeWakeHandledAtEpochMs: Date.now(),
             workspaceAttemptId: activeRuntimeWakeAttemptId,
             workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
           },
@@ -534,6 +538,7 @@ export async function startHostedContainerEntrypoint(input: {
           userId: null,
         });
         if (accepted) {
+          response.setHeader("x-runtime-wake-accepted-at-ms", String(Date.now()));
           response.setHeader("x-runtime-wake-accepted", "1");
         } else {
           response.setHeader("x-runtime-wake-accepted", "0");

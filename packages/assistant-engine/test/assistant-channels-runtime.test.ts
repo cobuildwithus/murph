@@ -3629,6 +3629,7 @@ describe('assistant channels runtime seam', () => {
       },
     )
 
+    expect(handle.isActive?.()).toBe(true)
     await vi.advanceTimersByTimeAsync(2 * 60_000)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
     await vi.advanceTimersByTimeAsync(3 * 60_000 - 1)
@@ -3637,6 +3638,7 @@ describe('assistant channels runtime seam', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
 
+    expect(handle.isActive?.()).toBe(false)
     await handle.stop()
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })

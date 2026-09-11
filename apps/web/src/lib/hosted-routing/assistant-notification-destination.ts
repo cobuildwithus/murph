@@ -241,11 +241,12 @@ export async function requireHostedAssistantNotificationDestination(input: {
   });
 }
 
+/** Returns the authorized destination's direct/group fact after the live check. */
 export async function assertHostedAssistantNotificationRouteAuthority(input: {
   authority: HostedExecutionExternalThreadRouteAuthority;
   prisma?: HostedOnboardingReadClient;
   signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   const container = await prisma.hostedThreadContainer.findUnique({
     select: { memberId: true },
@@ -256,13 +257,14 @@ export async function assertHostedAssistantNotificationRouteAuthority(input: {
       authority: input.authority,
       prisma,
     });
-    return;
+    return false;
   }
   await assertHostedDirectAssistantNotificationRouteAuthority({
     authority: input.authority,
     prisma,
     signal: input.signal,
   });
+  return true;
 }
 
 export async function assertHostedDirectAssistantNotificationRouteAuthority(

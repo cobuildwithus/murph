@@ -66,6 +66,80 @@ test("WHOOP sleep normalization preserves strict nap identity and leaves missing
   assert.equal(byId.get("missing"), undefined);
 });
 
+test("WHOOP normalization omits absent body measurements without changing provenance", () => {
+  for (const bodyMeasurement of [undefined, null, [], false, "invalid"]) {
+    const payload = normalizeWhoopSnapshot({
+      importedAt: "2026-03-16T10:00:00.000Z",
+      bodyMeasurement,
+    }, { defaultTimeZone: "America/New_York" });
+
+    assert.deepEqual(payload.events, []);
+    assert.deepEqual(payload.evidenceParts, []);
+    assert.equal(payload.provenance?.bodyMeasurementDay, undefined);
+    assert.deepEqual(payload.provenance?.importedSections, {
+      profile: false,
+      bodyMeasurement: false,
+      sleeps: 0,
+      recoveries: 0,
+      cycles: 0,
+      workouts: 0,
+      deletions: 0,
+    });
+  }
+});
+
+test("WHOOP workout metrics omit missing and invalid values while preserving zero values", () => {
+  const payload = normalizeWhoopSnapshot({
+    importedAt: "2026-03-16T10:00:00.000Z",
+    workouts: [
+      {},
+      {
+        altitude_gain_meter: "bad",
+        altitude_change_meter: null,
+        score: {
+          strain: null,
+          average_heart_rate: "bad",
+          max_heart_rate: Infinity,
+          kilojoule: "",
+          percent_recorded: false,
+        },
+      },
+      {
+        altitude_gain_meter: "0",
+        altitude_change_meter: 0,
+        score: {
+          strain: 0,
+          average_heart_rate: "0",
+          max_heart_rate: 0,
+          kilojoule: "0",
+          percent_recorded: 0,
+        },
+      },
+    ].map((workout) => ({
+      ...workout,
+      start: "2026-03-15T17:00:00.000Z",
+      end: "2026-03-15T17:45:00.000Z",
+    })),
+  });
+
+  assert.deepEqual(payload.events?.map(workoutMetricsFromEvent), [
+    undefined,
+    undefined,
+    {
+      workoutStrain: 0,
+      averageHeartRate: 0,
+      maxHeartRate: 0,
+      totalCalories: 0,
+      percentRecorded: 0,
+      totalElevationGainMeters: 0,
+      altitudeChangeMeters: 0,
+    },
+  ]);
+  assert.deepEqual(payload.events?.map((event) => event.externalRef?.resourceId), [
+    "workout-1", "workout-2", "workout-3",
+  ]);
+});
+
 type _normalizedDeviceBatchMatchesCorePayload = AssertTrue<
   IsMutuallyAssignable<NormalizedDeviceBatch, Omit<DeviceBatchImportPayload, "vaultRoot">>
 >;
@@ -3143,10 +3217,44 @@ test("Junction daily aggregate alias repair remains atomic when a later event re
   }
 });
 
+test("createImporters rejects an already-aborted snapshot before normalization or canonical writes", async () => {
+  const controller = new AbortController();
+  const reason = new Error("synthetic foreground request");
+  controller.abort(reason);
+  let writes = 0;
+  const importers = createImporters({
+    corePort: { importDeviceBatch() { writes += 1; return { applied: true }; } },
+  });
+  await assert.rejects(importers.importDeviceProviderSnapshot(null, {
+    signal: controller.signal,
+  }), (error) => error === reason);
+  assert.equal(writes, 0);
+});
+
+test("createImporters preserves committed snapshot progress after the signal aborts", async () => {
+  const controller = new AbortController();
+  const importers = createImporters({
+    corePort: {
+      importDeviceBatch(_payload: DeviceBatchImportPayload, options?: DeviceBatchImportExecutionOptions) {
+        assert.equal(options?.signal, controller.signal);
+        controller.abort(new Error("synthetic foreground request"));
+        return { applied: true, events: [] };
+      },
+    },
+  });
+  const result = await importers.importDeviceProviderSnapshot({
+    provider: "whoop",
+    snapshot: { accountId: "synthetic-account", recoveries: [] },
+  }, { signal: controller.signal });
+  assert.deepEqual(result, { applied: true, events: [] });
+});
+
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {
   const calls: DeviceBatchImportPayload[] = [];
   const importSession = createDeviceProviderSnapshotImportSession();
   const observedSessions: unknown[] = [];
+  const controller = new AbortController();
+  const observedSignals: unknown[] = [];
 
   const result = await importDeviceProviderSnapshot<{
     deviceProviderSnapshotImportTiming: {
@@ -3180,6 +3288,7 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
       ) {
         calls.push(payload);
         observedSessions.push(options?.session);
+        observedSignals.push(options?.signal);
         options?.onTiming?.({
           canonicalWriteElapsedMs: 12,
           eventIdentityIndexCacheHit: true,
@@ -3193,11 +3302,13 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
       },
     },
     importSession,
+    signal: controller.signal,
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.provider, "whoop");
   assert.deepEqual(observedSessions, [importSession]);
+  assert.deepEqual(observedSignals, [controller.signal]);
   assert.deepEqual(result.deviceProviderSnapshotImportTiming, {
     canonicalCoreElapsedMs: 56,
     canonicalWriteElapsedMs: 12,

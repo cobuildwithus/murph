@@ -15,6 +15,7 @@ import {
 import {
   RunnerContainer as BaseRunnerContainer,
 } from "../runner-container.ts";
+import { readHostedRunnerDeployment } from "../hosted-runner-release.ts";
 import {
   handleHostedRunnerGeminiOutbound,
   handleHostedRunnerOpenAiOutbound,
@@ -198,6 +199,14 @@ export class RunnerContainer extends BaseRunnerContainer {
 export class NextRunnerContainer extends RunnerContainer {
   constructor(state: unknown, env: Readonly<Record<string, unknown>>) {
     super(state, env, "next");
+  }
+}
+
+export class SmallRunnerContainer extends RunnerContainer {
+  protected override readonly slotNamespace = "small" as const;
+
+  constructor(state: unknown, env: Readonly<Record<string, unknown>>) {
+    super(state, env, readHostedRunnerDeployment(env)?.active.bank ?? "primary");
   }
 }
 
@@ -796,3 +805,4 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
 
 RunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;
 NextRunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;
+SmallRunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;

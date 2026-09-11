@@ -3,6 +3,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const HOSTED_MEMBER_SCHEMA_GUARD = {
+  HostedMemberApprovalCredentials: [
+    'memberId String @id @map("member_id")',
+    'credentialsEncrypted String @map("credentials_encrypted")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
   HostedGroupParticipantObservation: [
     'contactLookupKey String @id @map("contact_lookup_key")',
     'firstObservedAt DateTime @map("first_observed_at")',
@@ -59,6 +65,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
   HostedMember: [
+    "authRecords HostedAuthRecord[]",
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
     'assistantProviderPreference String? @map("assistant_provider_preference")',
@@ -79,7 +86,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
-    "deviceProviderApplications DeviceProviderApplication[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
@@ -279,6 +285,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedConnectedAppConnectIntent",
   "HostedConnectedAppsSession",
   "HostedMember",
+  "HostedMemberApprovalCredentials",
   "HostedMemberBillingRef",
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
@@ -1191,6 +1198,10 @@ describe("hosted Prisma baseline migration", () => {
       "20260905000000_clinical_record_reader_cleanup",
       "20260905010000_linq_terminal_message_retry",
       "20260908190000_feedback_operator_tasks",
+      "20260909210000_hosted_approval_credentials",
+      "20260909220000_hosted_auth_records",
+      "20260910190000_message_typing_latency_alerts",
+      "20260911143000_checkpoint_runtime_recheck_receipt",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
@@ -2477,7 +2488,6 @@ describe("hosted Prisma baseline migration", () => {
     expect(schema).not.toContain("model LinqRecipientBinding");
     expect(schema).not.toContain("model LinqWebhookEvent");
   });
-
 
   it("keeps legacy Linq delivery health blocking until the post-drain lane", () => {
     const schema = readFileSync(

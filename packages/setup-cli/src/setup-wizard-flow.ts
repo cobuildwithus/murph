@@ -9,7 +9,6 @@ import type {
 export type SetupWizardStep =
   | 'intro'
   | 'assistant-provider'
-  | 'assistant-method'
   | 'scheduled-updates'
   | 'channels'
   | 'wearables'
@@ -19,7 +18,7 @@ export type SetupWizardStep =
 export type SetupWizardFlowStep = Exclude<SetupWizardStep, 'intro'>
 export type SetupWizardSelectionStep = Extract<
   SetupWizardFlowStep,
-  'assistant-provider' | 'assistant-method' | 'scheduled-updates' | 'channels' | 'wearables'
+  'assistant-provider' | 'scheduled-updates' | 'channels' | 'wearables'
 >
 
 export function formatSelectionSummary(values: readonly string[]): string {
@@ -39,13 +38,11 @@ export function formatMissingEnv(values: readonly string[]): string {
 }
 
 export function listSetupWizardSteps(input: {
-  includeAssistantMethodStep: boolean
   includePublicUrlStep: boolean
 }): SetupWizardStep[] {
   return [
     'intro',
     'assistant-provider',
-    ...(input.includeAssistantMethodStep ? (['assistant-method'] as const) : []),
     'scheduled-updates',
     'channels',
     'wearables',
@@ -56,12 +53,10 @@ export function listSetupWizardSteps(input: {
 
 export function hasSetupWizardStepPassed(input: {
   currentStep: SetupWizardStep
-  includeAssistantMethodStep: boolean
   includePublicUrlStep: boolean
   stepToCheck: SetupWizardStep
 }): boolean {
   const steps = listSetupWizardSteps({
-    includeAssistantMethodStep: input.includeAssistantMethodStep,
     includePublicUrlStep: input.includePublicUrlStep,
   })
   const currentIndex = steps.indexOf(input.currentStep)
@@ -112,8 +107,6 @@ export function formatSetupWizardPromptTitle(
   switch (step) {
     case 'assistant-provider':
       return 'How should Murph answer?'
-    case 'assistant-method':
-      return 'How should Murph use Codex?'
     case 'scheduled-updates':
       return 'Auto updates'
     case 'channels':
@@ -132,8 +125,6 @@ export function formatSetupWizardStepIntro(
   switch (step) {
     case 'assistant-provider':
       return 'Choose the Codex path Murph should use by default.'
-    case 'assistant-method':
-      return 'Choose the Codex model path Murph should use by default.'
     case 'scheduled-updates':
       return 'These are optional check-ins Murph can send later.'
     case 'channels':
@@ -155,7 +146,6 @@ export function resolveSetupWizardHints(input: {
         { label: 'q quit', tone: 'muted' },
       ]
     case 'assistant-provider':
-    case 'assistant-method':
     case 'scheduled-updates':
     case 'channels':
     case 'wearables':

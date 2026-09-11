@@ -1,7 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
-import { deviceSyncError } from "@murphai/device-syncd/errors";
-
 import {
   DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
   type ConsumeOAuthStateResult,
@@ -15,11 +13,6 @@ import {
   lockHostedMemberRow,
   readHostedMemberSuspensionAfterLockTx,
 } from "../../hosted-onboarding/shared";
-import type { DeviceProviderApplicationBinding } from "../provider-applications/types";
-import {
-  requireDeviceProviderApplicationRevision,
-  requireMemberOwnedDeviceProviderApplicationProvider,
-} from "../provider-applications/types";
 import { toJsonRecord } from "../shared";
 import { toPrismaJsonObject } from "./prisma-json";
 
@@ -53,7 +46,6 @@ export class PrismaHostedOAuthSessionStore {
     expectedOwnerId?: string,
   ): Promise<DiscardUnconsumedOAuthStateResult> {
     return this.discardUnconsumedOAuthStateInternal({
-      binding: null,
       expectedOwnerId,
       expectedProvider,
       now,
@@ -61,142 +53,8 @@ export class PrismaHostedOAuthSessionStore {
     });
   }
 
-  discardUnconsumedOAuthStateWithProviderApplication(
-    state: string,
-    now: string,
-    binding: DeviceProviderApplicationBinding,
-    expectedProvider?: string,
-    expectedOwnerId?: string,
-  ): Promise<DiscardUnconsumedOAuthStateResult> {
-    const provider = requireMemberOwnedDeviceProviderApplicationProvider(
-      binding.provider,
-    );
-    const revision = requireDeviceProviderApplicationRevision(binding.revision);
-    if (!binding.applicationId.trim()) {
-      throw new TypeError(
-        "Member-owned provider application OAuth discard requires an application id.",
-      );
-    }
-    if (expectedProvider && expectedProvider !== provider) {
-      throw new TypeError(
-        "Member-owned provider application OAuth discard provider mismatch.",
-      );
-    }
-    return this.discardUnconsumedOAuthStateInternal({
-      binding: {
-        applicationId: binding.applicationId,
-        provider,
-        revision,
-      },
-      expectedOwnerId,
-      expectedProvider: provider,
-      now,
-      state,
-    });
-  }
-
   async createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {
-    return createOAuthStateRecord(this.prisma, input, null);
-  }
-
-  async createOAuthStateWithProviderApplication(
-    input: OAuthStateRecord,
-    binding: DeviceProviderApplicationBinding,
-  ): Promise<OAuthStateRecord> {
-    const ownerId = input.ownerId;
-    if (!ownerId) {
-      throw new TypeError(
-        "Member-owned provider application OAuth state requires an owner.",
-      );
-    }
-    const provider = requireMemberOwnedDeviceProviderApplicationProvider(
-      binding.provider,
-    );
-    const revision = requireDeviceProviderApplicationRevision(binding.revision);
-    if (!binding.applicationId.trim()) {
-      throw new TypeError(
-        "Member-owned provider application OAuth state requires an application id.",
-      );
-    }
-    if (input.provider !== provider) {
-      throw new TypeError(
-        "Member-owned provider application OAuth state provider mismatch.",
-      );
-    }
-    return this.prisma.$transaction(async (tx) => {
-      await lockHostedMemberRow(tx, ownerId);
-      const application = await tx.deviceProviderApplication.findFirst({
-        select: { id: true },
-        where: {
-          id: binding.applicationId,
-          memberId: ownerId,
-          provider,
-          revision,
-        },
-      });
-      if (!application) {
-        throw deviceSyncError({
-          code: "PROVIDER_APPLICATION_STALE",
-          httpStatus: 409,
-          message: "Private provider application changed and must be reauthorized.",
-          retryable: false,
-        });
-      }
-
-      return createOAuthStateRecord(tx, input, {
-        applicationId: binding.applicationId,
-        provider,
-        revision,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  }
-
-  async readOAuthStateProviderApplicationBinding(input: {
-    expectedOwnerId: string;
-    expectedProvider: string;
-    now: string;
-    state: string;
-  }): Promise<DeviceProviderApplicationBinding | null> {
-    const record = await this.prisma.deviceOauthSession.findFirst({
-      select: {
-        provider: true,
-        providerApplicationId: true,
-        providerApplicationRevision: true,
-        userId: true,
-      },
-      where: {
-        expiresAt: { gt: new Date(input.now) },
-        provider: input.expectedProvider,
-        state: input.state,
-        userId: input.expectedOwnerId,
-      },
-    });
-    if (!record) {
-      return null;
-    }
-    if (
-      record.providerApplicationId === null
-      && record.providerApplicationRevision === null
-    ) {
-      return null;
-    }
-    if (
-      !record.providerApplicationId
-      || record.providerApplicationRevision === null
-    ) {
-      throw new TypeError(
-        "Stored OAuth state has an incomplete provider application binding.",
-      );
-    }
-    return {
-      applicationId: record.providerApplicationId,
-      provider: requireMemberOwnedDeviceProviderApplicationProvider(
-        record.provider,
-      ),
-      revision: requireDeviceProviderApplicationRevision(
-        record.providerApplicationRevision,
-      ),
-    };
+    return createOAuthStateRecord(this.prisma, input);
   }
 
   consumeOAuthState(
@@ -206,7 +64,6 @@ export class PrismaHostedOAuthSessionStore {
     expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
     return this.consumeOAuthStateInternal({
-      binding: null,
       expectedOwnerId,
       expectedProvider,
       now,
@@ -214,42 +71,7 @@ export class PrismaHostedOAuthSessionStore {
     });
   }
 
-  consumeOAuthStateWithProviderApplication(
-    state: string,
-    now: string,
-    binding: DeviceProviderApplicationBinding,
-    expectedProvider?: string,
-    expectedOwnerId?: string,
-  ): Promise<ConsumeOAuthStateResult> {
-    const provider = requireMemberOwnedDeviceProviderApplicationProvider(
-      binding.provider,
-    );
-    const revision = requireDeviceProviderApplicationRevision(binding.revision);
-    if (!binding.applicationId.trim()) {
-      throw new TypeError(
-        "Member-owned provider application OAuth consume requires an application id.",
-      );
-    }
-    if (expectedProvider && expectedProvider !== provider) {
-      throw new TypeError(
-        "Member-owned provider application OAuth consume provider mismatch.",
-      );
-    }
-    return this.consumeOAuthStateInternal({
-      binding: {
-        applicationId: binding.applicationId,
-        provider,
-        revision,
-      },
-      expectedOwnerId,
-      expectedProvider: provider,
-      now,
-      state,
-    });
-  }
-
   private async consumeOAuthStateInternal(input: {
-    binding: DeviceProviderApplicationBinding | null;
     expectedOwnerId?: string;
     expectedProvider?: string;
     now: string;
@@ -319,22 +141,6 @@ export class PrismaHostedOAuthSessionStore {
         return {
           status: "owner_mismatch",
         };
-      }
-
-      if (
-        input.binding
-        && (
-          record.provider !== input.binding.provider
-          || record.providerApplicationId !== input.binding.applicationId
-          || record.providerApplicationRevision !== input.binding.revision
-        )
-      ) {
-        throw deviceSyncError({
-          code: "PROVIDER_APPLICATION_STALE",
-          httpStatus: 409,
-          message: "OAuth state does not match the private provider application.",
-          retryable: false,
-        });
       }
 
       const stateRecord = {
@@ -420,7 +226,6 @@ export class PrismaHostedOAuthSessionStore {
   }
 
   private async discardUnconsumedOAuthStateInternal(input: {
-    binding: DeviceProviderApplicationBinding | null;
     expectedOwnerId?: string;
     expectedProvider?: string;
     now: string;
@@ -448,22 +253,6 @@ export class PrismaHostedOAuthSessionStore {
       if (input.expectedOwnerId && record.userId !== input.expectedOwnerId) {
         return { status: "owner_mismatch" };
       }
-      if (
-        input.binding
-        && (
-          record.provider !== input.binding.provider
-          || record.providerApplicationId !== input.binding.applicationId
-          || record.providerApplicationRevision !== input.binding.revision
-        )
-      ) {
-        throw deviceSyncError({
-          code: "PROVIDER_APPLICATION_STALE",
-          httpStatus: 409,
-          message: "OAuth state does not match the private provider application.",
-          retryable: false,
-        });
-      }
-
       const stateRecord = {
         state: record.state,
         provider: record.provider,
@@ -523,15 +312,12 @@ export class PrismaHostedOAuthSessionStore {
 async function createOAuthStateRecord(
   prisma: PrismaClient | Prisma.TransactionClient,
   input: OAuthStateRecord,
-  binding: DeviceProviderApplicationBinding | null,
 ): Promise<OAuthStateRecord> {
   await prisma.deviceOauthSession.create({
     data: {
       state: input.state,
       userId: input.ownerId ?? null,
       provider: input.provider,
-      providerApplicationId: binding?.applicationId ?? null,
-      providerApplicationRevision: binding?.revision ?? null,
       returnTo: input.returnTo,
       metadataJson: toPrismaJsonObject(input.metadata ?? {}),
       createdAt: new Date(input.createdAt),

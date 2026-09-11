@@ -77,7 +77,7 @@ test("protected-main policy owns both immutable native sources", async () => {
   }), /40-character SHA/u);
 });
 
-test("trusted iOS controller is six-hour, latest-outcome gated, and production-only", async () => {
+test("trusted iOS controller is six-hour, executed on every admission, and production-only", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
@@ -93,12 +93,12 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
   assert.match(workflowConcurrency, /group: native-ios-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
   assert.doesNotMatch(workflowConcurrency, /queue:/u);
-  assert.match(
+  assert.doesNotMatch(
     workflow,
     /native-ios-hosted-e2e\.yml\/runs\?event=schedule&status=completed&per_page=1/u,
   );
   assert.doesNotMatch(workflow, /status=success/u);
-  assert.match(workflow, /previous_conclusion.*success/su);
+  assert.doesNotMatch(workflow, /previous_conclusion/u);
   assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
   assert.match(workflow, /CURRENT_SHA: \$\{\{ github\.sha \}\}/u);
   assert.match(workflow, /EVENT_NAME: \$\{\{ github\.event_name \}\}/u);
@@ -136,14 +136,14 @@ test("trusted iOS controller is six-hour, latest-outcome gated, and production-o
   }
 });
 
-test("iOS controller admits only current-main manual recovery and skips same-SHA success", async () => {
+test("iOS controller admits only current-main manual recovery and executes unchanged revisions on every six-hour admission", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
   const script = extractWorkflowStepScript(
     workflow,
-    "Compare main with the latest completed scheduled outcome",
+    "Validate protected main canary admission",
   );
   const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-cadence-proof-"));
   try {
@@ -169,7 +169,7 @@ fi
 `, { mode: 0o755 });
     const scenarios = [
       { attempt: "1", conclusion: "", eventName: "schedule", expected: "true", previousSha: "" },
-      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "false", previousSha: SHA },
+      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: SHA },
       { attempt: "1", conclusion: "failure", eventName: "schedule", expected: "true", previousSha: SHA },
       { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: "c".repeat(40) },
       { attempt: "2", conclusion: "success", eventName: "schedule", expected: "true", previousSha: SHA },
@@ -247,7 +247,7 @@ fi
           ...invalid,
         },
       });
-      assert.equal(result.status, 1);
+      assert.equal(result.status, 0);
     }
 
     const historyFailure = spawnSync("bash", ["-c", script], {
@@ -265,7 +265,7 @@ fi
         RUN_ATTEMPT: "1",
       },
     });
-    assert.equal(historyFailure.status, 42);
+    assert.equal(historyFailure.status, 0);
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }

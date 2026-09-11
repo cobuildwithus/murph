@@ -114,6 +114,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
@@ -138,6 +139,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
@@ -388,6 +390,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_existing",
@@ -410,6 +413,7 @@ describe("hosted webhook Temporal handoff", () => {
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
@@ -471,7 +475,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       enqueueDeviceWebhook: vi.fn(),
       ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell: vi.fn(),
       getRunnerStatus: vi.fn(),
       reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
@@ -522,7 +525,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       }),
       enqueueDeviceWebhook: vi.fn(),
       ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell: vi.fn(),
       getRunnerStatus: vi.fn(),
       reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),
@@ -554,7 +556,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       enqueueDeviceWebhook: vi.fn(),
       ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell: vi.fn(),
       getRunnerStatus: vi.fn(),
       reconcileRuntimeHealthDataConsent: vi.fn(),
       sendTelegramUsageLimitNotice: vi.fn(),

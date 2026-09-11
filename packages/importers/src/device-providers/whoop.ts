@@ -118,6 +118,14 @@ function cycleOrFallbackTimestamp(...candidates: Array<string | undefined>): str
   return candidates.find((candidate) => typeof candidate === "string" && candidate.length > 0);
 }
 
+function whoopRecordTimestamps(record: PlainObject, importedAt: string) {
+  const startAt = toIso(record.start);
+  const endAt = toIso(record.end);
+  const version = toIso(record.updated_at);
+  const recordedAt = cycleOrFallbackTimestamp(version, endAt, startAt, importedAt);
+  return { startAt, endAt, version, recordedAt };
+}
+
 function firstDayKey(...candidates: Array<string | undefined>): string | undefined {
   for (const candidate of candidates) {
     if (typeof candidate !== "string") {
@@ -247,11 +255,7 @@ function millisecondsToMinutes(value: unknown): number | undefined {
   return numeric / 60000;
 }
 
-function firstBodyMeasurementMeasuredAt(bodyMeasurement: PlainObject | undefined): string | undefined {
-  if (!bodyMeasurement) {
-    return undefined;
-  }
-
+function firstBodyMeasurementMeasuredAt(bodyMeasurement: PlainObject): string | undefined {
   return cycleOrFallbackTimestamp(
     toIso(bodyMeasurement.measured_at),
     toIso(bodyMeasurement.measuredAt),
@@ -260,22 +264,14 @@ function firstBodyMeasurementMeasuredAt(bodyMeasurement: PlainObject | undefined
   );
 }
 
-function firstBodyMeasurementUpdatedAt(bodyMeasurement: PlainObject | undefined): string | undefined {
-  if (!bodyMeasurement) {
-    return undefined;
-  }
-
+function firstBodyMeasurementUpdatedAt(bodyMeasurement: PlainObject): string | undefined {
   return cycleOrFallbackTimestamp(
     toIso(bodyMeasurement.updated_at),
     toIso(bodyMeasurement.updatedAt),
   );
 }
 
-function firstBodyMeasurementExplicitDayKey(bodyMeasurement: PlainObject | undefined): string | undefined {
-  if (!bodyMeasurement) {
-    return undefined;
-  }
-
+function firstBodyMeasurementExplicitDayKey(bodyMeasurement: PlainObject): string | undefined {
   return firstDayKey(
     stringId(bodyMeasurement.day),
     stringId(bodyMeasurement.date),
@@ -285,9 +281,9 @@ function firstBodyMeasurementExplicitDayKey(bodyMeasurement: PlainObject | undef
   );
 }
 
-function calculateBodyMassIndex(bodyMeasurement: PlainObject | undefined): number | undefined {
-  const weightKilograms = finiteNumber(bodyMeasurement?.weight_kilogram ?? bodyMeasurement?.weightKilogram);
-  const heightMeters = finiteNumber(bodyMeasurement?.height_meter ?? bodyMeasurement?.heightMeter);
+function calculateBodyMassIndex(bodyMeasurement: PlainObject): number | undefined {
+  const weightKilograms = finiteNumber(bodyMeasurement.weight_kilogram ?? bodyMeasurement.weightKilogram);
+  const heightMeters = finiteNumber(bodyMeasurement.height_meter ?? bodyMeasurement.heightMeter);
 
   if (weightKilograms === undefined || heightMeters === undefined || heightMeters <= 0) {
     return undefined;
@@ -460,46 +456,74 @@ const WHOOP_BODY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<Whoop
   },
 ];
 
-function nonEmptyWorkoutMetrics(metrics: WorkoutSessionMetrics): WorkoutSessionMetrics | undefined {
-  return Object.keys(metrics).length > 0 ? metrics : undefined;
+function emitWhoopBodyMeasurement(
+  events: DeviceEventPayload[],
+  measurement: PlainObject | undefined,
+  accountId: string | undefined,
+  importedAt: string,
+  defaultTimeZone: string | undefined,
+): string | undefined {
+  if (!measurement) {
+    return undefined;
+  }
+
+  const explicitDayKey = firstBodyMeasurementExplicitDayKey(measurement);
+  const measuredAt = firstBodyMeasurementMeasuredAt(measurement);
+  const updatedAt = firstBodyMeasurementUpdatedAt(measurement);
+  const accountScope = bodyMeasurementAccountScope(accountId);
+  const observedAt = explicitDayKey ? measuredAt : measuredAt ?? updatedAt;
+  const recordedAt = measuredAt ?? updatedAt ?? importedAt;
+  const occurredAt = observedAt ??
+    (explicitDayKey ? `${explicitDayKey}T00:00:00.000Z` : undefined) ?? recordedAt;
+  const dayKey = explicitDayKey ??
+    firstWhoopLocalDayKey(measurement, recordedAt) ??
+    firstVaultLocalDayKey(defaultTimeZone, recordedAt);
+  const fallbackDayKey = firstDayKey(observedAt) ?? firstDayKey(recordedAt);
+  const resourceDayKey = dayKey ?? fallbackDayKey;
+  const resourceId = resourceDayKey
+    ? bodyMeasurementDayResourceId(resourceDayKey, accountScope)
+    : bodyMeasurementCurrentResourceId(accountScope);
+  const legacyDayKey = firstDayKey(measuredAt, updatedAt, importedAt);
+  const legacyResourceIds = [
+    dayKey ? bodyMeasurementDayResourceId(dayKey, undefined) : undefined,
+    fallbackDayKey,
+    fallbackDayKey ? bodyMeasurementDayResourceId(fallbackDayKey, undefined) : undefined,
+    legacyDayKey,
+    legacyDayKey ? bodyMeasurementDayResourceId(legacyDayKey, undefined) : undefined,
+  ].filter((legacyId): legacyId is string => Boolean(legacyId) && legacyId !== resourceId);
+
+  emitObservationMetrics(
+    events,
+    {
+      source: { measurement, bmi: calculateBodyMassIndex(measurement) },
+      occurredAt,
+      recordedAt,
+      dayKey,
+      observationGrain: "summary",
+      evidenceRoles: ["body-measurement"],
+      externalRef: (facet) => makeExternalRef("body-measurement", resourceId, undefined, facet),
+      legacyExternalRefs: (facet) => [...new Set(legacyResourceIds)]
+        .map((legacyId) => makeExternalRef("body-measurement", legacyId, undefined, facet)),
+    },
+    WHOOP_BODY_OBSERVATION_METRICS,
+  );
+
+  return dayKey;
 }
 
 function buildWhoopWorkoutMetrics(
   workout: PlainObject,
   score: PlainObject | undefined,
 ): WorkoutSessionMetrics | undefined {
-  const metrics: WorkoutSessionMetrics = {};
-  const workoutStrain = finiteNumber(score?.strain);
-  const averageHeartRate = finiteNumber(score?.average_heart_rate);
-  const maxHeartRate = finiteNumber(score?.max_heart_rate);
-  const totalCalories = kilojoulesToKilocalories(score?.kilojoule);
-  const percentRecorded = finiteNumber(score?.percent_recorded);
-  const totalElevationGainMeters = finiteNumber(workout.altitude_gain_meter);
-  const altitudeChangeMeters = finiteNumber(workout.altitude_change_meter);
-
-  if (workoutStrain !== undefined) {
-    metrics.workoutStrain = workoutStrain;
-  }
-  if (averageHeartRate !== undefined) {
-    metrics.averageHeartRate = averageHeartRate;
-  }
-  if (maxHeartRate !== undefined) {
-    metrics.maxHeartRate = maxHeartRate;
-  }
-  if (totalCalories !== undefined) {
-    metrics.totalCalories = totalCalories;
-  }
-  if (percentRecorded !== undefined) {
-    metrics.percentRecorded = percentRecorded;
-  }
-  if (totalElevationGainMeters !== undefined) {
-    metrics.totalElevationGainMeters = totalElevationGainMeters;
-  }
-  if (altitudeChangeMeters !== undefined) {
-    metrics.altitudeChangeMeters = altitudeChangeMeters;
-  }
-
-  return nonEmptyWorkoutMetrics(metrics);
+  return stripEmptyObject(stripUndefined({
+    workoutStrain: finiteNumber(score?.strain),
+    averageHeartRate: finiteNumber(score?.average_heart_rate),
+    maxHeartRate: finiteNumber(score?.max_heart_rate),
+    totalCalories: kilojoulesToKilocalories(score?.kilojoule),
+    percentRecorded: finiteNumber(score?.percent_recorded),
+    totalElevationGainMeters: finiteNumber(workout.altitude_gain_meter),
+    altitudeChangeMeters: finiteNumber(workout.altitude_change_meter),
+  }));
 }
 
 function pushDeletionObservation(
@@ -574,82 +598,15 @@ export function normalizeWhoopSnapshot(
     }
   }
 
-  const bodyMeasurementExplicitDayKey = bodyMeasurement
-    ? firstBodyMeasurementExplicitDayKey(bodyMeasurement)
-    : undefined;
-  const bodyMeasurementMeasuredAt = bodyMeasurement
-    ? firstBodyMeasurementMeasuredAt(bodyMeasurement)
-    : undefined;
-  const bodyMeasurementUpdatedAt = bodyMeasurement
-    ? firstBodyMeasurementUpdatedAt(bodyMeasurement)
-    : undefined;
-  const bodyMeasurementScope = bodyMeasurementAccountScope(accountId);
-  const bodyMeasurementObservedAt = bodyMeasurementExplicitDayKey
-    ? bodyMeasurementMeasuredAt
-    : bodyMeasurementMeasuredAt ?? bodyMeasurementUpdatedAt;
-  const bodyMeasurementRecordedAt = bodyMeasurement
-    ? bodyMeasurementMeasuredAt ?? bodyMeasurementUpdatedAt ?? importedAt
-    : undefined;
-  const bodyMeasurementOccurredAt = bodyMeasurement
-    ? bodyMeasurementObservedAt ??
-      (bodyMeasurementExplicitDayKey ? `${bodyMeasurementExplicitDayKey}T00:00:00.000Z` : undefined) ??
-      bodyMeasurementRecordedAt
-    : undefined;
-  const bodyMeasurementDayKey = bodyMeasurement
-    ? bodyMeasurementExplicitDayKey ??
-      firstWhoopLocalDayKey(bodyMeasurement, bodyMeasurementRecordedAt) ??
-      firstVaultLocalDayKey(context.defaultTimeZone, bodyMeasurementRecordedAt)
-    : undefined;
-  const bodyMeasurementFallbackDayKey = firstDayKey(bodyMeasurementObservedAt) ?? firstDayKey(bodyMeasurementRecordedAt);
-  const bodyMeasurementResourceId = bodyMeasurementDayKey
-    ? bodyMeasurementDayResourceId(bodyMeasurementDayKey, bodyMeasurementScope)
-    : bodyMeasurementFallbackDayKey
-      ? bodyMeasurementDayResourceId(bodyMeasurementFallbackDayKey, bodyMeasurementScope)
-      : bodyMeasurementCurrentResourceId(bodyMeasurementScope);
-  const bodyMeasurementLegacyResourceId = firstDayKey(
-    bodyMeasurementMeasuredAt,
-    bodyMeasurementUpdatedAt,
-    importedAt,
-  );
-  const bodyMeasurementLegacyResourceIds = [
-    bodyMeasurementDayKey ? bodyMeasurementDayResourceId(bodyMeasurementDayKey, undefined) : undefined,
-    bodyMeasurementFallbackDayKey,
-    bodyMeasurementFallbackDayKey ? bodyMeasurementDayResourceId(bodyMeasurementFallbackDayKey, undefined) : undefined,
-    bodyMeasurementLegacyResourceId,
-    bodyMeasurementLegacyResourceId ? bodyMeasurementDayResourceId(bodyMeasurementLegacyResourceId, undefined) : undefined,
-  ].filter((resourceId): resourceId is string => Boolean(resourceId) && resourceId !== bodyMeasurementResourceId);
-  const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
-
   pushEvidencePart(evidenceParts, createEvidencePart("profile", "profile.json", profile));
   pushEvidencePart(evidenceParts, createEvidencePart("body-measurement", "body-measurement.json", bodyMeasurement));
-
-  if (bodyMeasurement && bodyMeasurementOccurredAt && bodyMeasurementRecordedAt) {
-    emitObservationMetrics(
-      events,
-      {
-        source: {
-          measurement: bodyMeasurement,
-          bmi: bodyMeasurementBmi,
-        },
-        occurredAt: bodyMeasurementOccurredAt,
-        recordedAt: bodyMeasurementRecordedAt,
-        dayKey: bodyMeasurementDayKey,
-        observationGrain: "summary",
-        evidenceRoles: ["body-measurement"],
-        externalRef: (facet) => makeExternalRef("body-measurement", bodyMeasurementResourceId, undefined, facet),
-        legacyExternalRefs: (facet) => [...new Set(bodyMeasurementLegacyResourceIds)]
-          .map((resourceId) => makeExternalRef("body-measurement", resourceId, undefined, facet)),
-      },
-      WHOOP_BODY_OBSERVATION_METRICS,
-    );
-  }
+  const bodyMeasurementDayKey = emitWhoopBodyMeasurement(
+    events, bodyMeasurement, accountId, importedAt, context.defaultTimeZone,
+  );
 
   for (const sleep of sleeps) {
     const sleepId = stringId(sleep.id) ?? `sleep-${events.length + 1}`;
-    const startAt = toIso(sleep.start);
-    const endAt = toIso(sleep.end);
-    const version = toIso(sleep.updated_at);
-    const recordedAt = cycleOrFallbackTimestamp(toIso(sleep.updated_at), endAt, startAt, importedAt);
+    const { startAt, endAt, version, recordedAt } = whoopRecordTimestamps(sleep, importedAt);
     const dayKey = firstWhoopLocalDayKey(sleep, endAt, startAt, recordedAt);
     const occurredAt = dayKey ? startAt ?? recordedAt : endAt ?? startAt ?? recordedAt;
     const durationMinutes = minutesBetween(startAt, endAt);
@@ -769,10 +726,7 @@ export function normalizeWhoopSnapshot(
   for (const cycle of cycles) {
     const cycleId = stringId(cycle.id) ?? `cycle-${events.length + 1}`;
     const cycleRole = `cycle:${cycleId}`;
-    const startAt = toIso(cycle.start);
-    const endAt = toIso(cycle.end);
-    const version = toIso(cycle.updated_at);
-    const recordedAt = cycleOrFallbackTimestamp(toIso(cycle.updated_at), endAt, startAt, importedAt);
+    const { startAt, endAt, version, recordedAt } = whoopRecordTimestamps(cycle, importedAt);
     const occurredAt = endAt ?? startAt ?? recordedAt;
     const dayKey = firstWhoopLocalDayKey(cycle, endAt, startAt, recordedAt);
     const score = asPlainObject(cycle.score);
@@ -800,10 +754,7 @@ export function normalizeWhoopSnapshot(
   for (const workout of workouts) {
     const workoutId = stringId(workout.id) ?? `workout-${events.length + 1}`;
     const workoutRole = `workout:${workoutId}`;
-    const startAt = toIso(workout.start);
-    const endAt = toIso(workout.end);
-    const version = toIso(workout.updated_at);
-    const recordedAt = cycleOrFallbackTimestamp(toIso(workout.updated_at), endAt, startAt, importedAt);
+    const { startAt, endAt, version, recordedAt } = whoopRecordTimestamps(workout, importedAt);
     const occurredAt = startAt ?? recordedAt;
     const dayKey = firstWhoopOffsetDayKey(whoopTimezoneOffsetMinutes(workout), startAt, recordedAt, endAt);
     const durationMinutes = minutesBetween(startAt, endAt);

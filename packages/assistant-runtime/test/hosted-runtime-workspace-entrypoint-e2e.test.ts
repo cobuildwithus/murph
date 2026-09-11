@@ -1,6 +1,6 @@
 import {
   TEST_NOW,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createDeviceSyncResolvedConfig,
   createMailboxItem,
@@ -8,10 +8,12 @@ import {
   createPlatform,
   createSnapshotDeviceSyncPort,
   createWorkspacePort,
+  createVaultSnapshotBundle,
   createWorkspaceRunRequest,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
   ensureHostedBootstrapMetadataForSystemMailboxTest,
+  enqueueDeviceSyncSystemMailboxItemForTest,
   importRuntimeControlSystemMailboxItemForTest,
   mocks,
   readCheckpointConversationWatermark,
@@ -21,6 +23,7 @@ import {
   writeSyntheticAssistantAutoReplyTerminalEvidence,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
+import { updateHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import assert from "node:assert/strict";
 import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -113,7 +116,7 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("e2e preserves device-sync follow-up wake and runs the scheduled alarm lane", async () => {
+describe("hosted workspace runtime entrypoint", () => {test.each([false, true])("e2e preserves device-sync follow-up wake alongside a future connection retry: %s", async (futureConnectionRetry) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -131,7 +134,24 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
     try {
       vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
 
+      if (futureConnectionRetry) {
+        await enqueueDeviceSyncSystemMailboxItemForTest({
+          item: createMailboxItem({ kind: "device-sync.wake", lane: "system", laneSeq: "1" }),
+          vaultRoot,
+        });
+        await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+          pending: state.pending.map((item) => ({
+            ...item,
+            mailboxLaneSeq: null,
+            nextAttemptAt: "2099-01-01T00:00:00.000Z",
+            wake: { ...item.wake, kind: "device-sync.wake", reason: "reconcile_due", connectionId: "synthetic-other-connection" },
+          })),
+        }));
+      }
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
+      const artifactBytesByHash = new Map([[initialSnapshot.hash, initialSnapshot.bytes]]);
       const firstResult = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -143,18 +163,17 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:first:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/device-sync-first.bundle.json",
-                size: 512,
-              }),
-            };
+            const snapshot = await createVaultSnapshotBundle({
+              vaultRoot,
+            });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
           },
           async importItem() {
             throw new Error("Scheduled device-sync wakes should not import mailbox items.");
           },
           platform: createPlatform({
+            artifactBytesByHash,
             deviceSyncPort: firstDeviceSyncPort,
             mailboxPort: createMailboxPort({
               events,
@@ -164,6 +183,7 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
               checkpointRequests: firstCheckpointRequests,
               events,
               workspace: createWorkspaceState({
+                snapshotRef: initialSnapshot.snapshotRef,
                 nextWakeAt: firstNow,
                 nextWakeReason: "device-sync.reconcile",
                 version: "0",
@@ -200,9 +220,8 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:second:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/device-sync-follow-up.bundle.json",
                 size: 512,
               }),
             };
@@ -211,12 +230,14 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
             throw new Error("No mailbox items should be imported for the follow-up alarm.");
           },
           platform: createPlatform({
+            artifactBytesByHash,
             deviceSyncPort: secondDeviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
             workspacePort: createWorkspacePort({
               checkpointRequests: secondCheckpointRequests,
               events,
               workspace: createWorkspaceState({
+                snapshotRef: firstCheckpoint.snapshotRef,
                 nextWakeAt: firstCheckpoint.nextWakeAt,
                 nextWakeReason: "device-sync.reconcile",
                 version: "1",
@@ -321,9 +342,8 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
               snapshotInput.handledConversationFrontierSelected ?? false,
             );
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "6".repeat(64),
-                key: "users/bundles/member-synthetic/device-sync-pending-retry.bundle.json",
                 size: 512,
               }),
             };
@@ -357,7 +377,7 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
-              await deviceSyncPort.fetchSnapshot();
+              await foregroundImported.promise;
               assert.ok(pendingInputId);
               return {
                 checkpointReason: "assistant_runtime_commit" as const,
@@ -438,9 +458,8 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:follow-up:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/device-sync-follow-up-after-retry.bundle.json",
                 size: 512,
               }),
             };
@@ -532,9 +551,8 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
             checkpointWatermarks.push(watermark);
             events.push(`snapshot:${snapshotInput.reason}:${watermark}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointWatermarks.length}`.repeat(64),
-                key: `users/bundles/member-synthetic/projection-stall-${checkpointWatermarks.length}.bundle.json`,
                 size: 512,
               }),
             };
@@ -746,9 +764,8 @@ describe("hosted workspace runtime entrypoint", () => {test("e2e preserves devic
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "5".repeat(64),
-                key: "users/bundles/member-synthetic/pending-retry-system-mailbox.bundle.json",
                 size: 512,
               }),
             };

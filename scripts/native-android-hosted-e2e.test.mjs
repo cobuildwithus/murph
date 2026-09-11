@@ -378,7 +378,7 @@ test("public Android controller has no PR lifecycle and retains fail-closed run 
   assert.doesNotMatch(native, /mode === "pr"|prHead|pulls\/\$\{/u);
 });
 
-test("trusted Android controller is six-hour, latest-outcome gated, and production-only", async () => {
+test("trusted Android controller is six-hour, executed on every admission, and production-only", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
@@ -393,7 +393,7 @@ test("trusted Android controller is six-hour, latest-outcome gated, and producti
   assert.match(workflow, /actions: read\n\s+contents: read/u);
   assert.match(workflowConcurrency, /group: native-android-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
-  assert.match(
+  assert.doesNotMatch(
     workflow,
     /native-android-hosted-e2e\.yml\/runs\?event=schedule&status=completed&per_page=1/u,
   );
@@ -429,14 +429,14 @@ test("trusted Android controller is six-hour, latest-outcome gated, and producti
   }
 });
 
-test("Android controller admits only current-main manual recovery and skips same-SHA success", async () => {
+test("Android controller admits only current-main manual recovery and executes unchanged revisions on every six-hour admission", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
   );
   const script = extractWorkflowStepScript(
     workflow,
-    "Compare main with the latest completed scheduled outcome",
+    "Validate protected main canary admission",
   );
   const tempDir = await mkdtemp(path.join(tmpdir(), "native-android-cadence-proof-"));
   try {
@@ -462,7 +462,7 @@ fi
 `, { mode: 0o755 });
     const scenarios = [
       { attempt: "1", conclusion: "", eventName: "schedule", expected: "true", previousSha: "" },
-      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "false", previousSha: WEB_SHA },
+      { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: WEB_SHA },
       { attempt: "1", conclusion: "failure", eventName: "schedule", expected: "true", previousSha: WEB_SHA },
       { attempt: "1", conclusion: "success", eventName: "schedule", expected: "true", previousSha: ANDROID_SHA },
       { attempt: "2", conclusion: "success", eventName: "schedule", expected: "true", previousSha: WEB_SHA },
@@ -533,7 +533,7 @@ fi
         RUN_ATTEMPT: "1",
       },
     });
-    assert.equal(historyFailure.status, 42);
+    assert.equal(historyFailure.status, 0);
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }

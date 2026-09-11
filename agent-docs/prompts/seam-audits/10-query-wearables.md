@@ -8,7 +8,8 @@ description: One-pass seam audit prompt for the @murphai/query wearables read mo
 
 - `packages/query/src/wearables/**`
 - `packages/query/src/wearables.ts`
-- `packages/importers/src/device-providers/{metric-catalog.ts,provider-descriptors.ts}`
+- `packages/health-metrics/src/wearable-metric-catalog.ts`
+- `packages/importers/src/device-providers/provider-descriptors.ts`
 - directly coupled `packages/query/test/**`
 
 ## Focus

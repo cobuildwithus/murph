@@ -724,7 +724,7 @@ export async function sendLinqIMessageAppCard(
   const body: MessageSendParams = {
     message: {
       preferred_service: 'iMessage',
-      idempotency_key: idempotencyKey,
+      idempotency_key: buildLinqProviderIdempotencyKey(idempotencyKey),
       parts: [{
         type: 'imessage_app',
         // `app_store_id` is intentionally absent. Linq otherwise substitutes
@@ -2810,7 +2810,7 @@ function buildLinqRichLinkMessageBody(input: {
     }],
   }
   if (idempotencyKey) {
-    message.idempotency_key = idempotencyKey
+    message.idempotency_key = buildLinqProviderIdempotencyKey(idempotencyKey)
   }
   if (replyToMessageId) {
     message.reply_to = { message_id: replyToMessageId }
@@ -2870,12 +2870,20 @@ function buildLinqMessageBody(input: {
     parts,
   }
   if (idempotencyKey) {
-    message.idempotency_key = idempotencyKey
+    message.idempotency_key = buildLinqProviderIdempotencyKey(idempotencyKey)
   }
   if (replyToMessageId) {
     message.reply_to = { message_id: replyToMessageId }
   }
   return { message }
+}
+
+function buildLinqProviderIdempotencyKey(key: string): string {
+  // Keep persisted authority metadata intact and preserve already-valid wire keys.
+  // Hash the final key, including any rich-link or fallback sibling suffix.
+  return key.length <= 255
+    ? key
+    : `linq-idempotency:sha256:${createHash('sha256').update(key).digest('hex')}`
 }
 
 export function assertLinqMessagePartsWithinLimits(input: {

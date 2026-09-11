@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { type Stats } from "node:fs";
 import path from "node:path";
-import { chmod, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -50,10 +50,6 @@ export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH =
   "hosted-portable-workspace-delta.json";
 export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_SCHEMA =
   "murph.portable-workspace-delta.v1";
-const HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_RELATIVE_PATH =
-  `${RUNTIME_CACHE_ROOT_RELATIVE_PATH}/hosted-skipped-inline-files.json`;
-const HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_SCHEMA =
-  "murph.hosted-workspace-skipped-inline-files.v1";
 const HOSTED_QUERY_PROJECTION_SNAPSHOT_RELATIVE_PATHS = [
   `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite`,
   `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite-shm`,
@@ -254,13 +250,6 @@ export async function snapshotHostedExecutionContext(
 
 export interface HostedPortableWorkspaceManifestFile {
   artifact?: HostedBundleArtifactRef;
-  path: string;
-  root: string;
-  sha256: string;
-  size: number;
-}
-
-export interface HostedWorkspaceSkippedInlineFile {
   path: string;
   root: string;
   sha256: string;
@@ -547,116 +536,6 @@ function writeHostedPortableWorkspaceManifestToBundle(
     root: HOSTED_WORKSPACE_BUNDLE_METADATA_ROOT,
     text: JSON.stringify(manifest) + "\n",
   });
-}
-
-export async function writeHostedWorkspaceSkippedInlineFiles(input: {
-  files: readonly HostedWorkspaceSkippedInlineFile[];
-  vaultRoot: string;
-}): Promise<void> {
-  const manifestPath = resolveHostedWorkspaceSkippedInlineFilesPath(input.vaultRoot);
-  if (input.files.length === 0) {
-    await rm(manifestPath, { force: true });
-    return;
-  }
-
-  const files = input.files
-    .map(canonicalizeHostedWorkspaceSkippedInlineFile)
-    .sort(compareHostedWorkspaceSkippedInlineFiles);
-  await mkdir(path.dirname(manifestPath), { mode: 0o700, recursive: true });
-  await writeFile(
-    manifestPath,
-    JSON.stringify({
-      files,
-      schema: HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_SCHEMA,
-    }) + "\n",
-    {
-      encoding: "utf8",
-      mode: 0o600,
-    },
-  );
-  await chmod(manifestPath, 0o600);
-}
-
-export async function readHostedWorkspaceSkippedInlineFiles(input: {
-  vaultRoot: string;
-}): Promise<HostedWorkspaceSkippedInlineFile[]> {
-  const manifestPath = resolveHostedWorkspaceSkippedInlineFilesPath(input.vaultRoot);
-  let text: string;
-  try {
-    text = await readFile(manifestPath, "utf8");
-  } catch (error) {
-    if (isMissingPathError(error)) {
-      return [];
-    }
-    throw error;
-  }
-
-  const parsed: unknown = JSON.parse(text);
-  if (!isPlainRecord(parsed) || parsed.schema !== HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_SCHEMA) {
-    throw new Error("Hosted workspace skipped-inline manifest schema is invalid.");
-  }
-  if (!Array.isArray(parsed.files)) {
-    throw new Error("Hosted workspace skipped-inline manifest files must be an array.");
-  }
-  return parsed.files
-    .map(parseHostedWorkspaceSkippedInlineFile)
-    .sort(compareHostedWorkspaceSkippedInlineFiles);
-}
-
-function resolveHostedWorkspaceSkippedInlineFilesPath(vaultRoot: string): string {
-  return path.join(
-    path.resolve(vaultRoot),
-    ...HOSTED_WORKSPACE_SKIPPED_INLINE_FILES_RELATIVE_PATH.split(path.posix.sep),
-  );
-}
-
-function parseHostedWorkspaceSkippedInlineFile(value: unknown): HostedWorkspaceSkippedInlineFile {
-  if (!isPlainRecord(value)) {
-    throw new Error("Hosted workspace skipped-inline manifest file must be an object.");
-  }
-  const size = value.size;
-  if (
-    typeof value.path !== "string" ||
-    typeof value.root !== "string" ||
-    !isSha256Hex(value.sha256) ||
-    typeof size !== "number" ||
-    !Number.isSafeInteger(size) ||
-    size < 0
-  ) {
-    throw new Error("Hosted workspace skipped-inline manifest file fields are invalid.");
-  }
-  return canonicalizeHostedWorkspaceSkippedInlineFile({
-    path: value.path,
-    root: value.root,
-    sha256: value.sha256,
-    size,
-  });
-}
-
-function canonicalizeHostedWorkspaceSkippedInlineFile(
-  file: HostedWorkspaceSkippedInlineFile,
-): HostedWorkspaceSkippedInlineFile {
-  return {
-    path: normalizeWorkspaceSnapshotRelativePath(file.path),
-    root: file.root,
-    sha256: file.sha256,
-    size: file.size,
-  };
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isSha256Hex(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
-}
-
-function compareHostedWorkspaceSkippedInlineFiles(
-  left: HostedWorkspaceSkippedInlineFile,
-  right: HostedWorkspaceSkippedInlineFile,
-): number {
-  return `${left.root}:${left.path}`.localeCompare(`${right.root}:${right.path}`);
 }
 
 async function collectHostedPortableWorkspaceDeltaFiles(input: {

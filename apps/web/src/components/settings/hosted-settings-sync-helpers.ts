@@ -1,34 +1,5 @@
-export interface JsonErrorDetails {
-  code: string | null;
-  message: string | null;
-}
-
-export async function readOptionalJsonObject(response: Response): Promise<Record<string, unknown> | null> {
-  const text = await response.text();
-
-  if (!text.trim()) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(text);
-    return isRecord(payload) ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-export function readJsonErrorDetails(payload: Record<string, unknown> | null): JsonErrorDetails {
-  const errorPayload = isRecord(payload?.error) ? payload.error : null;
-
-  return {
-    code: typeof errorPayload?.code === "string" ? errorPayload.code : null,
-    message: typeof errorPayload?.message === "string" ? errorPayload.message : null,
-  };
 }
 
 export async function retrySyncOperation<T>(input: {

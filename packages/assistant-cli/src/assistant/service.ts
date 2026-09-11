@@ -1,9 +1,3 @@
-// Thin daemon-aware wrapper around the assistant-engine local assistant orchestration.
-import {
-  maybeOpenAssistantConversationViaDaemon,
-  maybeSendAssistantMessageViaDaemon,
-  maybeUpdateAssistantSessionOptionsViaDaemon,
-} from '../assistant-daemon-client.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   openAssistantConversationLocal,
@@ -76,11 +70,6 @@ export async function openAssistantConversation(
     vault: input.vault,
   })
 
-  const remote = await maybeOpenAssistantConversationViaDaemon(input)
-  if (remote) {
-    return remote
-  }
-
   return openAssistantConversationLocal(input)
 }
 
@@ -99,11 +88,6 @@ export async function sendAssistantMessage(
     vault: messageInput.vault,
   })
 
-  const remote = await maybeSendAssistantMessageViaDaemon(messageInput)
-  if (remote) {
-    return remote
-  }
-
   return sendAssistantMessageLocal(messageInput)
 }
 
@@ -112,10 +96,5 @@ export async function updateAssistantSessionOptions(input: {
   sessionId: string
   vault: string
 }): Promise<AssistantSession> {
-  const remote = await maybeUpdateAssistantSessionOptionsViaDaemon(input)
-  if (remote) {
-    return remote
-  }
-
   return updateAssistantSessionOptionsLocal(input)
 }

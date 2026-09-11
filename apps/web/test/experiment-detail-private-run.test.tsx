@@ -35,7 +35,7 @@ import {
   splitHomeExperimentCards,
 } from "@/src/lib/experiments/library-cards";
 import { buildExperimentRunCardSummary } from "@/src/lib/experiments/run-card-summary";
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveExperimentProjectionFixture } from "./health-commons-projection-fixtures";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
@@ -248,7 +248,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("matches browser-vault tracked experiments against Health Commons protocol aliases", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -453,7 +453,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("does not bind a private run on title-only collisions", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -477,7 +477,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("uses the newest completed matching run when no live run exists", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -516,7 +516,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("uses the run time zone for active timeline reference dates near UTC boundaries", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -565,7 +565,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("matches browser-vault tracked experiments by canonical commonsProtocolRef key", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -612,7 +612,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("prefers canonical runPlan windows for baseline days and analysis availability", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -679,7 +679,7 @@ describe("experiment detail private-run composition", () => {
   it.each(["active", "running", "in progress"])(
     "does not keep a stale %s label after the run window ends",
     async (sourceStatus) => {
-      const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+      const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
       expect(protocol).not.toBeNull();
 
@@ -783,7 +783,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders honest baseline progress before the protocol window starts", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -839,7 +839,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders honest result states without inventing personal outcomes", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -924,7 +924,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps the exact canonical saved outcome and charts its saved daily points", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     const outcome = createSavedOutcome({
       deltaAbs: null,
       id: "exp_sauna_saved_outcome",
@@ -1151,7 +1151,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders a saved structured review without a false empty-metrics state", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     expect(protocol).not.toBeNull();
 
     const base = createSavedOutcome({
@@ -1241,7 +1241,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps incomplete structured-review states recoverable in the browser UI", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     expect(protocol).not.toBeNull();
 
     const states = [
@@ -1509,7 +1509,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders done private runs as finished results", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1554,7 +1554,7 @@ describe("experiment detail private-run composition", () => {
     { statistic: "count", label: "count", baseline: 3, current: 3, latest: 1, delta: "0" },
     { statistic: "latest", label: "latest", baseline: 61, current: 58, latest: 58, delta: "-3 bpm" },
   ] as const)("separates the latest dated result from the $statistic comparison", async (item) => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1664,7 +1664,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps comparable card summaries while showing secondary results without a baseline", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1765,7 +1765,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("hides deltas until the intervention window has enough days to compare", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1935,7 +1935,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("formats converted percent expected ranges with measured biomarker units", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -1998,7 +1998,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders partial and not-logged schedule cells from real browser-vault sessions", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2089,7 +2089,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders repeated-session Results from occurrence counts instead of date cells", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2221,7 +2221,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders all-assumed schedule cells as done with assumed detail copy", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2300,7 +2300,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders mixed confirmed and assumed schedule copy without calling all sessions logged", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2384,7 +2384,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps device-observed schedule copy on logged wording", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
 
     expect(protocol).not.toBeNull();
 
@@ -2443,7 +2443,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("does not synthesize a schedule grid for calendar-less count adherence", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+    const protocol = resolveExperimentProjectionFixture("norwegian-4x4");
 
     expect(protocol).not.toBeNull();
 
@@ -2518,7 +2518,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("does not synthesize a schedule grid for unsupported explicit adherence", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2587,7 +2587,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders browser-vault session confounders in private results context", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2664,7 +2664,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders experiment-context entries in private results context", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2725,7 +2725,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("preserves same-day planned target cells in the schedule UI projection", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2803,7 +2803,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("starts protocol week numbering from the real intervention window", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2858,7 +2858,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("returns no private run when the browser selector has no matching run", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2874,7 +2874,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps paused runs distinct from active runs", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -2934,7 +2934,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("renders stopped runs as saved but incomplete results", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
@@ -3013,7 +3013,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("keeps a post-stop point measurement out of stopped Results", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     const outcome = createSavedOutcome({
       id: "exp_sauna_stopped_anchor",
       slug: "finnish-sauna",
@@ -3140,7 +3140,7 @@ describe("experiment detail private-run composition", () => {
   });
 
   it("projects stopped runs from live boundaries when they diverge from a suppressed outcome", async () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocol = resolveExperimentProjectionFixture("finnish-sauna");
     const outcome = createSavedOutcome({
       id: "exp_sauna_divergent_stop",
       slug: "finnish-sauna",

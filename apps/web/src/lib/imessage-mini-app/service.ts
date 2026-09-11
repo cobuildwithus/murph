@@ -21,7 +21,7 @@ import {
   assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted,
 } from "../legal/consent";
-import { sha256Hex, toIsoTimestamp } from "../primitives";
+import { isRecord, sha256Hex, toIsoTimestamp } from "../primitives";
 
 export const IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX = "hbds_imessage_";
 export const IMESSAGE_MINI_APP_RENEWAL_BEARER_TOKEN_PREFIX = "hbds_imessage_renew_";
@@ -471,7 +471,10 @@ export function validateIMessageMiniAppMemberAction(
   body: Record<string, unknown>,
   now = new Date(),
 ): MemberActionRequestV1 {
-  const parsed = memberActionRequestV1Schema.safeParse(body);
+  const parsed = memberActionRequestV1Schema.safeParse({
+    ...body,
+    action: normalizeNativeWorkoutPresentation(body.action),
+  });
   if (!parsed.success) {
     throw miniAppRequestInvalid("Member action request is invalid.");
   }
@@ -485,6 +488,44 @@ export function validateIMessageMiniAppMemberAction(
   }
 
   return parsed.data;
+}
+
+// Swift's synthesized Encodable omits nil presentation fields. Normalize only
+// this installed-client wire shape; persisted actions still use the strict schema.
+function normalizeNativeWorkoutPresentation(action: unknown): unknown {
+  if (
+    !isRecord(action)
+    || (action.kind !== "workout.live.apply" && action.kind !== "workout.live.snapshot")
+    || !isRecord(action.presentation)
+    || !isRecord(action.presentation.workout)
+    || !Array.isArray(action.presentation.workout.exercises)
+  ) {
+    return action;
+  }
+
+  const presentation = action.presentation;
+  const workout = action.presentation.workout;
+  const exercises = action.presentation.workout.exercises.map((exercise: unknown) => {
+    if (!isRecord(exercise) || !Array.isArray(exercise.sets)) {
+      return exercise;
+    }
+    return {
+      ...exercise,
+      sets: exercise.sets.map((set: unknown) => isRecord(set)
+        ? { ...set, target: set.target ?? null, actual: set.actual ?? null }
+        : set),
+    };
+  });
+
+  return {
+    ...action,
+    presentation: {
+      ...presentation,
+      subtitle: presentation.subtitle ?? null,
+      footer: presentation.footer ?? null,
+      workout: { ...workout, exercises },
+    },
+  };
 }
 
 function rejectUnknownFields(

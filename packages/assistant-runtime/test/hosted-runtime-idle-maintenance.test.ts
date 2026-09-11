@@ -49,6 +49,7 @@ import {
   initializeVault,
   readEventLedgerShardRecords,
   upsertEvent,
+  type RunGeneratedImageCaptureRetentionResult,
 } from "@murphai/core";
 
 import {
@@ -60,6 +61,15 @@ import {
   runHostedIdleCheckpointMaintenance,
 } from "../src/hosted-runtime/idle-maintenance.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
+
+const emptyBlockedCaptureCounts = {
+  GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_EVENT_MISSING: 0,
+  GENERATED_IMAGE_RETENTION_MANIFEST_INVALID: 0,
+  GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED: 0,
+  VAULT_FILE_MISSING: 0,
+};
 
 async function waitForAtomicArchiveTempFile(
   directoryPath: string,
@@ -148,6 +158,7 @@ beforeEach(() => {
   runGeneratedImageCaptureRetention.mockReset();
   runGeneratedImageCaptureRetention.mockResolvedValue({
     blockedCaptureCount: 0,
+    blockedCaptureCounts: { ...emptyBlockedCaptureCounts },
     hasMoreEligibleCaptures: false,
     nextEligibleAt: null,
     retiredByteCount: 0,
@@ -519,6 +530,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   it("schedules generated-image cleanup on the shared retention wake", async () => {
     runGeneratedImageCaptureRetention.mockResolvedValue({
       blockedCaptureCount: 0,
+      blockedCaptureCounts: { ...emptyBlockedCaptureCounts },
       hasMoreEligibleCaptures: false,
       nextEligibleAt: "2026-07-10T00:00:00.000Z",
       retiredByteCount: 0,
@@ -553,6 +565,117 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       nextWakeAt: "2026-07-10T00:00:00.000Z",
       nextWakeReason: "inbox_media_retention",
     });
+  });
+
+  it.each([
+    {
+      name: "all six reasons",
+      blockedCaptureCount: 21,
+      counts: {
+        GENERATED_IMAGE_RETENTION_ATTACHMENT_INVALID: 1,
+        GENERATED_IMAGE_RETENTION_EVENT_INVALID: 2,
+        GENERATED_IMAGE_RETENTION_EVENT_MISSING: 3,
+        GENERATED_IMAGE_RETENTION_MANIFEST_INVALID: 4,
+        GENERATED_IMAGE_RETENTION_PRECONDITION_FAILED: 5,
+        VAULT_FILE_MISSING: 6,
+      },
+      expected: {
+        generatedImageRetentionAttachmentInvalidCaptures: 1,
+        generatedImageRetentionEventInvalidCaptures: 2,
+        generatedImageRetentionEventMissingCaptures: 3,
+        generatedImageRetentionManifestInvalidCaptures: 4,
+        generatedImageRetentionPreconditionFailedCaptures: 5,
+        generatedImageRetentionVaultFileMissingCaptures: 6,
+      },
+    },
+    {
+      name: "one nonzero reason",
+      blockedCaptureCount: 2,
+      counts: { GENERATED_IMAGE_RETENTION_EVENT_MISSING: 2 },
+      expected: {
+        generatedImageRetentionAttachmentInvalidCaptures: 0,
+        generatedImageRetentionEventInvalidCaptures: 0,
+        generatedImageRetentionEventMissingCaptures: 2,
+        generatedImageRetentionManifestInvalidCaptures: 0,
+        generatedImageRetentionPreconditionFailedCaptures: 0,
+        generatedImageRetentionVaultFileMissingCaptures: 0,
+      },
+    },
+    { name: "no blocked captures", blockedCaptureCount: 0, counts: {}, expected: {} },
+  ])("emits only the existing count-only warning for $name", async ({
+    blockedCaptureCount, counts, expected,
+  }) => {
+    const result: RunGeneratedImageCaptureRetentionResult = {
+      blockedCaptureCount,
+      blockedCaptureCounts: { ...emptyBlockedCaptureCounts, ...counts },
+      hasMoreEligibleCaptures: false,
+      nextEligibleAt: "2026-07-16T00:00:00.000Z",
+      retiredByteCount: 10,
+      retiredCaptureCount: 2,
+      scannedCaptureCount: blockedCaptureCount + 2,
+    };
+    // Unknown properties must never be spread through the logging boundary.
+    runGeneratedImageCaptureRetention.mockResolvedValue({
+      ...result,
+      blockedCaptureCounts: { ...result.blockedCaptureCounts, "synthetic-private-reason": 99 },
+      error: new Error("synthetic private error detail"),
+      eventId: "synthetic-capture-id",
+      relativePath: "raw/captures/synthetic-private-image.png",
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "on");
+    try {
+      await expect(runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_synthetic_retention_1",
+        model: null,
+        pendingWork: true,
+        providerName: null,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/synthetic-vault",
+        wakeSignal: null,
+      })).resolves.toEqual({
+        kind: "skipped",
+        reason: "pending_work",
+        threadContextTokensBefore: null,
+        nextWakeAt: result.nextEligibleAt,
+        nextWakeReason: "inbox_media_retention",
+      });
+      expect(infoSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(blockedCaptureCount > 0 ? 1 : 0);
+      if (blockedCaptureCount > 0) {
+        expect(JSON.parse(String(warnSpy.mock.calls[0]?.[0]))).toEqual({
+          component: "runtime",
+          details: {
+            failureCode: "generated_image_retention_capture_blocked",
+            generatedImageRetentionBlockedCaptures: blockedCaptureCount,
+            generatedImageRetentionRetiredCaptures: 2,
+            ...expected,
+          },
+          eventId: null,
+          level: "warn",
+          message:
+            "Hosted idle maintenance retired valid generated images, but one or more captures require repair.",
+          phase: "checkpoint",
+          schema: "murph.hosted-execution.log.v1",
+          time: expect.any(String),
+          userId: null,
+          userIdPresent: true,
+        });
+      }
+      expect(runGeneratedImageCaptureRetention).toHaveBeenCalledTimes(1);
+      expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+      errorSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 
   it("bounds generated-image cleanup by the remaining canonical receipt capacity", async () => {

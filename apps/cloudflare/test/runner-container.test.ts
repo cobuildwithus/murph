@@ -381,7 +381,7 @@ describe("RunnerContainer", () => {
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_050,
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -488,7 +488,7 @@ describe("RunnerContainer", () => {
       attemptId: activeRequest.attemptId,
       leaseGeneration: activeRequest.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -575,7 +575,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -634,7 +634,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -693,7 +693,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -778,7 +778,7 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(invocation).resolves.toEqual(createRunnerResult());
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -868,7 +868,7 @@ describe("RunnerContainer", () => {
     await lifecycleDestroyStarted.promise;
 
     await invocationFailure;
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -960,7 +960,7 @@ describe("RunnerContainer", () => {
       status: 200,
     }));
     await expect(activeInvocation).resolves.toEqual(createRunnerResult());
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1030,7 +1030,7 @@ describe("RunnerContainer", () => {
     runnerResponse.reject(new Error("Network connection lost"));
 
     await invocationFailure;
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1063,7 +1063,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1128,7 +1128,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1145,6 +1145,60 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
+  it.each([false, true])("relays bounded transport metadata without conflating pending notification: %s", async (pending) => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running", platformRunning: true,
+      containerFetch: vi.fn(async () => new Response(null, {
+        status: 204,
+        headers: {
+          "x-runtime-wake-accepted": "1",
+          "x-runtime-wake-identity-checked": "1",
+          "x-runtime-wake-pending": pending ? "1" : "0",
+          "x-runtime-wake-received-at-ms": "1777010000000",
+          "x-runtime-wake-accepted-at-ms": "1777010000001",
+        },
+      })),
+    });
+    await expect(container.ensureProcessing({
+      activeRuntime: { attemptId: "attempt_diagnostic", leaseGeneration: "12", userId: "member_123" },
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      kind: "accepted", action: pending ? "already_running" : "woken",
+      wakeDiagnostics: {
+        wakeStage: "acknowledgement", wakeStatus: 204,
+        wakeAccepted: true, wakePending: pending, wakeIdentityChecked: true,
+        wakeEnteredAtEpochMs: expect.any(Number), wakeDispatchAtEpochMs: expect.any(Number),
+        wakeResponseAtEpochMs: expect.any(Number), wakeDrainFinishedAtEpochMs: expect.any(Number),
+        wakeHandlerReceivedAtEpochMs: 1777010000000, wakeHandlerAcceptedAtEpochMs: 1777010000001,
+        wakeActivePointerPresent: false, wakeSignalAborted: false,
+      },
+    });
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("does not turn accepted response headers into success when metadata drain fails", async () => {
+    const { container } = createContainerDouble({
+      initialStatus: "running", platformRunning: true,
+      containerFetch: vi.fn(async () => new Response(new ReadableStream({
+        start(controller) { controller.error(new Error("private drain failure fixture")); },
+      }), {
+        status: 200,
+        headers: { "x-runtime-wake-accepted": "1", "x-runtime-wake-identity-checked": "1",
+          "x-runtime-wake-received-at-ms": "not-an-epoch" },
+      })),
+    });
+    const result = await container.ensureProcessing({
+      activeRuntime: { attemptId: "attempt_diagnostic_drain", leaseGeneration: "12", userId: "member_123" },
+      userId: "member_123",
+    });
+    expect(result).toMatchObject({ kind: "wake-unconfirmed", reason: "container-rpc-error",
+      wakeDiagnostics: { wakeStage: "drain", wakeStatus: 200, wakeAccepted: true } });
+    expect(result.wakeDiagnostics?.wakeDrainFinishedAtEpochMs).toBeUndefined();
+    expect(result.wakeDiagnostics?.wakeHandlerReceivedAtEpochMs).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("private drain failure fixture");
+  });
+
   it("short-circuits a wake probe when platform truth says a pointerless shell is stopped", async () => {
     const { container, containerFetch, getState, startAndWaitForPorts } =
       createContainerDouble({
@@ -1159,7 +1213,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer_stopped_shell",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1193,7 +1247,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer_running_shell",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1201,6 +1255,46 @@ describe("RunnerContainer", () => {
     expect(containerFetch.mock.calls.some(([url]) =>
       String(url).endsWith("/internal/runtime-wake")
     )).toBe(true);
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("accepts overlapping wakes acknowledged by the same exact runtime after losing the local pointer", async () => {
+    const requestsStarted = createDeferred<void>();
+    const releaseResponses = createDeferred<void>();
+    let requestCount = 0;
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+      containerFetch: vi.fn(async (url: string) => {
+        expect(url).toContain("/internal/runtime-wake");
+        requestCount += 1;
+        if (requestCount === 2) requestsStarted.resolve(undefined);
+        await releaseResponses.promise;
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "x-runtime-wake-accepted": "1",
+            "x-runtime-wake-identity-checked": "1",
+          },
+        });
+      }),
+    });
+    const input = {
+      activeRuntime: {
+        attemptId: "attempt_concurrent_foreground_wakes",
+        leaseGeneration: "12",
+        userId: "member_123",
+      },
+      userId: "member_123",
+    };
+    const wakes = [container.ensureProcessing(input), container.ensureProcessing(input)];
+    await requestsStarted.promise;
+    releaseResponses.resolve(undefined);
+    expect(await Promise.all(wakes)).toMatchObject([
+      { action: "woken", kind: "accepted" },
+      { action: "woken", kind: "accepted" },
+    ]);
+    expect(destroy).not.toHaveBeenCalled();
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
@@ -1242,7 +1336,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1278,7 +1372,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_pointerless_during_destroy",
       leaseGeneration: "1",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1337,7 +1431,7 @@ describe("RunnerContainer", () => {
       },
       status: 204,
     }));
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1377,7 +1471,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_stale",
       leaseGeneration: "10",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1415,7 +1509,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "container-rpc-error",
     });
@@ -1452,7 +1546,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -1488,7 +1582,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1527,7 +1621,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1556,7 +1650,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1594,7 +1688,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1628,7 +1722,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1665,7 +1759,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1702,7 +1796,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -1753,7 +1847,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -1819,7 +1913,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "already_running",
       kind: "accepted",
     });
@@ -2038,6 +2132,28 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it.each([RunnerContainer, NextRunnerContainer])("rechecks the actual process image when native rollout replaces a warm generation", async containerClass => {
+    const bank = containerClass === NextRunnerContainer ? "next" : "primary";
+    const active = { bank, id: `${bank}-permanent`, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+    const candidate = { ...active, bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64), image: `registry.example.test/runner@sha256:${"e".repeat(64)}` };
+    let actual = active;
+    const { container, destroy, containerFetch } = createContainerDouble({
+      containerClass, initialStatus: "running",
+      env: { HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, candidate, previous: null }) },
+      containerFetch: vi.fn(async () => new Response(JSON.stringify({ ...createRunnerHealthResult(), runnerBundle: { bundleFingerprint: actual.bundleFingerprint, sourceFingerprint: actual.sourceFingerprint } }), { headers: { "content-type": "application/json" } })),
+    });
+    await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" })).resolves.toMatchObject({ kind: "ready" });
+    actual = candidate;
+    container.onStart();
+    await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" })).resolves.toMatchObject({ kind: "ready" });
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(destroy).not.toHaveBeenCalled();
+    actual = { ...candidate, sourceFingerprint: active.sourceFingerprint };
+    container.onStart();
+    await expect(container.ensureReadyForProcessing({ timeoutMs: 15_000, userId: "member_123" })).rejects.toThrow("bundle fingerprint mismatch");
+    expect(destroy).toHaveBeenCalled();
+  });
+
   it("rejects a stale cold image without retrying deployment convergence on the member path", async () => {
     let healthChecks = 0;
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
@@ -2114,6 +2230,7 @@ describe("RunnerContainer", () => {
       const destroyStarted = createDeferred<void>();
       const destroy = vi.fn(async () => {
         destroyStarted.resolve(undefined);
+        await new Promise<void>(() => undefined);
       });
       const startAndWaitForPorts = vi.fn(async () => {
         status = "running";
@@ -2988,7 +3105,9 @@ describe("RunnerContainer", () => {
         if (expectedDestroyCalls === 1) {
           await destroyIssued.promise;
         }
-        await vi.waitFor(() => expect(statusReads).toBe(gatedStatusRead));
+        if (expectedDestroyCalls === 0) {
+          await vi.waitFor(() => expect(statusReads).toBe(gatedStatusRead));
+        }
 
         nowMs += 1_000;
         const replacementStartedAtMs = nowMs;
@@ -3495,42 +3614,6 @@ describe("RunnerContainer", () => {
       timeout.mockRestore();
       vi.useRealTimers();
     }
-  });
-
-  it.each(["stopped", "running"] as const)(
-    "accepts legacy shell hints without allocating or probing a %s container",
-    async (initialStatus) => {
-      const { container, containerFetch, getState, start, startAndWaitForPorts } =
-        createContainerDouble({ initialStatus });
-      const input = { timeoutMs: 7_500, userId: "member_123" };
-
-      await expect(container.prewarmShell(input)).resolves.toEqual({
-        action: "superseded",
-        kind: "superseded",
-      });
-      for (const source of ["linq-message-routing", "linq-typing-started"] as const) {
-        await expect(container.beginShellPrewarm({ ...input, source }))
-          .resolves.toEqual({ accepted: true });
-      }
-
-      expect(start).not.toHaveBeenCalled();
-      expect(startAndWaitForPorts).not.toHaveBeenCalled();
-      expect(containerFetch).not.toHaveBeenCalled();
-      expect(getState).not.toHaveBeenCalled();
-    },
-  );
-
-  it("starts through authoritative readiness after an inert legacy hint", async () => {
-    const { container, start, startAndWaitForPorts } = createContainerDouble();
-    const input = { timeoutMs: 7_500, userId: "member_123" };
-    await container.beginShellPrewarm(input);
-
-    await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
-    expect(start).not.toHaveBeenCalled();
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
   });
 
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
@@ -4077,7 +4160,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_stale",
       leaseGeneration: "10",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -4139,7 +4222,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       action: "woken",
       kind: "accepted",
     });
@@ -4198,7 +4281,7 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_evt_123",
       leaseGeneration: "11",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -4212,6 +4295,35 @@ describe("RunnerContainer", () => {
     }));
 
     await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("preserves the wake timeout when the SDK converts an aborted fetch into HTTP 500", async () => {
+    const wakeDeadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(wakeDeadline.signal);
+    const sdkResponse = new Response("Synthetic transport timeout", { status: 500 });
+    const { container } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+      containerFetch: vi.fn(async (url: string) => {
+        expect(url).toContain("/internal/runtime-wake");
+        // The actual SDK's exception-to-response behavior is covered by the
+        // Containers helper suite; exercise Murph's response drain here.
+        wakeDeadline.abort(new DOMException("Synthetic wake deadline", "TimeoutError"));
+        return sdkResponse;
+      }),
+    });
+    try {
+      await expect(container.wakeRuntime({
+        attemptId: "attempt_sdk_timeout",
+        leaseGeneration: "1",
+        userId: "member_123",
+      })).resolves.toMatchObject({ kind: "unknown", reason: "container-rpc-timeout",
+        wakeDiagnostics: { wakeSignalAborted: true, wakeStatus: 500, wakeStage: "drain" },
+      });
+      expect(sdkResponse.bodyUsed).toBe(true);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it("rejects runtime wakes when metadata response draining times out", async () => {
@@ -4267,7 +4379,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       });
       await vi.advanceTimersByTimeAsync(5_000);
-      await expect(wake).resolves.toEqual({
+      await expect(wake).resolves.toMatchObject({
         kind: "unknown",
         reason: "container-rpc-timeout",
       });
@@ -4842,7 +4954,7 @@ describe("RunnerContainer", () => {
     vi.useFakeTimers();
 
     try {
-      const destroy = vi.fn(async () => {});
+      const destroy = vi.fn(() => new Promise<void>(() => undefined));
       const getState = vi.fn(async () => ({
         lastChange: Date.now(),
         status: "running",
@@ -4912,7 +5024,7 @@ describe("RunnerContainer", () => {
 
     try {
       let hangNextStatusRead = false;
-      const destroy = vi.fn(async () => {});
+      const destroy = vi.fn(() => new Promise<void>(() => undefined));
       const getState = vi.fn(async () => {
         if (hangNextStatusRead) {
           await new Promise<void>(() => undefined);
@@ -5019,8 +5131,6 @@ describe("RunnerContainer", () => {
         component: "container",
         details: expect.objectContaining({
           lifecycleStage: "destroyed",
-          settleReason: "onStop",
-          stopObservedAfterDestroy: true,
         }),
         message: "Hosted execution container destroy completed.",
         phase: "container.ready",
@@ -6433,7 +6543,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -6546,7 +6656,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6630,7 +6740,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6829,7 +6939,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -6975,7 +7085,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -7212,7 +7322,7 @@ describe("RunnerContainer", () => {
     },
   );
 
-  it("requires exact abort and observed stop when control-plane status is stale", async () => {
+  it("requires exact abort and native destruction when control-plane status is stale", async () => {
     const request = createRunnerRequest("evt_missing_pointer_stale_stopped_status");
     const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/internal/workspace-invocation/abort")) {
@@ -7225,7 +7335,8 @@ describe("RunnerContainer", () => {
       }
       throw new Error(`Unexpected runner request URL: ${url}`);
     });
-    const destroy = vi.fn(async () => {});
+    const nativeStop = createDeferred<void>();
+    const destroy = vi.fn(() => nativeStop.promise);
     const { container } = createContainerDouble({
       containerFetch,
       destroy,
@@ -7246,7 +7357,7 @@ describe("RunnerContainer", () => {
     expect(containerFetch).toHaveBeenCalledOnce();
     expect(abortSettled).toBe(false);
 
-    container.onStop({ exitCode: 0, reason: "exit" });
+    nativeStop.resolve(undefined);
     await expect(abort).resolves.toBe("accepted");
   });
 
@@ -7417,7 +7528,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7476,7 +7587,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7610,7 +7721,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: request.leaseGeneration,
       processingMode: "system_mailbox",
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7833,7 +7944,7 @@ describe("RunnerContainer", () => {
       leaseGeneration: replacementRequest.leaseGeneration,
       userId: "member_123",
     });
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7924,7 +8035,7 @@ describe("RunnerContainer", () => {
     await abortRequestStarted.promise;
     releasePreservedStatus.resolve(undefined);
 
-    await expect(wake).resolves.toEqual({
+    await expect(wake).resolves.toMatchObject({
       kind: "unknown",
       reason: "active-child-rejected",
     });
@@ -7979,7 +8090,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -8212,7 +8323,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       kind: "not-wakeable",
       reason: "no-active-child",
     });
@@ -8290,31 +8401,16 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("waits for a destroyed warm shell to report stopped before cold restart", async () => {
+  it("waits for native destruction before cold restart", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
 
     try {
-      const settleRunningObserved = createDeferred<void>();
+      const nativeStop = createDeferred<void>();
       let healthChecks = 0;
-      let statusReads = 0;
-      const getState = vi.fn(async () => {
-        statusReads += 1;
-        if (statusReads === 3) {
-          settleRunningObserved.resolve();
-          return {
-            lastChange: Date.now(),
-            status: "running",
-          };
-        }
-
-        return {
-          lastChange: Date.now(),
-          status: statusReads < 3 ? "running" : "stopped",
-        };
-      });
+      const getState = vi.fn(async () => ({ lastChange: Date.now(), status: "running" }));
       const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-        destroy: vi.fn(async () => {}),
+        destroy: vi.fn(() => nativeStop.promise),
         getState,
         initialStatus: "running",
         startAndWaitForPorts: vi.fn(async () => {}),
@@ -8354,23 +8450,17 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       });
 
-      await settleRunningObserved.promise;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(destroy).toHaveBeenCalledOnce();
       expect(startAndWaitForPorts).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(250);
+      nativeStop.resolve(undefined);
+      await vi.advanceTimersByTimeAsync(1);
       await expect(invokePromise).resolves.toEqual(createRunnerResult());
 
       expect(destroy).toHaveBeenCalledTimes(1);
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-      const destroyCompletedLog = mocks.emitHostedExecutionStructuredLog.mock.calls
-        .map(([log]) => log)
-        .find((log) => log.message === "Hosted execution container destroy completed.");
-      expect(destroyCompletedLog?.details).toEqual(expect.objectContaining({
-        destroySettleTimeoutMs: 5_000,
-        lifecycleStage: "destroyed",
-        observedStatusesAfterDestroy: ["running", "stopped"],
-        statusAfterDestroy: "stopped",
-      }));
+      expect(getState).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
@@ -9219,6 +9309,23 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("finishes native destruction without waiting for cached lifecycle status", async () => {
+    vi.useFakeTimers();
+    try {
+      const getState = vi.fn(async () => ({ lastChange: Date.now(), status: "running" }));
+      const { container, destroy } = createContainerDouble({ getState, initialStatus: "running" });
+      let settled = false;
+      const result = container.destroyInstance().then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(settled).toBe(true);
+      await result;
+      expect(getState).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("waits for explicit destroy to resolve through the native container lifecycle", async () => {
     vi.useFakeTimers();
 
@@ -9315,54 +9422,6 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("fails closed when destroy resolves but the container never reports stopped", async () => {
-    vi.useFakeTimers();
-
-    try {
-      let status: "running" | "destroying" = "running";
-      const destroy = vi.fn(async () => {
-        status = "destroying";
-        await new Promise<void>((resolve) => setTimeout(resolve, 250));
-      });
-      const getState = vi.fn(async () => ({
-        lastChange: Date.now(),
-        status,
-      }));
-      const { container } = createContainerDouble({
-        destroy,
-        getState,
-        initialStatus: "running",
-      });
-
-      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(5_500);
-
-      await expect(destroyPromise).resolves.toMatchObject({
-        message: "Hosted runner container did not report stopped after destroy.",
-      });
-      expect(destroy).toHaveBeenCalledTimes(1);
-      expect(getState.mock.calls.length).toBeGreaterThan(1);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            destroySettleTimeoutMs: 5_000,
-            failClosed: true,
-            lifecycleStage: "destroy-settle",
-            observedStatusesAfterDestroy: ["destroying"],
-            statusAfterDestroy: "destroying",
-            statusBeforeDestroy: "running",
-          }),
-          level: "error",
-          message: "Hosted execution container destroy did not settle to stopped.",
-          phase: "failed",
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("fails closed when the destroy request itself never settles", async () => {
     vi.useFakeTimers();
 
@@ -9384,21 +9443,21 @@ describe("RunnerContainer", () => {
       await vi.advanceTimersByTimeAsync(5_500);
 
       await expect(destroyPromise).resolves.toMatchObject({
-        message: "Hosted runner container did not report stopped after destroy.",
+        message: "Hosted runner container failed to destroy cleanly.",
+        cause: { message: "Hosted runner container destruction timed out." },
       });
       expect(destroy).toHaveBeenCalledTimes(1);
-      expect(getState.mock.calls.length).toBeGreaterThan(1);
+      expect(getState).toHaveBeenCalledOnce();
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "container",
           details: expect.objectContaining({
-            destroySettleTimeoutMs: 5_000,
             failClosed: true,
-            lifecycleStage: "destroy-settle",
+            lifecycleStage: "destroy",
             statusBeforeDestroy: "running",
           }),
           level: "error",
-          message: "Hosted execution container destroy did not settle to stopped.",
+          message: "Hosted execution container destroy request failed.",
           phase: "failed",
         }),
       );
@@ -9441,62 +9500,6 @@ describe("RunnerContainer", () => {
             lifecycleStage: "status",
           }),
           message: "Hosted execution container failed while checking its lifecycle state.",
-          phase: "failed",
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("fails closed when destroy settle status reads never settle", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const destroy = vi.fn(async () => {});
-      let statusReadCount = 0;
-      const getState = vi.fn(async () => {
-        statusReadCount += 1;
-        if (statusReadCount === 1) {
-          return {
-            lastChange: Date.now(),
-            status: "running",
-          };
-        }
-
-        await new Promise<void>(() => undefined);
-        return {
-          lastChange: Date.now(),
-          status: "destroying",
-        };
-      });
-      const { container } = createContainerDouble({
-        destroy,
-        getState,
-        initialStatus: "running",
-      });
-
-      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(5_500);
-
-      await expect(destroyPromise).resolves.toMatchObject({
-        message: "Hosted runner container did not report stopped after destroy.",
-      });
-      expect(destroy).toHaveBeenCalledTimes(1);
-      expect(getState.mock.calls.length).toBeGreaterThan(1);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            destroySettleTimeoutMs: 5_000,
-            failClosed: true,
-            lifecycleStage: "destroy-settle",
-            observedStatusesAfterDestroy: ["status_error"],
-            statusAfterDestroy: null,
-            statusBeforeDestroy: "running",
-          }),
-          level: "error",
-          message: "Hosted execution container destroy did not settle to stopped.",
           phase: "failed",
         }),
       );
@@ -9556,7 +9559,7 @@ describe("RunnerContainer", () => {
   });
 
   it("fails closed before reusing a warm shell after best-effort cleanup does not settle", async () => {
-    const destroy = vi.fn(async () => {});
+    const destroy = vi.fn(() => new Promise<void>(() => undefined));
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify(createRunnerHealthResult()), {
@@ -9602,7 +9605,7 @@ describe("RunnerContainer", () => {
       await vi.advanceTimersByTimeAsync(5_500);
 
       await expect(invokeResult).resolves.toMatchObject({
-        message: "Hosted runner container did not report stopped after destroy.",
+        message: "Hosted runner container failed to destroy cleanly.",
       });
     } finally {
       vi.useRealTimers();

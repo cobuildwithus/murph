@@ -13,6 +13,7 @@ import {
   formatComplexityDiffReport,
   isCyclomaticSourcePath,
   parseNameStatus,
+  type ComplexityDiffReport,
 } from "./check-cyclomatic-complexity.js";
 
 const analyzerScriptPath = fileURLToPath(
@@ -437,4 +438,160 @@ describe("cyclomatic complexity CLI composition", () => {
       await rm(repository, { force: true, recursive: true });
     }
   });
+});
+
+describe("cyclomatic complexity exact function moves", () => {
+  const moved = functionWithBranches("moved", 24);
+  const retained = "export const retained = true;";
+  const nested = `function outer(value) { ${moved} return moved(value); }`;
+  const typedMoved = moved
+    .replace("function moved(value)", "async function moved(value: number): Promise<unknown>")
+    .replace("return value;", "return consume({ value, }, [value,],);");
+  const parenthesizedMoved = moved.replace("return value;", "return (value + 1);");
+  const concentrated = `${functionWithBranches("first", 24)}${functionWithBranches("second", 24)}`;
+  const concentratedHead = `${functionWithBranches("first", 29)}${functionWithBranches("second", 19)}`;
+  const cases: {
+    name: string;
+    before: Record<string, string>;
+    after: Record<string, string>;
+    passed: boolean;
+    movedIn: number;
+  }[] = [
+    {
+      name: "accepts an exact extraction with comments and export changes",
+      before: { "source.ts": `${moved}${retained}` },
+      after: {
+        "source.ts": `import { moved } from './owner.js'; ${retained}`,
+        "owner.ts": `// New module ownership.\nexport ${moved.trim().replace("return value;", "/* preserved */ return value;")}`,
+      },
+      passed: true,
+      movedIn: 1,
+    },
+    {
+      name: "rejects a copy from an unchanged source file",
+      before: { "source.ts": moved },
+      after: { "source.ts": moved, "owner.ts": moved },
+      passed: false,
+      movedIn: 0,
+    },
+    {
+      name: "reserves the donor when its file changes but the function stays",
+      before: { "source.ts": moved },
+      after: { "source.ts": `${moved}${retained}`, "owner.ts": moved },
+      passed: false,
+      movedIn: 0,
+    },
+    {
+      name: "consumes one removed occurrence only once across two destinations",
+      before: { "source.ts": `${moved}${retained}` },
+      after: { "source.ts": retained, "first.ts": moved, "second.ts": moved },
+      passed: false,
+      movedIn: 1,
+    },
+    {
+      name: "does not match a moved function with greater complexity",
+      before: { "source.ts": `${moved}${retained}` },
+      after: { "source.ts": retained, "owner.ts": functionWithBranches("moved", 25) },
+      passed: false,
+      movedIn: 0,
+    },
+    {
+      name: "does not match changed bodies even with equal complexity",
+      before: { "source.ts": `${moved}${retained}` },
+      after: { "source.ts": retained, "owner.ts": moved.replace("return value;", "return -value;") },
+      passed: false,
+      movedIn: 0,
+    },
+    {
+      name: "does not match renamed functions",
+      before: { "source.ts": `${moved}${retained}` },
+      after: { "source.ts": retained, "owner.ts": moved.replace("function moved", "function renamed") },
+      passed: false,
+      movedIn: 0,
+    },
+    {
+      name: "preserves independent nested frames when their outer function moves",
+      before: { "source.ts": `${nested}${retained}` },
+      after: { "source.ts": retained, "owner.ts": nested },
+      passed: true,
+      movedIn: 2,
+    },
+    {
+      name: "rejects a copied nested function when its donor remains inside an edited wrapper",
+      before: { "source.ts": nested },
+      after: { "source.ts": nested.replace("return moved(value);", "return moved(value) + 1;"), "owner.ts": moved },
+      passed: false,
+      movedIn: 0,
+    },
+    {
+      name: "does not offset growth against an unrelated deletion",
+      before: { "source.ts": moved, "other.ts": functionWithBranches("other", 20) },
+      after: { "source.ts": retained, "other.ts": functionWithBranches("other", 21) },
+      passed: false,
+      movedIn: 0,
+    },
+    {
+      name: "preserves maximum protection in a donor after its largest function moves",
+      before: { "source.ts": `${functionWithBranches("largest", 40)}${concentrated}` },
+      after: { "source.ts": concentratedHead, "owner.ts": functionWithBranches("largest", 40) },
+      passed: false,
+      movedIn: 1,
+    },
+    {
+      name: "preserves maximum protection in a destination receiving a larger function",
+      before: { "source.ts": `${functionWithBranches("largest", 40)}${retained}`, "owner.ts": concentrated },
+      after: { "source.ts": retained, "owner.ts": `${functionWithBranches("largest", 40)}${concentratedHead}` },
+      passed: false,
+      movedIn: 1,
+    },
+    {
+      name: "matches async typed functions with trailing comma source positions",
+      before: { "source.ts": `${retained}\n${typedMoved}` },
+      after: { "source.ts": retained, "owner.ts": `export ${typedMoved.trim()}` },
+      passed: true,
+      movedIn: 1,
+    },
+    {
+      name: "matches parenthesized expressions after source positions change",
+      before: { "source.ts": `${retained}\n${parenthesizedMoved}` },
+      after: { "source.ts": retained, "owner.ts": parenthesizedMoved },
+      passed: true,
+      movedIn: 1,
+    },
+  ];
+
+  for (const { name, before, after, passed, movedIn } of cases) {
+    it(name, async () => {
+      const repository = await mkdtemp(path.join(tmpdir(), "complexity-moves-"));
+      try {
+        runFixtureGit(repository, "init", "--initial-branch=main");
+        for (const [name, source] of Object.entries(before)) {
+          await writeFile(path.join(repository, name), source);
+        }
+        runFixtureGit(repository, "add", ".");
+        runFixtureGit(repository, "commit", "-m", "baseline");
+        const baseRef = runFixtureGit(repository, "rev-parse", "HEAD");
+        for (const [name, source] of Object.entries(after)) {
+          await writeFile(path.join(repository, name), source);
+        }
+        const workingTree = runComplexityCli(repository, "--base", baseRef, "--json");
+        expect(workingTree.status, workingTree.stderr).toBe(passed ? 0 : 1);
+        const report: ComplexityDiffReport = JSON.parse(workingTree.stdout);
+        expect(report.files.reduce((sum, file) => sum + file.movedInCount, 0)).toBe(movedIn);
+        expect(report.files.reduce((sum, file) => sum + file.movedOutCount, 0)).toBe(movedIn);
+        // Full summaries still expose moved hotspots for the mandatory review.
+        expect(report.files.some((file) => file.headSummary.maximumComplexity > 20)).toBe(true);
+        runFixtureGit(repository, "add", ".");
+        runFixtureGit(repository, "commit", "-m", "candidate");
+        const committed = runComplexityCli(repository, "--base", baseRef, "--head", "HEAD");
+        expect(committed.status, committed.stderr).toBe(passed ? 0 : 1);
+        if (movedIn > 0) {
+          expect(committed.stdout).toContain("exact moves:");
+          expect(committed.stdout).toContain("deltas compare only unmoved functions");
+        }
+      } finally {
+        await rm(repository, { force: true, recursive: true });
+      }
+    });
+  }
 });

@@ -7521,6 +7521,69 @@ test("device sync service aborts and releases provider jobs when foreground work
   }
 });
 
+test("device sync service releases an interrupted snapshot import without consuming retry budget", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-yield");
+  let yieldRequested = false;
+  let imports = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [createFakeProvider()],
+    importer: {
+      async importDeviceProviderSnapshot(_input, options) {
+        imports += 1;
+        assert.ok(options?.signal);
+        yieldRequested = true;
+        const signal = options.signal;
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("import did not yield")), 1_000);
+          signal.addEventListener("abort", () => {
+            clearTimeout(timeout);
+            if (imports === 1) {
+              reject(signal.reason);
+            } else {
+              // A started canonical publication still returns its committed receipt.
+              resolve();
+            }
+          }, { once: true });
+        });
+        return { applied: true, events: [] };
+      },
+    },
+  });
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "import-yield" });
+    const yielded = await service.runWorkerOnce();
+    assert.ok(yielded);
+    const pending = store.getJobById(yielded.id);
+    assert.equal(pending?.status, "queued");
+    assert.equal(pending?.attempts, 0);
+    assert.equal(pending?.leaseOwner, null);
+    assert.equal(pending?.leaseExpiresAt, null);
+    assert.deepEqual(service.listJobFailureDiagnostics(), []);
+    const firstTiming = service.listJobTimingDiagnostics()[0];
+    assert.equal(firstTiming?.outcome, "yielded");
+    assert.equal(firstTiming?.durableProgressCommitted, false);
+    assert.equal(firstTiming?.canonicalProgressCommitted, undefined);
+
+    yieldRequested = false;
+    const completed = await service.runWorkerOnce();
+    assert.equal(completed?.id, yielded.id);
+    assert.equal(store.getJobById(yielded.id)?.status, "succeeded");
+    assert.equal(imports, 2);
+    assert.equal(service.listJobTimingDiagnostics()[1]?.canonicalProgressCommitted, true);
+  } finally {
+    close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("device sync service yields between sequential snapshot imports", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-sequential-import-yield");
   const imports: unknown[] = [];

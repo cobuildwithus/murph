@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedRunnerContainerEnv } from "../../src/hosted-env-policy.ts";
+
 import {
   buildHostedLinqInboundEvent,
+  HOSTED_LOCAL_LINQ_API_TOKEN,
   startHostedLocalLinqStub,
   type HostedLocalLinqWaitScenario,
 } from "./hosted-local-linq-support.js";
@@ -14,14 +17,57 @@ const passiveWaitScenario = {
   buildFailureMessage: async (_userId: string, summaryLines: readonly string[]) =>
     summaryLines.join("\n"),
 } satisfies HostedLocalLinqWaitScenario;
+const providerHeaders = { authorization: `Bearer ${HOSTED_LOCAL_LINQ_API_TOKEN}` };
 
 describe("hosted local Linq provider stub", () => {
+  it.each([
+    { attachmentId: "att_pdf_fixture", extension: "pdf", mimeType: "application/pdf" },
+    { attachmentId: "att_image_fixture", extension: "png", mimeType: "image/png" },
+    { attachmentId: "att_voice_fixture", extension: "wav", mimeType: "audio/wav" },
+  ])("keeps $extension download URLs aligned with the runner CDN origin", async ({
+    attachmentId,
+    extension,
+    mimeType,
+  }) => {
+    const stub = await startHostedLocalLinqStub();
+
+    try {
+      const runnerEnv = buildHostedRunnerContainerEnv({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+        LINQ_API_BASE_URL: stub.runnerBaseUrl,
+        LINQ_API_TOKEN: HOSTED_LOCAL_LINQ_API_TOKEN,
+        LINQ_ATTACHMENT_CDN_BASE_URL: stub.attachmentDownloadBaseUrl,
+      });
+      const expectedCdnOrigin = `${stub.runnerBaseUrl}/attachment-downloads`;
+      expect(runnerEnv.LINQ_API_BASE_URL).toBe("https://api.linqapp.com/api/partner/v3");
+      expect(runnerEnv.LINQ_ATTACHMENT_CDN_BASE_URL).toBe(expectedCdnOrigin);
+
+      const metadata = await fetch(`${stub.baseUrl}/attachments/${attachmentId}`, {
+        headers: { ...providerHeaders, host: "api.linqapp.com" },
+      });
+      expect(metadata.status).toBe(200);
+      const expectedDownloadUrl = `${expectedCdnOrigin}/${attachmentId}.${extension}`;
+      await expect(metadata.json()).resolves.toEqual({ download_url: expectedDownloadUrl });
+
+      // The host test reaches the same public byte route over loopback.
+      const bytes = await fetch(`${stub.baseUrl}${new URL(expectedDownloadUrl).pathname}`);
+      expect(bytes.status).toBe(200);
+      expect(bytes.headers.get("content-type")).toBe(mimeType);
+      expect((await bytes.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      expect(stub.observedRequests.at(-1)?.authorizationStatus).toBe("missing");
+    } finally {
+      await stub.stop();
+    }
+  });
+
   it("serves canonical direct-chat summaries through its shared runtime URL", async () => {
     const stub = await startHostedLocalLinqStub();
 
     try {
       expect(new URL(stub.runnerBaseUrl).hostname).toBe("host.docker.internal");
-      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`);
+      const response = await fetch(`${stub.baseUrl}/chats/chat_direct`, { headers: providerHeaders });
 
       expect(response.status).toBe(200);
       expect(Number.isSafeInteger(stub.observedRequests[0]?.observedAtEpochMs)).toBe(
@@ -60,7 +106,7 @@ describe("hosted local Linq provider stub", () => {
     });
 
     try {
-      const response = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const response = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
@@ -102,7 +148,7 @@ describe("hosted local Linq provider stub", () => {
           size_bytes: 128,
         }),
         headers: {
-          authorization: "Bearer hosted-local",
+          ...providerHeaders,
           "content-type": "application/json",
         },
         method: "POST",
@@ -145,7 +191,7 @@ describe("hosted local Linq provider stub", () => {
           },
         }),
         headers: {
-          authorization: "Bearer hosted-local",
+          ...providerHeaders,
           "content-type": "application/json",
         },
         method: "POST",
@@ -307,14 +353,14 @@ describe("hosted local Linq provider stub", () => {
 
     try {
       stub.setChatIsGroup("chat_group", true);
-      const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const groupResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
       await expect(groupResponse.json()).resolves.toMatchObject({
         id: "chat_group",
         is_group: true,
       });
 
       stub.setChatIsGroup("chat_group", false);
-      const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`);
+      const directResponse = await fetch(`${stub.baseUrl}/chats/chat_group`, { headers: providerHeaders });
       await expect(directResponse.json()).resolves.toMatchObject({
         id: "chat_group",
         is_group: false,
@@ -380,6 +426,7 @@ async function postLinqStubMessage(input: {
       },
     }),
     headers: {
+      ...providerHeaders,
       "content-type": "application/json",
     },
     method: "POST",

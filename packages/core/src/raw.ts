@@ -1,4 +1,5 @@
 import {
+  RAW_ASSET_OWNER_KINDS,
   rawAssetOwnerSchema,
   type RawAssetOwner,
   type RawAssetOwnerKind,
@@ -189,127 +190,36 @@ export function resolveRawAssetDirectory({
 }
 
 export function inferRawAssetOwnerFromDirectory(rawDirectory: string): RawAssetOwner | null {
-  let normalizedDirectory: string;
-
   try {
-    normalizedDirectory = normalizeRelativeVaultPath(rawDirectory);
+    const segments = normalizeRelativeVaultPath(rawDirectory).split("/");
+    const hasPartition = segments.length === 6;
+    const [year, month, id] = segments.slice(-3);
+
+    if (
+      (segments.length !== 5 && !hasPartition)
+      || !/^\d{4}$/u.test(year)
+      || !/^\d{2}$/u.test(month)
+    ) {
+      return null;
+    }
+
+    const rootDirectory = segments.slice(0, 2).join("/");
+    const kind = RAW_ASSET_OWNER_KINDS.find((candidate) =>
+      RAW_ASSET_OWNER_DEFINITIONS[candidate].rootDirectory === rootDirectory
+      && RAW_ASSET_OWNER_PARTITION_KINDS.has(candidate) === hasPartition
+    );
+    if (!kind) {
+      return null;
+    }
+
+    return normalizeRawAssetOwner({
+      kind,
+      id,
+      ...(hasPartition ? { partition: segments[2] } : {}),
+    });
   } catch {
     return null;
   }
-
-  const segments = normalizedDirectory.split("/");
-
-  const hasYearMonth = (year: string | undefined, month: string | undefined): boolean =>
-    /^\d{4}$/u.test(year ?? "") && /^\d{2}$/u.test(month ?? "");
-
-  try {
-    if (
-      segments[0] === "raw"
-      && segments[1] === "captures"
-      && segments.length === 5
-      && hasYearMonth(segments[2], segments[3])
-    ) {
-      return normalizeRawAssetOwner({
-        kind: "capture",
-        id: segments[4] as string,
-      });
-    }
-
-    if (
-      segments[0] === "raw"
-      && segments[1] === "documents"
-      && segments.length === 5
-      && hasYearMonth(segments[2], segments[3])
-    ) {
-      return normalizeRawAssetOwner({
-        kind: "document",
-        id: segments[4] as string,
-      });
-    }
-
-    if (
-      segments[0] === "raw"
-      && segments[1] === "assessments"
-      && segments.length === 5
-      && hasYearMonth(segments[2], segments[3])
-    ) {
-      return normalizeRawAssetOwner({
-        kind: "assessment",
-        id: segments[4] as string,
-      });
-    }
-
-    if (
-      segments[0] === "raw"
-      && segments[1] === "measurements"
-      && segments.length === 5
-      && hasYearMonth(segments[2], segments[3])
-    ) {
-      return normalizeRawAssetOwner({
-        kind: "measurement",
-        id: segments[4] as string,
-      });
-    }
-
-    if (
-      segments[0] === "raw"
-      && segments[1] === "meals"
-      && segments.length === 5
-      && hasYearMonth(segments[2], segments[3])
-    ) {
-      return normalizeRawAssetOwner({
-        kind: "meal",
-        id: segments[4] as string,
-      });
-    }
-
-    if (segments[0] === "raw" && segments[1] === "workouts") {
-      if (segments.length === 5 && hasYearMonth(segments[2], segments[3])) {
-        return normalizeRawAssetOwner({
-          kind: "workout",
-          id: segments[4] as string,
-        });
-      }
-
-      if (segments.length === 6 && hasYearMonth(segments[3], segments[4])) {
-        return normalizeRawAssetOwner({
-          kind: "workout_batch",
-          partition: segments[2] as string,
-          id: segments[5] as string,
-        });
-      }
-    }
-
-    if (
-      segments[0] === "raw"
-      && segments[1] === "samples"
-      && segments.length === 6
-      && hasYearMonth(segments[3], segments[4])
-    ) {
-      return normalizeRawAssetOwner({
-        kind: "sample_batch",
-        partition: segments[2] as string,
-        id: segments[5] as string,
-      });
-    }
-
-    if (
-      segments[0] === "raw"
-      && segments[1] === "integrations"
-      && segments.length === 6
-      && hasYearMonth(segments[3], segments[4])
-    ) {
-      return normalizeRawAssetOwner({
-        kind: "device_batch",
-        partition: segments[2] as string,
-        id: segments[5] as string,
-      });
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
 }
 
 export function rawDirectoryMatchesOwner(rawDirectory: string, owner: RawAssetOwner): boolean {

@@ -516,7 +516,6 @@ export interface CodexAppServerTurnInput {
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
   generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
-  excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null

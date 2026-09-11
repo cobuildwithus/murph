@@ -25,6 +25,7 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionWake,
   HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
@@ -164,6 +165,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
+  "clinical-records.enrichment-requested",
   "device-sync.wake",
   "environment-interview.completed",
   "environment-voice.captured",
@@ -763,6 +765,8 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
 }
 
 export interface HostedMailboxItem {
+  /** Ephemeral Worker decryption; never written to the canonical mailbox. */
+  decodedWake?: HostedExecutionWake;
   causalSeq?: string | null;
   consumedAt?: string | null;
   createdAt: string;
@@ -861,6 +865,9 @@ export interface HostedGroupRunningBitProjection {
 }
 
 export interface HostedMailboxFetchResponse {
+  // Web supplies this invocation-lifecycle fact on every fetch, including empty
+  // batches. Deploy Web before a runner that consumes it.
+  assistantProvider: HostedAssistantProvider;
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
@@ -2323,6 +2330,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "assistant_input_accepted_for_execution",
   "linq_typing_request_started",
   "linq_typing_accepted",
+  "telegram_typing_accepted",
   "progress_update_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
@@ -2575,6 +2583,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     assistantInputAcceptedForExecutionAtEpochMs?: number;
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
+    telegramTypingAcceptedAtEpochMs?: number;
     progressUpdateAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
@@ -2958,6 +2967,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "assistantInputAcceptedForExecutionAtEpochMs",
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
+    "telegramTypingAcceptedAtEpochMs",
     "progressUpdateAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
@@ -3117,25 +3127,6 @@ export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
 
-export const HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS = [
-  "shellPrewarmOrchestrationAttemptId",
-  "shellPrewarmRequestStartedAtEpochMs",
-  "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
-  "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
-  "shellPrewarmCloudflareRouteReceivedAtEpochMs",
-  "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
-  "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
-  "shellPrewarmUserRunnerRpcStartedAtEpochMs",
-  "shellPrewarmConsentLockAcquiredAtEpochMs",
-  "shellPrewarmAdmissionReadStartedAtEpochMs",
-  "shellPrewarmAdmissionReadFinishedAtEpochMs",
-] as const;
-
-export type HostedRuntimeShellPrewarmOrchestrationDiagnostics = Pick<
-  HostedRuntimeOrchestrationLatencyDiagnostics,
-  (typeof HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS)[number]
->;
-
 export const HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER =
   "x-hosted-runtime-orchestration-latency";
 
@@ -3189,25 +3180,6 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
   return Object.keys(diagnostics).length > 0
     ? diagnostics as HostedRuntimeOrchestrationLatencyDiagnostics
-    : null;
-}
-
-export function sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
-  value: unknown,
-): HostedRuntimeShellPrewarmOrchestrationDiagnostics | null {
-  const orchestration = sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(value);
-  if (!orchestration) {
-    return null;
-  }
-  const diagnostics = Object.fromEntries(
-    HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS.flatMap(
-      (key) => orchestration[key] === undefined
-        ? []
-        : [[key, orchestration[key]]],
-    ),
-  ) as Partial<HostedRuntimeShellPrewarmOrchestrationDiagnostics>;
-  return Object.keys(diagnostics).length > 0
-    ? diagnostics as HostedRuntimeShellPrewarmOrchestrationDiagnostics
     : null;
 }
 
@@ -3741,6 +3713,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.idle",
   "runner.lease_superseded",
   "runner.provider_egress_diagnostic",
+  "runner.processing_finished",
   "runner.started",
   "runner.web_control_preflight_rejected",
   "runtime.invocation_finished",

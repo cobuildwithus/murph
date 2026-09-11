@@ -43,6 +43,8 @@ const JUNCTION_WEARABLE_LIVE_ENV_KEYS = [
   "MURPH_E2E_JUNCTION_GARMIN_MEMBER_ID",
   "MURPH_E2E_JUNCTION_OURA_MEMBER_ID",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_JUNCTION_WEARABLE_DATA",
+  "MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT",
   "MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID",
   "MURPH_E2E_KERNEL_CLI_PATH",
   "MURPH_E2E_OURA_EMAIL",
@@ -349,6 +351,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     name: "linq-scheduled-reminder",
     dedicatedVitestProcess: true,
+    vitestProcessTestNamePatterns: [
+      "^hosted local Linq scheduled reminder (e2e preserves the scheduled image reminder|timing helpers)",
+      "^hosted local Linq scheduled reminder e2e delivers a due reminder",
+      "^hosted local Linq scheduled reminder e2e delivers a scheduled nutrition card",
+    ],
   },
   {
     dedicatedVitestProcess: true,

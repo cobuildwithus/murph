@@ -405,13 +405,16 @@ describe("redactHostedLocalDiagnosticText", () => {
 });
 
 describe("spawnChildProcess diagnostics", () => {
-  it("retains bounded full text separately from the diagnostic tail", async () => {
+  it.each([
+    "Address already in use.",
+    "\u001b[1mAddress already in use.\u001b[0m",
+  ])("retains bounded full text separately from the diagnostic tail (%j)", async (message) => {
     const child = spawnChildProcess(
       "cloudflare",
       process.execPath,
       [
         "-e",
-        "process.stderr.write('Address already in use.\\n' + 'x'.repeat(4000))",
+        `process.stderr.write(${JSON.stringify(message)} + '\\n' + 'x'.repeat(4000))`,
       ],
       process.env,
       { pipeOutput: false },
@@ -429,7 +432,7 @@ describe("spawnChildProcess diagnostics", () => {
     });
 
     expect(child.stderrTail()).not.toContain("Address already in use");
-    expect(child.stderrText()).toContain("Address already in use");
+    expect(child.stderrText()).toContain(message);
   });
 
   it("tails captured child output before running expensive diagnostic redaction", async () => {

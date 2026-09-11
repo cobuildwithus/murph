@@ -16306,6 +16306,50 @@ test("Junction migration interval coverage uses the accepted canonical end", () 
   );
 });
 
+test("Junction migration interval coverage preserves provider timestamp acceptance", () => {
+  const canonicalEnd = "2026-08-12T10:00:00.000Z";
+  for (const endAt of [
+    "2026-08-12T12:00:00+02:00",
+    "Wed, 12 Aug 2026 10:00:00 GMT",
+    new Date(canonicalEnd),
+    Date.parse(canonicalEnd),
+  ]) {
+    assert.deepEqual(deriveJunctionCanonicalCoverageEvidence([{
+      dataOrigin: { sourceProviderSlug: "fitbit" },
+      externalRef: { resourceType: "junction-fitbit-sleep" },
+      fields: { endAt },
+      kind: "sleep_session",
+      occurredAt: "2026-08-12T02:00:00.000Z",
+    }]), [{
+      coverageBoundary: canonicalEnd,
+      resource: "sleep",
+      sourceProviderSlug: "fitbit",
+    }]);
+  }
+
+  for (const endAt of ["invalid", {}, new Date(Number.NaN), Number.NaN]) {
+    assert.deepEqual(deriveJunctionCanonicalCoverageEvidence([{
+      dataOrigin: { sourceProviderSlug: "fitbit" },
+      externalRef: { resourceType: "junction-fitbit-sleep" },
+      fields: { endAt },
+      kind: "sleep_session",
+      occurredAt: "2026-08-12T02:00:00.000Z",
+    }]), []);
+  }
+
+  assert.deepEqual(deriveJunctionCanonicalCoverageEvidence([{
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    externalRef: { resourceType: "junction-fitbit-workouts" },
+    fields: { workout: { endedAt: "invalid" } },
+    kind: "activity_session",
+    occurredAt: canonicalEnd,
+  }]), [{
+    coverageBoundary: canonicalEnd,
+    resource: "workouts",
+    sourceProviderSlug: "fitbit",
+  }]);
+});
+
 test("Junction migration keeps active Fitbit facts and admits successor only after each fence", () => {
   const payload = normalizeJunctionSnapshot({
     canonicalCoverageFence: {

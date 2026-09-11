@@ -1,3 +1,4 @@
+import { runHostedRecoveryBatch } from "../hosted-orchestration/recovery-batch";
 import { getPrisma } from "../prisma";
 import {
   formatHostedExecutionSafeLogErrorDetails,
@@ -11,7 +12,6 @@ import {
 const DEFAULT_WAKE_LIMIT = 25;
 const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
 const MAX_WAKE_LIMIT = 250;
-const WAKE_CONCURRENCY = 5;
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
@@ -69,9 +69,8 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   let wakeFailed = 0;
   let wakeNotAccepted = 0;
 
-  await runWithConcurrency(
+  await runHostedRecoveryBatch(
     selectedDueConnections,
-    WAKE_CONCURRENCY,
     async (dueConnection) => {
       wakeAttempted += 1;
 
@@ -130,6 +129,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         reason: wake.reason ?? null,
       });
     },
+    true,
   );
 
   const skippedDueConnections = Math.max(0, dueConnections.length - selectedDueConnections.length);
@@ -167,21 +167,4 @@ function normalizeLimit(value: number | null | undefined, fallback: number, max:
   }
 
   return Math.max(1, Math.min(Math.floor(value), max));
-}
-
-async function runWithConcurrency<T>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T) => Promise<void>,
-): Promise<void> {
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const item = items[nextIndex];
-      nextIndex += 1;
-      await worker(item);
-    }
-  }));
 }

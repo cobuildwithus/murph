@@ -57,6 +57,7 @@ import { projectBrowserTrainingSession } from "./training.ts";
 import { buildBrowserVaultExperimentRunCards } from "./experiment-run-cards.ts";
 import { createBrowserVaultProjectionQueryClient } from "./query.ts";
 import { stringifyJsonCooperatively } from "./json.ts";
+import { cloneJson, isBrowserSafeJson } from "./json-values.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -720,27 +721,6 @@ function previewText(value: string | null, limit: number): string | null {
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
   return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
-}
-
-function cloneJson(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function isBrowserSafeJson(value: unknown): boolean {
-  if (value === null) {
-    return true;
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.every(isBrowserSafeJson);
-  }
-  if (typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).every(isBrowserSafeJson);
-  }
-
-  return false;
 }
 
 function subtractDaysFromIsoDate(value: string, days: number): string {

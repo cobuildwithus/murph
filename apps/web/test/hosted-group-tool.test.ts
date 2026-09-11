@@ -101,7 +101,8 @@ vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
   isHostedMemberSuspended: mocks.isHostedMemberSuspended,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>()),
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 

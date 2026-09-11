@@ -2,14 +2,10 @@ import {
   type HostedHealthDataConsentState,
   type HostedRunnerStatusResponse,
   type HostedRuntimeHealthDataAdmissionResponse,
-  type HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  CloudflareHostedControlRuntimeShellPrewarmSource,
-} from "@murphai/cloudflare-hosted-control/client";
 import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -69,6 +65,8 @@ import {
 } from "../workspace-snapshot-store.ts";
 import {
   buildRunnerWriteFenceValidationRejectedDetails,
+  buildRuntimeProcessingSummaryEntry,
+  type RuntimeProcessingDiagnostics,
 } from "./diagnostics.js";
 import {
   createWorkspaceSnapshotSessionService,
@@ -112,10 +110,6 @@ export interface HostedRuntimeHealthDataConsentReconcileResult {
   userId: string;
 }
 
-const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
-// The retained hint measured a 693 ms provider-start p50 gain. Abandon its
-// optional admission before it can consume even half of that useful overlap.
-const HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS = 250;
 const HOSTED_WORKSPACE_READ_FAILURE_BODY_MAX_BYTES = 4 * 1_024;
 const HOSTED_WORKSPACE_READ_FAILURE_BODY_TIMEOUT_MS = 1_000;
 const HOSTED_WORKSPACE_READ_FAILURE_CODES = [
@@ -232,6 +226,8 @@ export class HostedUserRunner {
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
+      readHealthDataAdmission: (userId, timeoutMs) =>
+        this.readHostedRuntimeHealthDataAdmissionFromWeb(userId, timeoutMs),
       runnerContainerNamespace,
       readCheckpointHandoff: async (input) =>
         await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
@@ -348,176 +344,88 @@ export class HostedUserRunner {
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     // The route supplies its server-derived auth/request start so parsing and
     // Durable Object dispatch cannot grant this command a fresh budget.
-    const commandStartedAtEpochMs = input.commandStartedAtEpochMs ?? Date.now();
+    const enteredAtEpochMs = Date.now();
+    const commandStartedAtEpochMs = input.commandStartedAtEpochMs ?? enteredAtEpochMs;
+    const diagnostics: RuntimeProcessingDiagnostics = {
+      stage: "consent_queue",
+      details: {
+        commandStartedAtEpochMs,
+        userRunnerEnteredAtEpochMs: enteredAtEpochMs,
+      },
+    };
     const commandBudget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: input.commandTimeoutMs ?? null,
       startedAtMs: commandStartedAtEpochMs,
       webControlTimeoutMs: this.env.webControlTimeoutMs,
     });
-    const preControllerDeadline = new AbortController();
-    const preControllerTimeout = setTimeout(() => {
-      preControllerDeadline.abort(
-        new DOMException(
-          "Hosted runtime ensure-processing pre-controller budget timed out.",
-          "TimeoutError",
-        ),
-      );
-    }, Math.max(1, commandBudget.deadlineAtMs - Date.now()));
-    let runtimeProcessingStarted = false;
+    diagnostics.details.runtimeProcessingDeadlineAtEpochMs = commandBudget.deadlineAtMs;
+    diagnostics.details.runtimeProcessingRequestedMode = input.processingMode ?? "default";
+    // Reuse only established numeric boundaries, not arbitrary orchestration
+    // JSON (which also contains request-specific context we do not need here).
+    for (const key of [
+      "temporalActivityStartedAtEpochMs", "temporalActivityRequestStartedAtEpochMs",
+      "runtimeControlAuthStartedAtEpochMs", "runtimeControlAuthFinishedAtEpochMs",
+      "cloudflareRouteReceivedAtEpochMs", "userRunnerRpcStartedAtEpochMs",
+      "userRunnerConstructorStartedAtEpochMs", "userRunnerConstructorFinishedAtEpochMs",
+    ] as const) {
+      const value = input.orchestration?.[key];
+      if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+        diagnostics.details[key] = value;
+      }
+    }
     let deadlineResponse: HostedRuntimeEnsureProcessingResponse | null = null;
-    const isPreControllerDeadlineExpired = (): boolean =>
-      preControllerDeadline.signal.aborted
-      || Date.now() >= commandBudget.deadlineAtMs;
     const readDeadlineResponse = (): HostedRuntimeEnsureProcessingResponse => {
       deadlineResponse ??= createRuntimeProcessingRetryLater({
         analytics: this.runtimeRetryAnalytics,
+        diagnostics,
         orchestrationAttemptId: input.orchestrationAttemptId,
         reason: "command_budget_exhausted",
         userId: input.userId,
       });
       return deadlineResponse;
     };
-    const lockedEnsure = this.withRuntimeConsentMutationLock(async () => {
-      if (isPreControllerDeadlineExpired()) {
-        return readDeadlineResponse();
-      }
-      const lockInput = withRuntimeOrchestration(input, {
-        runtimeConsentLockAcquiredAtEpochMs: Date.now(),
-        healthDataAdmissionReadStartedAtEpochMs: Date.now(),
-      });
-      let admission: HostedRuntimeHealthDataAdmissionResponse;
-      try {
-        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-          lockInput.userId,
-          { signal: preControllerDeadline.signal },
-        );
-      } catch (error) {
-        if (isPreControllerDeadlineExpired()) {
-          return readDeadlineResponse();
-        }
-        throw error;
-      }
-      const processingInput = withRuntimeOrchestration(lockInput, {
-        healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
-      });
-      if (isPreControllerDeadlineExpired()) {
-        return readDeadlineResponse();
-      }
-      if (!admission.processingAllowed) {
-        return {
-          kind: "retry_later" as const,
-          retryAt: new Date(
-            Date.now() + HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS,
-          ).toISOString(),
-        };
-      }
-      runtimeProcessingStarted = true;
-      clearTimeout(preControllerTimeout);
-      return await this.runtimeProcessing.ensureForUser({
-        ...processingInput,
-        commandStartedAtEpochMs,
-      });
-    });
+    // Bound time queued behind withdrawal. Once admitted to the lock, the
+    // controller owns the same deadline for its individual runtime steps.
+    let queueTimeout: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<HostedRuntimeEnsureProcessingResponse>((resolve) => {
-      const onAbort = () => {
-        if (!runtimeProcessingStarted) {
-          resolve(readDeadlineResponse());
-        }
-      };
-      preControllerDeadline.signal.addEventListener("abort", onAbort, {
-        once: true,
-      });
-      void lockedEnsure.finally(() => {
-        preControllerDeadline.signal.removeEventListener("abort", onAbort);
-      }).catch(() => undefined);
-    });
-
-    try {
-      const result = await Promise.race([lockedEnsure, deadline]);
-      void lockedEnsure.catch(() => undefined);
-      return result;
-    } finally {
-      clearTimeout(preControllerTimeout);
-    }
-  }
-
-  async prewarmRuntimeShellForUser(
-    userId: string,
-    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
-    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
-  ): Promise<void> {
-    const orchestrationAttemptId =
-      orchestration?.shellPrewarmOrchestrationAttemptId;
-    if (this.runtimeConsentMutationLock) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          shellPrewarmAdmissionOutcome: "skipped_consent_busy",
-          ...(orchestrationAttemptId === undefined
-            ? {}
-            : { orchestrationAttemptId }),
-          shellPrewarmSource: source ?? "unknown",
-        },
-        message: "Hosted runner shell prewarm admission decided.",
-        phase: "scheduled",
-        userId,
-      });
-      return;
-    }
-    await this.withRuntimeConsentMutationLock(async () => {
-      const shellPrewarmConsentLockAcquiredAtEpochMs = Date.now();
-      const shellPrewarmAdmissionReadStartedAtEpochMs = Date.now();
-      let admission: HostedRuntimeHealthDataAdmissionResponse;
-      try {
-        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-          userId,
-          { timeoutMs: HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS },
-        );
-      } catch {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
-            ...(orchestrationAttemptId === undefined
-              ? {}
-              : { orchestrationAttemptId }),
-            shellPrewarmSource: source ?? "unknown",
-          },
-          level: "warn",
-          message: "Hosted runner shell prewarm admission decided.",
-          phase: "scheduled",
-          userId,
-        });
-        return;
-      }
-      const shellPrewarmAdmissionReadFinishedAtEpochMs = Date.now();
-      if (!admission.processingAllowed) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
-            ...(orchestrationAttemptId === undefined
-              ? {}
-              : { orchestrationAttemptId }),
-            shellPrewarmSource: source ?? "unknown",
-          },
-          message: "Hosted runner shell prewarm admission decided.",
-          phase: "scheduled",
-          userId,
-        });
-        return;
-      }
-      await this.runtimeProcessing.beginShellPrewarmForUser(
-        userId,
-        source,
-        orchestration === undefined ? undefined : {
-          ...orchestration,
-          shellPrewarmAdmissionReadFinishedAtEpochMs,
-          shellPrewarmAdmissionReadStartedAtEpochMs,
-          shellPrewarmConsentLockAcquiredAtEpochMs,
-        },
+      queueTimeout = setTimeout(
+        () => resolve(readDeadlineResponse()),
+        Math.max(1, commandBudget.deadlineAtMs - Date.now()),
       );
     });
+    const lockedEnsure = this.withRuntimeConsentMutationLock(async () => {
+      if (Date.now() >= commandBudget.deadlineAtMs) {
+        return readDeadlineResponse();
+      }
+      clearTimeout(queueTimeout);
+      diagnostics.details.runtimeConsentLockAcquiredAtEpochMs = Date.now();
+      return await this.runtimeProcessing.ensureForUser({
+        ...withRuntimeOrchestration(input, {
+          runtimeConsentLockAcquiredAtEpochMs: Date.now(),
+        }),
+        commandStartedAtEpochMs,
+      }, diagnostics);
+    });
+    let result: HostedRuntimeEnsureProcessingResponse | undefined;
+    try {
+      result = await Promise.race([lockedEnsure, deadline]);
+      return result;
+    } finally {
+      clearTimeout(queueTimeout);
+      // Snapshot before scheduling: a timed-out RPC or queued lock callback may
+      // finish later. Telemetry must not extend admission or change the result.
+      const entry = buildRuntimeProcessingSummaryEntry(diagnostics, result, enteredAtEpochMs);
+      const telemetry = Promise.resolve().then(() =>
+        this.runtimeInvocation.recordRuntimeProcessingSummary({
+          entry, orchestrationAttemptId: input.orchestrationAttemptId, userId: input.userId,
+        }),
+      ).catch(() => undefined);
+      try {
+        this.state.waitUntil(telemetry);
+      } catch {
+        // The promise already owns rejection handling even if scheduling fails.
+      }
+    }
   }
 
   async reconcileRuntimeHealthDataConsentForUser(
@@ -825,7 +733,7 @@ export class HostedUserRunner {
 
   private async readHostedRuntimeHealthDataAdmissionFromWeb(
     userId: string,
-    input: { signal?: AbortSignal; timeoutMs?: number } = {},
+    timeoutMs = this.env.webControlTimeoutMs,
   ): Promise<HostedRuntimeHealthDataAdmissionResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(this.env.hostedWebAllowHttpHosts
@@ -836,8 +744,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
-      signal: input.signal,
-      timeoutMs: input.timeoutMs ?? this.env.webControlTimeoutMs,
+      timeoutMs,
     });
 
     if (!response.ok) {

@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import nativeWorkoutRequest from "./fixtures/imessage-workout-native-request.json";
+
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { isRecord } from "../src/lib/primitives";
 import { createBearerRequest } from "./route-test-helpers";
@@ -29,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   findAgentSession: vi.fn(),
   readJsonObject: vi.fn(async (request: Request) => await request.json()),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
-  requirePrivyMemberAuthFromBearerToken: vi.fn(),
+  requireHostedMemberAuthFromBearerToken: vi.fn(),
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
@@ -63,8 +65,8 @@ vi.mock("@/src/lib/http", async (importOriginal) => ({
   readJsonObject: mocks.readJsonObject,
 }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requirePrivyMemberAuthFromBearerToken:
-    mocks.requirePrivyMemberAuthFromBearerToken,
+  requireHostedMemberAuthFromBearerToken:
+    mocks.requireHostedMemberAuthFromBearerToken,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
@@ -120,7 +122,7 @@ describe("iMessage mini-app routes", () => {
     mocks.readJsonObject.mockImplementation(async (request: Request) =>
       await request.json()
     );
-    mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
+    mocks.requireHostedMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: "member-1" },
     });
     mocks.upsertAgentSession.mockImplementation(async (input) => ({
@@ -167,7 +169,7 @@ describe("iMessage mini-app routes", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+    expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(
       request,
       prisma,
     );
@@ -216,7 +218,7 @@ describe("iMessage mini-app routes", () => {
     const responsePromise = enrollmentRoute.POST(request);
     await Promise.resolve();
 
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
 
     body.resolve({ schemaVersion: 1 });
@@ -341,7 +343,7 @@ describe("iMessage mini-app routes", () => {
         },
       });
       expect(readCredentialToken(body)).not.toBe(originalToken);
-      expect(mocks.requirePrivyMemberAuthFromBearerToken).toHaveBeenCalledTimes(1);
+      expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledTimes(1);
       expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenLastCalledWith({
         memberId: "member-1",
         prisma: transactionClient,
@@ -448,7 +450,7 @@ describe("iMessage mini-app routes", () => {
     ));
 
     expect(response.status).toBe(400);
-    expect(mocks.requirePrivyMemberAuthFromBearerToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedMemberAuthFromBearerToken).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
@@ -556,6 +558,71 @@ describe("iMessage mini-app routes", () => {
       duplicate: false,
       schemaVersion: 1,
     });
+  });
+
+  it("admits the native Swift payload and canonicalizes omitted/null retries identically", async () => {
+    const body = { ...nativeWorkoutRequest, requestedAt: new Date().toISOString() };
+    const first = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      body,
+    ));
+    expect(first.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledTimes(1);
+    const admitted = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0].envelope;
+    expect(admitted.request).toMatchObject({
+      actionId: body.actionId,
+      requestedAt: body.requestedAt,
+      action: {
+        mutations: body.action.mutations,
+        presentation: {
+          subtitle: null,
+          footer: null,
+          workout: { exercises: [{ sets: [
+            { status: "completed", actual: "80 lb × 10", target: null },
+            { status: "pending", actual: null, target: null },
+          ] }] },
+        },
+      },
+    });
+    const retry = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      admitted.request,
+    ));
+    expect(retry.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[1]?.[0].envelope)
+      .toEqual(admitted);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledTimes(2);
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an incomplete completed result before mailbox preparation", async () => {
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      {
+        ...nativeWorkoutRequest,
+        requestedAt: new Date().toISOString(),
+        action: {
+          ...nativeWorkoutRequest.action,
+          presentation: {
+            ...nativeWorkoutRequest.action.presentation,
+            workout: {
+              ...nativeWorkoutRequest.action.presentation.workout,
+              exercises: [{ name: "Cable Row", sets: [{ status: "completed" }] }],
+            },
+          },
+        },
+      },
+    ));
+    expect(response.status).toBe(400);
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("admits a workout snapshot read and returns its typed card result", async () => {

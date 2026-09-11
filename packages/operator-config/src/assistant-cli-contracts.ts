@@ -1694,14 +1694,6 @@ export const assistantAskResultSchema = z.object({
   deliveryError: assistantDeliveryErrorSchema.nullable(),
 })
 
-export const assistantChatResultSchema = z.object({
-  vault: pathSchema,
-  startedAt: isoTimestampSchema,
-  stoppedAt: isoTimestampSchema,
-  turns: z.number().int().nonnegative(),
-  session: assistantSessionOutputSchema,
-})
-
 export const assistantDeliverResultSchema = z.object({
   vault: pathSchema,
   message: z.string().min(1),
@@ -1893,8 +1885,6 @@ export const assistantStopResultSchema = z.object({
   message: z.string().min(1),
 })
 
-
-
 export const assistantAutoReplyChannelStateSchema = z
   .object({
     channel: z.string().min(1),
@@ -2027,8 +2017,6 @@ export type AssistantDiagnosticsSnapshot = z.infer<
 >
 type AssistantAskResultRecord = z.infer<typeof assistantAskResultSchema>
 export type AssistantAskResult = AssistantAskResultRecord
-type AssistantChatResultRecord = z.infer<typeof assistantChatResultSchema>
-export type AssistantChatResult = AssistantChatResultRecord
 export type AssistantDeliverResult = z.infer<
   typeof assistantDeliverResultSchema
 >

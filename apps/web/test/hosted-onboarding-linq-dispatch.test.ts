@@ -113,8 +113,8 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionModel: "gpt-5.4-nano",
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqInstantStartPhonePrefixes: ["+44"] as readonly string[],
+      linqSmsInstantStartEnabled: true,
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
-      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -165,7 +165,9 @@ const mocks = vi.hoisted(() => {
     shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
     }),
-    signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+    signalHostedMailboxAppendRuntime: vi.fn<
+      typeof import("../src/lib/hosted-orchestration/signal-runtime").signalHostedMailboxAppendRuntime
+    >(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
@@ -244,6 +246,7 @@ const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
 
 function expectHostedLinqPointerSignalAccepted(eventId = "evt_123", userId = "member_123"): void {
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+    onSignalStarted: expect.any(Function),
     abortSignal: expect.any(AbortSignal),
     expectedUserId: userId,
     mailboxItemId: `mailbox_${eventId}`,
@@ -1228,6 +1231,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+44"];
+    mocks.hostedOnboardingEnvironment.linqSmsInstantStartEnabled = true;
     mocks.checkHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",
@@ -3664,6 +3668,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_thread_container_123",
       mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
@@ -3751,6 +3756,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     })).rejects.toThrow("Temporal unavailable");
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_direct_nudge_read_receipt",
@@ -4470,10 +4476,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
-      prewarmRuntimeShell,
     });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
@@ -4605,7 +4609,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -5058,6 +5061,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.upsert).toHaveBeenCalledTimes(1);
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(2, {
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_direct_group_transition",
@@ -6523,6 +6527,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(hostedLinqLine.updateMany).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_family",
       mailboxItemId: "mailbox_member_family_activation",
@@ -6651,6 +6656,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_access_restored",
@@ -7645,7 +7651,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("reconciles an exact provider-redelivered event after activation commits before its continuation returns", async () => {
+  it.each(["iMessage", "SMS", "RCS"])("reconciles an exact %s redelivery after activation commits before its continuation returns", async (service) => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_retry";
     const eventId = "evt_instant_start_retry";
@@ -7786,13 +7792,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             handle: "+15550000000",
             id: "handle_owner_123",
             is_me: true,
-            service: "iMessage",
+            service,
           },
         },
         parts: [{ type: "text", value: "Hey Murph" }],
       },
       eventId,
-      service: "iMessage",
+      service,
     });
 
     await expect(handleHostedOnboardingLinqWebhook({
@@ -7946,10 +7952,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
-      prewarmRuntimeShell,
     });
     mocks.startHostedLinqChatTypingIndicator.mockImplementation(
       (input: { chatId: string }) => {
@@ -7972,8 +7976,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input) => {
       callOrder.push("conversation-signal");
+      input.onSignalStarted?.();
       return {
         signalAccepted: true,
         workflowId: `hosted-user-runtime:${memberId}`,
@@ -8045,14 +8050,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(activationWakeIndex).toBeGreaterThan(signalIndex);
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
-    expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
-      expect.objectContaining({
-        wakeHandoff: expect.not.objectContaining({
-          runtimeShellPrewarmOrchestrationAttemptId: expect.any(String),
-        }),
-      }),
-    );
     expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
       userId: memberId,
@@ -8108,6 +8105,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         userId: memberId,
       },
       mailboxItemId: "mailbox_instant_first_turn_outbound",
+      onSignalStarted: expect.any(Function),
     });
 
     typingResult.resolve({ ok: false, status: 503 });
@@ -8214,10 +8212,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const ensureRuntimeProcessing = vi.fn<
       (input: { userId: string }) => Promise<{ accepted: boolean }>
     >(async () => ({ accepted: true }));
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
-      prewarmRuntimeShell,
     });
     mocks.startHostedLinqChatTypingIndicator.mockRejectedValueOnce(
       new Error("typing unavailable"),
@@ -8252,7 +8248,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
@@ -9716,7 +9711,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("instant-starts an admitted iMessage email handle without asserting verified email", async () => {
+  it.each([
+    { service: "iMessage", kind: "email", contact: "person@example.test" },
+    { service: "SMS", kind: "phone", contact: "+15551234567" },
+    { service: "RCS", kind: "phone", contact: "+15551234567" },
+  ] as const)("instant-starts a new model-admitted $service $kind contact", async ({ service, kind, contact }) => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     let createdMemberId: string | null = null;
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -9780,17 +9780,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               handle: "+15550000000",
               id: "handle_owner_123",
               is_me: true,
-              service: "iMessage",
+              service,
             },
           },
           sender_handle: {
-            handle: "Buddy@iCloud.com",
+            handle: contact,
             id: "handle_sender_email",
-            service: "iMessage",
+            service,
           },
         },
         eventId: "evt_email_handle",
-        service: "iMessage",
+        service,
       })),
     );
 
@@ -9817,7 +9817,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         reason: "instant-start-enrollment-required",
       },
     });
-    expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
+    if (kind === "email") expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
           linqEmailHandleLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
@@ -9830,15 +9830,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedMemberRouting.upsert).toHaveBeenLastCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          pendingLinqParticipantContactKind: "email",
-          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+          pendingLinqParticipantContactKind: kind,
+          pendingLinqParticipantContactLookupKey: expect.any(String),
         }),
         update: expect.objectContaining({
-          pendingLinqParticipantContactKind: "email",
-          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+          pendingLinqParticipantContactKind: kind,
+          pendingLinqParticipantContactLookupKey: expect.any(String),
         }),
       }),
     );
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -14537,7 +14538,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const prisma = asPrismaTransactionClient({
       hostedLinqLine: buildHostedLinqLineFixture({
-        activeMemberLimit: 1,
         maxNewConversationsPerDay: 1,
         phoneNumber: homeLinePhone,
       }),
@@ -15319,7 +15319,6 @@ function buildManagedInboundHostedLinqLineFixture(
         )
       )
         ? [{
-            activeMemberLimit: null,
             assignmentWeight: 1,
             configuredAt: new Date("2026-03-26T00:00:00.000Z"),
             egressPolicy: "enabled",
@@ -15341,7 +15340,6 @@ function buildManagedInboundHostedLinqLineFixture(
 }
 
 function buildHostedLinqLineFixture(input: {
-  activeMemberLimit?: number | null;
   maxNewConversationsPerDay?: number | null;
   phoneNumber: string;
 }): HostedLinqLineFixture {
@@ -15355,7 +15353,6 @@ function buildHostedLinqLineFixture(input: {
         )
       )
         ? [{
-            activeMemberLimit: input.activeMemberLimit ?? null,
             assignmentWeight: 1,
             maxNewConversationsPerDay: input.maxNewConversationsPerDay ?? null,
             phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(input.phoneNumber),
@@ -15377,7 +15374,6 @@ function buildHostedLinqLineFixture(input: {
 
 function buildHostedLinqLinePoolFixture(input: {
   lines: Array<{
-    activeMemberLimit?: number | null;
     maxNewConversationsPerDay?: number | null;
     phoneNumber: string;
     proactiveConversationCount?: number | null;
@@ -15385,7 +15381,6 @@ function buildHostedLinqLinePoolFixture(input: {
   }>;
 }): HostedLinqLineFixture {
   const rows = input.lines.map((line) => ({
-    activeMemberLimit: line.activeMemberLimit ?? null,
     assignmentWeight: 1,
     configuredAt: new Date("2026-03-26T00:00:00.000Z"),
     egressPolicy: "enabled",
@@ -15413,7 +15408,6 @@ function buildHostedLinqLinePoolFixture(input: {
         : rows;
 
       return matchingRows.map((row) => ({
-        activeMemberLimit: row.activeMemberLimit,
         assignmentWeight: row.assignmentWeight,
         configuredAt: row.configuredAt,
         egressPolicy: row.egressPolicy,
@@ -15531,7 +15525,6 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
               )
             )
               ? [{
-                  activeMemberLimit: null,
                   assignmentWeight: 1,
                   maxNewConversationsPerDay: null,
                   phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

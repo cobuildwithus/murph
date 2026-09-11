@@ -2,6 +2,7 @@ import {
   createHostedRunnerSecretsReader,
   type R2BucketLike,
 } from "../bundle-store.js";
+import { readHostedRunnerAllowedSecretKeys } from "../hosted-env-policy.js";
 import {
   decodeHostedRunnerSecretsPayload,
 } from "../runner-secrets.js";
@@ -17,6 +18,9 @@ export class RunnerSecretsService {
   ) {}
 
   async readRunnerSecrets(userId: string): Promise<Record<string, string>> {
+    if (readHostedRunnerAllowedSecretKeys(this.allowedRunnerSecretsSource).size === 0) {
+      return {};
+    }
     return decodeHostedRunnerSecretsPayload(
       await this.createRunnerSecretsReader().readRunnerSecrets(userId),
       this.allowedRunnerSecretsSource,

@@ -1,9 +1,10 @@
 import {
   REAL_SET_TIMEOUT,
   TEST_NOW,
+  ensureHostedBootstrapMetadataForSystemMailboxTest,
   TEST_USER_ID,
   createAssistantAskRequestedWake,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createDeviceSyncResolvedConfig,
   createEmptyDeviceSyncPort,
@@ -127,9 +128,8 @@ import {
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
-  test("checkpoints a stale delivery projection so pending device work can resume", async () => {
+  test("clears a stale delivery projection while the same workspace drains device work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-stale-delivery-"));
-    const resumedVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-delivery-resume-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -139,6 +139,7 @@ describe("hosted workspace runtime entrypoint", () => {
     vi.setSystemTime(new Date(TEST_NOW));
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: createMailboxItem({
           id: "mailbox_stale_delivery_device",
@@ -152,7 +153,6 @@ describe("hosted workspace runtime entrypoint", () => {
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
-        key: "users/bundles/member-synthetic/stale-delivery-before.bundle.json",
         vaultRoot,
       });
       artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
@@ -187,7 +187,6 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async createCheckpointSnapshot() {
             const snapshot = await createVaultSnapshotBundle({
-              key: "users/bundles/member-synthetic/stale-delivery-after.bundle.json",
               vaultRoot,
             });
             artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
@@ -196,60 +195,17 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
       assert.ok(checkpointRequests.length > 0, "Stale delivery must be corrected durably before the next attempt.");
-      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeAt, null);
-      assert.equal(checkpointRequests[0]?.nextDefaultProcessingWakeReason, null);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0, "The default owner must hand off device work.");
-      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 1);
+      const correctedCheckpoint = checkpointRequests.find((request) => request.reason === "idle_shutdown");
+      assert.ok(correctedCheckpoint);
+      assert.equal(correctedCheckpoint.nextDefaultProcessingWakeAt, null);
+      assert.equal(correctedCheckpoint.nextDefaultProcessingWakeReason, null);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
       assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
-      const checkpoint = checkpointRequests.at(-1)!;
-      const nextVersion = String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n);
-      await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: { idleCheckpointDelayMs: 1, processingMode: "system_mailbox", workspaceVersion: nextVersion },
-          resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
-          vaultRoot: resumedVaultRoot,
-          platform: createPlatform({
-            artifactBytesByHash,
-            deviceSyncPort,
-            mailboxPort: createMailboxPort({ events, items: [] }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests, events,
-              workspace: createWorkspaceState({
-                nextWakeAt: checkpoint.nextWakeAt ?? null,
-                nextWakeReason: checkpoint.nextWakeReason ?? null,
-                nextDefaultProcessingWakeAt: checkpoint.nextDefaultProcessingWakeAt,
-                nextDefaultProcessingWakeReason: checkpoint.nextDefaultProcessingWakeReason,
-                systemMailboxProgressGeneration: checkpoint.systemMailboxProgressGeneration,
-                redactedStatus: checkpoint.redactedStatus ?? null,
-                snapshotRef: checkpoint.snapshotRef,
-                version: nextVersion,
-              }),
-            }),
-          }),
-          async importItem() {
-            throw new Error("Device work is already imported.");
-          },
-          async runAssistantPhase(input) {
-            return await runHostedWorkspaceAssistantPhase({ ...input, now: () => TEST_NOW });
-          },
-          async createCheckpointSnapshot() {
-            return { snapshotRef: (await createVaultSnapshotBundle({
-              key: "users/bundles/member-synthetic/stale-delivery-drained.bundle.json",
-              vaultRoot: resumedVaultRoot,
-            })).snapshotRef };
-          },
-        },
-      );
-      assert.ok(deviceSyncPort.fetchSnapshotCalls > 0, "The next owner must reach device sync.");
-      assert.equal((await readHostedSystemMailboxState(resumedVaultRoot)).pending.length, 0);
-      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, null);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
-      await removeTempRoot(resumedVaultRoot);
     }
   });
   test("persists a disproved default wake without claiming assistant progress", async () => {
@@ -285,9 +241,8 @@ describe("hosted workspace runtime entrypoint", () => {
               : { progressed: false };
           },
           async createCheckpointSnapshot() {
-            return { snapshotRef: createBundleRef({
+            return { snapshotRef: createSnapshotFixtureRef({
               hash: "c".repeat(64), size: 512,
-              key: "users/bundles/member-synthetic/empty-default.bundle.json",
             }) };
           },
         },
@@ -327,9 +282,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "b".repeat(64),
-                  key: "users/bundles/member-synthetic/workspace-budget.bundle.json",
                   size: 512,
                 }),
               };
@@ -462,9 +416,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/import-checkpoint-system-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -557,9 +510,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "d".repeat(64),
-                  key: "users/bundles/member-synthetic/workspace-budget-due-assistant-wake.bundle.json",
                   size: 512,
                 }),
               };
@@ -733,9 +685,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot() {
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: "c".repeat(64),
-              key: "users/bundles/member-synthetic/workspace-cleared-wake.bundle.json",
               size: 512,
             }),
           };
@@ -917,9 +868,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/provider-handoff.bundle.json",
                 size: 512,
               }),
             };
@@ -952,7 +902,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 };
               },
             },
-            mailboxPort: createMailboxPort({ events: [], items: mailboxItems }),
+            mailboxPort: createMailboxPort({ assistantProvider: "venice", events: [], items: mailboxItems }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               checkpointWorkspace: (request) => {
@@ -1014,7 +964,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("defers provider egress when live provider authority is unavailable", async () => {
+  test("uses an empty mailbox's provider fact without rereading unavailable settings", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TEST_NOW));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-authority-"));
@@ -1072,7 +1022,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         },
       );
 
-      assert.equal(providerEgressCount, 0);
+      assert.equal(providerEgressCount, 1);
       assert.equal(result.status, "idle");
       assert.equal(checkpointRequests.length, 0);
     } finally {
@@ -1081,7 +1031,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("hands a detached ask to a fresh invocation when the live provider changes", async () => {
+  test("hands a detached ask to a fresh invocation after an acknowledged provider update", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-detached-provider-handoff-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -1123,9 +1073,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "b".repeat(64),
-                  key: "users/bundles/member-synthetic/detached-provider-handoff.bundle.json",
                   size: 512,
                 }),
               };
@@ -1162,8 +1111,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               assistantConfigurationToolPort: {
                 async request() {
                   return {
-                    action: "read",
+                    action: "update",
                     result: {
+                      appliesAt: "next_turn",
                       availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
                       availableProviders: ["openai", "venice"],
                       availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
@@ -1172,7 +1122,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                       model: "gpt-5.6-terra",
                       provider: "venice",
                       reasoningEffort: "low",
+                      requiredPlan: null,
                       solAvailable: false,
+                      status: "updated",
                     },
                   };
                 },
@@ -1184,9 +1136,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 workspace: createWorkspaceState({ version: "0" }),
               }),
             }),
-            async runAssistantPhase() {
+            async runAssistantPhase(input) {
               events.push("foreground");
               await prepareStarted.promise;
+              await input.runtime.platform.assistantConfigurationToolPort?.request({
+                action: "update",
+                assistantInputId: "ain_synthetic_provider_update",
+                provider: "venice",
+              });
               prepareRelease.resolve();
               return { progressed: false };
             },
@@ -1236,9 +1193,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot() {
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: "d".repeat(64),
-              key: "users/bundles/member-synthetic/device-sync-tied-projection.bundle.json",
               size: 512,
             }),
           };
@@ -1349,26 +1305,20 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }],
           });
           assert.ok(baseBundle);
-          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
           const baseHash = sha256HostedBundleHex(baseBundle);
-          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
-          const snapshotRef = buildHostedExecutionLayeredSnapshotRef({
-            base: createBundleRef({ hash: baseHash, key: "users/bundles/member-synthetic/owner-base.bundle.json", size: baseBundle.byteLength }),
-            hot: createBundleRef({ hash: hotHash, key: "users/bundles/member-synthetic/owner-hot.bundle.json", size: hotSnapshot.bundle.byteLength }),
-          });
+          const snapshotRef = createSnapshotFixtureRef({ hash: baseHash, size: baseBundle.byteLength });
           const result = await runHostedWorkspaceRuntimeJobInProcess(
             createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1, processingMode } }),
             {
               async createCheckpointSnapshot() {
-                return { snapshotRef: createBundleRef({
+                return { snapshotRef: createSnapshotFixtureRef({
                   hash: "7".repeat(64),
-                  key: "users/bundles/member-synthetic/restored-owner.bundle.json",
                   size: 512,
                 }) };
               },
               async importItem() { throw new Error("Restored owner must not reimport retired payload."); },
               platform: createPlatform({
-                artifactBytesByHash: new Map([[baseHash, baseBundle], [hotHash, hotSnapshot.bundle]]),
+                artifactBytesByHash: new Map([[baseHash, baseBundle]]),
                 mailboxPort: createMailboxPort({ events, items: [] }),
                 workspacePort: createWorkspacePort({
                   checkpointRequests,
@@ -1436,9 +1386,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "4".repeat(64),
-                key: "users/bundles/member-synthetic/idle-device-wake-retention.bundle.json",
                 size: 512,
               }),
             };
@@ -1534,9 +1483,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "5".repeat(64),
-                key: "users/bundles/member-synthetic/status-device-wake-retention.bundle.json",
                 size: 512,
               }),
             };
@@ -1752,9 +1700,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/stale-supersede.bundle.json",
                 size: 512,
               }),
             };
@@ -2099,9 +2046,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         assert.ok(baseBundle);
         const baseHash = sha256HostedBundleHex(baseBundle);
         artifactBytesByHash.set(baseHash, baseBundle);
-        initialSnapshotRef = createBundleRef({
+        initialSnapshotRef = createSnapshotFixtureRef({
           hash: baseHash,
-          key: `synthetic/assistant-carry-status-commit/${baseHash}.bundle`,
           size: baseBundle.byteLength,
         });
       } else {
@@ -2126,11 +2072,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               + `${snapshotInput.reason}:${Date.now()}`,
             );
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${snapshotCount}`.repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + `assistant-carry-mask-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -2447,6 +2390,9 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                   laneSeq: "1",
                 }));
                 runtimeWakeSignal.notify(Date.now());
+                // This scenario requires a staged retry before checkpointing.
+                // Hold the model phase until staging; delivery may now cancel it.
+                await trustedCompletionRetryFailed.promise;
               }
               if (checkpointAssistantInputRetry) {
                 mailboxItems.push(createMailboxItem({
@@ -2935,9 +2881,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/stale-device-wake-preserved.bundle.json",
                 size: 512,
               }),
             };
@@ -3018,9 +2963,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/alarm-idle.bundle.json",
                 size: 512,
               }),
             };
@@ -3069,23 +3013,38 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
 
   test.each([
     {
+      assistantWakeAt: null,
       checkpointed: false,
       expectedWorkspaceVersion: "0",
       label: "no-progress",
     },
     {
+      assistantWakeAt: null,
       checkpointed: true,
       expectedWorkspaceVersion: "1",
       label: "post-checkpoint",
     },
+    {
+      assistantWakeAt: TEST_NOW,
+      checkpointed: true,
+      expectedWorkspaceVersion: "1",
+      label: "post-checkpoint with due assistant work",
+    },
+    {
+      assistantWakeAt: new Date(Date.parse(TEST_NOW) + 30_000).toISOString(),
+      checkpointed: true,
+      expectedWorkspaceVersion: "1",
+      label: "post-checkpoint with earlier future assistant work",
+    },
   ])(
-    "schedules one delayed continuation in the $label path when forced browser-vault refresh maintenance times out",
-    async ({ checkpointed, expectedWorkspaceVersion, label }) => {
+    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out",
+    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label }) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
       const attemptId = `attempt_synthetic_browser_vault_marker_force_${label}`;
       const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const events: string[] = [];
+      let assistantPhaseCalls = 0;
       const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
       const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
 
@@ -3117,9 +3076,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "e".repeat(64),
-                  key: `users/bundles/member-synthetic/browser-vault-timeout-${label}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -3136,10 +3094,13 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               }),
             }),
             async runAssistantPhase() {
+              assistantPhaseCalls += 1;
               return checkpointed
                 ? {
                     browserVaultReplicaRefreshRequested: true,
                     checkpointReason: "assistant_runtime_commit" as const,
+                    nextWakeAt: assistantWakeAt,
+                    nextWakeReason: assistantWakeAt ? "assistant" : null,
                     progressed: true as const,
                   }
                 : {
@@ -3163,9 +3124,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         );
         expect(checkpointRequests).toHaveLength(checkpointed ? 1 : 0);
         expect(result.status).toBe("scheduled");
-        expect(result.nextWakeAt).toBe(retryAt);
+        expect(result.nextWakeAt).toBe(assistantWakeAt ?? retryAt);
+        expect(assistantPhaseCalls).toBe(1);
         expect(result.nextWakeReason).toBe("assistant");
-        expect(result.immediateRecheckRequested).toBeUndefined();
+        expect(result.immediateRecheckRequested).toBe(assistantWakeAt ? true : undefined);
         const refreshLog = readCapturedRuntimePhaseLogs({
           attemptId,
           spy: consoleInfo,
@@ -3248,9 +3210,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/browser-refresh-order.bundle.json",
                 size: 512,
               }),
             };
@@ -3378,7 +3339,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     try {
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
 
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
+      const artifactBytesByHash = new Map([[initialSnapshot.hash, initialSnapshot.bytes]]);
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -3391,9 +3355,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/stale-device-sync-clear.bundle.json",
                 size: 512,
               }),
             };
@@ -3402,12 +3365,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             throw new Error("Import should not run when no mailbox items are fetched.");
           },
           platform: createPlatform({
+            artifactBytesByHash,
             deviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
+                snapshotRef: initialSnapshot.snapshotRef,
                 nextWakeAt: staleWakeAt,
                 nextWakeReason: input.nextWakeReason,
                 version: "0",
@@ -3427,12 +3392,15 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           : []),
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
+        ...(input.nextWakeReason === "device-sync.reconcile"
+          ? ["snapshot:idle_shutdown", "workspace.checkpoint"]
+          : []),
       ];
       assert.deepEqual(events, expectedEvents);
       const shouldRunDeviceSync = input.nextWakeReason === "device-sync.reconcile";
       assert.equal(deviceSyncPort.fetchSnapshotCalls, shouldRunDeviceSync ? 1 : 0);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 2 : 1);
+      assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 3 : 1);
       const terminalCheckpoint = checkpointRequests.at(-1);
       assert.equal(terminalCheckpoint?.reason, "idle_shutdown");
       assert.equal(terminalCheckpoint?.nextWakeAt, null);

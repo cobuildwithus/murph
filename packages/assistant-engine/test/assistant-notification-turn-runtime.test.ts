@@ -790,12 +790,11 @@ test('sendAssistantNotificationLocal rejects exact text before delivery when the
     },
     channel: 'telegram',
     deliveryPolicy: 'explicit-target-override',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: 'external-thread',
     identityId: 'stored-direct-identity',
     replyToMessageId: null,
     threadId: 'external-thread',
-    threadIsDirect: null,
   }
   const providerResult = createProviderResult({ session })
   const {
@@ -854,12 +853,11 @@ test('sendAssistantNotificationLocal rejects an unknown audience before provider
     },
     channel: 'linq',
     deliveryPolicy: 'explicit-target-override',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: 'saved-linq-chat',
     identityId: null,
     replyToMessageId: null,
     threadId: null,
-    threadIsDirect: null,
   }
   const providerResult = createProviderResult({ session })
   const {
@@ -2646,12 +2644,11 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     bindingDelivery: null,
     channel: null,
     deliveryPolicy: 'binding-target-only',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: null,
-    threadIsDirect: null,
   })
   expect(resolveAssistantConversationScope(
     maintenanceRunnerCall.plan.conversationPolicy.audience,
@@ -3308,12 +3305,11 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
     bindingDelivery: null,
     channel: 'linq',
     deliveryPolicy: 'not-requested',
-    effectiveThreadIsDirect: false,
+    threadIsDirect: false,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: 'family-step-challenge',
-    threadIsDirect: false,
   }
 
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
@@ -3450,12 +3446,11 @@ test('sendAssistantNotificationLocal forwards one hosted context and leaves audi
     bindingDelivery: null,
     channel: 'linq',
     deliveryPolicy: 'not-requested',
-    effectiveThreadIsDirect: true,
+    threadIsDirect: true,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: 'direct-scheduled-thread',
-    threadIsDirect: true,
   }
 
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
@@ -3651,12 +3646,11 @@ test.each(SCHEDULED_GROUP_CARD_CASES)(
       bindingDelivery: null,
       channel,
       deliveryPolicy: 'not-requested',
-      effectiveThreadIsDirect: false,
+      threadIsDirect: false,
       explicitTarget: target,
       identityId: null,
       replyToMessageId: null,
       threadId: target,
-      threadIsDirect: false,
     }
     const { deliverMessage, mocks, sendAssistantNotificationLocal } =
       await loadNotificationTurnHarness({
@@ -6048,12 +6042,11 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'not-requested',
-        effectiveThreadIsDirect: true,
+        threadIsDirect: true,
         explicitTarget: null,
         identityId: null,
         replyToMessageId: null,
         threadId: null,
-        threadIsDirect: null,
       },
       operatorAuthority: 'direct-operator',
     },

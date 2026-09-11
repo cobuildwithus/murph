@@ -7,6 +7,10 @@
 # privileged process tree. GitHub's step timeout remains the overall ceiling.
 set -euo pipefail
 
+# Playwright downloads its own Chromium. Remove the runner's unused Chrome apt
+# source before installing the required Ubuntu libraries and fonts.
+sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
+
 readonly APT_POLICY_PATH="/etc/apt/apt.conf.d/99murph-playwright"
 readonly APT_RETRIES=1
 readonly APT_TIMEOUT_SECONDS=180

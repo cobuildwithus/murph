@@ -63,6 +63,28 @@ describe("goal contact resolver route", () => {
     expect(mocks.getHostedMurphContactContext).toHaveBeenCalledTimes(1);
   });
 
+  it("resolves contact-only requests without accepting or looking up a draft", async () => {
+    const response = await POST(goalContactRequest({}));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      option: { kind: "text", href: expect.stringMatching(/^sms:\+15550100001\?/) },
+    });
+    expect(mocks.resolveHealthCommonsCanonicalGoalEntry).not.toHaveBeenCalled();
+    expect(mocks.getHostedMurphContactContext).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { prompt: "synthetic draft" },
+    { goalRouteId: null },
+    { goalRouteId: "" },
+    { memberId: "another-member" },
+    { murphPhoneNumber: "+15550100002" },
+  ])("rejects extra fields or invalid identifiers: %j", async (payload) => {
+    expect((await POST(goalContactRequest(payload))).status).toBe(400);
+    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
+  });
+
   it("accepts only one bounded canonical goal ID and never accepts free-text prompts", async () => {
     const extraTextResponse = await POST(goalContactRequest({
       goalRouteId: "lower-resting-heart-rate",
@@ -78,14 +100,12 @@ describe("goal contact resolver route", () => {
     expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
-  it("rejects stale authentication instead of returning the anonymous fallback", async () => {
+  it.each([{}, { goalRouteId: "lower-resting-heart-rate" }])("rejects stale authentication for %j", async (payload) => {
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticatedMember: null,
     });
 
-    const response = await POST(goalContactRequest({
-      goalRouteId: "lower-resting-heart-rate",
-    }));
+    const response = await POST(goalContactRequest(payload));
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
@@ -94,7 +114,7 @@ describe("goal contact resolver route", () => {
     expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
-  it("fails closed when an assigned text route cannot be resolved", async () => {
+  it.each([{}, { goalRouteId: "lower-resting-heart-rate" }])("fails closed for an unresolved text route: %j", async (payload) => {
     mocks.getHostedMurphContactContext.mockResolvedValue({
       initialContactChannels: {
         email: true,
@@ -105,9 +125,7 @@ describe("goal contact resolver route", () => {
       murphPhoneNumber: null,
     });
 
-    const response = await POST(goalContactRequest({
-      goalRouteId: "lower-resting-heart-rate",
-    }));
+    const response = await POST(goalContactRequest(payload));
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
@@ -115,7 +133,7 @@ describe("goal contact resolver route", () => {
     });
   });
 
-  it("uses Telegram only when it is the authenticated member's available channel", async () => {
+  it.each([{}, { goalRouteId: "lower-resting-heart-rate" }])("uses the authenticated Telegram channel for %j", async (payload) => {
     mocks.getHostedMurphContactContext.mockResolvedValue({
       initialContactChannels: {
         email: false,
@@ -126,9 +144,7 @@ describe("goal contact resolver route", () => {
       murphPhoneNumber: null,
     });
 
-    const response = await POST(goalContactRequest({
-      goalRouteId: "lower-resting-heart-rate",
-    }));
+    const response = await POST(goalContactRequest(payload));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({

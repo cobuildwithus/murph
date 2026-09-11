@@ -276,3 +276,204 @@ test("nested validation catches getters while never reading unowned fields", () 
   }
   assert.deepEqual(normalizeCliTiming(report), sample());
 });
+
+test("session failure retains finite detail once without changing the thrown object", async () => {
+  const failure = Object.assign(new Error("PRIVATE_SENTINEL"), {
+    code: "invalid_payload", context: { stage: "validation", value: "PRIVATE_SENTINEL" },
+  });
+  let report!: CliTiming;
+  await assert.rejects(withCliTiming(() => timeCliDispatch("experiment session log", async () => {
+    throw failure;
+  }), (value) => { report = value; }), (error) => error === failure);
+  assert.equal(report.commands.length, 1);
+  assert.equal(report.commands[0]!.command, "experiment session log");
+  assert.equal(report.commands[0]!.outcome, "error");
+  assert.equal(report.commands[0]!.calls, 1);
+  assert.deepEqual(report.commands[0]!.failures, [
+    { code: "invalid_payload", stage: "validation", count: 1 },
+  ]);
+  assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+});
+
+test("first observation wins across catches; nested scopes and reused throws count per invocation", async () => {
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  const original = Object.assign(new Error("PRIVATE_SENTINEL"), {
+    code: "invalid_payload", context: { stage: "validation" },
+  });
+  let report!: CliTiming;
+  await withCliTiming(() => timeCliDispatch("batch", async () => {
+    await withCliTiming(() => timeCliDispatch("batch", async () => {
+      for (let index = 0; index < 2; index += 1) {
+        await assert.rejects(withCliTiming(() => timeCliDispatch("experiment session log", async () => {
+          noteCliTimingFailure(original);
+          noteCliTimingFailure(original);
+          throw new Error("PRIVATE_SENTINEL replacement exit");
+        })), /replacement exit/u);
+      }
+    }));
+    await withCliTiming(() => timeCliDispatch("experiment session log", async () => {}));
+  }), (value) => { report = value; });
+  assert.equal(report.batchContainers, 2);
+  assert.deepEqual(report.commands.map(({ command, outcome, calls, failures }) => ({ command, outcome, calls, failures })), [
+    { command: "experiment session log", outcome: "error", calls: 2,
+      failures: [{ code: "invalid_payload", stage: "validation", count: 2 }] },
+    { command: "experiment session log", outcome: "ok", calls: 1, failures: undefined },
+  ]);
+});
+
+test("failure capture is finite, own-data-only, private-safe and inert without an active scope", async () => {
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  const cases: Array<{ error: unknown; code: string; stage: string }> = [
+    { error: Object.assign(new Error("PRIVATE_SENTINEL"), { code: "conflict", stage: "persistence" }), code: "conflict", stage: "persistence" },
+    { error: { code: "PRIVATE_SENTINEL", name: "PRIVATE_SENTINEL", stage: "PRIVATE_SENTINEL", message: "PRIVATE_SENTINEL", context: { stage: "PRIVATE_SENTINEL" }, cause: { code: "invalid_payload", stage: "validation" }, extra: "PRIVATE_SENTINEL" }, code: "unknown", stage: "unknown" },
+    { error: { code: "ECONNRESET_PRIVATE_SENTINEL", stage: "transport_PRIVATE_SENTINEL" }, code: "unknown", stage: "unknown" },
+    { error: { name: "Incur.ValidationError", fieldErrors: [{ path: "PRIVATE_SENTINEL" }] }, code: "VALIDATION_ERROR", stage: "validation" },
+    { error: { name: "Incur.ParseError" }, code: "VALIDATION_ERROR", stage: "validation" },
+    { error: { name: "ZodError" }, code: "invalid_payload", stage: "validation" },
+    { error: { code: "ETIMEDOUT", context: { stage: "transport" } }, code: "ETIMEDOUT", stage: "transport" },
+    { error: Object.create({ code: "conflict", stage: "persistence" }), code: "unknown", stage: "unknown" },
+    { error: "PRIVATE_SENTINEL", code: "unknown", stage: "unknown" },
+    { error: null, code: "unknown", stage: "unknown" },
+  ];
+  let reads = 0;
+  const hostile = Object.defineProperties({}, Object.fromEntries(
+    ["code", "name", "stage", "message", "context", "cause", "extra"].map((key) => [key, {
+      get() { reads += 1; throw new Error("PRIVATE_SENTINEL"); },
+    }])));
+  const proxy = new Proxy({}, { getOwnPropertyDescriptor() { throw new Error("PRIVATE_SENTINEL"); },
+    get() { throw new Error("PRIVATE_SENTINEL"); }, has() { throw new Error("PRIVATE_SENTINEL"); } });
+  cases.push({ error: hostile, code: "unknown", stage: "unknown" }, { error: proxy, code: "unknown", stage: "unknown" });
+  for (const { error, code, stage } of cases) {
+    let report!: CliTiming;
+    // Observe before a generic exit without asking application code to inspect
+    // hostile metadata. Capture itself must never invoke any accessor.
+    await withCliTiming(async () => {
+      await timeCliDispatch("experiment session log", async () => { noteCliTimingFailure(error); });
+      noteCliTimingExit(1, false);
+    }, (value) => { report = value; });
+    assert.deepEqual(report.commands[0]!.failures, [{ code, stage, count: 1 }]);
+    assert.equal(JSON.stringify(report).includes("PRIVATE_SENTINEL"), false);
+  }
+  assert.equal(reads, 0);
+  const previous = process.env.MURPH_CLI_TIMING_ENDPOINT;
+  try {
+    delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+    const unchanged = {};
+    assert.equal(await withCliTiming(async () => { noteCliTimingFailure(hostile); return unchanged; }), unchanged);
+    noteCliTimingFailure(hostile);
+    assert.equal(reads, 0);
+  } finally {
+    if (previous === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+    else process.env.MURPH_CLI_TIMING_ENDPOINT = previous;
+  }
+  // Even the pre-existing EPIPE outcome probe must not replace a hostile throw.
+  let caught: unknown;
+  try { await withCliTiming(async () => { throw proxy; }, () => {}); }
+  catch (error) { caught = error; }
+  assert.equal(caught, proxy);
+});
+
+test("nonzero exits without detail are unknown observations; success and EPIPE semantics stay intact", async () => {
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  let report!: CliTiming;
+  await withCliTiming(async () => { noteCliTimingExit(3, false); }, (value) => { report = value; });
+  assert.equal(report.commands[0]!.outcome, "error");
+  assert.deepEqual(report.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1 }]);
+  const pipe = Object.assign(new Error("PRIVATE_SENTINEL"), { code: "EPIPE" });
+  await assert.rejects(withCliTiming(async () => { throw pipe; }, (value) => { report = value; }), (error) => error === pipe);
+  assert.equal(report.commands[0]!.outcome, "unknown");
+  assert.deepEqual(report.commands[0]!.failures, [{ code: "EPIPE", stage: "unknown", count: 1 }]);
+  await withCliTiming(async () => { noteCliTimingFailure(pipe); noteCliTimingExit(0, false); }, (value) => { report = value; });
+  assert.equal(report.commands[0]!.outcome, "ok");
+  assert.equal(report.commands[0]!.failures, undefined);
+});
+
+test("optional failure normalization never invalidates timing and collapses only to finite vocabulary", () => {
+  const legacy = sample("experiment session log");
+  legacy.commands[0]!.outcome = "error";
+  legacy.commands[0]!.calls = 3;
+  const command = legacy.commands[0]!;
+  const malformed: unknown[] = [null, "PRIVATE_SENTINEL", {}, Array(9).fill({ code: "conflict", stage: "write", count: 1 }),
+    [{ code: "conflict", stage: "write", count: 0 }], [{ code: "conflict", stage: "write", count: 4 }],
+    [{ code: "conflict", stage: "write", count: Number.MAX_SAFE_INTEGER + 1 }],
+    [{ get count() { throw new Error("PRIVATE_SENTINEL"); } }]];
+  for (const failures of malformed) {
+    assert.deepEqual(normalizeCliTiming({ ...legacy, commands: [{ ...command, failures }] }), legacy);
+  }
+  assert.deepEqual(normalizeCliTiming({ ...legacy, commands: [{ ...command,
+    get failures() { throw new Error("PRIVATE_SENTINEL"); } }] }), legacy);
+  assert.deepEqual(normalizeCliTiming({ ...legacy, commands: [{ ...command,
+    failures: [{ code: "conflict", stage: "write", count: 2 }], droppedFailures: 2 }] }), legacy);
+  assert.deepEqual(normalizeCliTiming({ ...legacy, commands: [{ ...command,
+    get droppedFailures() { throw new Error("PRIVATE_SENTINEL"); } }] }), legacy);
+  const normalized = normalizeCliTiming({ ...legacy, commands: [{ ...command, failures: [
+    { code: "PRIVATE_SENTINEL", stage: "PRIVATE_SENTINEL", count: 1, message: "PRIVATE_SENTINEL" },
+    { code: "other_PRIVATE_SENTINEL", stage: "other_PRIVATE_SENTINEL", count: 1 },
+    { code: "invalid_payload", stage: "validation", count: 1 },
+  ] }] });
+  assert.deepEqual(normalized?.commands[0]!.failures, [
+    { code: "unknown", stage: "unknown", count: 2 }, { code: "invalid_payload", stage: "validation", count: 1 },
+  ]);
+  assert.equal(JSON.stringify(normalized).includes("PRIVATE_SENTINEL"), false);
+  assert.deepEqual(normalizeCliTiming(sample()), sample());
+});
+
+test("failure merging preserves legacy identities, bounded drops, mixed-version coverage and independent copies", () => {
+  const codes = ["invalid_payload", "conflict", "not_found", "permission_denied", "invalid_path",
+    "storage_unavailable", "ENOENT", "ENOSPC", "ETIMEDOUT"] as const;
+  const report = emptyCliTiming();
+  for (const code of codes) {
+    const incoming = sample("experiment session log");
+    incoming.commands[0]!.outcome = "error";
+    incoming.commands[0]!.failures = [{ code, stage: "validation", count: 1 }];
+    const original = structuredClone(incoming);
+    mergeCliTiming(report, incoming);
+    assert.deepEqual(incoming, original);
+    incoming.commands[0]!.failures[0]!.count = 100;
+  }
+  assert.equal(report.commands.length, 1);
+  assert.equal(report.commands[0]!.calls, 9);
+  assert.equal(report.commands[0]!.failures?.length, 8);
+  assert.equal(report.commands[0]!.droppedFailures, 1);
+  assert.equal(report.droppedCalls, 0);
+  const oldError = sample("experiment session log");
+  oldError.commands[0]!.outcome = "error";
+  mergeCliTiming(report, oldError);
+  assert.equal(report.commands[0]!.calls, 10);
+  assert.equal(report.commands[0]!.failures?.reduce((n, entry) => n + entry.count, 0), 8);
+  mergeCliTiming(report, sample("experiment session log"));
+  assert.equal(report.commands.length, 2);
+  const differentStage = sample("experiment session log");
+  differentStage.commands[0]!.outcome = "error";
+  differentStage.commands[0]!.failures = [{ code: "invalid_payload", stage: "write", count: 1 }];
+  mergeCliTiming(report, differentStage);
+  assert.equal(report.commands[0]!.droppedFailures, 2);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const copied = emptyCliTiming();
+  mergeCliTiming(copied, report);
+  copied.commands[0]!.failures![0]!.count += 1;
+  assert.equal(report.commands[0]!.failures![0]!.count, 1);
+  const overflow = sample("experiment session log");
+  overflow.commands[0]!.outcome = "error";
+  overflow.commands[0]!.calls = Number.MAX_SAFE_INTEGER;
+  overflow.commands[0]!.failures = [{ code: "conflict", stage: "write", count: Number.MAX_SAFE_INTEGER }];
+  const before = structuredClone(overflow.commands);
+  mergeCliTiming(overflow, differentStage);
+  assert.deepEqual(overflow.commands, before);
+  assert.equal(overflow.droppedCalls, 1);
+});
+
+
+test("optional normalization uses bounded indexed reads and never retains an unchecked accessor value", () => {
+  const timing = sample("experiment session log");
+  timing.commands[0]!.outcome = "error";
+  let countReads = 0;
+  const failures = [{ code: "conflict", stage: "write",
+    get count() { countReads += 1; return countReads === 1 ? 1 : "PRIVATE_SENTINEL"; },
+  }];
+  Object.defineProperty(failures, Symbol.iterator, { get() { throw new Error("PRIVATE_SENTINEL"); } });
+  const normalized = normalizeCliTiming({ ...timing, commands: [{ ...timing.commands[0], failures }] });
+  assert.deepEqual(normalized?.commands[0]!.failures, [{ code: "conflict", stage: "write", count: 1 }]);
+  assert.equal(countReads, 1);
+  assert.equal(JSON.stringify(normalized).includes("PRIVATE_SENTINEL"), false);
+});

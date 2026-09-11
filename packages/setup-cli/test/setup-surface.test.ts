@@ -346,7 +346,7 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
     [
       'murph assistant run',
       'murph automation list',
-      'murph assistant chat',
+      'murph assistant ask "Summarize my saved health context."',
       'murph device connect oura --open',
       'murph export OURA_CLIENT_ID=...',
       'murph automation scaffold',
@@ -966,7 +966,7 @@ test('setup CLI helper exports keep interactive and post-launch decisions stable
       },
       { stdinIsTTY: true, stderrIsTTY: true },
     ),
-    'assistant-chat',
+    null,
   )
   assert.equal(
     resolveSetupPostLaunchAction(successContext, {

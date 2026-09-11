@@ -544,6 +544,19 @@ test("requires exactly one session capture field for a subjective primary metric
   }
 });
 
+test("normalizes clinical stature and infant weight across source units", () => {
+  assert.equal(resolveMetricDefinition("height")?.key, "body-height");
+  for (const metricKey of ["height", "head-circumference"]) {
+    const result = normalizeMetricValue({ metricKey, unit: "in", value: 15 });
+    assert.equal(result.canonicalUnit, "cm");
+    assert.equal(result.canonicalValue, 38.1);
+    assert.deepEqual(result.warnings, []);
+    assert.equal(normalizeMetricValue({ metricKey, unit: "kg", value: 15 }).canonicalValue, null);
+  }
+  assert.equal(normalizeMetricValue({ metricKey: "body-weight", unit: "g", value: 3500 }).canonicalValue, 3.5);
+  assert.equal(normalizeMetricValue({ metricKey: "bmi", unit: "kg/m2", value: 24.2 }).canonicalValue, 24.2);
+});
+
 test("normalizes supported metric units without hiding unsupported unit mismatches", () => {
   assert.equal(normalizeUnit("constructor"), "constructor");
   assert.equal(normalizeUnit("__proto__"), "__proto__");

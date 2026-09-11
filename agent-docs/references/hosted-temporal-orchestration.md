@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-31
+Last verified: 2026-09-09
 
 ## Decision
 
@@ -141,11 +141,22 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint and classifies only the exact first live system
-row as `model_free` or `default_owned`. Environment completion is one generic
+redacted workspace checkpoint and projects `model_free` when live eligible work
+exists after that prefix, otherwise `default_owned` for retained live work.
+The first-row lookup adds at most one tenant-scoped, ordered, filtered lookup
+when its head requires the default owner. It reads no payloads and uses no
+transaction. This class admits execution; it neither completes the earlier row
+nor changes the handled prefix. Runtime claims own independent execution. Environment completion is one generic
 model-free kind, as is deterministic member-channel reconciliation; Temporal
 does not know their product meaning or select a feature-specific processing
-mode. Temporal applies three distinct retirement
+mode. The wire shape and the existing two processing modes remain unchanged.
+Deploy the runtime consumer before the broader Web readiness producer. Older
+Web producers remain safe but can delay independent work behind a default-owned
+head; older runtime consumers retain that delay with newer Web facts. Neither
+skew may retire a live pointer before its handled prefix advances. No Temporal
+workflow command or history changes are required, and rollback preserves the
+existing snapshot, mailbox, and receipt readers.
+Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
 Temporal's noncanonical pointer projection because the current facts admit no
@@ -462,6 +473,25 @@ synthetic pre-patch replay fixture were removed. The workflow must keep the
 `deprecatePatch()` marker and patch id until a later removal phase confirms the
 deprecatePatch-window histories have drained. Private replay and package
 coverage gates require that marker to remain present.
+
+## Checkpoint recheck suppression
+
+Web signals after a successful checkpoint with a workspace or retention wake.
+Intermediate checkpoints may suppress that signal only when a successful prior
+signal is acknowledged for the same scheduling facts, every persisted wake is
+future, and no mailbox progress changed. The existing workspace row holds a
+nullable `runtime_recheck_signaled_version` receipt. A callback records it only
+after Temporal accepts the signal and only if the exact checkpoint version still
+matches. The checkpoint CAS carries the receipt across equal wake timestamps,
+reasons, progress generation and complete redacted status; mailbox counter or
+consumption changes invalidate it in the same transaction. Missing receipts,
+legacy projections, due work and `idle_shutdown` retain rechecks. Signal or
+receipt failure leaves the next checkpoint eligible to retry. This receipt is
+operational acknowledgment, not scheduling authority, and never enters runtime
+responses or Temporal facts. It adds one bounded database write after an actual
+successful signal, no read and no extra round trip for a suppressed checkpoint.
+Apply the nullable-column migration before deploying Web; old Web ignores the
+receipt and its version movement conservatively invalidates suppression.
 
 ## Final Minimal Contract
 
@@ -847,10 +877,16 @@ The hard-cut architecture is accepted when:
   production Deployment Check; with that external binding in place, production
   domains stay on the previous deployment until the current public commit,
   current private `main`, and current live readers produce one accepted proof.
-  That same private run selects the one canonical foreground-priority lane from
-  its integration manifest, forces and observes standby allocation, and emits a
-  second digest bound to both exact main SHAs, the fixed lane, and the public
-  protected environment's expected production Temporal target digest. Private
+  That same private run selects the `production_core` scope from its canonical
+  integration manifest: Linq delivery, scheduled reminder, hosted-web browser
+  smoke, foreground reply priority, and foreground checkpoint ordering. It
+  forces and observes standby allocation in the foreground proof and emits a
+  second digest bound to both exact main SHAs, the fixed scope, and the public
+  protected environment's expected production Temporal target digest. All five
+  lanes must have unique successful job receipts bound to that same digest;
+  missing, skipped, canceled, duplicated, malformed, or stale receipts block
+  admission. Deploy private scope support before the public controller; older
+  foreground-only proof cannot satisfy or downgrade the new request. Private
   setup and final attestation derive the live target from protected
   configuration and reject mismatch without exporting its component values.
   The release mode rejects an arbitrary public ref; public pull requests remain
@@ -860,7 +896,7 @@ The hard-cut architecture is accepted when:
   candidate, and no local production upload or historical promotion/rollback
   path may compete with that Git owner. Rollback uses a fresh revert commit so
   it receives current proof. This proves the reconciliation-facts wire boundary
-  and foreground/standby path; Murph Cloud release admission still owns full
+  and the composed core hosted journeys; Murph Cloud release admission still owns full
   worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.

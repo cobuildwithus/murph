@@ -1,4 +1,5 @@
 import { getPrisma } from "@/src/lib/prisma";
+import { assertHostedLegacyCredentialWriterTx } from "@/src/lib/better-auth/legacy-writer";
 import {
   signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
@@ -14,6 +15,7 @@ import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onb
 import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 import {
@@ -62,6 +64,8 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const now = new Date();
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, auth.member.id);
+    await assertHostedLegacyCredentialWriterTx(tx, auth.member.id);
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: auth.member.id,
       prisma: tx,

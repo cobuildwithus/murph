@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 100,
+  "item": {
+    "id": "epic-hospital-documents",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Hospital connections bring in more of your record",
+    "summary": "When an Epic hospital shares linked reports and files, Murph can save them with the rest of your health history.",
+    "details": "Murph keeps the original files, extracts readable text when possible, and continues large imports across pages. If a hospital withholds or cannot provide a file, the import keeps the available evidence and marks the missing part for review.",
+    "relevanceTags": ["health", "clinical-records"],
+    "sourcePullRequests": [3229]
+  }
+}

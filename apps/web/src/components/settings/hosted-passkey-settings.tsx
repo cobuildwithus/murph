@@ -5,29 +5,38 @@ import { Fingerprint } from "lucide-react";
 import { usePasskeyWalletMfa } from "@/src/components/sensitive-actions/use-passkey-wallet-mfa";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
-import type { HostedPrivyWalletMfaStatus } from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
+import type { HostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/shared";
+import { useApprovalPasskeyEnrollment } from "@/src/components/sensitive-actions/use-approval-passkey-enrollment";
 import { cn } from "@/src/lib/utils";
 
+import { ApprovalPasskeyStatus, ApprovalPasskeyUpdate } from "./approval-passkey-status";
 import { SettingsStatusLine } from "./connected-account-card";
 
 export function HostedPasskeySettings({
   authenticated,
+  enrollmentEnabled = false,
   secureApprovalStatus,
 }: {
   authenticated: boolean;
-  secureApprovalStatus: HostedPrivyWalletMfaStatus;
+  enrollmentEnabled?: boolean;
+  secureApprovalStatus: HostedSecureApprovalStatus;
 }) {
   if (!authenticated) {
     return null;
   }
 
-  return <PasskeySetup secureApprovalStatus={secureApprovalStatus} />;
+  if (secureApprovalStatus.method === "passkey") {
+    return <ApprovalPasskeyStatus />;
+  }
+  return <PasskeySetup enrollmentEnabled={enrollmentEnabled} secureApprovalStatus={secureApprovalStatus} />;
 }
 
 function PasskeySetup({
+  enrollmentEnabled,
   secureApprovalStatus,
 }: {
-  secureApprovalStatus: HostedPrivyWalletMfaStatus;
+  enrollmentEnabled: boolean;
+  secureApprovalStatus: HostedSecureApprovalStatus;
 }) {
   const {
     clientAuthenticated,
@@ -121,6 +130,7 @@ function PasskeySetup({
               )
           : null}
       </div>
+      {effectiveConfigured && enrollmentEnabled ? <ApprovalPasskeyMigration /> : null}
       {statusMessage
         ? <SettingsStatusLine message={statusMessage.message} tone={statusMessage.tone} />
           : null}
@@ -133,7 +143,7 @@ function resolveStatusMessage(input: {
   error: string | null;
   pendingLabel: string | null;
   ready: boolean;
-  secureApprovalStatus: HostedPrivyWalletMfaStatus;
+  secureApprovalStatus: HostedSecureApprovalStatus;
 }): { message: string; tone: "destructive" | "neutral" } | null {
   if (input.error) {
     return { message: input.error, tone: "destructive" };
@@ -169,4 +179,9 @@ function resolveStatusMessage(input: {
   }
 
   return null;
+}
+
+function ApprovalPasskeyMigration() {
+  const enrollment = useApprovalPasskeyEnrollment();
+  return <ApprovalPasskeyUpdate {...enrollment} onUpdate={() => void enrollment.enroll()} />;
 }

@@ -46,18 +46,17 @@ describe("hosted Family exact-tier capacity", () => {
     });
   });
 
-  it("reads one positive persisted row per known tier with a Pulse legacy fallback", () => {
+  it("reads only positive persisted rows for known tiers", () => {
     expect(readHostedFamilyPlanCapacities([
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 1, planCode: "edge" },
       { billedQuantity: 1, planCode: "max" },
     ])).toEqual({ edge: 1, max: 1, pulse: 2 });
-    expect(readHostedFamilyPlanCapacities([], 3)).toEqual({ edge: 0, max: 0, pulse: 3 });
-    expect(readHostedFamilyPlanCapacities([], 2)).toEqual({ edge: 0, max: 0, pulse: 2 });
+    expect(readHostedFamilyPlanCapacities([])).toBeNull();
     expect(readHostedFamilyPlanCapacities([
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 1, planCode: "edge" },
-    ], 6)).toEqual({ edge: 1, max: 0, pulse: 2 });
+    ])).toEqual({ edge: 1, max: 0, pulse: 2 });
     expect(readHostedFamilyPlanCapacities([
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 1, planCode: "pulse" },

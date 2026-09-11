@@ -13,11 +13,14 @@ import {
   createHostedPostCommitDeadline,
   waitForHostedPostCommitOperation,
 } from "../hosted-onboarding/bounded-post-commit";
+import {
+  HOSTED_RECOVERY_JITTER_WINDOW_MS,
+  runHostedRecoveryBatch,
+} from "./recovery-batch";
 import { signalHostedMailboxAppendRuntime } from "./signal-runtime";
 
 const DEFAULT_HANDOFF_LIMIT = 25;
 const MAX_HANDOFF_LIMIT = 250;
-const HANDOFF_CONCURRENCY = 5;
 
 export interface HostedPreferenceHandoffSweepResult {
   candidateUsers: number;
@@ -78,9 +81,8 @@ export async function runHostedPreferenceHandoffSweeper(input: {
   // The production query selects active members before LIMIT. Recheck through
   // the canonical async gate to fail closed if access changes after selection;
   // those races do not consume the handoff-attempt budget.
-  await runWithConcurrency(
+  await runHostedRecoveryBatch(
     uniqueCandidates,
-    HANDOFF_CONCURRENCY,
     async (candidate) => {
       if (await hasActiveAccess(candidate.userId)) {
         activeUserIds.add(candidate.userId);
@@ -88,16 +90,18 @@ export async function runHostedPreferenceHandoffSweeper(input: {
         handoffSkippedInactive += 1;
       }
     },
+    false,
   );
   const activeCandidates = uniqueCandidates.filter((candidate) =>
     activeUserIds.has(candidate.userId)
   );
   const selectedCandidates = activeCandidates.slice(0, handoffLimit);
-  const handoffDeadlineMs = createHostedPostCommitDeadline(input.handoffTimeoutMs);
+  // Keep the existing handoff-work budget in addition to the bounded pacing window.
+  const handoffDeadlineMs = createHostedPostCommitDeadline(input.handoffTimeoutMs)
+    + HOSTED_RECOVERY_JITTER_WINDOW_MS;
 
-  await runWithConcurrency(
+  await runHostedRecoveryBatch(
     selectedCandidates,
-    HANDOFF_CONCURRENCY,
     async (candidate) => {
       handoffAttempted += 1;
       try {
@@ -121,6 +125,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
         });
       }
     },
+    true,
   );
 
   const skippedCandidateUsers = Math.max(
@@ -343,20 +348,4 @@ function normalizeLimit(
     return fallback;
   }
   return Math.max(1, Math.min(Math.floor(value), max));
-}
-
-async function runWithConcurrency<T>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T) => Promise<void>,
-): Promise<void> {
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const item = items[nextIndex];
-      nextIndex += 1;
-      await worker(item);
-    }
-  }));
 }

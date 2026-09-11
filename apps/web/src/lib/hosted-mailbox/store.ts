@@ -22,6 +22,10 @@ import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
+import {
+  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES,
+} from "@murphai/hosted-execution/orchestration-control";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import type {
   HostedExecutionConversationMessageWake,
@@ -1816,6 +1820,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
 export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
   afterSeq: bigint | number | string;
   at: Date;
+  modelFreeOnly?: true;
   prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<{
@@ -1840,6 +1845,23 @@ export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
     },
     where: {
       ...buildHostedMailboxLiveItemWhere(input.at),
+      ...(input.modelFreeOnly
+        ? {
+            AND: [{
+              OR: [
+                { kind: { in: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.filter(
+                  (kind) => kind !== "assistant.notification.requested",
+                ) } },
+                ...HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.map(
+                  (prefix) => ({
+                    kind: "assistant.notification.requested",
+                    dedupeKey: { startsWith: prefix, not: prefix },
+                  }),
+                ),
+              ],
+            }],
+          }
+        : {}),
       lane: "system",
       laneSeq: {
         gt: afterSeq,
@@ -2030,11 +2052,9 @@ export async function readHostedMailboxWakeByDedupeKey(input: {
   }
   const payload = item.payloadRef
     ? await readHostedMailboxPayload({
-        dedupeKey: item.dedupeKey,
-        mailboxItemId: item.id,
+        item,
         payloadRef: item.payloadRef,
         prisma,
-        userId: item.userId,
       })
     : null;
   const decoded = await decodeHostedMailboxStoredPayload({
@@ -2355,11 +2375,9 @@ export async function readHostedMailboxWakeByItemId(input: {
   }
   const payload = item.payloadRef
     ? await readHostedMailboxPayload({
-        dedupeKey: item.dedupeKey,
-        mailboxItemId: item.id,
+        item,
         payloadRef: item.payloadRef,
         prisma,
-        userId: item.userId,
       })
     : null;
   const decoded = await decodeHostedMailboxStoredPayload({
@@ -2663,12 +2681,9 @@ export async function readHostedMailboxRecentLiveConversationItemIds(input: {
 }
 
 export async function fetchHostedMailboxPayload(input: {
-  dedupeKey: string;
-  mailboxItemId: string;
+  item: HostedMailboxItemRecord | null;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
-  requestId: string;
-  userId: string;
 }): Promise<HostedMailboxPayloadFetchResponse> {
   const payloadResult = await readHostedMailboxPayloadAvailability(input);
 
@@ -2685,45 +2700,25 @@ export async function fetchHostedMailboxPayload(input: {
 }
 
 export async function readHostedMailboxPayload(input: {
-  dedupeKey: string;
-  mailboxItemId: string;
+  item: HostedMailboxItemRecord;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
-  requestId?: string;
-  userId: string;
 }): Promise<HostedMailboxPayloadRecord | null> {
   return (await readHostedMailboxPayloadAvailability(input)).payload;
 }
 
 async function readHostedMailboxPayloadAvailability(input: {
-  dedupeKey: string;
-  mailboxItemId: string;
+  item: HostedMailboxItemRecord | null;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
-  requestId?: string;
-  userId: string;
 }): Promise<{
   payload: HostedMailboxPayloadRecord | null;
   retryable: boolean;
   unavailableCode: "expired" | "not_found";
 }> {
-  const prisma = input.prisma ?? getPrisma();
-  const userId = requireNonEmptyString(input.userId, "Hosted mailbox payload userId");
-  const mailboxItemId = requireNonEmptyString(
-    input.mailboxItemId,
-    "Hosted mailbox payload mailboxItemId",
-  );
-  const dedupeKey = requireNonEmptyString(
-    input.dedupeKey,
-    "Hosted mailbox payload dedupeKey",
-  );
+  const item = input.item;
   const payloadRef = normalizeNullableString(input.payloadRef);
-
-  if (input.requestId !== undefined) {
-    requireNonEmptyString(input.requestId, "Hosted mailbox payload requestId");
-  }
-
-  if (payloadRef && resolveHostedMailboxPayloadRef(payloadRef) !== mailboxItemId) {
+  if (!item || (payloadRef && resolveHostedMailboxPayloadRef(payloadRef) !== item.id)) {
     return {
       payload: null,
       retryable: false,
@@ -2732,23 +2727,10 @@ async function readHostedMailboxPayloadAvailability(input: {
   }
 
   const fetchedAt = new Date();
-  const item = await prisma.hostedMailboxItem.findFirst({
-    where: {
-      dedupeKey,
-      id: mailboxItemId,
-      userId,
-    },
-  });
-
-  if (!item) {
-    return {
-      payload: null,
-      retryable: false,
-      unavailableCode: "not_found",
-    };
-  }
-
-  if (isHostedMailboxItemExpired(item, fetchedAt)) {
+  if (isHostedMailboxItemExpired({
+    createdAt: new Date(item.createdAt),
+    expiresAt: item.expiresAt ? new Date(item.expiresAt) : null,
+  }, fetchedAt)) {
     return {
       payload: null,
       retryable: false,
@@ -2756,11 +2738,12 @@ async function readHostedMailboxPayloadAvailability(input: {
     };
   }
 
+  const prisma = input.prisma ?? getPrisma();
   const row = await prisma.hostedMailboxPayload.findFirst({
     where: {
       mailboxItem: buildHostedMailboxLiveItemWhere(fetchedAt),
-      mailboxItemId,
-      userId,
+      mailboxItemId: item.id,
+      userId: item.userId,
     },
   });
 

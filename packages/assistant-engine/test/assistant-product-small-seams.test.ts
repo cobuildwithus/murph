@@ -115,6 +115,25 @@ afterEach(async () => {
 })
 
 describe('assistant product small seams', () => {
+  it.each([null, false])('does not infer a private audience from actor equality when directness is %s', (threadIsDirect) => {
+    const { audience } = resolveAssistantConversationPolicy({
+      message: { deliverResponse: true, deliveryTarget: 'same-raw-identifier' },
+      session: { binding: {
+        actorId: 'same-raw-identifier',
+        channel: 'telegram',
+        conversationKey: null,
+        delivery: { kind: 'thread', target: 'same-raw-identifier' },
+        identityId: null,
+        threadId: 'opaque-conversation',
+        threadIsDirect,
+      } },
+    })
+    expect(audience.threadIsDirect).toBe(threadIsDirect)
+    expect(resolveAssistantConversationScope(audience)).toBe(
+      threadIsDirect === false ? 'group' : 'unverified-external',
+    )
+  })
+
   it('resolves conversation audiences and directness for delivery routing', () => {
     const explicitOverride = resolveAssistantConversationPolicy({
       message: {
@@ -143,10 +162,9 @@ describe('assistant product small seams', () => {
 
     expect(explicitOverride.audience).toMatchObject({
       deliveryPolicy: 'explicit-target-override',
-      effectiveThreadIsDirect: true,
+      threadIsDirect: true,
       replyToMessageId: 'reply-1',
       threadId: 'thread-1',
-      threadIsDirect: true,
     })
     expect(explicitOverride.operatorAuthority).toBe('direct-operator')
     expect(resolveAssistantConversationScope(explicitOverride.audience)).toBe('direct')
@@ -175,9 +193,8 @@ describe('assistant product small seams', () => {
 
     expect(publicAudience.audience).toMatchObject({
       deliveryPolicy: 'explicit-target-override',
-      effectiveThreadIsDirect: false,
-      threadId: 'group-thread',
       threadIsDirect: false,
+      threadId: 'group-thread',
     })
     expect(resolveAssistantConversationScope(publicAudience.audience)).toBe('group')
 
@@ -211,10 +228,9 @@ describe('assistant product small seams', () => {
     expect(messageChannelFallback.audience).toMatchObject({
       channel: 'telegram',
       deliveryPolicy: 'explicit-target-override',
-      effectiveThreadIsDirect: null,
+      threadIsDirect: null,
       explicitTarget: 'telegram-thread',
       threadId: 'telegram-thread',
-      threadIsDirect: true,
     })
     expect(resolveAssistantConversationScope(messageChannelFallback.audience)).toBe(
       'unverified-external',
@@ -242,7 +258,7 @@ describe('assistant product small seams', () => {
         },
       },
     })
-    expect(unboundGroupTarget.audience.effectiveThreadIsDirect).toBeNull()
+    expect(unboundGroupTarget.audience.threadIsDirect).toBeNull()
     expect(resolveAssistantConversationScope(unboundGroupTarget.audience)).toBe(
       'unverified-external',
     )
@@ -278,7 +294,7 @@ describe('assistant product small seams', () => {
         },
       },
     })
-    expect(blindedHostedDirectAudience.audience.effectiveThreadIsDirect).toBe(true)
+    expect(blindedHostedDirectAudience.audience.threadIsDirect).toBe(true)
     expect(resolveAssistantConversationScope(blindedHostedDirectAudience.audience)).toBe(
       'direct',
     )
@@ -314,7 +330,7 @@ describe('assistant product small seams', () => {
         },
       },
     })
-    expect(blindedHostedGroupAudience.audience.effectiveThreadIsDirect).toBe(false)
+    expect(blindedHostedGroupAudience.audience.threadIsDirect).toBe(false)
     expect(resolveAssistantConversationScope(blindedHostedGroupAudience.audience)).toBe(
       'group',
     )
@@ -370,7 +386,7 @@ describe('assistant product small seams', () => {
         },
       },
     })
-    expect(mismatchedDirectTarget.audience.effectiveThreadIsDirect).toBeNull()
+    expect(mismatchedDirectTarget.audience.threadIsDirect).toBeNull()
     expect(resolveAssistantConversationScope(mismatchedDirectTarget.audience)).toBe(
       'unverified-external',
     )
@@ -401,7 +417,7 @@ describe('assistant product small seams', () => {
         },
       },
     })
-    expect(mismatchedExplicitDirectTarget.audience.effectiveThreadIsDirect).toBeNull()
+    expect(mismatchedExplicitDirectTarget.audience.threadIsDirect).toBeNull()
     expect(
       resolveAssistantConversationScope(mismatchedExplicitDirectTarget.audience),
     ).toBe('unverified-external')
@@ -431,7 +447,10 @@ describe('assistant product small seams', () => {
       },
     })
     expect(bindingTargetOnly.audience.deliveryPolicy).toBe('binding-target-only')
-    expect(bindingTargetOnly.audience.effectiveThreadIsDirect).toBe(true)
+    expect(bindingTargetOnly.audience.threadIsDirect).toBeNull()
+    expect(resolveAssistantConversationScope(bindingTargetOnly.audience)).toBe(
+      'unverified-external',
+    )
 
     const threadTargetAudience = resolveAssistantConversationPolicy({
       message: {
@@ -458,7 +477,7 @@ describe('assistant product small seams', () => {
         },
       },
     })
-    expect(threadTargetAudience.audience.effectiveThreadIsDirect).toBe(false)
+    expect(threadTargetAudience.audience.threadIsDirect).toBe(false)
 
     const reboundDirectThreadAudience = resolveAssistantConversationPolicy({
       message: {

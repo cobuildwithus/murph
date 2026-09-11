@@ -108,6 +108,7 @@ export interface HostedAssistantOperatorConfigState {
 }
 
 export interface HostedAssistantBootstrapResult extends HostedAssistantOperatorConfigState {
+  config: HostedAssistantConfig | null
   seeded: boolean
   source: 'hosted-env' | 'invalid' | 'missing' | 'saved'
 }
@@ -246,6 +247,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
 
       return {
         ...savedState,
+        config: saved.hostedAssistant ?? null,
         seeded: true,
         source: 'hosted-env',
       }
@@ -254,6 +256,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
     if (input.allowMissing) {
       return {
         configured: false,
+        config: null,
         provider: null,
         seeded: false,
         source: 'invalid',
@@ -274,6 +277,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
 
       return {
         ...savedState,
+        config: saved.hostedAssistant ?? null,
         seeded: true,
         source: 'hosted-env',
       }
@@ -283,6 +287,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   if (existingState.configured) {
     return {
       ...existingState,
+      config: existingHostedConfig,
       seeded: false,
       source: 'saved',
     }
@@ -291,6 +296,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   if (input.allowMissing) {
     return {
       configured: false,
+      config: existingHostedConfig,
       provider: existingActiveProfile ? 'codex-cli' : null,
       seeded: false,
       source: 'missing',

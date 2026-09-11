@@ -252,6 +252,15 @@ the next import. Overlap, an external ledger write, or an import failure forces
 a full rescan. The session is neither persisted nor shared across drains, and
 the worker still checks the foreground-yield fence before each job.
 
+The job's abort signal also reaches snapshot normalization and canonical import
+preparation. Large identity scans yield to the event loop at bounded row
+intervals so foreground polling can interrupt them. Cancellation before
+publication releases the canonical lock, discards the session cache, and
+requeues the existing job without consuming its retry budget. Once canonical
+publication starts it finishes atomically and reports committed progress, even
+if the signal aborts during the write. This does not make synchronous
+normalization, archive validation, or every preparation segment interruptible.
+
 Privacy-safe job timing separates Junction inventory requests, Junction
 resource requests, normalization, event-identity indexing, canonical writes,
 and remaining provider time. `device-sync.pass_finished` reports only bounded

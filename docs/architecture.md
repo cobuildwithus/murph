@@ -43,7 +43,6 @@ repo/
     operator-config/
     assistant-cli/
     setup-cli/
-    assistantd/
     assistant-runtime/
     gateway-core/
     cloudflare-hosted-control/
@@ -82,11 +81,10 @@ repo/
 - `packages/health-commons` owns the public Health Commons for protocol, biomarker, source, and source-person pages, plus build-time catalog generation, scoped runtime artifacts, and aggregate outcome summaries consumed by local and hosted surfaces.
 - `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, and assistant-specific vault/inbox/knowledge tools.
 - `packages/operator-config` owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and shared CLI/setup contracts.
-- `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging, and the Ink chat UI.
+- `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging.
 - `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
-- `packages/assistantd` owns the loopback-only local assistant daemon and authenticated control plane for steady-state assistant, automation, outbox, and status operations bound to one vault.
 - `packages/assistant-runtime` owns the headless hosted runtime surface that runs bounded hosted inbox/bootstrap/assistant/outbox/device-sync workspace invocations behind an injected hosted platform context.
-- `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, projection/snapshot helpers, opaque ids, and event-log utilities.
+- `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, and opaque ids.
 - `packages/cloudflare-hosted-control` owns private Cloudflare processing/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
 - `packages/hosted-local-harness` owns the local hosted-development and hosted E2E harness, including profile selection, redacted state files, runner-bundle prep, diagnostics, and cleanup.
 - `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
@@ -146,7 +144,6 @@ repo/
 - Local operator surface:
   - `murph` and `vault-cli`
   - `packages/device-syncd`
-  - `packages/assistantd`
 - Hosted control plane:
   - `apps/web`
 - Hosted execution plane:

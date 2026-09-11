@@ -32,6 +32,7 @@ export interface AssistantChannelActivityStopOptions {
 }
 
 export interface AssistantChannelActivityHandle {
+  isActive?: () => boolean
   refreshAfterMessage?: () => Promise<void>
   refreshNow?: () => Promise<void>
   stop: (options?: AssistantChannelActivityStopOptions) => Promise<void>
@@ -81,6 +82,11 @@ export interface LinqRuntimeDependencies {
 }
 
 export interface AssistantChannelDependencies {
+  onTypingAccepted?: (event: {
+    acceptedInputIds: readonly string[]
+    at: string
+    channel: string
+  }) => void
   signal?: AbortSignal
   startLinqTyping?: (input: {
     target: string

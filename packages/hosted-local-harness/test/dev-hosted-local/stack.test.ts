@@ -3749,14 +3749,17 @@ describe("hosted local dev stack", () => {
     );
   });
 
-  it("preserves an exited child's port-bind classification past verbose sibling output", async () => {
+  it.each([
+    { channel: "stderr", message: "Address already in use (0.0.0.0:43001).", name: "plain address" },
+    { channel: "stderr", message: "\u001b[1mAddress already in use (0.0.0.0:43001).\u001b[0m", name: "bold address" },
+    { channel: "stdout", message: "\u001b[31mEADDRINUSE\u001b[0m", name: "colored code" },
+    { channel: "stderr", message: "\u001b[1mPort 43001 is already in use.\u001b[0m", name: "bold port" },
+  ])("preserves $name port-bind classification on $channel past verbose sibling output", async ({ channel, message }) => {
     const cloudflareChild = createBufferedChild({
       exitCode: 1,
       name: "cloudflare",
       pid: 503,
-      stderrText:
-        "Address already in use (0.0.0.0:43001).\n"
-        + "x".repeat(4_000),
+      [channel === "stderr" ? "stderrText" : "stdoutText"]: message + "\n" + "x".repeat(4_000),
     });
     spawnChildProcess
       .mockReturnValueOnce(cloudflareChild)
@@ -3777,7 +3780,11 @@ describe("hosted local dev stack", () => {
       env: process.env,
     });
 
-    await expect(stack.ready).rejects.toThrow("Address already in use");
+    await expect(stack.ready).rejects.toThrow(
+      "cloudflare dev process exited before the hosted local stack became healthy. "
+      + "Address already in use was reported by the exited process.",
+    );
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
   });
 
   it("skips Vercel link and env pull when the caller already provides a Vercel OIDC token", async () => {

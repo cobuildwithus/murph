@@ -4,6 +4,12 @@ Neutral metric identity, normalization, derived MetricPoint contracts, and pure 
 
 Canonical vault records still store evidence. This package owns only read-side metric mechanics.
 
+Sample-series summaries, the wearable metric catalog, and reviewed lab fallback
+ranges are part of this package's root entrypoint. Importers, query, CLI, and Web
+consume them here directly; ingestion and Health Commons packages do not
+re-export these neutral primitives. Health Commons continues to own authored
+page guidance and its parity checks against the reviewed runtime range catalog.
+
 Decision-grade metric-window comparisons use normalized `MetricPoint` values
 and the shared series/window selectors. Wearable day summaries are presentation
 context, not analysis truth.

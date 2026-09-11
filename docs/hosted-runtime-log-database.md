@@ -43,6 +43,138 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Ensure-processing summaries
+
+`runner.processing_finished` is one best-effort summary per completed
+`HostedUserRunner.ensureRuntimeProcessingForUser` call, including denied,
+queued-out, uncertain, accepted, and thrown outcomes. It is not a poll trace,
+mailbox admission, runtime health proof, or recovery signal. Only the existing
+`runner.accepted_attempt_failed` event requests failure recovery through this
+callback. No schema migration or new durable state is required.
+
+The existing invocation log owner sends the signed callback in a caught,
+detached promise. `HostedUserRunner` passes that promise to its existing
+`state.waitUntil` owner; neither the request nor its response cancellation is
+awaited by processing control. Response cancellation is initiated with owned
+rejection handling but is not awaited by the telemetry task either. A rejected
+HTTP log write emits only `runtimeLogWriteStatus` in the existing Workers logger,
+never response content. Transport failures, rejections, and scheduling failures
+cannot replace the control result. Delivery remains best-effort.
+
+Correlation uses `orchestrationAttemptFingerprint`, `commandStartedAtEpochMs`,
+and the typed runtime attempt/generation columns when known. The fingerprint is
+lowercase hex SHA-256 of UTF-8 `murph.runtime-processing-attempt.v1`, one NUL byte,
+and the complete caller-selected orchestration attempt id. No syntax-based
+exception permits a plaintext id: the private producer could use a member id.
+Hashing runs only on detached telemetry; a hash failure omits the fingerprint,
+never falls back to the input. This is pseudonymous correlation, not anonymity
+against guessing a low-entropy input. It adds no key, secret or configuration.
+
+Repeated commands can reuse an orchestration id, so retain command start and
+runtime attempt/generation. Detached writes may arrive out of order. On a fence
+change, transport and liveness observations for the superseded target are
+deleted rather than carried into the later one. `wakeAttemptId` and
+`wakeLeaseGeneration`, when present, belong to the last observed fence, as do
+the typed columns. A new fence with an older reply lacking optional metadata
+must not inherit the prior fence's observations. This summary is not a history
+of every target visited during convergence.
+
+Finite `runtimeProcessingStage` values are `consent_queue`, `state_bind`,
+`state_read`, `admission`, `active_wake`, `liveness`, and `fresh_start`.
+`runtimeProcessingOutcome` preserves the public result kind or `threw`;
+`runtimeProcessingAction` is present only for accepted results.
+`activeWakeRpcDispatchedAtEpochMs` marks invocation of the child RPC by the
+caller, not child receipt. `activeWakeRpcOutcome` is `returned`, `caller_timeout`,
+or `rpc_error`. `returned` is not acceptance: it can include a child-reported
+timeout. `caller_timeout` uses the existing command-budget timeout classifier;
+an already-expired budget can prevent dispatch altogether. These fields do not
+cancel the child, suppress late accepted work, or reinterpret the final result.
+`runtimeProcessingRetryAtEpochMs` preserves the actual returned retry time; it
+does not show when the external scheduler will next run.
+`runtimeProcessingRetryReason` preserves the existing retry taxonomy, with
+`admission_denied` for authoritative denial. `runtimeLivenessOutcome` and its
+optional finite reason distinguish exact-active, inactive, mismatch, and
+indeterminate observations. A local exact-active pointer is not a fresh TCP
+health check. No exception text is added by this event.
+
+`wakeStage` is one of `admission`, `dispatch`, `drain`, `acknowledgement`,
+`legacy_health`, or `exiting_owner`. It and the transport timestamps are
+optional across revisions, closed-picked RPC metadata, not control inputs.
+Updated RunnerContainer responses always include observations; no request flag
+is needed. The authoritative ensure-processing response JSON is unchanged.
+The existing TCP handler adds numeric receipt and acceptance timing headers, which are relayed
+without logging any arbitrary headers. Receipt precedes request-body parsing;
+acceptance follows the wake decision. `wakePending=true` means the entrypoint
+retained a wake before callback readiness, **not** that the runtime consumer
+was notified. `wakeAccepted=true` describes headers; a later drain failure can
+still produce `retry_later`. The final outcome must always be read with it.
+
+Use the existing foreground latency milestones (`runtimeWakeNotifiedAtEpochMs`,
+`foregroundWaitResolvedAtEpochMs`, and import/delivery phases) for work after
+notification. Coalescing can retain the earliest notification and first
+orchestration context; do not assume one notification row per ensure attempt.
+
+Deploy the Web parser/event allowlist before emitting this event from Workers.
+Older Web versions reject unknown event codes; older Container/Node revisions
+omit optional metadata. Control results are unchanged under those skews. If an
+RPC loses the caller's deadline race, its transport observations never return
+to this summary: missing fields mean **unobserved**, not “not dispatched” or
+“not received.” A reset or an unbounded await can prevent a final summary
+altogether. This instrumentation does not claim to distinguish SDK readiness
+from platform TCP scheduling inside a request that never returns.
+
+Example bounded SQL (epoch fields are nullable; do not coerce absence to zero):
+
+```sql
+WITH attempts AS (
+  SELECT at, attempt_id, lease_generation, redacted_json AS d
+  FROM hosted_runtime_log
+  WHERE at >= :window_start AND at < :window_end
+    AND event_code = 'runner.processing_finished'
+  ORDER BY at DESC
+  LIMIT 200
+)
+SELECT at, attempt_id, lease_generation,
+  d->>'orchestrationAttemptFingerprint' AS orchestration_attempt_fingerprint,
+  d->>'commandStartedAtEpochMs' AS command_started_epoch_ms,
+  d->>'runtimeProcessingOutcome' AS outcome,
+  d->>'runtimeProcessingAction' AS action,
+  d->>'runtimeProcessingRetryReason' AS retry_reason,
+  d->>'runtimeProcessingRetryAtEpochMs' AS retry_at_epoch_ms,
+  d->>'runtimeProcessingRetryStage' AS retry_stage,
+  d->>'runtimeProcessingStage' AS final_stage,
+  d->>'activeWakeRpcOutcome' AS caller_rpc_outcome,
+  d->>'activeWakeRpcDispatchedAtEpochMs' AS caller_rpc_dispatched_epoch_ms,
+  d->>'wakeStage' AS transport_stage,
+  d->>'wakeStatus' AS response_status,
+  d->>'wakeAccepted' AS accepted_flag,
+  d->>'wakePending' AS pending_flag,
+  d->>'wakeSignalAborted' AS signal_aborted,
+  d->>'runtimeLivenessOutcome' AS liveness,
+  d->>'runtimeLivenessReason' AS liveness_reason,
+  (d->>'userRunnerEnteredAtEpochMs')::bigint
+    - (d->>'cloudflareRouteReceivedAtEpochMs')::bigint AS route_to_runner_ms,
+  (d->>'runtimeConsentLockAcquiredAtEpochMs')::bigint
+    - (d->>'userRunnerEnteredAtEpochMs')::bigint AS consent_queue_ms,
+  (d->>'activeWakeFinishedAtEpochMs')::bigint
+    - (d->>'activeWakeStartedAtEpochMs')::bigint AS active_rpc_ms,
+  (d->>'wakeResponseAtEpochMs')::bigint
+    - (d->>'wakeDispatchAtEpochMs')::bigint AS transport_to_response_ms,
+  (d->>'wakeDrainFinishedAtEpochMs')::bigint
+    - (d->>'wakeResponseAtEpochMs')::bigint AS drain_ms,
+  (d->>'wakeHandlerAcceptedAtEpochMs')::bigint
+    - (d->>'wakeHandlerReceivedAtEpochMs')::bigint AS handler_to_accept_ms
+FROM attempts
+ORDER BY at, orchestration_attempt_fingerprint;
+```
+
+The transport interval includes the SDK's state/readiness work and TCP fetch,
+not just network time. Constructor timestamps can predate a warm request.
+Compare same-owner differences first; Worker, Durable Object, Node, Temporal,
+and Web epoch differences require clock-skew allowance. The SQL completion
+window should include the command budget beyond the ingress window. Do not
+export raw JSON or subject identifiers just to investigate a latency span.
+
 ### Provider request diagnostics
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
@@ -696,6 +828,146 @@ retained sample. Histograms merge by summing corresponding counts; never compute
 per-call percentiles from per-profile averages. Truncation/loss means even those
 bounds describe the retained samples, not the complete population.
 
+### Finite CLI failure counts (optional, same timing identity)
+
+Each non-successful invocation from a new producer contributes at most one
+`failures: [{ code, stage, count }]` observation inside its existing
+command/outcome entry. For example, a synthetic `experiment session log` throw
+with code `invalid_payload` and context stage `validation` produces that exact
+pair with count 1. A successful invocation has no failure fields. An observed
+nonzero exit without original error detail contributes `unknown / unknown`, not
+an apparent success. EPIPE keeps its existing `unknown` outcome; it is not
+reclassified as a product failure.
+
+The sole portable vocabulary, validation and merge owner is
+`packages/runtime-state/src/cli-timing.ts`. Codes and stages use exact finite
+membership, never pattern-admitted provider strings. It admits the actionable
+CLI/knowledge codes, fixed validation types and selected Node/transport codes;
+other values collapse to `unknown`. Capture reads only own data properties for
+`code`, `context.stage`, direct `stage`, and (when code is absent) three exact
+validation type names. It does not call getters, enumerate objects, inspect
+messages/field errors, follow prototypes/causes, or retain original errors or
+contexts. Code-only observations are diagnostic hints, not authorization or a
+claim that a reported stage is independently verified. Existing dynamic-tool
+finite stage/reason/category diagnostics remain separate and unchanged.
+
+The existing Incur error bridge observes ordinary handler throws **before** its
+public error projection can discard typed fields. Dispatch and invocation
+catches provide a fallback only: first observation wins, with no per-catch
+increment and no cross-invocation error-object cache. Recursive batch children
+retain their own scopes; the container is not an additional failure sample.
+Stop-on-error and the existing rejection of nested batch before child entry are
+unchanged. An unentered child has no invented diagnostic.
+
+There are at most **8 code/stage pairs per command/outcome**, within the existing
+32-command limit. Additional distinct pairs increment optional `droppedFailures`
+by their observation count; repeats of already-retained pairs still aggregate.
+`sum(failures.count) + droppedFailures <= calls`. These are safe positive counts
+(or a safe nonnegative drop count), not extra CLI calls. Malformed optional
+failure details are removed independently, retaining valid timing and usage.
+Unknown future codes/stages normalize to constants; resulting duplicate pairs
+coalesce. Old entries without these fields remain unchanged, including mixed
+old/new merges: missing old detail is **not** backfilled with fabricated unknown
+observations. Counts can therefore cover fewer than the entry's error calls.
+
+Existing UDP/HTTP fitting still removes whole command entries and charges their
+calls to `droppedCalls`; it does not reinterpret `droppedFailures` or split a
+command into duplicate identities. Whole-entry omission also loses that entry's
+failure details. The 8 KiB envelope, 16 KiB complete usage body, packet budget,
+retention, clocks, outcomes and all legacy accounting are unchanged. There is no
+new stream, collector, marker, DB field/table, retry, awaited operation or
+model-visible output. Without the existing timing transport, capture is inert.
+
+**Coverage limits:** Incur 0.5.1's `internal/command.ts` puts `Parser.parse`
+for resolved command arguments/options and command-level environment validation
+inside the middleware chain. Murph's `patches/incur@0.5.1.patch` at base
+`4949045492c` preserves that ordering and maps both `Errors.ValidationError` and
+`Errors.ParseError` to `VALIDATION_ERROR / validation`; the repository's
+`incur-smoke.test.ts` also checks this recovery contract. Capture uses those
+exact type names when no code is available, not the unpatched upstream
+ParseError fallback. A direct ZodError maps to `invalid_payload / validation`,
+matching the CLI projection. Qualify with the real-entry tests against the
+installed patched dependency, not upstream source alone.
+Global/configuration parsing, CLI-level environment and vars validation, and
+routing can precede middleware; some failures expose only an exit or reach the invocation
+fallback without a resolved path (`other`). Returned `c.error(...)` sentinels
+are not throws. Stream-consumption errors are handled outside the suspended
+middleware chain. Those paths may provide only an unknown observation, or no
+completion at all. Later asynchronous failures, hard kills and lost datagrams
+retain the existing missingness. No output parsing or additional Incur runtime
+hook is introduced to fill those gaps.
+
+**Compatible rollout:** admit this optional extension in downstream Web/hosted
+usage parsers, usage-body fitting and the engine receiver/profile consumer
+before updating CLI producers. They all use the portable normalizer; no second
+schema tree or new bundler ownership is needed. Older timing-aware consumers
+accept the same command/outcome identity and strip the new fields, preserving
+calls/phases and usage accounting. Older producers remain readable unchanged.
+A producer-first or consumer rollback loses detail, not billing validity. The
+history-backed test uses `MURPH_CLI_FAILURE_COMPAT_BASE=4949045492c` to load both
+actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains a
+separate, pre-timing rollout proof.
+
+### Bounded failure-frequency inspection and decision threshold
+
+Run on the **primary usage database** after compatible consumers and producers
+are present. This query caps input at 10,000 usage rows over 72 hours and output
+at 50 finite command/code/stage groups. It uses existing turn IDs only internally
+for aggregation; no IDs or private content are returned. The maximum observed
+count per turn/pair avoids adding repeated provider-request/profile snapshots;
+`observed_failures_lower_bound` is conservative, not an exact all-attempt total.
+A row-cap hit requires a narrower fixed window before making coverage claims.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT turn_id, turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= (now() AT TIME ZONE 'UTC') - interval '72 hours'
+    AND occurred_at < (now() AT TIME ZONE 'UTC')
+  ORDER BY occurred_at DESC
+  LIMIT 10000
+), commands AS (
+  SELECT turn_id, c
+  FROM rows
+  CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+    AND c ->> 'command' IN ('experiment session log', 'knowledge upsert', 'other')
+    AND c ->> 'outcome' = 'error'
+), per_turn AS (
+  SELECT turn_id, c ->> 'command' AS command,
+         f ->> 'code' AS code, f ->> 'stage' AS stage,
+         max((f ->> 'count')::numeric) AS observations
+  FROM commands
+  CROSS JOIN LATERAL jsonb_array_elements(c -> 'failures') f
+  GROUP BY turn_id, c ->> 'command', f ->> 'code', f ->> 'stage'
+)
+SELECT command, code, stage, count(*) AS independent_turns,
+       sum(observations) AS observed_failures_lower_bound,
+       (code <> 'unknown' AND count(*) >= 2) AS investigate,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM per_turn
+GROUP BY command, code, stage
+ORDER BY independent_turns DESC, observed_failures_lower_bound DESC, command, code, stage
+LIMIT 50;
+```
+
+Investigate an implementation change only when the **same finite command/code/
+stage failure occurs in at least two independent turns**, then reproduce that
+specific path synthetically. One noisy loop is one turn, however high its count.
+Unknowns are a coverage signal, not evidence for a particular product fix. Check
+rollout version, absent diagnostics, `droppedFailures`, `droppedCalls` and
+transport completeness before treating frequencies as representative. This
+telemetry does not by itself establish bad input, missing ownership, a conflict,
+or a product defect; do not presume or repair experiment behavior from it.
+
+Failure-extension regression coverage additionally includes real shell/entry
+fake handlers and real Incur errors over loopback, first-observation dedup,
+private/hostile properties, mixed successes/errors/stages, current usage parsing,
+actual old-reader skew, usage-body fitting and Web persisted normalization. These
+are synthetic local tests; no real-model journey or production destination is
+needed for this extension's unchanged output contract.
+
 ### Bounded latest-72h / prior-72h inspection
 
 Run on the **primary usage database**. This example uses one stable UTC anchor,
@@ -815,7 +1087,8 @@ The gate uses the pinned real Codex binary and a synthetic local Responses
 provider, `buildHostedCodexConfigToml`, the unchanged `murph-member-workspace`
 profile and production shell allowlist, with only the synthetic vault as a
 workspace root. `MURPH_HOSTED_CLI_TIMING_CLI_BIN` optionally selects an absolute
-path to the freshly packaged `@murphai/murph` **`dist/bin.js`**. Without it, the
+path to the freshly packaged `@murphai/murph` **`dist/bin.js`**, or the fully
+assembled runner's **`.bundle/bin.js`**. Without it, the
 test uses the checkout's `packages/cli/dist/bin.js`; this works only when that
 layout is already readable by the profile. The test checks the built entry and
 package name, but does not establish artifact freshness from the path: prepare
@@ -890,9 +1163,13 @@ built `wearables latest` invocation reaches the real query owner and must expose
 No query calls are added to non-query commands. A nonempty session, unchanged
 session on continuation, and native `warm-reused` traces are required.
 
-Passing this gate establishes built CLI -> hosted shell -> Codex raw diagnostic
-transport; the engine profile test composes it with the actual extractor -> hosted
-normalization boundary. Separate startup cases distinguish no native event from
+Passing this gate establishes the selected artifact -> hosted shell -> Codex raw
+diagnostic transport; a source or `dist/bin.js` run does **not** establish
+`.bundle/bin.js` parity. In bundled mode, a third, telemetry-disabled child runs
+the installed sibling `dist/bin.js` in the same shell/profile. All three children
+must complete successfully with identical per-stream bytes; only the enabled
+bundled child may contribute the single report. The engine profile test composes
+this with the actual extractor -> hosted normalization boundary. Separate startup cases distinguish no native event from
 an actual native RPC error and retain the latter. Their receiver fixture mirrors
 the one-shot production close contract: catch and finally can both finish cleanup,
 but only the first can return a diagnostic. Empty startup failures remain empty;
@@ -904,6 +1181,99 @@ in the repository. Run that explicit gate from the active plan. A current-parser
 roundtrip of field-stripped data is only legacy-shape proof, not mixed-version
 proof. Ordinary runs without the base variable explicitly skip this additional
 history-dependent case.
+
+#### Bundled timing-owner prerequisite and artifact parity
+
+The CLI's literal lazy import of
+`@murphai/runtime-state/node/cli-timing` and query's variable native runtime import
+must reach the same installed timing owner. Inlining that leaf into the CLI while
+query loads the installed package creates separate `AsyncLocalStorage` instances:
+lifecycle scopes can survive while `query-freshness`, `query-manifest` and
+`query-status` disappear. The shared runner esbuild policy keeps **only that exact
+stateful subpath** external; both bundle input guards reject accidental inlining
+of its installed implementation. The leaf resolves its relative timing catalog
+from the same installed package for CLI and native query callers. Other
+runtime-state entrypoints remain bundleable; no process-global registry is added.
+The CLI import remains lazy. Entry, static-closure and total-output guards are
+unchanged and must pass on the actual assembled candidate.
+
+Old missing query phases mean **unknown**, not zero query cost or a query-free
+command. Lifecycle coverage, a successful command and zero dropped-span counters
+do not prove that the old split owner observed query work; this loss occurs before
+span admission. Do not reconstruct absent durations or treat pre-fix absence as a
+performance baseline. The correction restores existing bounded numeric/enum
+spans to the existing report and transport, without changing collectors, fields,
+caps, loss/unknown semantics, native errors, cancellation or CLI results.
+
+The runner bundle test stages a synthetic successful read through a native
+variable import and copies the candidate's built **public timing exports**, not
+an alternative timing implementation. Its esbuild negative control removes only
+the timing external: it must retain lifecycle phases and lose all three query
+phases. The corrected path calls `bundleInstalledVaultCliBinary`, then executes
+`.bundle/bin.js` and both retargeted wrappers. Enabled reports must contain the
+query phases and remain valid under the existing private-safe normalizer; all
+successful output/exit results must match `dist/bin.js`, including telemetry off.
+Relative-import bypass cases exercise both shared forbidden-input guards.
+This isolates module ownership, not the real query implementation or transport;
+the assembled hosted gate above owns that composed proof.
+
+Use the repository's supported Node (at least 24.14.1), pinned pnpm 10.33.0,
+installed candidate dependencies and pinned Codex binary. Build the public timing
+exports before running the synthetic bundle tests; missing exports are a hard
+fixture failure, not a skip or a source-loader fallback. From the repository root:
+
+```sh
+pnpm --filter @murphai/runtime-state build
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage \
+  apps/cloudflare/test/runner-bundle-cli-bundle.test.ts \
+  apps/cloudflare/test/runner-bundle-entrypoint-bundle.test.ts
+pnpm --dir apps/cloudflare typecheck
+pnpm --dir packages/assistant-runtime typecheck
+```
+
+For the actual production artifact proof, use canonical Linux x86_64 assembly
+without skip flags or budget overrides, then copy the **entire installed runner
+tree**, including retained package payloads, into an already permitted temporary
+root. Do not substitute a separately built CLI, incomplete file copy, new source
+loader, symlink back to an unreadable checkout, or broader filesystem grant:
+
+```sh
+set -eu
+pnpm --dir apps/cloudflare runner:bundle
+export MURPH_CLI_TIMING_ARTIFACT_ROOT="$(mktemp -d)"
+cp -R apps/cloudflare/.deploy/runner-bundle "$MURPH_CLI_TIMING_ARTIFACT_ROOT/installed"
+export MURPH_HOSTED_CLI_TIMING_CLI_BIN="$MURPH_CLI_TIMING_ARTIFACT_ROOT/installed/node_modules/@murphai/murph/.bundle/bin.js"
+MURPH_RUN_HOSTED_CLI_TIMING_E2E=1 \
+  pnpm --dir packages/assistant-runtime exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/hosted-runtime-codex-config.test.ts -t 'shared CLI timing'
+```
+
+The assembly output above is the default deploy-directory location; use the
+actual assembly output when an existing deploy-directory override is active.
+Preserve the installed candidate package tree during the copy and remove the
+owned temporary root after validation. The real successful `wearables latest`
+read must expose all three query phases through the existing hosted diagnostic
+pipeline. `goal list` and `family list` must remain query-phase-free; cold and warm
+session evidence, native failures and telemetry-disabled no-op checks remain
+mandatory. Source query-concurrency tests and an unbundled hosted run are useful
+separate evidence, never substitutes for this assembled-artifact gate.
+
+This is a packaging-only correction using an already deployed vocabulary. The
+original consumer-first rollout rule still applies to introduction of shared CLI
+timing, but this correction requires no new consumer schema, database migration
+or coordinated protocol transition. Rebuild the runner with its matching installed
+packages and use the normal parent-owned rollout. Mixed old/new runners remain
+wire-compatible; older runners may still omit query spans. Do not use the new
+CLI bundle with a different or missing installed timing package.
+
+After parent validation and deployment, measure **72 hours of normal traffic**
+using the bounded aggregate inspection above. Record rollout coverage separately
+from duration, missingness and existing drop/loss indicators; compare the latest
+72-hour and preceding 72-hour windows only where coverage supports comparison.
+Do not add identifiers to reports, replay production payloads, generate probe
+traffic, or infer an optimization from newly visible spans. No production
+measurements or rollout results are established by this implementation handoff.
 
 For source-resolution and startup-loading corrections, run the focused guards
 from the repository root before the existing built hosted proof:

@@ -258,7 +258,7 @@ landing; record the chosen posture here so the decision is reviewable.
   replay, while a write without one receives a unique retention-only identity.
   The generated-image owner materializes this shared file before every lookup
   read; hosted private generation requires the workspace runner's existing
-  persistence boundary, so a lazy legacy index cannot be replaced as empty and
+  persistence boundary, so an existing lookup cannot be replaced as empty and
   the capture cannot commit without its deadline checkpoint.
   Retries of a stable identity update no file count and either reuse the saved
   capture or return the deleted outcome.
@@ -285,7 +285,7 @@ landing; record the chosen posture here so the decision is reviewable.
   their exact 14-day cutoff into that wake in the same canonical receipt
   checkpoint, preserving the earliest cutoff through shutdown. Retirement uses
   that boundary too: guarded raw text-replacement receipts carry the inspected
-  preimage, and legacy lazy restore materializes receipt targets before replay.
+  preimage, and current receipt recovery resolves required media references before replay.
 
 - `assistant-state/hosted-provider-cleanup.json`
   (`murph.hosted-provider-cleanup.v1`) is compact durable operational-continuity
@@ -306,6 +306,20 @@ landing; record the chosen posture here so the decision is reviewable.
   snapshot-bridge pruning guard once production vaults have all written the
   marker. The steady-state file bound for the provider-cleanup family is
   asserted by the provider-cleanup unit tests.
+
+- `.runtime/operations/assistant/state/input-media.json` is one portable,
+  rebuildable input-store index per workspace, independent of conversation or
+  message count. It maps hashed conversation identities to input ids and media
+  expiry bounds; it contains no message text or attachment paths. Missing or
+  malformed state rebuilds from canonical input events under the existing
+  runtime write lock. Media evidence updates publish a candidate superset
+  before canonical evidence and prune expired entries; reads open only the
+  current conversations' unexpired candidates and validate canonical evidence.
+  The existing assistant `state` snapshot inclusion carries this file. A first
+  lookup creates at most one file; subsequent turns reuse it. Deploy with
+  `container_rollout=immediate` and drain old input-store writers before first
+  publication. After publication, the index-aware runner is the rollback floor;
+  an older writer would not maintain its candidate set.
 
 - `.runtime/operations/assistant/state/session-routing.sqlite` is one portable,
   rebuildable projection per workspace. It stores hashed exact alias and

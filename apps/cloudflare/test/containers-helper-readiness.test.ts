@@ -33,6 +33,84 @@ describe("patched Cloudflare container readiness probes", () => {
     vi.useRealTimers();
   });
 
+  it.each(["TimeoutError", "AbortError"])("returns HTTP 500 when a native wake fetch rejects with %s", async (name) => {
+    const runner: Container = Object.create(Container.prototype);
+    const nativeFetch = vi.fn(async () => {
+      throw new DOMException("Synthetic wake transport cancellation", name);
+    });
+    const decrementInflight = vi.fn();
+    Object.defineProperties(runner, {
+      container: { value: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
+      ctx: { value: { id: "synthetic-container" } },
+      defaultPort: { value: runnerPort },
+      decrementInflight: { value: decrementInflight },
+      inflightRequests: { value: 0, writable: true },
+      renewActivityTimeout: { value: vi.fn() },
+      state: { value: { getState: async () => ({ status: "healthy" }) } },
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      // Exercise the installed, patched SDK rather than the runner's transport
+      // double: the wrapper hides a thrown timeout inside an HTTP response.
+      const response = await runner.containerFetch("http://container/internal/runtime-wake", {
+        method: "POST",
+      });
+      expect(response.status).toBe(500);
+      expect(response.headers.get("x-runtime-wake-accepted")).toBeNull();
+      expect(nativeFetch).toHaveBeenCalledOnce();
+      expect(decrementInflight).toHaveBeenCalledOnce();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("performs SDK readiness before a wake when a running shell has non-healthy cached status", async () => {
+    const runner: Container = Object.create(Container.prototype);
+    const nativeFetch = vi.fn(async () => {
+      const response = new Response(null, { status: 204 });
+      Object.defineProperty(response, "webSocket", { value: null });
+      return response;
+    });
+    Object.defineProperties(runner, {
+      container: { value: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
+      defaultPort: { value: runnerPort },
+      decrementInflight: { value: vi.fn() },
+      inflightRequests: { value: 0, writable: true },
+      renewActivityTimeout: { value: vi.fn() },
+      state: { value: { getState: async () => ({ status: "running" }) } },
+    });
+    let releaseReadiness!: () => void;
+    const readiness = vi.spyOn(runner, "startAndWaitForPorts").mockImplementation(
+      () => new Promise<void>((resolve) => { releaseReadiness = resolve; }),
+    );
+    const wake = runner.containerFetch("http://container/internal/runtime-wake", { method: "POST" });
+    await vi.waitFor(() => expect(readiness).toHaveBeenCalledOnce());
+    expect(nativeFetch).not.toHaveBeenCalled();
+    releaseReadiness();
+    await expect(wake).resolves.toMatchObject({ status: 204 });
+    expect(nativeFetch).toHaveBeenCalledOnce();
+  });
+
+  it("uses native destruction completion independently of cached SDK status", async () => {
+    let finishNativeDestroy: () => void = () => { throw new Error("Destroy not started"); };
+    const nativeDestroy = vi.fn(() => new Promise<void>((resolve) => {
+      finishNativeDestroy = resolve;
+    }));
+    const runner: Container = Object.create(Container.prototype);
+    Object.defineProperty(runner, "container", { value: { destroy: nativeDestroy } });
+    const cachedStatus = vi.spyOn(runner, "getState")
+      .mockRejectedValue(new Error("Cached state unavailable"));
+    let completed = false;
+    const destruction = runner.destroy().then(() => { completed = true; });
+    await Promise.resolve();
+    expect(nativeDestroy).toHaveBeenCalledOnce();
+    expect(completed).toBe(false);
+    finishNativeDestroy();
+    await destruction;
+    expect(completed).toBe(true);
+    expect(cachedStatus).not.toHaveBeenCalled();
+  });
+
   it("cuts the production-shaped sticky-probe path by more than two seconds", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:00:00.000Z"));
@@ -77,7 +155,7 @@ describe("patched Cloudflare container readiness probes", () => {
     }
   });
 
-  it("applies the bounded probe to the direct start path used by shell prewarm", async () => {
+  it("applies the bounded probe to the direct SDK start path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:01:30.000Z"));
     const harness = await createProbeHarness({

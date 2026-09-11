@@ -1634,6 +1634,20 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { conversationThreadId: null, directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: null, target: "chat-group", targetKind: "thread", threadIsDirect: false },
+    { conversationThreadId: null, directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: null, target: "+15550100003", targetKind: "participant", threadIsDirect: true },
+    { target: "chat-home", targetKind: "thread", threadIsDirect: true },
+  ])("rejects invalid expected routes before acquiring database authority %#", async (expectedResolvedRoute) => {
+    const response = await postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authorityCheckOnly: false, target: "chat-home", targetKind: "thread", expectedResolvedRoute }),
+    }));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_INVALID" } });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+  });
+
   it("checks route authority without claiming provider dispatch", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",

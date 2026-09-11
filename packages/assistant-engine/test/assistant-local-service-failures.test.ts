@@ -1269,12 +1269,11 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
     bindingDelivery: null,
     channel: null,
     deliveryPolicy: 'binding-target-only',
-    effectiveThreadIsDirect: false,
+    threadIsDirect: false,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: null,
-    threadIsDirect: null,
   }
 
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({

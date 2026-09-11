@@ -11946,8 +11946,12 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
-  it("fails closed before capability or provider access when Web lacks the canonical-route protocol", async () => {
-    const assertRecentInbound = vi.fn(async () => ({}));
+  it.each([undefined, {
+    conversationThreadId: null, directRecipientPhoneNumber: "+15550100001",
+    fromPhoneNumber: null, target: "chat_group", targetKind: "thread" as const,
+    threadIsDirect: false,
+  }])("fails closed before capability or provider access for missing or contradictory route %#", async (resolvedRoute) => {
+    const assertRecentInbound = vi.fn(async () => resolvedRoute ? { resolvedRoute } : {});
     const persistAppCardTextFallback = vi.fn(async () => undefined);
     const providerFetch = vi.fn<typeof fetch>();
     const recordDeliveryOutcome = vi.fn(async () => undefined);

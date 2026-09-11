@@ -51,7 +51,6 @@ export type {
   BrowserVaultMetricsQueryClient,
   BrowserVaultMetricsReplica,
   BrowserVaultMetricsIndexReplica,
-  BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultReplica,
   BrowserVaultReplicaPolicy,

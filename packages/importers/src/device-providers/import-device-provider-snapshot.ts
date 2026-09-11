@@ -17,7 +17,7 @@ import {
 } from "../shared.ts";
 
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
-import { deriveJunctionCanonicalCoverageEvidence } from "./junction.ts";
+import { deriveJunctionCanonicalCoverageEvidence } from "./junction-canonical-coverage.ts";
 import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
 
@@ -28,6 +28,7 @@ export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
   defaultTimeZone?: string;
   importSession?: DeviceBatchImportExecutionOptions["session"];
+  signal?: AbortSignal | null;
   providerRegistry?: DeviceProviderRegistry;
 }
 
@@ -358,22 +359,27 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     corePort,
     defaultTimeZone,
     importSession,
+    signal,
     providerRegistry,
   }: DeviceProviderImporterExecutionOptions = {},
 ): Promise<TResult> {
+  signal?.throwIfAborted();
   const writer = assertCanonicalWritePort(corePort, ["importDeviceBatch"]);
   const resolvedDefaultTimeZone =
     defaultTimeZone ?? await resolveSnapshotImportDefaultTimeZone(input, corePort);
+  signal?.throwIfAborted();
   const normalizationStartedAt = performance.now();
   const payload = await prepareDeviceProviderSnapshotImport(input, {
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
+  signal?.throwIfAborted();
   const normalizationElapsedMs = Math.max(0, performance.now() - normalizationStartedAt);
   const coreTimingRef: {
     value?: Parameters<NonNullable<DeviceBatchImportExecutionOptions["onTiming"]>>[0];
   } = {};
   const result = await writer.importDeviceBatch(payload, {
+    signal,
     ...(importSession ? { session: importSession } : {}),
     onTiming: (timing) => {
       coreTimingRef.value = timing;

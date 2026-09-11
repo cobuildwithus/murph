@@ -158,6 +158,36 @@ describe("default phone-call result notification store", () => {
     mocks.signalHostedPhoneCallReconciliation.mockResolvedValue(undefined);
   });
 
+  it.each(["result", "stop"])("does not append a stale %s notification after deletion", async (kind) => {
+    const call = buildStoredAnalyzedCall({
+      resultNotificationChannel: null,
+      stopRequestedAt: new Date("2026-08-09T00:01:00.000Z"),
+      endedAt: new Date("2026-08-09T00:02:00.000Z"),
+    });
+    const prisma = buildPrisma({
+      call,
+      missing: true,
+      onTransaction: async (callback) => callback({
+        $queryRaw: vi.fn(async () => []),
+      }),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(DESTINATION);
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({ rootKey: new Uint8Array(32) });
+    const signalRuntime = vi.fn();
+
+    if (kind === "result") {
+      await finalizeStoredHostedPhoneCallResult(call, { signalRuntime });
+    } else {
+      await finalizeHostedPhoneCallStopSettlement(call, { signalRuntime });
+    }
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(signalRuntime).not.toHaveBeenCalled();
+  });
+
   it("finishes every preparation phase before one mailbox-only transaction", async () => {
     const phases: string[] = [];
     const resultPhase = createBlockedPhase("result", RESULT, phases);
@@ -174,6 +204,7 @@ describe("default phone-call result notification store", () => {
     }, phases);
     let transactionOpen = false;
     const transactionClient = {
+      $queryRaw: vi.fn(async () => [{ id: CALL_ID }]),
       hostedPhoneCall: {
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
@@ -491,6 +522,9 @@ describe("default phone-call result notification store", () => {
     const storedCall = await prisma.hostedPhoneCall.findUnique({
       where: { id: call.id },
     });
+    if (!storedCall) {
+      throw new Error("Start failure must retain its phone-call retry owner.");
+    }
     await finalizeHostedPhoneCallStartFailure(storedCall, { signalRuntime });
 
     expect(mocks.encryptHostedPhoneCallResult).toHaveBeenCalledOnce();
@@ -1070,6 +1104,7 @@ function buildPrisma(input: {
     call: HostedPhoneCall;
     count: number;
   };
+  missing?: boolean;
   onTransaction?: (callback: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
   resultNotificationChannel?: "linq" | "telegram" | null;
 } = {}) {
@@ -1084,6 +1119,7 @@ function buildPrisma(input: {
         : {}),
     });
   const transactionClient = {
+    $queryRaw: vi.fn(async () => [{ id: CALL_ID }]),
     hostedPhoneCall: {
       updateMany: vi.fn(async (args: {
         data: {
@@ -1120,7 +1156,7 @@ function buildPrisma(input: {
     hostedPhoneCall: {
       findUnique: vi.fn(async (findInput?: unknown) => {
         void findInput;
-        return call;
+        return input.missing ? null : call;
       }),
       updateMany: vi.fn(async (update: {
         data: Partial<HostedPhoneCall> & { resultJson?: unknown };
@@ -1222,6 +1258,9 @@ function buildRealMailboxPrisma(initialCall: HostedPhoneCall) {
       ...values: unknown[]
     ) => {
       const sql = strings.join("?");
+      if (sql.includes("hosted_member") || sql.includes("hosted_phone_call")) {
+        return [{ id: call.id }];
+      }
       if (sql.includes("hosted_mailbox_lane_counter")) {
         return [{ seq: 1n }];
       }

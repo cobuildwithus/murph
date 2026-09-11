@@ -691,7 +691,7 @@ export function verifyWorkspaceImportPolicy({
   }
 
   if (
-    (sourceMember === "packages/assistant-runtime" || sourceMember === "packages/assistantd")
+    sourceMember === "packages/assistant-runtime"
     && specifier === "@murphai/vault-usecases"
     && filePath.includes(`${path.sep}src${path.sep}`)
   ) {

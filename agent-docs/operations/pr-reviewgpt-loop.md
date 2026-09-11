@@ -24,6 +24,11 @@ invariants without replacement machinery. Minor refactoring, UX polish,
 disclosure gaps, and speculative edge cases are not blocking findings. The
 targeted exploratory presets remain available separately.
 
+Both lean and full guarded archives include the tracked native CI controller
+policy, PR evidence template, and assistant verification skill through the
+existing exact always-path manifest. These inputs remain available when they
+are unchanged by the candidate.
+
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context
 sensitivity and measures the complete current PR against its base. Sensitive or
@@ -404,8 +409,10 @@ the current user explicitly asks for it.
    if that lane cannot continue, use the fresh-full recovery command.
 
    Use `--wait` for normal review runs so ReviewGPT closes the tab it created
-   after capture. Do not resend an accepted prompt during recovery; continue
-   from the same thread and close any task-owned recovery tab when done.
+   after capture. For capture failures without a confirmed lane rate limit,
+   do not resend an accepted prompt; continue from the same thread and close
+   any task-owned recovery tab when done. Confirmed lane rate limits follow
+   the fresh-full recovery path above.
 
 3. Confirm the captured output is an actual completed review before triaging
    it. If the run leaves an empty/preliminary response, lacks

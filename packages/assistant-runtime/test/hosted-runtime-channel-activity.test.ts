@@ -162,7 +162,7 @@ test("hosted Linq typing uses the hosted env after target context validation", a
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.refreshMs, 45_000);
 });
 
-test("hosted Linq typing records exact request and acceptance milestones without payload data", async () => {
+test("hosted Linq typing records requests and admitted-input acceptance without payload data", async () => {
   const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
     matchedCount: 1,
     recorded: true,
@@ -171,12 +171,13 @@ test("hosted Linq typing records exact request and acceptance milestones without
   mocks.startLinqTypingIndicator.mockResolvedValue({
     stop: vi.fn(async () => undefined),
   });
+  const assistantInputIds = ["input_typing_trace_1"];
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
     },
     latencyTraceContext: {
-      assistantInputIds: ["input_typing_trace_1"],
+      assistantInputIds,
       latencyTracePort: {
         record: latencyTraceRecord,
       },
@@ -201,6 +202,7 @@ test("hosted Linq typing records exact request and acceptance milestones without
   const handle = await typing.startLinqTyping?.({
     target: "chat_typing_trace_1",
   });
+  typing.onTypingAccepted?.({ acceptedInputIds: assistantInputIds, at: new Date().toISOString(), channel: "linq" });
   await vi.waitFor(() => {
     expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
   });
@@ -223,6 +225,15 @@ test("hosted Linq typing records exact request and acceptance milestones without
   ]);
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("+15551234567");
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain("msg_typing_trace_1");
+  const acceptedAt = latencyTraceRecord.mock.calls[1]?.[0].event.at;
+  assistantInputIds[0] = "input_typing_trace_2";
+  typing.onTypingAccepted?.({ acceptedInputIds: ["input_typing_trace_2"], at: acceptedAt!, channel: "linq" });
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(latencyTraceRecord).toHaveBeenLastCalledWith({ event: expect.objectContaining({
+    assistantInputIds: ["input_typing_trace_2"],
+    at: acceptedAt,
+    milestone: "linq_typing_accepted",
+  }) }));
   await handle?.stop();
 });
 
@@ -1117,4 +1128,25 @@ test("hosted progress Linq delivery recovers the redacted routed same-wake chat"
     target: "linq_chat_current",
     targetKind: "thread",
   });
+});
+
+test.each(["linq", "telegram"])("typing telemetry uses admitted IDs and the actual %s channel", async (channel) => {
+  const record = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
+    matchedCount: 1, recorded: true, unmatchedCount: 0,
+  }));
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {}, userEnv: {},
+    latencyTraceContext: {
+      assistantInputIds: ["initial-input"], latencyTracePort: { record },
+      runtimeAttemptId: "synthetic-attempt", source: "linq",
+    },
+  });
+  typing.onTypingAccepted?.({
+    acceptedInputIds: ["admitted-followup"], at: "2026-09-11T00:00:00.000Z", channel,
+  });
+  await vi.waitFor(() => expect(record).toHaveBeenCalledWith({ event: {
+    assistantInputIds: ["admitted-followup"], at: "2026-09-11T00:00:00.000Z",
+    milestone: `${channel}_typing_accepted`, runtimeAttemptId: "synthetic-attempt",
+    source: channel, type: "assistant_milestone",
+  } }));
 });

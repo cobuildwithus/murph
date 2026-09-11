@@ -1540,6 +1540,8 @@ export const eventImportUpsertDecisionSchema = z
     action: z.literal("upsert"),
     payload: eventImportDecisionPayloadSchema,
     expectedLatest: expectedLatestEventSchema.optional(),
+    sourceParent: versionedExternalRefSchema.optional(),
+    invalidateFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
   })
   .strict();
 
@@ -1549,6 +1551,7 @@ export const eventImportRetractionDecisionSchema = z
     externalRef: versionedExternalRefSchema,
     reason: boundedString(1, 240),
     evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
+    retractFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
   })
   .strict();
 

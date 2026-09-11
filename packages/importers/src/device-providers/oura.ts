@@ -515,105 +515,38 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
 
   pushEvidencePart(evidenceParts, createEvidencePart("personal-info", "personal-info.json", personalInfo));
 
-  for (const activity of dailyActivity) {
-    const activityId = stringId(activity.id) ?? stringId(activity.day) ?? `daily-activity-${events.length + 1}`;
-    const recordedAt = firstIso(activity.timestamp, activity.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(activity.day), recordedAt);
-    const role = `daily-activity:${activityId}`;
-    const version = firstIso(activity.timestamp);
+  const dailyResources = [
+    { resourceType: "daily-activity", records: dailyActivity, metrics: OURA_DAILY_ACTIVITY_METRICS },
+    { resourceType: "daily-sleep", records: dailySleep, metrics: OURA_DAILY_SLEEP_METRICS },
+    { resourceType: "daily-readiness", records: dailyReadiness, metrics: OURA_DAILY_READINESS_METRICS },
+    { resourceType: "daily-spo2", records: dailySpO2, metrics: OURA_DAILY_SPO2_METRICS },
+  ];
 
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-activity-${activityId}.json`, activity));
+  // Resource order also determines event-count fallback identities.
+  for (const { resourceType, records, metrics } of dailyResources) {
+    for (const record of records) {
+      const resourceId = stringId(record.id) ?? stringId(record.day) ?? `${resourceType}-${events.length + 1}`;
+      const recordedAt = firstIso(record.timestamp, record.day) ?? importedAt;
+      const dayKey = firstDayKey(stringId(record.day), recordedAt);
+      const role = `${resourceType}:${resourceId}`;
+      const version = firstIso(record.timestamp);
 
-    emitObservationMetrics(
-      events,
-      {
-        source: activity,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-activity", activityId, version, facet),
-      },
-      OURA_DAILY_ACTIVITY_METRICS,
-    );
-  }
+      pushEvidencePart(evidenceParts, createEvidencePart(role, `${resourceType}-${resourceId}.json`, record));
 
-  for (const summary of dailySleep) {
-    const summaryId = stringId(summary.id) ?? stringId(summary.day) ?? `daily-sleep-${events.length + 1}`;
-    const recordedAt = firstIso(summary.timestamp, summary.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(summary.day), recordedAt);
-    const role = `daily-sleep:${summaryId}`;
-    const version = firstIso(summary.timestamp);
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-sleep-${summaryId}.json`, summary));
-
-    emitObservationMetrics(
-      events,
-      {
-        source: summary,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-sleep", summaryId, version, facet),
-      },
-      OURA_DAILY_SLEEP_METRICS,
-    );
-  }
-
-  for (const readiness of dailyReadiness) {
-    const readinessId =
-      stringId(readiness.id) ?? stringId(readiness.day) ?? `daily-readiness-${events.length + 1}`;
-    const recordedAt = firstIso(readiness.timestamp, readiness.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(readiness.day), recordedAt);
-    const role = `daily-readiness:${readinessId}`;
-    const version = firstIso(readiness.timestamp);
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-readiness-${readinessId}.json`, readiness));
-
-    emitObservationMetrics(
-      events,
-      {
-        source: readiness,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-readiness", readinessId, version, facet),
-      },
-      OURA_DAILY_READINESS_METRICS,
-    );
-  }
-
-  for (const spo2 of dailySpO2) {
-    const spo2Id = stringId(spo2.id) ?? stringId(spo2.day) ?? `daily-spo2-${events.length + 1}`;
-    const recordedAt = firstIso(spo2.timestamp, spo2.day) ?? importedAt;
-    const occurredAt = recordedAt;
-    const dayKey = firstDayKey(stringId(spo2.day), recordedAt);
-    const role = `daily-spo2:${spo2Id}`;
-    const version = firstIso(spo2.timestamp);
-
-    pushEvidencePart(evidenceParts, createEvidencePart(role, `daily-spo2-${spo2Id}.json`, spo2));
-
-    emitObservationMetrics(
-      events,
-      {
-        source: spo2,
-        occurredAt,
-        recordedAt,
-        dayKey,
-        observationGrain: "summary",
-        evidenceRoles: [role],
-        externalRef: (facet) => makeExternalRef("daily-spo2", spo2Id, version, facet),
-      },
-      OURA_DAILY_SPO2_METRICS,
-    );
+      emitObservationMetrics(
+        events,
+        {
+          source: record,
+          occurredAt: recordedAt,
+          recordedAt,
+          dayKey,
+          observationGrain: "summary",
+          evidenceRoles: [role],
+          externalRef: (facet) => makeExternalRef(resourceType, resourceId, version, facet),
+        },
+        metrics,
+      );
+    }
   }
 
   for (const sleep of sleeps) {

@@ -2251,18 +2251,13 @@ async function openIntegrationIngestLineStream(
 async function listIntegrationIngestRowSources(
   vaultRoot: string,
 ): Promise<IntegrationIngestRowSource[]> {
-  const sources = new Map<string, IntegrationIngestRowSource>();
-  for (const extension of [".jsonl", ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `.jsonl${suffix}`)]) {
-    const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory, {
-      extension,
-    });
-    for (const sourcePath of paths) {
-      const source = integrationIngestRowSourceFromPath(sourcePath);
-      sources.set(source.sourcePath, source);
-    }
-  }
-  return assertSingleIntegrationIngestShardRepresentation(
-    sortIntegrationIngestRowSources([...sources.values()]),
+  const extensions = [".jsonl", ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `.jsonl${suffix}`)];
+  const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
+  return resolveIntegrationIngestShardRepresentations(
+    vaultRoot,
+    sortIntegrationIngestRowSources(paths
+      .filter((sourcePath) => extensions.some((extension) => sourcePath.endsWith(extension)))
+      .map(integrationIngestRowSourceFromPath)),
   );
 }
 
@@ -2272,14 +2267,22 @@ async function listIntegrationIngestRowSourcesForLogicalPaths(
 ): Promise<IntegrationIngestRowSource[]> {
   const sources: IntegrationIngestRowSource[] = [];
   for (const logicalPath of [...new Set(logicalPaths)].sort()) {
-    for (const sourcePath of [logicalPath, ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `${logicalPath}${suffix}`)]) {
-      const resolved = resolveVaultPath(vaultRoot, sourcePath);
-      if (await pathExists(resolved.absolutePath)) {
-        sources.push(integrationIngestRowSourceFromPath(sourcePath));
-      }
+    sources.push(...await readIntegrationIngestShardSources(vaultRoot, logicalPath));
+  }
+  return resolveIntegrationIngestShardRepresentations(vaultRoot, sortIntegrationIngestRowSources(sources));
+}
+
+async function readIntegrationIngestShardSources(
+  vaultRoot: string,
+  logicalPath: string,
+): Promise<IntegrationIngestRowSource[]> {
+  const sources: IntegrationIngestRowSource[] = [];
+  for (const sourcePath of [logicalPath, ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `${logicalPath}${suffix}`)]) {
+    if (await pathExists(resolveVaultPath(vaultRoot, sourcePath).absolutePath)) {
+      sources.push(integrationIngestRowSourceFromPath(sourcePath));
     }
   }
-  return assertSingleIntegrationIngestShardRepresentation(sortIntegrationIngestRowSources(sources));
+  return sources;
 }
 
 function integrationIngestRowSourceFromPath(sourcePath: string): IntegrationIngestRowSource {
@@ -2875,29 +2878,56 @@ function unzipIntegrationIngestEntry(
   );
 }
 
-function assertSingleIntegrationIngestShardRepresentation(
+async function resolveIntegrationIngestShardRepresentations(
+  vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
-): IntegrationIngestRowSource[] {
+): Promise<IntegrationIngestRowSource[]> {
   const byLogicalPath = new Map<string, IntegrationIngestRowSource[]>();
   for (const source of sources) {
     const siblings = byLogicalPath.get(source.logicalPath) ?? [];
     siblings.push(source);
     byLogicalPath.set(source.logicalPath, siblings);
   }
+  const resolved: IntegrationIngestRowSource[] = [];
+  const currentMonth = resolveIntegrationIngestArchiveCurrentMonth(undefined);
   for (const [logicalPath, siblings] of byLogicalPath.entries()) {
-    if (siblings.length <= 1) {
-      continue;
+    let currentSources = siblings;
+    const month = integrationIngestMonthKeyFromLogicalPath(logicalPath);
+    if (
+      siblings.length > 1
+      && month !== null
+      && month < currentMonth
+      && siblings.every((source) => source.kind !== "zip")
+    ) {
+      currentSources = await withCanonicalWriteLock(vaultRoot, async () => {
+        // Another reader or writer may have completed the archive while this
+        // reader waited. Inspect every representation under the same lock.
+        const current = await readIntegrationIngestShardSources(vaultRoot, logicalPath);
+        if (current.length > 1 && current.every((source) => source.kind !== "zip")) {
+          try {
+            if (await reconcileIntegrationIngestSources({ signal: null, sources: current, vaultRoot })) {
+              return await readIntegrationIngestShardSources(vaultRoot, logicalPath);
+            }
+          } catch (error) {
+            if (!(error instanceof VaultError)) throw error;
+          }
+        }
+        return current;
+      });
     }
-    throw new VaultError(
-      "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT",
-      `Integration ingest shard "${logicalPath}" has multiple physical representations.`,
-      {
-        relativePath: logicalPath,
-        sourcePaths: siblings.map((source) => source.sourcePath).sort(),
-      },
-    );
+    if (currentSources.length > 1) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT",
+        `Integration ingest shard "${logicalPath}" has multiple physical representations.`,
+        {
+          relativePath: logicalPath,
+          sourcePaths: currentSources.map((source) => source.sourcePath).sort(),
+        },
+      );
+    }
+    resolved.push(...currentSources);
   }
-  return [...sources];
+  return resolved;
 }
 
 function assertZippedIntegrationIngestEntrySize(

@@ -76,9 +76,12 @@ describe("hosted local Codex image media delivery e2e", () => {
   beforeAll(async () => {
     await ensureScenario();
     await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
+      stripeCustomerId: `cus_local_image_media_${userId}`,
+      stripeSubscriptionId: `sub_local_image_media_${userId}`,
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     await requireScenario().waitForHostedCompletion(userId);
@@ -126,7 +129,7 @@ describe("hosted local Codex image media delivery e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    expect(replySend.authorizationStatus).toBe("hosted-sentinel");
+    expect(replySend.authorizationStatus).toBe("expected");
     expect(readObservedLinqMessageParts(replySend)).toEqual([
       {
         type: "text",

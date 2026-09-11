@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +37,11 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
+
+import {
+  assertEmptyGarminCanaryWorkspace,
+  waitForLiveGarminCanonicalData,
+} from "./helpers/hosted-local-junction-live-data.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -102,6 +109,8 @@ describe("hosted local device connect e2e", () => {
     const restoreProviderLoginEnvironment = temporarilyRemoveProcessEnvironment([
       "KERNEL_API_KEY",
       "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+      "MURPH_E2E_JUNCTION_WEARABLE_DATA",
+      "MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT",
       "MURPH_E2E_KERNEL_CLI_PATH",
       "MURPH_E2E_GARMIN_EMAIL",
       "MURPH_E2E_GARMIN_PASSWORD",
@@ -132,7 +141,7 @@ describe("hosted local device connect e2e", () => {
           JUNCTION_PROVIDER_FILTER: "garmin,oura,whoop_v2",
           JUNCTION_REGION: junctionConfig.region,
           MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-          MURPH_DEV_TEMPORAL: liveJunctionWearableConfig ? "disabled" : "managed",
+          MURPH_DEV_TEMPORAL: liveJunctionWearableConfig && !liveJunctionWearableConfig.canonicalData ? "disabled" : "managed",
           MURPH_DEV_WEB_HOST: "localhost",
         },
         localDatabaseUrl,
@@ -219,7 +228,7 @@ describe("hosted local device connect e2e", () => {
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_OTP)).toBe(false);
       expect(Boolean(requireScenario().runtimeEnv.MURPH_E2E_WHOOP_PASSWORD)).toBe(false);
       expect(requireScenario().runtimeEnv.MURPH_DEV_TEMPORAL).toBe(
-        liveJunctionWearableConfig ? "disabled" : "managed",
+        liveJunctionWearableConfig && !liveJunctionWearableConfig.canonicalData ? "disabled" : "managed",
       );
 
       for (const source of ["garmin", "oura", "whoop"] as const) {
@@ -367,7 +376,7 @@ describe("hosted local device connect e2e", () => {
   // only selected hosted-local scenario so no unrelated process inherits login
   // credentials.
   it.runIf(liveJunctionWearableConfig?.sources.includes("garmin") ?? false)(
-    "connects Garmin through Junction Link in a real browser and reloads persisted state",
+    "connects Garmin through Junction Link and requires canonical data when the data proof is enabled",
     async () => {
       await expect(runLiveJunctionWearableProof("garmin")).resolves.toEqual({
         callbackAutoCompleted: true,
@@ -378,7 +387,7 @@ describe("hosted local device connect e2e", () => {
         source: "garmin",
       });
     },
-    600_000,
+    1_320_000,
   );
 
   it.runIf(liveJunctionWearableConfig?.sources.includes("oura") ?? false)(
@@ -421,6 +430,8 @@ interface LiveProviderCredentials {
 interface LiveJunctionWearableConfig {
   apiKey: string;
   browserTransport: "kernel" | "local";
+  canonicalData: boolean;
+  canonicalDataReceiptPath: string | null;
   clientUserIdSecret: string;
   headless: boolean;
   kernelApiKey: string | null;
@@ -447,7 +458,9 @@ interface JunctionProviderModule {
 function readLiveJunctionWearableConfig(
   env: NodeJS.ProcessEnv,
 ): LiveJunctionWearableConfig | null {
+  const canonicalData = env.MURPH_E2E_JUNCTION_WEARABLE_DATA === "1";
   if (env.MURPH_E2E_JUNCTION_WEARABLE_LIVE !== "1") {
+    if (canonicalData) throw new Error("Canonical wearable data proof requires live Junction mode.");
     return null;
   }
 
@@ -469,6 +482,18 @@ function readLiveJunctionWearableConfig(
   const sources = readLiveWearableSources(
     env.MURPH_E2E_JUNCTION_WEARABLE_SOURCES,
   );
+  if (canonicalData && (
+    sources.length !== 1
+    || sources[0] !== "garmin"
+    || env.MURPH_DEV_TEMPORAL !== "managed"
+    || !env.MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR?.trim()
+  )) {
+    throw new Error("Canonical Garmin data proof requires sole Garmin, managed Temporal, and the real private worker package.");
+  }
+  const canonicalDataReceiptPath = env.MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT?.trim() || null;
+  if (canonicalData && (!canonicalDataReceiptPath || !path.isAbsolute(canonicalDataReceiptPath))) {
+    throw new Error("Canonical Garmin data proof requires an absolute caller-owned receipt path.");
+  }
   const browserTransport = readLiveBrowserTransport(
     env.MURPH_E2E_PROVIDER_BROWSER,
   );
@@ -494,6 +519,8 @@ function readLiveJunctionWearableConfig(
   return {
     apiKey,
     browserTransport,
+    canonicalData,
+    canonicalDataReceiptPath,
     clientUserIdSecret: requireLiveEnvironmentValue(
       env,
       "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -671,6 +698,9 @@ async function runLiveJunctionWearableProof(
   const memberId = liveBrowserUserIds[source];
   await resetLiveJunctionProvider(config, source);
   await requireScenario().seedActiveHostedMember({ memberId });
+  if (config.canonicalData) {
+    await assertEmptyGarminCanaryWorkspace({ memberId, scenario: requireScenario() });
+  }
   const hostedSessionCookie = await issueHostedBrowserSession({ memberId });
   const connectLink = await createHostedWearableConnectLink(memberId, source);
   if (!connectLink) {
@@ -679,8 +709,23 @@ async function runLiveJunctionWearableProof(
     );
   }
 
-  return await runJunctionWearableBrowser({
+  const connectedNotBefore = Date.now();
+  const result = await runJunctionWearableBrowser({
     config,
+    ...(config.canonicalData ? {
+      onConnected: async (signal: AbortSignal) => {
+        const provider = await import(junctionProviderModuleSpecifier) as JunctionProviderModule;
+        await waitForLiveGarminCanonicalData({
+          client: new JunctionClient({ apiKey: config.apiKey, environment: "sandbox", region: config.region }),
+          clientUserId: provider.buildJunctionClientUserId(config.clientUserIdSecret, memberId),
+          memberId,
+          notBefore: connectedNotBefore,
+          scenario: requireScenario(),
+          signal,
+          timeoutMs: config.timeoutMs,
+        });
+      },
+    } : {}),
     hostedSessionCookie,
     source,
     startUrl: connectLink.authorizationUrl,
@@ -688,6 +733,18 @@ async function runLiveJunctionWearableProof(
   }).finally(async () => {
     await resetLiveJunctionProvider(config, source);
   });
+  if (config.canonicalData && config.canonicalDataReceiptPath) {
+    try {
+      await writeFile(config.canonicalDataReceiptPath, JSON.stringify({
+        contractVersion: 1,
+        source: "garmin",
+        canonicalDataMatched: true,
+      }) + "\n", { flag: "wx", mode: 0o600 });
+    } catch {
+      throw new Error("MURPH_E2E_GARMIN_DATA_RECEIPT_WRITE_FAILED");
+    }
+  }
+  return result;
 }
 
 async function issueHostedBrowserSession(input: {
@@ -772,12 +829,17 @@ function temporarilyRemoveProcessEnvironment(keys: readonly string[]): () => voi
 
 async function runJunctionWearableBrowser(input: {
   config: LiveJunctionWearableConfig;
+  onConnected?: (signal: AbortSignal) => Promise<void>;
   hostedSessionCookie: string;
   source: LiveWearableSource;
   startUrl: string;
   webBaseUrl: string;
 }): Promise<JunctionWearableBrowserResult> {
-  const { stdout } = await execFileAsync(
+  const dataAbort = new AbortController();
+  let dataProof: Promise<void> | null = null;
+  let dataFailure: unknown;
+  let pendingOutput = "";
+  const browserRun = execFileAsync(
     "pnpm",
     [
       "exec",
@@ -791,9 +853,38 @@ async function runJunctionWearableBrowser(input: {
       encoding: "utf8",
       env: buildJunctionWearableBrowserEnvironment(input),
       maxBuffer: 1_000_000,
-      timeout: input.config.timeoutMs + 60_000,
+      timeout: input.config.timeoutMs * (input.onConnected ? 2 : 1) + 90_000,
     },
   );
+  browserRun.child.stdin?.on("error", () => {
+    dataFailure = new Error("MURPH_E2E_GARMIN_DATA_CONTROL_PIPE_FAILED");
+    dataAbort.abort();
+  });
+  browserRun.child.stdout?.on("data", (chunk: Buffer) => {
+    pendingOutput += chunk.toString("utf8");
+    const lines = pendingOutput.split(/\r?\n/u);
+    pendingOutput = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line !== "MURPH_E2E_GARMIN_CONNECTED=1" || !input.onConnected || dataProof) continue;
+      dataProof = input.onConnected(dataAbort.signal).catch((error: unknown) => {
+        dataFailure = error;
+      }).finally(() => {
+        // Complete the normal browser Disconnect even after a failed data proof.
+        if (browserRun.child.exitCode === null && !browserRun.child.stdin?.destroyed) {
+          browserRun.child.stdin?.end("MURPH_E2E_GARMIN_DATA_CHECK_COMPLETE=1\n");
+        }
+      });
+    }
+  });
+  let stdout: string;
+  try {
+    ({ stdout } = await browserRun);
+  } finally {
+    dataAbort.abort();
+    await dataProof;
+  }
+  if (input.onConnected && !dataProof) throw new Error("MURPH_E2E_GARMIN_DATA_PROOF_NOT_STARTED");
+  if (dataFailure) throw dataFailure;
   const marker = stdout
     .split(/\r?\n/u)
     .reverse()
@@ -825,6 +916,7 @@ function buildJunctionWearableBrowserEnvironment(input: {
       ? { KERNEL_API_KEY: input.config.kernelApiKey }
       : {}),
     MURPH_E2E_CONNECT_URL: input.startUrl,
+    ...(input.config.canonicalData ? { MURPH_E2E_JUNCTION_WEARABLE_DATA: "1" } : {}),
     MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
     ...(input.config.kernelCliPath
       ? { MURPH_E2E_KERNEL_CLI_PATH: input.config.kernelCliPath }
@@ -858,6 +950,8 @@ function buildBrowserProcessEnvironment(
     "MURPH_E2E_GARMIN_PASSWORD",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
     "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+    "MURPH_E2E_JUNCTION_WEARABLE_DATA",
+    "MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT",
     "MURPH_E2E_KERNEL_CLI_PATH",
     "MURPH_E2E_OURA_EMAIL",
     "MURPH_E2E_OURA_OTP",
@@ -905,6 +999,33 @@ function createWorkflowShapedGarminEnvironment(
 }
 
 describe("live Junction wearable configuration boundary", () => {
+  it("requires the real private Temporal worker before admitting canonical data proof", () => {
+    const environment = createWorkflowShapedGarminEnvironment({ MURPH_E2E_JUNCTION_WEARABLE_DATA: "1" });
+    expect(() => readLiveJunctionWearableConfig(environment)).toThrow("real private worker package");
+    const managedEnvironment = {
+      ...environment,
+      MURPH_DEV_TEMPORAL: "managed",
+      MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR: "/opt/private-worker",
+    };
+    expect(() => readLiveJunctionWearableConfig(managedEnvironment)).toThrow("receipt path");
+    const config = readLiveJunctionWearableConfig({
+      ...managedEnvironment,
+      MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT: "/tmp/canonical-data-receipt.json",
+    });
+    expect(config?.canonicalData).toBe(true);
+    if (!config) throw new Error("Expected canonical data configuration.");
+    const browserEnvironment = buildJunctionWearableBrowserEnvironment({
+      config,
+      environment: managedEnvironment,
+      hostedSessionCookie: "hosted-session",
+      source: "garmin",
+      startUrl: "http://localhost:43123/connect#deviceConnectIntent=opaque",
+      webBaseUrl: "http://localhost:43123",
+    });
+    expect(browserEnvironment.MURPH_E2E_JUNCTION_WEARABLE_DATA).toBe("1");
+    expect(browserEnvironment.MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT).toBeUndefined();
+  });
+
   it.each(["true", "1"])(
     "admits the protected headed Garmin workflow with CI=%s",
     (ci) => {

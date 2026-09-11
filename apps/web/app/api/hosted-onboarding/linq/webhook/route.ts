@@ -43,6 +43,7 @@ export const POST = withJsonError(async (request: Request) => {
 
     const response = await handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes({
       rawBody,
+      webhookReceivedAt: new Date(routeStartedAtMs),
       scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       signature,
       timestamp,

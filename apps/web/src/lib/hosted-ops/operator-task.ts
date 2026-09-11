@@ -213,8 +213,9 @@ export async function listHostedOperatorTasks(input: {
     take: OPERATOR_TASK_LIST_LIMIT,
     where: { requestedByMemberId: input.requestedByMemberId },
   });
+  const now = input.now ?? new Date();
   const resultCutoff = new Date(
-    (input.now ?? new Date()).getTime() - HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS,
+    now.getTime() - HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS,
   );
   return Promise.all(rows.map(async (row) => serializeOperatorTask(
     row,
@@ -225,6 +226,7 @@ export async function listHostedOperatorTasks(input: {
           value: row.resultEncrypted,
         })
       : null,
+    now,
   )));
 }
 
@@ -593,6 +595,14 @@ export async function decryptOperatorTaskResult(input: {
   return JSON.parse(value) as HostedExecutionAssistantAskResult;
 }
 
+export function resolveHostedOperatorTaskStatus(
+  task: { status: string; expiresAt: Date },
+  now: Date,
+): string {
+  return task.expiresAt <= now && ["queued", "running"].includes(task.status)
+    ? "failed" : task.status;
+}
+
 function serializeOperatorTask(
   task: {
     completedAt: Date | null;
@@ -605,6 +615,7 @@ function serializeOperatorTask(
     status: string;
   },
   result: HostedExecutionAssistantAskResult | null,
+  now = new Date(),
 ): HostedOperatorTaskView {
   return {
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -615,7 +626,7 @@ function serializeOperatorTask(
     memberId: task.memberId,
     result,
     source: task.source as HostedOperatorTaskSource,
-    status: task.status as HostedOperatorTaskView["status"],
+    status: resolveHostedOperatorTaskStatus(task, now) as HostedOperatorTaskView["status"],
   };
 }
 

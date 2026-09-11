@@ -8,7 +8,8 @@ vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
   hostedProductFeedback: { findUnique: mocks.feedbackRead, findMany: mocks.feedbackList },
   hostedOperatorTask: { findMany: mocks.taskList },
 }) }));
-vi.mock("@/src/lib/hosted-ops/operator-task", () => ({
+vi.mock("@/src/lib/hosted-ops/operator-task", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-ops/operator-task")>(),
   admitHostedOperatorTask: mocks.admit, decryptOperatorTaskResult: mocks.decrypt,
 }));
 vi.mock("@/src/lib/hosted-ops/access", () => ({ requireHostedOpsRequestAccess: mocks.access }));

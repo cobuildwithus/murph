@@ -9,6 +9,8 @@ import {
   HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
   hostedClinicalRecordsConnectLinkRequestSchema,
+  hostedClinicalRecordsFetchDocumentRequestSchema,
+  parseHostedClinicalRecordsFetchDocumentResponse,
   hostedClinicalRecordsFetchPageRequestSchema,
   hostedClinicalRecordsRetrievalSliceSchema,
   parseHostedClinicalRecordsFetchPageResponse,
@@ -18,6 +20,12 @@ import {
   parseHostedClinicalRecordsRunDescriptor,
   parseHostedClinicalRecordsSyncRequestedWake,
 } from "../src/clinical-records.ts";
+import {
+  HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
+  HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
+} from "../src/clinical-records-boundary.ts";
 import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_WAKE_KINDS,
@@ -33,6 +41,33 @@ import {
 const HASH = "a".repeat(64);
 
 describe("clinical records hosted execution contracts", () => {
+  it("bounds JSON-escaped pages plus the maximum attachment ticket envelope", () => {
+    const descriptor = { parentPageSha256: HASH, resourceType: "DocumentReference", resourceId: "a".repeat(200),
+      attachmentIndex: 1_999, ticket: "\u0000".repeat(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS), errorCode: "a".repeat(80) };
+    const descriptorBytes = Buffer.byteLength(JSON.stringify(descriptor));
+    // Count exact serialized components without materializing an eighty-MiB test object.
+    const fixed = Buffer.byteLength(JSON.stringify({ status: "page", body: "", nextCursor: "a".repeat(2_048),
+      pageUrlHash: HASH, documents: [] }));
+    const total = fixed + 6 * HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS
+      + HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS * descriptorBytes
+      + HOSTED_CLINICAL_RECORDS_MAX_PAGE_DOCUMENTS - 1;
+    expect(total).toBeLessThanOrEqual(HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES);
+  });
+
+  it("keeps linked document requests credential-free and bodies separate from FHIR pages", () => {
+    const request = { runId: "run-1", generation: 1, ticket: "opaque-ticket" };
+    expect(hostedClinicalRecordsFetchDocumentRequestSchema.parse(request)).toEqual(request);
+    for (const extra of [{ url: "https://outside.example.test" }, { accessToken: "secret" }, { memberId: "other" }]) {
+      expect(() => hostedClinicalRecordsFetchDocumentRequestSchema.parse({ ...request, ...extra })).toThrow();
+    }
+    const response = { status: "document", contentBase64: "aGk=", mediaType: "text/plain", byteLength: 2, sha256: HASH };
+    expect(parseHostedClinicalRecordsFetchDocumentResponse(response)).toEqual(response);
+    expect(() => parseHostedClinicalRecordsFetchDocumentResponse({ ...response, byteLength: 21 * 1024 * 1024 })).toThrow();
+    expect(parseHostedClinicalRecordsFetchPageResponse({ status: "page", body: "{}", nextCursor: null, documents: [{
+      parentPageSha256: HASH, resourceType: "DocumentReference", resourceId: "doc-1", attachmentIndex: 0, ticket: "opaque-ticket",
+    }] })).toMatchObject({ documents: [{ resourceId: "doc-1" }] });
+  });
+
   it("accepts only the bounded first-party connect-link shape", () => {
     const claim = `cr_${"a".repeat(32)}`;
     const response = {

@@ -80,6 +80,7 @@ const HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES = [
   "NextRunnerContainer",
   "DeploySmokeRunnerContainer",
   "StandbyRunnerContainer",
+  "SmallRunnerContainer",
 ] as const;
 const HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-e2e-";
 const HOSTED_LOCAL_WORKTREE_WORKER_CONTAINER_NAME_PREFIX = "workerd-murph-worktree-";

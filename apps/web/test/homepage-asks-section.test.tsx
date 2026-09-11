@@ -6,29 +6,24 @@ import { test } from "vitest";
 
 import {
   AsksGridSection,
-  WideFeature,
+  FeatureCard,
 } from "@/src/components/homepage/asks-section";
 
-test("WideFeature keeps the phone treatment compact and restores the desktop scale", () => {
-  const markup = renderToStaticMarkup(
-    createElement(WideFeature, {
-      artifact: createElement("div", null, "Artifact"),
-      artifactSide: "right",
-      body: "Body",
-      bubble: "Bubble",
-      headline: "Headline",
-      tint: "sage",
-    }),
-  );
+test("FeatureCard keeps the heading before the message and demo in every layout", () => {
+  for (const layout of ["compact", "wide", "reverse"] as const) {
+    const markup = renderToStaticMarkup(
+      createElement(FeatureCard, {
+        artifact: createElement("div", null, "Artifact"),
+        bubble: "Bubble",
+        headline: "Headline",
+        tint: "sage",
+        layout,
+      }),
+    );
 
-  assert.match(markup, /rounded-\[1\.5rem\]/);
-  assert.match(markup, /sm:rounded-\[2rem\]/);
-  assert.match(markup, /min-h-\[330px\]/);
-  assert.match(markup, /sm:min-h-\[440px\]/);
-  assert.match(markup, /max-w-\[240px\]/);
-  assert.match(markup, /sm:max-w-\[280px\]/);
-  assert.match(markup, /text-\[1\.5rem\]/);
-  assert.match(markup, /sm:text-\[clamp\(1\.75rem,2\.8vw,2\.625rem\)\]/);
+    assert.ok(markup.indexOf("Headline") < markup.indexOf("Bubble"));
+    assert.ok(markup.indexOf("Bubble") < markup.indexOf("Artifact"));
+  }
 });
 
 test("AsksGridSection stacks dense health findings at iPhone Mini widths", () => {
