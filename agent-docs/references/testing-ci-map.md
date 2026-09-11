@@ -663,14 +663,15 @@ including follow-up, maintenance memory, group configuration/challenge/progress
 and both shared-read variants. Route alternatives sharing an identity run in
 separate batches; admission is never broadened to make a test pass.
 
-Automation structural admission also runs the advertised JSON through the existing
-Zod JSON Schema reader and compares accepted/rejected fixtures with the production
-argument parser. Every action needs an accepted fixture; cases cover inspected
-versions, nested references/schedules, types, enums, formats, and bounds.
+Automation structural admission also runs the advertised JSON through Ajv 2020
+with standard format validation and compares accepted/rejected fixtures with the
+production argument parser. Every action needs an accepted fixture; cases cover inspected
+versions, nested references/schedules, types, enums, formats, uniqueness, and bounds.
 Personalization checks every advertised enum value and invalid field types against
-runtime admission, alongside the existing 32 persona-pair/presence combinations.
-These tests do not claim full schema/parser equivalence: custom refinements and
-keywords unsupported by the JSON Schema reader retain their dedicated runtime tests.
+runtime admission; all 32 persona-pair/presence combinations also validate the
+complete advertised schema. Ajv and its format plugin are test-only dependencies
+at versions already present in the lockfile. These tests do not claim full
+schema/parser equivalence: runtime-only refinements retain their dedicated tests.
 
 The fixture covers small documents and documents above the current compaction
 threshold, reference scopes/definitions, nested arrays/objects, compositions and

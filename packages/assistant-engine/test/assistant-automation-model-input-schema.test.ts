@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fromJSONSchema } from 'zod/v4'
+import { compileToolInputSchema } from './support/tool-input-schema-validation.ts'
 import { automationDeviceActivitySourceValues } from '@murphai/contracts'
 
 import {
@@ -46,13 +46,12 @@ function actionContract(
 
 // Validate the advertised document, independently of the production argument parser.
 // This replaces the old root-key-only approximation, which ignored field types,
-// nested requirements, enum values, bounds, and date formats. Custom runtime
-// refinements and JSON Schema keywords unsupported by this reader are not
-// claimed as parity coverage; the cases below exercise structural admission.
-const advertisedInput = fromJSONSchema(MURPH_AUTOMATION_TOOL.inputSchema)
+// nested requirements, enum values, bounds, and date formats. Runtime-only
+// refinements are not claimed as structural parity coverage.
+const advertisedInput = compileToolInputSchema(MURPH_AUTOMATION_TOOL.inputSchema)
 
 function advertisesInput(value: JsonSchemaObject): boolean {
-  return advertisedInput.safeParse(value).success
+  return advertisedInput(value)
 }
 
 function collectKeys(value: unknown, key: string): unknown[] {
@@ -89,6 +88,7 @@ describe('automation model input schema', () => {
     { label: 'maximum title', args: { ...patch, title: 'x'.repeat(160) }, accepted: true },
     { label: 'overlong title', args: { ...patch, title: 'x'.repeat(161) }, accepted: false },
     { label: 'nested reference', args: { ...patch, contextReferences: [reference] }, accepted: true },
+    { label: 'duplicate references', args: { ...patch, contextReferences: [reference, reference] }, accepted: false },
     { label: 'missing reference id', args: { ...patch, contextReferences: [{ entityKind: reference.entityKind }] }, accepted: false },
     { label: 'wrong reference id type', args: { ...patch, contextReferences: [{ ...reference, entityId: 42 }] }, accepted: false },
     { label: 'invalid reference kind pattern', args: { ...patch, contextReferences: [{ ...reference, entityKind: 'Invalid Kind' }] }, accepted: false },
@@ -104,7 +104,7 @@ describe('automation model input schema', () => {
   ]
 
   it.each(cases)('matches advertised and runtime structural admission: $label', ({ args, accepted }) => {
-    expect(advertisedInput.safeParse(args).success, 'advertised JSON Schema').toBe(accepted)
+    expect(advertisedInput(args), 'advertised JSON Schema').toBe(accepted)
     const parsed = readAutomationDynamicToolRequest({ arguments: args, tool: MURPH_AUTOMATION_TOOL.name })
     expect(parsed).not.toBeNull()
     expect(parsed?.kind !== 'invalid-automation-arguments', 'production argument parser').toBe(accepted)

@@ -1,6 +1,6 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { fromJSONSchema } from 'zod/v4'
+import { compileToolInputSchema } from './support/tool-input-schema-validation.ts'
 import { assistantBasePersonaIdValues, assistantTonePreferenceValues, assistantVoiceOptionIdValues } from '@murphai/contracts'
 
 import {
@@ -11,6 +11,8 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
+
+const advertisedInput = compileToolInputSchema(MURPH_PERSONALIZATION_TOOL.inputSchema)
 
 describe('assistant personalization tool', () => {
   it('keeps every advertised enum value and invalid field type aligned with runtime admission', () => {
@@ -26,11 +28,10 @@ describe('assistant personalization tool', () => {
       { name: 'voice', schema: properties.voice, values: assistantVoiceOptionIdValues, paired: {} },
     ]
     for (const field of fields) {
-      const schema: Record<string, unknown> = field.schema
-      const advertised = fromJSONSchema(schema)
+      const advertised = compileToolInputSchema(field.schema)
       for (const value of [...field.values, 'unsupported_value', '', 42, false, {}, []]) {
         const accepted = field.values.some((allowed) => allowed === value)
-        expect(advertised.safeParse(value).success, `${field.name} advertised value`).toBe(accepted)
+        expect(advertised(value), `${field.name} advertised value`).toBe(accepted)
         // Satisfy the separate persona-pair constraint when testing an enum.
         const paired = field.name === 'supportingPersona'
           ? { mainPersona: assistantBasePersonaIdValues.find((persona) => persona !== value) }
@@ -60,6 +61,7 @@ describe('assistant personalization tool', () => {
           fields.filter((_field, bit) => mask & (1 << bit)).map((field) => [field, values[field]]),
         ) }
         const valid = mask !== 0 && Boolean(mask & 1) === Boolean(mask & 2)
+        expect(advertisedInput(argumentsValue), 'advertised nonempty and paired-field contract').toBe(valid)
         const parsed = readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: {
           arguments: argumentsValue, namespace: 'murph', tool: 'personalization',
         } })
