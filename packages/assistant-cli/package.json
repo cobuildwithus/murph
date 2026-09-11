@@ -30,19 +30,15 @@
   },
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
-    "@murphai/assistantd": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/inbox-services": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "incur": "0.5.1",
-    "ink": "^6.8.0",
-    "react": "^19.2.6"
+    "incur": "0.5.1"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
     "typescript": "^7.0.2",
     "vitest": "^4.1.6"
   },

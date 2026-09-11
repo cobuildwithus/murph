@@ -6,9 +6,6 @@ import {
 import type Stripe from "stripe";
 
 import {
-  prepareHostedCryptoDomainRootCandidates,
-  provisionActiveHostedDomainRootEnvelopeForUserOnly,
-  unwrapHostedDomainRootForWeb,
   type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
@@ -51,7 +48,6 @@ import {
 import {
   acceptHostedMemberStripeCheckoutCompletionTx,
   assertNoHostedMemberStripeEffectTx,
-  clearHostedMemberLegacyTrialBillingUnderLockTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
   readHostedMemberStripeBillingRef,
@@ -91,16 +87,14 @@ import {
 } from "./stripe-error-log";
 import {
   requireHostedStripeApi,
-  requireHostedStripeBillingPlanConfig,
 } from "./runtime";
 import {
-  buildHostedLegacyTrialRetirementBlockedError,
+  buildHostedLegacyTrialBillingConflictError,
   classifyHostedPulseTrialCandidateDisposition,
   classifyHostedPulseTrialCandidateDispositionByLookupKey,
-  cancelHostedPulseTrialLoserSubscriptionsForMember,
-  isHostedLegacyPulseTrialRetirableStatus,
+  isHostedLegacyPulseTrialRetiredStatus,
   isHostedPulseTrialSubscriptionForKnownPolicy,
-} from "./pulse-trial-subscription-cleanup";
+} from "./pulse-trial-compatibility";
 import {
   applyHostedFamilyStripeCheckoutExpiredTx,
   applyHostedFamilyStripeCheckoutCompletedTx,
@@ -115,13 +109,6 @@ import {
   type HostedFamilyStripeSubscriptionResult,
 } from "./family-plan";
 import { lockHostedMemberRow, normalizeNullableString } from "./shared";
-import {
-  canGrantHostedStarterUsageForLegacyTrial,
-} from "./starter-usage";
-import {
-  ensureHostedStarterUsageGrantTx,
-  readHostedLegacyTrialConsumedUsageUsdMicrosTx,
-} from "./starter-usage-grant";
 import { cleanupHostedStandardCheckoutLoser } from "./stripe-checkout-loser-cleanup";
 
 export type HostedStripeActivatedMemberOutcome = {
@@ -139,7 +126,6 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-  cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   newlyActivatedMemberIds: string[];
   runtimeRecheckMemberIds?: string[];
@@ -149,35 +135,6 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
 export type HostedStripeSubscriptionUpdateOutcome = HostedStripeActivationOutcome & {
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
 };
-
-export async function prepareHostedStripeDirectMemberActivationCrypto(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient & Pick<PrismaClient, "$transaction">;
-}): Promise<PreparedHostedCryptoDomainRootCandidates> {
-  for (const domain of ["control", "ingress"] as const) {
-    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-      domain,
-      prisma: input.prisma,
-      reason: "hosted-member.activation-preflight",
-      userId: input.memberId,
-    });
-  }
-  await Promise.all(
-    (["control", "ingress"] as const).map(async (domain) => {
-      const root = await unwrapHostedDomainRootForWeb({
-        domain,
-        prisma: input.prisma,
-        userId: input.memberId,
-      });
-      root.rootKey.fill(0);
-    }),
-  );
-  return prepareHostedCryptoDomainRootCandidates({
-    domains: ["device", "runtime"],
-    prisma: input.prisma,
-    userId: input.memberId,
-  });
-}
 
 export type HostedSubscriptionCancellationEmailCandidate = {
   memberId: string;
@@ -302,7 +259,6 @@ export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
   prisma: Prisma.TransactionClient,
   dispatchContext?: HostedStripeDispatchContext,
-  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
   preparedCheckoutCompletion?: PreparedHostedStripeCheckoutCompletion,
 ): Promise<HostedStripeActivationOutcome> {
   const familyCheckout = await applyHostedFamilyStripeCheckoutCompletedTx({
@@ -413,9 +369,6 @@ export async function applyStripeCheckoutCompleted(
       dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
       memberId: memberSnapshot.core.id,
       preparedCheckoutCompletion,
-      ...(preparedCryptoDomainRoots
-        ? { preparedCryptoDomainRoots }
-        : {}),
       session,
       tx: prisma,
     });
@@ -667,7 +620,6 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   memberId: string;
   preparedCheckoutCompletion: PreparedHostedStripeCheckoutCompletion;
-  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
 }): Promise<HostedStripeActivationOutcome> {
@@ -719,17 +671,19 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     return buildEmptyHostedStripeActivationOutcome();
   }
 
+  // The unpaid provider-object drain is complete. Historical trial events
+  // cannot mint Starter credit or schedule cancellation work.
+  if (isHostedLegacyPulseTrialRetiredStatus(subscription.status)) {
+    return buildEmptyHostedStripeActivationOutcome();
+  }
+
   await lockHostedMemberRow(input.tx, input.memberId);
   const currentMember = await readHostedMemberPulseTrialBillingDecisionSnapshot({
     memberId: input.memberId,
     prisma: input.tx,
   });
   if (!currentMember) {
-    return {
-      ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupPulseTrialStripeSubscriptionId:
-        resolveHostedLegacyPulseTrialCleanupSubscriptionId(subscription),
-    };
+    return buildEmptyHostedStripeActivationOutcome();
   }
 
   const candidateDisposition =
@@ -741,172 +695,36 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
       pulseTrialRedeemedAt: currentMember.pulseTrialRedeemedAt,
       subscriptionId: subscription.id,
     });
-  const providerTrialCanBeRetired =
-    isHostedLegacyPulseTrialRetirableStatus(subscription.status);
-
-  // An active, past-due, or unpaid legacy Subscription may represent real paid
-  // service. Bind only the exact Checkout identity so the ordinary invoice and
-  // subscription owners can reconcile it; never infer Starter access or cancel
-  // that provider object from delayed trial metadata alone.
-  if (!providerTrialCanBeRetired) {
-    if (candidateDisposition === "loser") {
-      throw buildHostedLegacyTrialRetirementBlockedError();
-    }
-    const billingCompletion =
-      input.preparedCheckoutCompletion.billingCompletion;
-    if (!billingCompletion) {
-      throw new TypeError(
-        "Potentially paid legacy trial Checkout must be prepared before binding.",
-      );
-    }
-    const acceptance = await bindHostedStripeBillingRefsFromCheckoutSessionTx({
-      billingIdentityDisposition: "bind",
-      currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-      dispatchContext: input.dispatchContext,
-      memberId: input.memberId,
-      preparedCompletion: billingCompletion,
-      preparedStripeCheckoutEmail:
-        input.preparedCheckoutCompletion.stripeCheckoutEmail,
-      session: input.session,
-      tx: input.tx,
-    });
-    if (
-      acceptance.kind === "cleanup_superseded"
-      || acceptance.kind === "cleanup_terminal"
-    ) {
-      throw buildHostedLegacyTrialRetirementBlockedError();
-    }
-    return buildEmptyHostedStripeActivationOutcome();
-  }
-
-  if (currentMember.currentBillingPhase === "paid") {
-    return candidateDisposition === "loser"
-      ? {
-          ...buildEmptyHostedStripeActivationOutcome(),
-          cleanupPulseTrialStripeSubscriptionId:
-            resolveHostedLegacyPulseTrialCleanupSubscriptionId(subscription),
-        }
-      : buildEmptyHostedStripeActivationOutcome();
-  }
+  // A potentially paid legacy Subscription remains owned by exact Checkout
+  // binding and ordinary invoice/subscription reconciliation.
   if (candidateDisposition === "loser") {
-    return {
-      ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupPulseTrialStripeSubscriptionId:
-        resolveHostedLegacyPulseTrialCleanupSubscriptionId(subscription),
-    };
+    throw buildHostedLegacyTrialBillingConflictError();
   }
-
-  const outcome = await convertHostedLegacyPulseTrialToStarterTx({
+  const billingCompletion =
+    input.preparedCheckoutCompletion.billingCompletion;
+  if (!billingCompletion) {
+    throw new TypeError(
+      "Potentially paid legacy trial Checkout must be prepared before binding.",
+    );
+  }
+  const acceptance = await bindHostedStripeBillingRefsFromCheckoutSessionTx({
+    billingIdentityDisposition: "bind",
+    currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
     dispatchContext: input.dispatchContext,
-    effectiveAt:
-      readHostedStripePulseTrialStartedAt(
-        subscription,
-        readHostedStripeSubscriptionDate(subscription, "trial_end"),
-      ) ?? input.dispatchContext.eventCreatedAt,
-    legacyTrialStartedAt: currentMember.currentTrialStartedAt,
-    member: currentMember.core,
-    preparedCryptoDomainRoots: input.preparedCryptoDomainRoots,
-    subscription,
+    memberId: input.memberId,
+    preparedCompletion: billingCompletion,
+    preparedStripeCheckoutEmail:
+      input.preparedCheckoutCompletion.stripeCheckoutEmail,
+    session: input.session,
     tx: input.tx,
   });
-  if (input.preparedCheckoutCompletion.stripeCheckoutEmail) {
-    await upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx({
-      collectedAt: input.dispatchContext.eventCreatedAt,
-      memberId: currentMember.core.id,
-      preparedEmail: input.preparedCheckoutCompletion.stripeCheckoutEmail,
-      tx: input.tx,
-    });
+  if (
+    acceptance.kind === "cleanup_superseded"
+    || acceptance.kind === "cleanup_terminal"
+  ) {
+    throw buildHostedLegacyTrialBillingConflictError();
   }
-  return outcome;
-}
-
-
-async function convertHostedLegacyPulseTrialToStarterTx(input: {
-  dispatchContext: HostedStripeDispatchContext;
-  effectiveAt: Date;
-  legacyTrialStartedAt: Date | null;
-  member: {
-    billingStatus: HostedBillingStatus;
-    id: string;
-    suspendedAt: Date | null;
-  };
-  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
-  subscription: Stripe.Subscription;
-  tx: Prisma.TransactionClient;
-}): Promise<HostedStripeActivationOutcome> {
-  const cleanupPulseTrialStripeSubscriptionId =
-    resolveHostedLegacyPulseTrialCleanupSubscriptionId(input.subscription);
-
-  // Terminal or suspended accounts never receive new capacity. Retire only
-  // the obsolete provider identity and preserve the member's existing access
-  // state so a delayed trial event cannot reactivate the account.
-  if (!canGrantHostedStarterUsageForLegacyTrial(input.member)) {
-    await clearHostedMemberLegacyTrialBillingUnderLockTx({
-      billingStatusAfterClear: input.member.billingStatus,
-      memberId: input.member.id,
-      tx: input.tx,
-    });
-    return {
-      ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupPulseTrialStripeSubscriptionId,
-    };
-  }
-
-  const initialConsumedUsdMicros =
-    await readHostedLegacyTrialConsumedUsageUsdMicrosTx({
-      memberId: input.member.id,
-      trialStartedAt: input.legacyTrialStartedAt,
-      tx: input.tx,
-    });
-  await ensureHostedStarterUsageGrantTx({
-    effectiveAt: input.effectiveAt,
-    initialConsumedUsdMicros,
-    memberId: input.member.id,
-    source: "legacy_trial_migration",
-    tx: input.tx,
-  });
-  await clearHostedMemberLegacyTrialBillingUnderLockTx({
-    memberId: input.member.id,
-    tx: input.tx,
-  });
-  const activation = await activateHostedMemberForPositiveSourceTx({
-    dispatchContext: {
-      ...input.dispatchContext,
-      sourceType: "hosted.legacy_trial.converted_to_starter",
-    },
-    memberId: input.member.id,
-    ...(input.preparedCryptoDomainRoots
-      ? { preparedCryptoDomainRoots: input.preparedCryptoDomainRoots }
-      : {}),
-    prisma: input.tx,
-    skipIfPreviouslyActivated: true,
-  });
-
-  return {
-    activatedMemberId: activation.hostedExecutionEventId
-      ? input.member.id
-      : null,
-    cleanupPulseTrialStripeSubscriptionId,
-    hostedExecutionEventId: activation.hostedExecutionEventId,
-    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
-    newlyActivatedMemberIds: activation.activated ? [input.member.id] : [],
-    runtimeRecheckMemberIds: [input.member.id],
-    welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
-      ? input.member.id
-      : null,
-  };
-}
-
-function resolveHostedLegacyPulseTrialCleanupSubscriptionId(
-  subscription: Stripe.Subscription,
-): string | null {
-  if (!isHostedLegacyPulseTrialRetirableStatus(subscription.status)) {
-    return null;
-  }
-  return subscription.status === "canceled"
-      || subscription.status === "incomplete_expired"
-    ? null
-    : subscription.id;
+  return buildEmptyHostedStripeActivationOutcome();
 }
 
 function isHostedStripeActivationWelcomeCandidate(input: {
@@ -914,24 +732,6 @@ function isHostedStripeActivationWelcomeCandidate(input: {
   hostedExecutionEventId: string | null;
 }): boolean {
   return input.activated || Boolean(input.hostedExecutionEventId);
-}
-
-export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
-  memberId: string;
-  prisma: PrismaClient;
-  stripe?: Stripe;
-  subscriptionId: string;
-}): Promise<void> {
-  const billingConfig = requireHostedStripeBillingPlanConfig({
-    billingPlanCode: "launch_monthly",
-  });
-  return cancelHostedPulseTrialLoserSubscriptionsForMember({
-    memberId: input.memberId,
-    priceId: billingConfig.priceId,
-    prisma: input.prisma,
-    stripe: input.stripe ?? billingConfig.stripe,
-    subscriptionIds: [input.subscriptionId],
-  });
 }
 
 export class HostedStripeFamilySponsoredCleanupPendingError
@@ -1158,7 +958,6 @@ export async function applyStripeSubscriptionUpdated(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
   preparedFamilyCryptoDomainRoots?: PreparedHostedFamilyCryptoDomainRoots,
-  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
 ): Promise<HostedStripeSubscriptionUpdateOutcome> {
   const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
     dispatchContext,
@@ -1244,48 +1043,31 @@ export async function applyStripeSubscriptionUpdated(
       pulseTrialRedeemedAt: member.billingRef?.pulseTrialRedeemedAt ?? null,
       subscriptionId: subscription.id,
     });
-    const providerTrialCanBeRetired =
-      isHostedLegacyPulseTrialRetirableStatus(subscription.status);
+    const isRetiredLegacyTrialState =
+      isHostedLegacyPulseTrialRetiredStatus(subscription.status);
 
     const hasInvoiceProvenPaidPhase =
       member.billingRef?.currentBillingPhase === "paid";
 
-    if (candidateDisposition === "loser") {
-      if (!providerTrialCanBeRetired) {
-        throw buildHostedLegacyTrialRetirementBlockedError();
-      }
+    if (candidateDisposition === "loser" && !isRetiredLegacyTrialState) {
+      throw buildHostedLegacyTrialBillingConflictError();
+    }
+    if (
+      candidateDisposition === "loser"
+      || (
+        isRetiredLegacyTrialState
+        && !hasInvoiceProvenPaidPhase
+        && !(candidateDisposition === "current" && isTerminalSubscription)
+      )
+    ) {
       return {
         ...buildEmptyHostedStripeActivationOutcome(),
-        cleanupPulseTrialStripeSubscriptionId:
-          resolveHostedLegacyPulseTrialCleanupSubscriptionId(subscription),
         subscriptionCancellationEmail: null,
       };
     }
-
-    if (hasInvoiceProvenPaidPhase || !providerTrialCanBeRetired) {
-      // The exact current identity is owned by normal subscription
-      // reconciliation once a paid invoice exists or provider state could
-      // represent paid service. This preserves cancellation, delinquency, and
-      // recovery updates instead of leaving a stale paid projection behind.
-    } else {
-      return {
-        ...await convertHostedLegacyPulseTrialToStarterTx({
-          dispatchContext,
-          effectiveAt:
-            readHostedStripePulseTrialStartedAt(
-              subscription,
-              readHostedStripeSubscriptionDate(subscription, "trial_end"),
-            ) ?? dispatchContext.eventCreatedAt,
-          legacyTrialStartedAt:
-            member.billingRef?.currentTrialStartedAt ?? null,
-          member: member.core,
-          preparedCryptoDomainRoots,
-          subscription,
-          tx: prisma,
-        }),
-        subscriptionCancellationEmail: null,
-      };
-    }
+    // Exact bound terminal updates remain authoritative even after delinquency
+    // cleared the paid phase, and on cancellation notification retries. They
+    // remove access without granting Starter or inferring a new paid phase.
   }
 
   const {

@@ -14,7 +14,7 @@ import {
 } from "./deploy-automation/shared.ts";
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
-import { stageHostedRunnerRelease } from "./stage-runner-release.ts";
+import { prepareSmallRunnerNamespaceBootstrap, stageHostedRunnerRelease } from "./stage-runner-release.ts";
 import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
 import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
@@ -68,8 +68,33 @@ export async function runDeployWorkerVersionCli(
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
         });
         const current = await readCurrentDeployment(input.workerName, input.configPath);
-        const currentVersionId = requireSingleLiveVersion(current);
-        const currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
+        let currentVersionId = requireSingleLiveVersion(current);
+        let currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
+        const bootstrapPath = await prepareSmallRunnerNamespaceBootstrap({
+          allowed: env.CF_BOOTSTRAP_SMALL_RUNNER === "true" && !retainServingRunner,
+          configPath: input.configPath, currentVersion, currentVersionId,
+          listApplications: containerProvider.listApplications,
+        });
+        if (bootstrapPath) {
+          const retainedContainers = await readRenderedContainerIdentities(bootstrapPath);
+          const before = await readCloudflareContainerApplicationIdentities(
+            retainedContainers, containerProvider.listApplications, "before", containerProvider.readRollout,
+          );
+          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+          const output = await runWranglerLoggedCaptured([
+            "deploy", "--config", bootstrapPath, "--name", input.workerName, "--containers-rollout=none",
+            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
+          ]);
+          currentVersionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
+          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+          const after = await readCloudflareContainerApplicationIdentities(
+            retainedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,
+          );
+          buildContainerReleaseEntries({ before, after,
+            actions: retainedContainers.map(entry => ({ ...entry, action: "unchanged" })),
+          });
+          currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
+        }
         const { releaseSha } = await readRunnerBundleManifest(runnerBundleDir);
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
@@ -118,7 +143,7 @@ export async function runDeployWorkerVersionCli(
           applicationId: serving.applicationId, specification: serving.specification,
         });
         // Prove the isolated artifact before making the compatibility reader live.
-        for (const application of staged.applications.filter(application => application.name !== staged.activeApplicationName)) {
+        for (const application of staged.applications.filter(application => application.className === "DeploySmokeRunnerContainer")) {
           await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
           await releaseProvider.admitApplication(application);
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
@@ -145,6 +170,13 @@ export async function runDeployWorkerVersionCli(
           });
           await releaseProvider.assertApplicationReady({ ...serving, listApplications: containerProvider.listApplications,
             rolloutStepCount: rolloutSteps.length });
+        }
+        // Small runners carry member work: their old image needs the same
+        // compatibility reader before native mutation as the normal fleet.
+        for (const application of staged.applications.filter(application => application.className === "SmallRunnerContainer")) {
+          await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+          await releaseProvider.admitApplication({ ...application, rolloutStepPercentage: 100 });
+          await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }
         const prepared = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,

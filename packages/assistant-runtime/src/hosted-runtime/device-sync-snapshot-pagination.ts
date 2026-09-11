@@ -25,7 +25,6 @@ export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
   const seenCursors = new Set<string>();
   let cursor: HostedExecutionDeviceSyncRuntimeSnapshotRequest["cursor"] = null;
   let firstPage: HostedExecutionDeviceSyncRuntimeSnapshotResponse | null = null;
-  let providerConfigs: HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
 
   for (;;) {
     const isFirstPage = firstPage === null;
@@ -83,10 +82,6 @@ export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
       connectionIds.add(connection.connection.id);
       connections.push(connection);
     }
-    providerConfigs = mergeHostedRuntimeProviderConfigs(
-      providerConfigs,
-      page.providerConfigs,
-    );
 
     if (!isFirstPage && page.nextCursor === undefined) {
       throw new TypeError(
@@ -95,17 +90,10 @@ export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
     }
     const nextCursor = page.nextCursor ?? null;
     if (!nextCursor) {
-      const {
-        providerConfigs: _firstPageProviderConfigs,
-        ...firstPageWithoutProviderConfigs
-      } = initialPage;
       return {
-        ...firstPageWithoutProviderConfigs,
+        ...initialPage,
         connections,
         ...(initialPage.nextCursor === undefined ? {} : { nextCursor: null }),
-        ...(providerConfigs && Object.keys(providerConfigs).length > 0
-          ? { providerConfigs }
-          : {}),
       };
     }
     if (page.connections.length === 0) {
@@ -123,24 +111,4 @@ export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
     seenCursors.add(cursorKey);
     cursor = nextCursor;
   }
-}
-
-function mergeHostedRuntimeProviderConfigs(
-  current: HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"],
-  next: HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"],
-): HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"] {
-  if (!next) {
-    return current;
-  }
-  const merged: Record<string, unknown> = { ...(current ?? {}) };
-  for (const [provider, config] of Object.entries(next)) {
-    const existing = merged[provider];
-    if (existing && JSON.stringify(existing) !== JSON.stringify(config)) {
-      throw new TypeError(
-        `Hosted device-sync snapshot pages disagree on ${provider} application authority.`,
-      );
-    }
-    merged[provider] = config;
-  }
-  return merged as HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
 }

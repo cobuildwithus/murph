@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -105,9 +105,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "1".repeat(64),
-                  key: "users/bundles/member-synthetic/collapse-fresh-conversation.bundle.json",
                   size: 640,
                 }),
               };
@@ -339,9 +338,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "9".repeat(64),
-                  key: "users/bundles/member-synthetic/assistant-target-refresh.bundle.json",
                   size: 640,
                 }),
               };
@@ -604,9 +602,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "2".repeat(64),
-                  key: "users/bundles/member-synthetic/collapse-due-assistant-waits.bundle.json",
                   size: 640,
                 }),
               };
@@ -741,9 +738,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               events.push(`snapshot:${snapshotInput.reason}`);
               checkpointObserved.resolve();
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "8".repeat(64),
-                  key: "users/bundles/member-synthetic/collapse-owner-handoff.bundle.json",
                   size: 640,
                 }),
               };
@@ -849,9 +845,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "3".repeat(64),
-                  key: "users/bundles/member-synthetic/collapse-budget-waits.bundle.json",
                   size: 640,
                 }),
               };
@@ -964,11 +959,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `collapse-durable-followup-waits-${checkpointRequests.length}.bundle.json`,
                   size: 640,
                 }),
               };
@@ -1061,9 +1053,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "4".repeat(64),
-                key: "users/bundles/member-synthetic/collapse-shutdown-immediate.bundle.json",
                 size: 640,
               }),
             };
@@ -1141,11 +1132,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length + 5}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `collapse-due-assistant-serviced-${checkpointRequests.length}.bundle.json`,
                   size: 640,
                 }),
               };
@@ -1252,9 +1240,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "6".repeat(64),
-                  key: "users/bundles/member-synthetic/collapse-device-sync-returned.bundle.json",
                   size: 640,
                 }),
               };
@@ -1347,9 +1334,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/round4-drain-loop.bundle.json",
                 size: 640,
               }),
             };
@@ -1480,11 +1466,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `round4-hidden-wake-${checkpointRequests.length}.bundle.json`,
                   size: 640,
                 }),
               };
@@ -1665,11 +1648,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               async createCheckpointSnapshot(snapshotInput) {
                 events.push(`snapshot:${snapshotInput.reason}`);
                 return {
-                  snapshotRef: createBundleRef({
+                  snapshotRef: createSnapshotFixtureRef({
                     hash: "7".repeat(64),
-                    key:
-                      "users/bundles/member-synthetic/"
-                      + `collapse-stale-${scenario.name}.bundle.json`,
                     size: 640,
                   }),
                 };
@@ -1803,9 +1783,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/collapse-system-waits.bundle.json",
                 size: 640,
               }),
             };
@@ -1949,11 +1928,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length + 9}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `collapse-durable-wake-followup-${checkpointRequests.length}.bundle.json`,
                   size: 640,
                 }),
               };
@@ -2054,11 +2030,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length + 11}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `collapse-redacted-status-${checkpointRequests.length}.bundle.json`,
                   size: 640,
                 }),
               };
@@ -2177,11 +2150,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "d".repeat(64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "runtime-pre-checkpoint-conversation-wake.bundle.json",
                   size: 640,
                 }),
               };
@@ -2313,11 +2283,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "runtime-same-key-conversation-wake.bundle.json",
                   size: 640,
                 }),
               };
@@ -2466,9 +2433,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-post-checkpoint-projected-wake.bundle.json",
                 size: 640,
               }),
             };
@@ -2556,9 +2522,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-post-checkpoint-same-wake.bundle.json",
                 size: 640,
               }),
             };

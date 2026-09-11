@@ -3,8 +3,12 @@ import {
   readHostedAiUsageGate,
   resolveHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
+  type HostedAiUsageMemberState,
 } from "../hosted-execution/usage-allowance";
-import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
+import {
+  readHostedRuntimeAiAccessDecision,
+  type HostedRuntimeAiMemberAccessState,
+} from "../hosted-onboarding/member-access";
 import { HOSTED_STARTER_USAGE_GRANT_USD_MICROS } from "../hosted-onboarding/starter-usage";
 
 export type HostedRuntimeUsageGateCheck =
@@ -24,14 +28,24 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
   // "mutating" is authoritative turn admission and owns usage-period
   // bookkeeping. "read_first" stays write-free on allow and confirms denials
   // through that owner. "read_only" never writes and is for status surfaces.
-  mode: "mutating" | "read_first" | "read_only";
+
   now?: Date | string;
   prisma?: Parameters<typeof resolveHostedAiUsageGate>[0]["prisma"];
   userId: string;
-}): Promise<HostedRuntimeUsageGateCheck> {
+} & (
+  | { mode: "mutating"; memberState?: never }
+  | {
+      mode: "read_first" | "read_only";
+      // Fresh projection for this user and request only; never warm admission.
+      memberState?: HostedAiUsageMemberState & HostedRuntimeAiMemberAccessState;
+    }
+)): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
   const access = await readHostedRuntimeAiAccessDecision({
     memberId: input.userId,
+    ...(input.memberState
+      ? { memberState: input.memberState }
+      : {}),
     now,
     prisma: input.prisma,
   });
@@ -46,6 +60,9 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
       : checkHostedAiUsageGate;
   const decision = await readGate({
     memberId: input.userId,
+    ...(input.memberState
+      ? { memberState: input.memberState }
+      : {}),
     now,
     prisma: input.prisma,
   });

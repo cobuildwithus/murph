@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -135,10 +135,6 @@ import {
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
-  recordHostedMaterializedArtifactPaths,
-  resolveHostedMaterializedArtifactStateRelativePath,
-} from "../src/hosted-runtime/materialized-artifact-state.ts";
-import {
   createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
@@ -177,9 +173,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "2".repeat(64),
-                key: "users/bundles/member-synthetic/retention-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -288,9 +283,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "3".repeat(64),
-                key: "users/bundles/member-synthetic/retention-follow-up-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -435,9 +429,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/due-retention-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -478,7 +471,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
     }
   });
 
-  test("a lazy hosted snapshot retires a promoted inbox document and restores its canonical owner", async () => {
+  test("a v2 hosted snapshot retires a promoted inbox document and restores its canonical owner", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
     const workspaceRoot = await mkdtemp(
@@ -546,23 +539,14 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       assert.ok(importedRawRef);
 
       const baseBundle = await snapshotHostedBundleRoots({
-        externalizeFile: async (file) => {
-          if (!file.path.startsWith("raw/")) {
-            return null;
-          }
-          const sha256 = sha256HostedBundleHex(file.bytes);
-          artifactBytesByHash.set(sha256, file.bytes);
-          return { byteSize: file.bytes.byteLength, sha256 };
-        },
         kind: "vault",
         roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
       });
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
       artifactBytesByHash.set(baseHash, baseBundle);
-      const baseSnapshotRef = createBundleRef({
+      const baseSnapshotRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: `synthetic/promoted-document-retention/${baseHash}.bundle`,
         size: baseBundle.byteLength,
       });
 
@@ -580,29 +564,18 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         {
           async createCheckpointSnapshot() {
             const bundle = await snapshotHostedBundleRoots({
-              externalizeFile: async (file) => {
-                if (!file.path.startsWith("raw/")) {
-                  return null;
-                }
-                const sha256 = sha256HostedBundleHex(file.bytes);
-                artifactBytesByHash.set(sha256, file.bytes);
-                return { byteSize: file.bytes.byteLength, sha256 };
-              },
               kind: "vault",
               roots: [{
                 root: liveVaultRoot,
                 rootKey: "vault",
-                shouldIncludeRelativePath: (relativePath) =>
-                  relativePath !== resolveHostedMaterializedArtifactStateRelativePath(),
               }],
             });
             assert.ok(bundle);
             const hash = sha256HostedBundleHex(bundle);
             artifactBytesByHash.set(hash, bundle);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash,
-                key: `synthetic/promoted-document-retention/${hash}.bundle`,
                 size: bundle.byteLength,
               }),
             };
@@ -664,6 +637,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       ]);
 
       await assert.rejects(access(path.join(finalVaultRoot, inboxPath)), { code: "ENOENT" });
+      await assert.rejects(access(path.join(finalVaultRoot, ".runtime/operations/assistant/hosted-materialized-artifacts.json")), { code: "ENOENT" });
       assert.deepEqual(
         await readFile(path.join(finalVaultRoot, importedRawRef)),
         documentBytes,
@@ -746,23 +720,14 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       assert.ok(imageRef);
 
       const baseBundle = await snapshotHostedBundleRoots({
-        externalizeFile: async (file) => {
-          if (!file.path.startsWith("raw/")) {
-            return null;
-          }
-          const sha256 = sha256HostedBundleHex(file.bytes);
-          artifactBytesByHash.set(sha256, file.bytes);
-          return { byteSize: file.bytes.byteLength, sha256 };
-        },
         kind: "vault",
         roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
       });
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
       artifactBytesByHash.set(baseHash, baseBundle);
-      const baseSnapshotRef = createBundleRef({
+      const baseSnapshotRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: `synthetic/generated-image-retention/${baseHash}.bundle`,
         size: baseBundle.byteLength,
       });
 
@@ -863,29 +828,18 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
             await expect(readFile(path.join(restoredVaultRoot, imageRef), "utf8"))
               .resolves.toContain("generated_image_retention");
             const bundle = await snapshotHostedBundleRoots({
-              externalizeFile: async (file) => {
-                if (!file.path.startsWith("raw/")) {
-                  return null;
-                }
-                const sha256 = sha256HostedBundleHex(file.bytes);
-                artifactBytesByHash.set(sha256, file.bytes);
-                return { byteSize: file.bytes.byteLength, sha256 };
-              },
               kind: "vault",
               roots: [{
                 root: restoredVaultRoot,
                 rootKey: "vault",
-                shouldIncludeRelativePath: (relativePath) =>
-                  relativePath !== resolveHostedMaterializedArtifactStateRelativePath(),
               }],
             });
             assert.ok(bundle);
             const hash = sha256HostedBundleHex(bundle);
             artifactBytesByHash.set(hash, bundle);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash,
-                key: `synthetic/generated-image-retention/${hash}.bundle`,
                 size: bundle.byteLength,
               }),
             };
@@ -1142,9 +1096,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
       artifactBytesByHash.set(baseHash, baseBundle);
-      const baseSnapshotRef = createBundleRef({
+      const baseSnapshotRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: `synthetic/message-retention/${baseHash}.bundle`,
         size: baseBundle.byteLength,
       });
 
@@ -1169,9 +1122,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
             const hash = sha256HostedBundleHex(bundle);
             artifactBytesByHash.set(hash, bundle);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash,
-                key: `synthetic/message-retention/${hash}.bundle`,
                 size: bundle.byteLength,
               }),
             };
@@ -1427,9 +1379,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/retention-only.bundle.json",
                 size: 512,
               }),
             };
@@ -1494,9 +1445,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
     const createCheckpointSnapshot = vi.fn(async () => {
       events.push("snapshot:idle_shutdown");
       return {
-        snapshotRef: createBundleRef({
+        snapshotRef: createSnapshotFixtureRef({
           hash: "7".repeat(64),
-          key: "users/bundles/member-synthetic/retention-only-interrupted.bundle.json",
           size: 512,
         }),
       };
@@ -1584,9 +1534,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           async createCheckpointSnapshot() {
             events.push("snapshot:idle_shutdown");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "6".repeat(64),
-                key: "users/bundles/member-synthetic/retention-only-shutdown-pending-wake.bundle.json",
                 size: 512,
               }),
             };
@@ -1675,9 +1624,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
               }
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "8".repeat(64),
-                  key: "users/bundles/member-synthetic/durable-effect-follow-up.bundle.json",
                   size: 512,
                 }),
               };
@@ -1773,9 +1721,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/import-enrichment-barrier.bundle.json",
                 size: 512,
               }),
             };
@@ -1880,9 +1827,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-checkpoint-wake-drain.bundle.json",
                 size: 512,
               }),
             };
@@ -1981,9 +1927,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "1".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-failure-isolated.bundle.json",
                 size: 512,
               }),
             };
@@ -2070,9 +2015,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-failure.bundle.json",
                 size: 512,
               }),
             };
@@ -2169,9 +2113,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspace: createWorkspaceState({
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/other-user.bundle.json",
                 size: 512,
               }),
               userId: "member_synthetic_workspace_other",
@@ -2245,9 +2188,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
           assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
           assert.equal(snapshotInput.runtimeWakePendingAtCheckpoint, false);
           return {
-            snapshotRef: createBundleRef({
+            snapshotRef: createSnapshotFixtureRef({
               hash: "d".repeat(64),
-              key: "users/bundles/member-synthetic/phase-checkpoint.bundle.json",
               size: 512,
             }),
           };

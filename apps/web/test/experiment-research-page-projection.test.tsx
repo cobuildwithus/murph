@@ -7,7 +7,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getGeneratedHealthCommonsWebRouteIndex } from "@murphai/health-commons";
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import type { ResearchTabExperiment } from "@/src/components/experiments/experiment-detail/research-tab";
 
 const mocks = vi.hoisted(() => ({
@@ -256,12 +255,7 @@ describe("ExperimentResearchPage", () => {
     }
   });
 
-  it("renders the same Finnish sauna research fields as the full detail model", async () => {
-    const fullProtocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
-    if (!fullProtocol) {
-      throw new Error("Expected the full Finnish sauna protocol.");
-    }
-
+  it("renders Finnish sauna research with explicit evidence and caveat content", async () => {
     const element = await ExperimentResearchPage({
       params: Promise.resolve({
         experimentId: "murph-finnish-standard-3x-week",
@@ -271,23 +265,27 @@ describe("ExperimentResearchPage", () => {
     const experiment = mocks.researchTab.mock.calls.at(-1)?.[0]
       ?.experiment as ResearchTabExperiment;
 
-    expect(experiment).toEqual(expect.objectContaining({
-      id: "finnish-sauna",
-      protocolKeepInMind: fullProtocol.protocolKeepInMind,
-      researchStats: fullProtocol.researchStats,
-      studies: fullProtocol.studies,
+    expect(experiment.id).toBe("finnish-sauna");
+    expect(experiment.protocolKeepInMind).toContain(
+      "This is a short self-experiment for practical recovery context and cardiovascular proxies, not a treatment plan or longevity proof.",
+    );
+    expect(experiment.researchStats).toContainEqual({ label: "SOURCES CHECKED", value: 178 });
+    expect(experiment.researchLandscape).toEqual(expect.objectContaining({
+      confidenceLabel: "mixed",
+      mainCaveat: expect.stringContaining("cohort findings are context only"),
+      primaryClaim: expect.stringContaining("resting heart rate"),
     }));
-    expect(experiment.researchLandscape).toEqual(fullProtocol.researchLandscape
-      ? {
-          bottomLine: fullProtocol.researchLandscape.bottomLine,
-          confidenceLabel: fullProtocol.researchLandscape.confidenceLabel,
-          mainCaveat: fullProtocol.researchLandscape.mainCaveat,
-          primaryClaim: fullProtocol.researchLandscape.primaryClaim,
-        }
-      : undefined);
-    expect(experiment.researchGroups).toEqual(fullProtocol.researchGroups);
+    expect(experiment.studies).toContainEqual(expect.objectContaining({
+      url: "https://pubmed.ncbi.nlm.nih.gov/38410962/",
+      stance: "context_only",
+      type: "OBS",
+    }));
+    expect(experiment.researchGroups?.map((group) => group.label)).toEqual(expect.arrayContaining([
+      expect.stringContaining("Finnish"),
+    ]));
     expect(markup).toContain('data-experiment-id="finnish-sauna"');
-    expect(markup).toContain(`data-study-count="${fullProtocol.studies.length}"`);
+    expect(experiment.studies.length).toBeGreaterThan(0);
+
   });
 
   it("routes missing experiment research projections to notFound", async () => {

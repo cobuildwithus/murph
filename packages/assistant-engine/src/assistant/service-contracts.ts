@@ -205,11 +205,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   workingDirectory?: string
 }
 
-export interface AssistantChatInput
-  extends Omit<AssistantMessageInput, 'deliverResponse' | 'deliveryTarget' | 'prompt'> {
-  initialPrompt?: string | null
-}
-
 export interface AssistantTurnSharedPlan {
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy

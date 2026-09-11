@@ -10,9 +10,8 @@ import {
   readHostedMailboxItemForTest,
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
-import { sha256HostedBundleHex, snapshotHostedExecutionContext } from "@murphai/runtime-state/node";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -208,15 +207,21 @@ async function seedVault(active: HostedLocalFullStackScenario, userId: string): 
   } else {
     await createIntegratedVaultServices().core.init({ requestId: "seed-hot-admission", timezone: "UTC", vault: vaultRoot });
   }
-  const snapshot = await snapshotHostedExecutionContext({ operatorHomeRoot, vaultRoot });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: active.runtimeEnv,
+    harness: active.harness,
+    operatorHomeRoot,
+    userId,
+    vaultRoot,
+  });
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     environment: active.runtimeEnv,
     userId,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: { seeded: true },
-    snapshotRef: { hash, key: `cloudflare-workspace-snapshots/${hash}.bundle`, size: snapshot.bundle.byteLength, updatedAt: new Date().toISOString() },
+    snapshotRef,
     browserVaultReplicaRef: {
       byteLength: 256,
       dataVersion: `hot-admission-${hash.slice(0, 16)}`,
@@ -230,8 +235,4 @@ async function seedVault(active: HostedLocalFullStackScenario, userId: string): 
     },
   });
   expect(checkpoint.status).toBe("updated");
-  const upload = await active.harness.request(`/__test/artifacts?userId=${encodeURIComponent(userId)}&sha256=${hash}`, {
-    method: "PUT", body: new Blob([new Uint8Array(snapshot.bundle)]), headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: userId },
-  });
-  expect(upload.ok).toBe(true);
 }
