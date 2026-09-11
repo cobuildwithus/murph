@@ -1,6 +1,7 @@
 ---
 title: 'Scheduled reminder E2E serializes independent real-time journeys'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3266'
 ---
 
 ## Expected Behavior

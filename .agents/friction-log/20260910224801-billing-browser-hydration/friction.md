@@ -1,6 +1,7 @@
 ---
 title: 'Billing browser hydration wait retains a replaced server-rendered button'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3247'
 ---
 
 ## Expected Behavior
