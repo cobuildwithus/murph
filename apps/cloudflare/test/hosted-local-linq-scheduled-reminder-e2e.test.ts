@@ -118,6 +118,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
       homePhone,
       memberId: userId,
       memberPhone,
