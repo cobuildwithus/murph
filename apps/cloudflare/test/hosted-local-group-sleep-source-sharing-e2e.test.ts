@@ -15,15 +15,9 @@ import {
 import {
   createHostedMailboxAssistantInputId,
 } from "@murphai/hosted-execution/assistant-identifiers";
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
+import type {
+  HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -42,6 +36,7 @@ import {
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 import { createHostedPhoneLookupKey } from "./helpers/hosted-contact-privacy.js";
 
 const runId = Date.now();
@@ -681,9 +676,13 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
     "utf8",
   );
 
-  const snapshot = await snapshotHostedExecutionContext({ operatorHomeRoot, vaultRoot });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
-  const snapshotRef = createSnapshotBundleRef(hash, snapshot.bundle.byteLength);
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    harness: requireScenario().harness,
+    operatorHomeRoot,
+    userId: ownerMemberId,
+    vaultRoot,
+  });
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(hash),
     environment: requireScenario().runtimeEnv,
@@ -691,16 +690,6 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
     userId: ownerMemberId,
   });
   expect(checkpoint.status).toBe("updated");
-
-  const uploadResponse = await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(ownerMemberId)}&sha256=${hash}`,
-    {
-      body: new Blob([new Uint8Array(snapshot.bundle)]),
-      headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: ownerMemberId },
-      method: "PUT",
-    },
-  );
-  expect(uploadResponse.status).toBe(200);
 }
 
 function buildReactionEvent(input: { messageId: string }): Record<string, unknown> {
@@ -753,15 +742,6 @@ async function waitForWorkspaceVersionAdvance(input: {
   throw new Error(await requireScenario().buildFailureMessage(input.userId, [
     "Timed out waiting for the post-consent maintenance checkpoint.",
   ]));
-}
-
-function createSnapshotBundleRef(hash: string, size: number): HostedExecutionSnapshotRef {
-  return {
-    hash,
-    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
-    size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(
