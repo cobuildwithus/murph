@@ -1681,12 +1681,14 @@ emits aggregate counts only, and updates rows with an optimistic authority
 check. Do not run `--apply` before the final alias proof and prior-function
 drain, do not treat a dry-run as readiness, and do not drop the legacy
 physical `hosted_linq_line.active_member_limit` column in the same rollout.
-Current application code and generated Prisma clients omit that retired field;
-the nullable physical column remains for older Web builds and operator scripts.
-A separate contract cleanup must establish the replacement rollback floor and
-prove old HTTP requests, deployment-pinned Workflows, and operator CLI
-invocations have drained before dropping it. The complete assignment and
-deployment contract is in `docs/hosted-linq-db-home-lines-migration.md`.
+Current application code and generated Prisma clients omit that retired field.
+The separate contract cleanup `20260910180000_drop_linq_active_member_limit`
+drops it only after the replacement rollback floor and old HTTP request,
+applicable deployment-pinned Workflow, and operator CLI drain gates are met.
+Keep that contract migration out of `main` until those gates hold: merge admits
+its automatic postdeploy execution, and the automatic HTTP drain does not prove
+old CLI or pinned-Workflow completion. The complete assignment and deployment
+contract is in `docs/hosted-linq-db-home-lines-migration.md`.
 
 New routed Linq and Telegram groups materialize their ordinary unnamed hosted
 group and route-owner membership inside the canonical route transaction. The
