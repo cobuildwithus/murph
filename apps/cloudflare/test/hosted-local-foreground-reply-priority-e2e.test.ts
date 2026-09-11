@@ -214,7 +214,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("aborts and replaces generic model-free system work for a signed foreground reply", async () => {
+  it("serves a signed foreground reply while preserving generic system work", async () => {
     // Production maintains the memberless standby before member traffic arrives.
     // Establish that real precondition before starting the deliberately heavy
     // system-mailbox runtime so the local machine does not provision both
@@ -284,8 +284,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const inboundText = "Reply while the full system mailbox is active.";
     const replyText = "Foreground reply won over the full system mailbox.";
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
-    const recoveryEvidenceStartedAt = new Date();
     const providerStartObservations: Array<{
+      providerStartedAt: Date;
       activeFence: Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>;
       deviceMailboxItem: Awaited<ReturnType<typeof readHostedMailboxItemForTest>>;
       systemLane: {
@@ -300,8 +300,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       const foregroundReply = sendInboundAndRequirePromptReply({
         identity: systemMailboxProbe,
         inboundText,
-        label: "system mailbox exact replacement",
+        label: "system mailbox foreground handoff",
         onAssistantProviderStart: async () => {
+          const providerStartedAt = new Date();
           const [activeFence, status, deviceMailboxItem] =
             await Promise.all([
               readActiveRuntimeFenceForTest(systemMailboxProbe.userId),
@@ -318,6 +319,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
             lane.lane === "system"
           );
           providerStartObservations.push({
+            providerStartedAt,
             activeFence,
             deviceMailboxItem,
             systemLane: systemLane
@@ -339,9 +341,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemAttemptId: systemFence.attemptId,
         userId: systemMailboxProbe.userId,
       });
-      // The foreground starts under a new fence after the background owner
-      // settles. It may retain the same member-bound warm target or claim an
-      // observed pristine slot; durable handoff evidence covers either path.
+      // An accepted wake may serve foreground under the exact system owner.
+      // If that owner settles first, a replacement may reuse its warm target
+      // or claim an observed pristine slot.
       await expect(releaseForegroundPriorityOrderingBarrier({
         scenario: requireScenario(),
         userId: systemMailboxProbe.userId,
@@ -358,10 +360,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           ["Assistant provider started without an active runtime write fence."],
         ));
       }
-      expect(providerStart.activeFence.processingMode).toBe("default");
-      expect(providerStart.activeFence.attemptId).not.toBe(
-        systemFence.attemptId,
-      );
+      if (providerStart.activeFence.attemptId === systemFence.attemptId) {
+        expect(providerStart.activeFence).toEqual(systemFence);
+      } else {
+        expect(providerStart.activeFence.processingMode).toBe("default");
+      }
       expect([systemFence.runnerContainerName, ...readyStandbySlotNames]).toContain(
         providerStart.activeFence.runnerContainerName,
       );
@@ -398,7 +401,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       }
       await assertExactlyOneAcceptedReplyAfterBoundary({
         identity: systemMailboxProbe,
-        label: "system mailbox exact replacement",
+        label: "system mailbox foreground handoff",
         replyText,
       });
       expect(countAssistantProviderInputs(inboundText)).toBe(
@@ -406,15 +409,14 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       );
 
       // Do not manufacture a second system pointer. The existing durable
-      // mailbox/Temporal continuation must recover the yielded device/system
-      // work under a non-overlapping invocation and advance the frontier.
+      // mailbox/runtime continuation must resume device/system work and
+      // advance progress, whether the exact owner is retained or replaced.
       await requireSystemWakeStormPreserved(
         systemMailboxProbe.userId,
         latestAppend.wake.seq,
         {
           expectedWakeKinds: systemWakes.map((wake) => wake.kind),
-          preemptedAttemptId: systemFence.attemptId,
-          recoveryEvidenceStartedAt,
+          recoveryEvidenceStartedAt: providerStart.providerStartedAt,
         },
       );
     } finally {
@@ -2813,7 +2815,6 @@ async function requireSystemWakeStormPreserved(
   expectedImportedSeq: string,
   input: {
     expectedWakeKinds: readonly string[];
-    preemptedAttemptId: string;
     recoveryEvidenceStartedAt: Date;
   },
 ): Promise<void> {
@@ -2848,7 +2849,6 @@ async function requireSystemWakeStormPreserved(
       const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
         const wakeKind = entry.redactedJson?.wakeKind;
         return entry.attemptId !== null
-          && entry.attemptId !== input.preemptedAttemptId
           && typeof wakeKind === "string"
           && input.expectedWakeKinds.includes(wakeKind)
           && (
@@ -2865,8 +2865,7 @@ async function requireSystemWakeStormPreserved(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but seeded system work did not continue under a replacement attempt.",
-    `preempted system attempt id: ${input.preemptedAttemptId}`,
+    "Foreground reply succeeded, but seeded system work did not continue.",
     `expected imported sequence: ${expectedImportedSeq}`,
     `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
     `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,

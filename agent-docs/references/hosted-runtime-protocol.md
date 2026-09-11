@@ -900,12 +900,14 @@ remains available through `nextDefaultProcessingWakeAt` instead of replacing
 the device deadline. A cold pass with assistant execution blocked also retains
 the future device deadline when no mailbox item is runnable yet.
 Current conversation work and explicitly approved continuations retain
-foreground priority. A non-direct default request behind
-`system_mailbox` wakes the exact active child, preserves its fence, and retries
-while that child checkpoints and releases. Authenticated Web-direct foreground
-work may instead preempt that exact system child through the existing abort
-seam. A `system_mailbox` request behind an active default owner sends a normal
-wake to that exact child, preserving its default mode and fence. It sends no
+foreground priority. A default request behind `system_mailbox`, including
+an authenticated Web-direct request, wakes the exact active child with the
+requested default mode. An accepted wake retains that child's fence and lets
+its runtime qualify actual conversation input before serving foreground in
+place. If the exact child has already settled, the existing inactive-fence
+path may start a replacement. A `system_mailbox` request behind an active
+default owner sends a normal wake to that exact child, preserving its default
+mode and fence. It sends no
 requested mode handoff and never interrupts foreground work. Wake acceptance
 is not import completion: durable mailbox and import receipts remain the
 completion authority, including when an older warm child handles the wake.
@@ -962,11 +964,12 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, and for
-authenticated Web-direct foreground/default work behind a `system_mailbox`
-fence, the existing workspace-invocation abort seam is the sole preemption
-authority. A non-direct default request behind system-mailbox work retains the
-exact-child wake-and-checkpoint handoff. A system-mailbox request may wake an
+For foreground/default work behind an `inbox_media_retention` fence, the
+existing workspace-invocation abort seam is the sole preemption authority.
+Foreground/default work behind `system_mailbox` instead wakes the exact child,
+including for authenticated Web-direct requests. An accepted wake preserves
+its ownership; assistant policy and actual conversation input remain the
+runtime's admission boundary. A system-mailbox request may wake an
 active default child but cannot preempt or downgrade it. A local exact-pointer abort enters the same inactive-fence
 replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
