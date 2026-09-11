@@ -76,6 +76,7 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { OPENAI_CODEX_MODEL_PROVIDER_CONFIG } from '@murphai/operator-config/assistant/target-runtime'
 import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
 import {
@@ -100,7 +101,7 @@ import {
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { upsertKnowledgePage } from '../src/knowledge/service.ts'
 import {
   markAssistantContextSnapshotDirty,
@@ -211,6 +212,7 @@ import type {
   AssistantHostedDeviceConnectProvider,
   AssistantHostedDeviceToolRequest,
   AssistantHostedGroupSharedReadResponse,
+  AssistantUsageRecorder,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
@@ -229,6 +231,8 @@ import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
   buildAssistantCronExecutionInstructions,
+  claimResolvedAssistantCronJob,
+  executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
 import {
   findCanonicalAssistantCronRecordInList,
@@ -305,6 +309,12 @@ import {
 } from './support/codex-model-catalog.ts'
 import { createDeferred } from './test-helpers.ts'
 import { isAssistantGeneratedDeliveryRef } from '../src/assistant/generated-delivery-files.ts'
+import {
+  createCanonicalLiveFixture,
+  runCanonicalGroupBoundaryJourney,
+  runCanonicalMealRestartJourney,
+  runCanonicalReminderJourney,
+} from './support/canonical-live-journeys.ts'
 
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import {
@@ -331,6 +341,28 @@ const realCodexSuiteUsage = {
 function describeRealCodex(name: string, factory: () => void): void {
   const suite = RUN_REAL_CODEX_E2E ? describe : describe.skip
   suite(name, { tags: [REAL_CODEX_E2E_TAG] }, factory)
+}
+
+describeRealCodex('real model canonical production journeys', () => {
+  it('real model canonical meal persists across assistant restart', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalMealRestartJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
+  it('real model canonical reminder create fire and cancel', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalReminderJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
+  it('real model group privacy and quiet boundary', async () => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runCanonicalGroupBoundaryJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
+})
+function recordCanonicalProviderRequest(): void {
+  realCodexSuiteUsage.providerRequests += 1
+  realCodexSuiteUsage.requestsMissingUsage += 1
 }
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 
@@ -2398,6 +2430,31 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('uses production Responses websocket configuration for canonical provider journeys', () => {
+    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-5.6-terra', modelProvider: 'openai-env', productionTransport: true })
+    expect(toml).toContain('wire_api = "responses"')
+    expect(toml).toContain('supports_websockets = true')
+    expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
+    expect(toml).toContain('"MURPH_CANONICAL_JOURNEY_CLI"')
+    expect(toml.split('[model_providers.')[0]).not.toContain('OPENAI_API_KEY')
+  })
+  it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
+    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-5.6-terra', modelProvider: 'openai-env' })
+    try {
+      const codex = await execFileAsync(fixture.codexCommand, ['-c', 'default_permissions="murph-member-read"', 'features', 'list'], { env: fixture.env, timeout: 60_000 })
+      expect(codex.stdout.trim()).not.toBe('')
+      const result = await fixture.cli(['meal', 'totals', '--from', '2026-08-29', '--to', '2026-08-29', '--format', 'json'])
+      expect(JSON.parse(result)).toMatchObject({ mealCount: 0 })
+      await expect(fixture.cli(['nonexistent-canonical-journey-command'])).rejects.toThrow()
+    } finally { await fixture.close() }
+  }, 120_000)
+  it('rejects unknown Personal Patterns fixture commands instead of fabricating success', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-pattern-fixture-contract-'))
+    try {
+      await materializePersonalPatternsBaselineVaultCli({ binDirectory: root, commandCapturePath: path.join(root, 'commands'), initialDigestSent: false, ledgerCapturePath: path.join(root, 'ledger'), vocabularyCapturePath: path.join(root, 'vocabulary') })
+      await expect(execFileAsync(path.join(root, 'vault-cli'), ['nonexistent-command'])).rejects.toThrow()
+    } finally { await removeRealCodexTemporaryPath(root) }
+  })
   it('executes canonical single-read nutrition fixtures through the real CLI', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'murph-nutrition-cli-fixture-'))
     const binDirectory = path.join(root, 'bin')
@@ -16248,6 +16305,83 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
 })
 
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
+  it.each([true, false])('sends one scheduled Telegram cue with live route audience %s', async (threadIsDirect) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-telegram-audience-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const created = await upsertAutomation({
+        continuityPolicy: 'fresh',
+        instructions: 'Send a concise reminder to take a two-minute stretch break now. Do not ask a question or claim the break is completed.',
+        now: new Date(),
+        route: {
+          channel: 'telegram', deliveryTarget: 'synthetic-telegram-destination',
+          identityId: null, participantId: null, threadId: 'opaque-conversation',
+        },
+        schedule: { kind: 'dailyLocal', localTime: '19:00' },
+        slug: 'synthetic-telegram-stretch', status: 'active', supportKind: 'reminder',
+        tags: [], title: 'Stretch reminder', vaultRoot: workingDirectory,
+      })
+      const source = findCanonicalAssistantCronRecordInList(
+        await listCanonicalAssistantCronRecords(workingDirectory), created.record.automationId,
+      )
+      if (!source) throw new Error('Expected saved automation.')
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+        jobId: resolveCanonicalAssistantCronJobId(source), now: new Date().toISOString(),
+      })
+      const paths = resolveAssistantStatePaths(workingDirectory)
+      const claimed = await claimResolvedAssistantCronJob({
+        job: { kind: 'canonical', source, runtimeState, job: projectCanonicalAssistantCronJob({ source, runtimeState }) },
+        paths,
+      })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const authority = {
+        channel: 'telegram' as const, containerMemberId: 'synthetic-member', threadId: 'synthetic-telegram-destination',
+      }
+      const resolveScheduledExternalThreadRoute = vi.fn(async () => ({ ...authority, threadIsDirect }))
+      const recordUsage = vi.fn<AssistantUsageRecorder['recordUsage']>(async (record) => {
+        recordRealCodexProviderUsage({ ...record, providerMetadataJson: null })
+      })
+      const providerEvents: unknown[] = []
+      const result = await executeClaimedAssistantCronJob({
+        deliveryDispatchMode: 'queue-only',
+        executionContext: { hosted: {
+          defaultTarget: modelTarget, memberId: 'synthetic-member', resolveScheduledExternalThreadRoute, userEnvKeys: [],
+          usageRecorder: { recordUsage },
+        } },
+        job: claimed, paths, trigger: 'scheduled', vault: workingDirectory,
+        onTraceEvent: (event) => providerEvents.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+      })
+      expect(result.runErrorCode, result.run.error ?? undefined).toBeNull()
+      expect(recordUsage).toHaveBeenCalledOnce()
+      expect(readCapabilityRoutingActions(providerEvents)).toEqual([])
+      expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledOnce()
+      expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledWith({
+        channel: 'telegram', signal: expect.any(AbortSignal), target: authority.threadId,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({
+        channel: 'telegram', threadIsDirect, externalThreadRouteAuthority: authority,
+        explicitTarget: authority.threadId, status: 'pending', operation: null,
+      })
+      const reply = intents[0]!.message
+      process.stdout.write(`[real-codex scheduled Telegram audience] ${JSON.stringify({ threadIsDirect, reply, intents: intents.length })}\n`)
+      expect(reply).toMatch(/stretch/iu)
+      expect(reply).toMatch(/(?:two|2)[ -]minute/iu)
+      expect(reply).not.toMatch(/\?|verified|audience|binding|completed|already (?:sent|done)/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it.each([
     {
       context: [
@@ -34917,7 +35051,8 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *)',
-      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    printf \'%s\\n\' \'unsupported Personal Patterns fixture command\' >&2',
+      '    exit 64',
       '    ;;',
       'esac',
       '',
@@ -38005,6 +38140,7 @@ function summarizeCodexEventSequence(
 
 async function resolveRealCodexE2eConfig(
   input: {
+    productionTransport?: boolean
     sourceEnv?: NodeJS.ProcessEnv
   } = {},
 ): Promise<RealCodexE2eConfig> {
@@ -38093,6 +38229,7 @@ async function resolveRealCodexE2eConfig(
       apiKeyEnv,
       model,
       modelProvider,
+      productionTransport: input.productionTransport,
     }),
     {
       encoding: 'utf8',
@@ -38144,6 +38281,7 @@ function buildRealCodexConfigToml(input: {
   defaultPermissions?: string | null
   model: string
   modelProvider: string
+  productionTransport?: boolean
   sandboxMode?: 'workspace-write' | null
 }): string {
   const baseUrl =
@@ -38173,6 +38311,7 @@ function buildRealCodexConfigToml(input: {
     'ignore_default_excludes = false',
     'include_only = [',
     ...REAL_CODEX_E2E_ENV_ALLOWLIST.map((key) => `  ${tomlString(key)},`),
+    ...(input.productionTransport ? ['HOME', 'VAULT', 'MURPH_CANONICAL_JOURNEY_CLI', 'MURPH_CANONICAL_JOURNEY_COMMANDS'].map((key) => `  ${tomlString(key)},`) : []),
     ']',
     '',
     `[model_providers.${tomlKey(input.modelProvider)}]`,
@@ -38182,7 +38321,7 @@ function buildRealCodexConfigToml(input: {
     'wire_api = "responses"',
     'request_max_retries = 4',
     'stream_max_retries = 5',
-    'supports_websockets = false',
+    `supports_websockets = ${input.productionTransport === true && input.modelProvider === OPENAI_ENV_MODEL_PROVIDER && OPENAI_CODEX_MODEL_PROVIDER_CONFIG.supportsWebSockets}`,
     '',
   ].join('\n')
 }

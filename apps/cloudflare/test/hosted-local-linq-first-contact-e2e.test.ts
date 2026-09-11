@@ -26,7 +26,6 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRunnerStatusResponse,
@@ -35,10 +34,6 @@ import type {
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
@@ -68,6 +63,7 @@ import {
   type ObservedLinqRequest,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
@@ -2070,11 +2066,14 @@ async function seedEmptyHostedWorkspaceCheckpointForTest(
     vault: vaultRoot,
   });
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId: memberId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(memberId, hash, label),
     environment: requireScenario().runtimeEnv,
@@ -2083,45 +2082,10 @@ async function seedEmptyHostedWorkspaceCheckpointForTest(
     redactedStatusJson: {
       seeded: true,
     },
-    snapshotRef: createSnapshotBundleRef(hash, snapshot.bundle.byteLength),
+    snapshotRef,
     userId: memberId,
   });
   expect(checkpoint.status).toBe("updated");
-
-  await uploadHostedSnapshotArtifact({
-    bytes: snapshot.bundle,
-    hash,
-    userId: memberId,
-  });
-}
-
-async function uploadHostedSnapshotArtifact(input: {
-  bytes: Uint8Array;
-  hash: string;
-  userId: string;
-}): Promise<void> {
-  await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(input.userId)}&sha256=${input.hash}`,
-    {
-      body: new Blob([new Uint8Array(input.bytes)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-      },
-      method: "PUT",
-    },
-  );
-}
-
-function createSnapshotBundleRef(
-  hash: string,
-  size: number,
-): HostedExecutionSnapshotRef {
-  return {
-    hash,
-    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
-    size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(

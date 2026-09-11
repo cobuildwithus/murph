@@ -1698,7 +1698,7 @@ export async function runHostedWorkspaceAssistantPhase(
           if (!assertAuthority) {
             throw new VaultCliError(
               "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
-              "Hosted group delivery requires live thread route authority before provider work.",
+              "Hosted scheduled delivery requires live thread route authority before provider work.",
               { retryable: true },
             );
           }
@@ -1707,8 +1707,15 @@ export async function runHostedWorkspaceAssistantPhase(
             containerMemberId: input.request.userId,
             threadId: target,
           } as const;
-          await assertAuthority(authority, { signal });
-          return authority;
+          const result = await assertAuthority(authority, { signal });
+          if (typeof result?.threadIsDirect !== "boolean") {
+            throw new VaultCliError(
+              "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+              "Hosted scheduled delivery requires the route owner's audience.",
+              { retryable: true },
+            );
+          }
+          return { ...authority, threadIsDirect: result.threadIsDirect };
         },
         resolveScheduledLinqRoute: async ({
           fromPhoneNumber,

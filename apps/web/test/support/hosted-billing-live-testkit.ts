@@ -34,6 +34,10 @@ const hostedFamilyPlanModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/family-plan.ts",
   import.meta.url,
 ).href;
+const hostedUsageAllowanceModuleSpecifier = new URL(
+  "../../src/lib/hosted-execution/usage-allowance.ts",
+  import.meta.url,
+).href;
 
 const DEFAULT_POLL_INTERVAL_MS = 300;
 const DEFAULT_POLL_TIMEOUT_MS = 120_000;
@@ -101,6 +105,17 @@ export interface HostedBillingProjectionForTest {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   stripeSubscriptionScheduleId: string | null;
+}
+
+export interface HostedBillingUsageGateForTest {
+  allowed: boolean;
+  allowanceSource: string;
+  billingPlanCode: string;
+  limitUsdMicros: bigint;
+  periodEnd: Date;
+  periodStart: Date;
+  remainingUsdMicros: bigint;
+  spentUsdMicros: bigint;
 }
 
 export interface HostedFamilyProjectionForTest {
@@ -178,6 +193,14 @@ interface HostedPrismaModule {
     databaseUrl: string;
     poolMax?: number;
   }): HostedBillingTestPrisma;
+}
+
+interface HostedUsageAllowanceModule {
+  readHostedAiUsageGate(input: {
+    memberId: string;
+    now: Date;
+    prisma: HostedBillingTestPrisma;
+  }): Promise<HostedBillingUsageGateForTest>;
 }
 
 interface HostedMemberStoreModule {
@@ -509,6 +532,25 @@ export async function readHostedBillingProjectionForTest(input: {
       stripeSubscriptionScheduleId:
         billingRef?.stripeSubscriptionScheduleId ?? null,
     };
+  });
+}
+
+export async function readHostedBillingUsageGateForTest(input: {
+  at: Date;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<HostedBillingUsageGateForTest> {
+  return withHostedBillingTestkit(input.environment, async ({ prisma }) => {
+    const usageAllowance: HostedUsageAllowanceModule = await import(
+      hostedUsageAllowanceModuleSpecifier
+    );
+    // Stripe Test Clocks move provider time, not the Web process's wall clock.
+    // Use the production read owner's explicit time input to select that period.
+    return usageAllowance.readHostedAiUsageGate({
+      memberId: input.memberId,
+      now: input.at,
+      prisma,
+    });
   });
 }
 

@@ -664,9 +664,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }, { signal });
   });
 
-  it("resolves scheduled Telegram group authority through the live Web route owner", async () => {
+  it.each([true, false])("resolves scheduled Telegram audience %s through the live Web route owner", async (threadIsDirect) => {
     const signal = new AbortController().signal;
-    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+    const assertExternalThreadRouteAuthority = vi.fn().mockResolvedValue({ threadIsDirect });
     const phaseInput = createPhaseInput({});
     phaseInput.runtime.platform.effectsPort.assertExternalThreadRouteAuthority =
       assertExternalThreadRouteAuthority;
@@ -686,6 +686,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           channel: "telegram",
           containerMemberId: "member_synthetic_phase",
           threadId: "telegram_group_123",
+          threadIsDirect,
+        });
+
+        assertExternalThreadRouteAuthority.mockResolvedValueOnce(undefined);
+        await expect(resolveScheduledExternalThreadRoute({
+          channel: "telegram",
+          signal,
+          target: "telegram_group_123",
+        })).rejects.toMatchObject({
+          code: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+          context: { retryable: true },
         });
 
         return {

@@ -1395,6 +1395,7 @@ describe('monorepo release flow coverage audit', () => {
         'incur@0.5.1: patches/incur@0.5.1.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
         'wrangler@4.90.0: patches/wrangler@4.90.0.patch',
+        'wrangler@4.93.0: patches/wrangler@4.93.0.patch',
       ],
     )
     expect(repoToolsPatch).toContain('tracked_files=()')
