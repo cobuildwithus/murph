@@ -1,0 +1,61 @@
+{
+  "action": {
+    "presentation": {
+      "title": "Synthetic workout",
+      "workout": {
+        "exercises": [
+          {
+            "name": "Cable Row",
+            "sets": [
+              {
+                "status": "completed",
+                "actual": "80 lb \u00d7 10"
+              },
+              {
+                "status": "pending"
+              }
+            ]
+          }
+        ],
+        "version": 1,
+        "state": "active"
+      }
+    },
+    "expectedWorkout": {
+      "actionBinding": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "exercises": [
+        {
+          "name": "Cable Row",
+          "sets": [
+            {
+              "logged": false
+            },
+            {
+              "logged": false
+            }
+          ]
+        }
+      ]
+    },
+    "kind": "workout.live.apply",
+    "mutations": [
+      {
+        "result": {
+          "reps": 10,
+          "weight": 80,
+          "kind": "weight_reps",
+          "weightUnit": "lb"
+        },
+        "kind": "set.put",
+        "setPosition": 1,
+        "exercisePosition": 1,
+        "exerciseName": "Cable Row",
+        "expectedResult": null
+      }
+    ],
+    "version": 1
+  },
+  "schemaVersion": 1,
+  "actionId": "11111111-1111-4111-8111-111111111111",
+  "requestedAt": "2026-08-12T15:00:00.000Z"
+}

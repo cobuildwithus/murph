@@ -37,7 +37,17 @@ import { readHostedProviderCleanupCheckpoint } from "../src/hosted-runtime/provi
 import { readHostedSystemMailboxState, resolveHostedSystemMailboxWakeCandidates } from "../src/hosted-runtime/system-mailbox-state.ts";
 import * as systemWork from "../src/hosted-runtime/workspace-system-work.ts";
 
-test.each(["success", "projection-error", "fresh-foreground", "checkpoint-hint", "checkpoint-foreground"] as const)("settles checkpointed Environment recording in the foreground replacement: %s", async (scenario) => {
+test.each([
+  "success",
+  "projection-error",
+  "fresh-foreground",
+  "checkpoint-hint",
+  "checkpoint-foreground",
+  "scheduler-refresh",
+  "refresh-foreground",
+  "refresh-read-error",
+  "refresh-incomplete",
+] as const)("settles checkpointed Environment recording in the foreground replacement: %s", async (scenario) => {
   let vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-environment-interrupted-recording-"));
   const roots = [vaultRoot];
   const replacementError = new Error("Synthetic foreground replacement released the system owner.");
@@ -45,6 +55,9 @@ test.each(["success", "projection-error", "fresh-foreground", "checkpoint-hint",
   const effectContexts: string[] = [];
   let projectionFailureActive = scenario === "projection-error";
   let projectionInterrupted = false;
+  let refreshWakeSent = false;
+  let refreshReadFault: "error" | "incomplete" | null = null;
+  let completeRefreshWakeRead: (() => void) | null = null;
   let effectStartedAt = 0;
   const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
   const checkpointExpectationCount = () => latencyTraceRequests.filter((request) =>
@@ -133,9 +146,29 @@ test.each(["success", "projection-error", "fresh-foreground", "checkpoint-hint",
     let currentWorkspace = createWorkspaceState({ snapshotRef: snapshot.snapshotRef });
     const workspacePort = createWorkspacePort({ checkpointRequests, events, workspace: currentWorkspace });
 
+    const mailboxPort = createMailboxPort({ events, items });
     const basePlatform = createPlatform({
       events, artifactBytesByHash, latencyTraceRequests,
-      mailboxPort: createMailboxPort({ events, items }),
+      mailboxPort: {
+        ...mailboxPort,
+        async fetch(request, context) {
+          const fault = refreshReadFault;
+          refreshReadFault = null;
+          if (fault === "error") throw new Error("Synthetic mailbox classification unavailable.");
+          const response = await mailboxPort.fetch(request, context);
+          if (completeRefreshWakeRead) {
+            events.push("refresh.mailbox_read");
+            completeRefreshWakeRead();
+            completeRefreshWakeRead = null;
+          }
+          return fault === "incomplete" ? {
+            ...response,
+            maxSeqByLane: response.maxSeqByLane.map((entry) => entry.lane === "system"
+              ? { ...entry, maxSeq: String(BigInt(entry.maxSeq) + 1n) }
+              : entry),
+          } : response;
+        },
+      },
       workspacePort: {
         ...workspacePort,
         async read() { return { fetchedAt: TEST_NOW, workspace: currentWorkspace }; },
@@ -157,13 +190,43 @@ test.each(["success", "projection-error", "fresh-foreground", "checkpoint-hint",
         },
       },
       browserVaultReplicaPort: {
-        async write({ replica }) {
+        async write({ replica, signal }) {
           assert.ok(events.includes("reply.sent"), "Foreground reply precedes Environment publication.");
           const habitat = parseBrowserVaultReplica(replica).entities.find((entity) => entity.family === "habitat" && entity.attributes.aspect === "sleep-environment");
           const indicators = habitat?.attributes.indicators;
           assert.ok(indicators && typeof indicators === "object" && "night_temp_c" in indicators);
           assert.equal(indicators.night_temp_c, 19);
           events.push("replica.write");
+          if ((scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) && !refreshWakeSent) {
+            refreshWakeSent = true;
+            if (scenario === "refresh-foreground") {
+              items.push(createMailboxItem({ id: "mailbox_item_synthetic_refresh_foreground", laneSeq: "2" }));
+              events.push("foreground.queued_during_refresh");
+            } else if (scenario === "refresh-read-error") {
+              refreshReadFault = "error";
+            } else if (scenario === "refresh-incomplete") {
+              refreshReadFault = "incomplete";
+            }
+            // Same-owner container wakes omit requestedProcessingMode.
+            for (let hint = 0; hint < (scenario === "scheduler-refresh" ? 3 : 1); hint += 1) {
+              const wakeRead = scenario === "scheduler-refresh"
+                ? new Promise<void>((resolve) => { completeRefreshWakeRead = resolve; })
+                : null;
+              events.push("refresh.wake_hint");
+              runtimeWakeSignal.notify();
+              if (wakeRead) await withRealTimeout(wakeRead, 1_000, facts);
+              // Let the completed mailbox read reach the classifier before the next hint.
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+            if (scenario !== "scheduler-refresh") {
+              assert.ok(signal);
+              await withRealTimeout(new Promise<void>((resolve) => {
+                if (signal.aborted) resolve();
+                else signal.addEventListener("abort", () => resolve(), { once: true });
+              }), 1_000, facts);
+            }
+            signal?.throwIfAborted();
+          }
           return createBrowserVaultReplicaRef(replica);
         },
         async publishRef({ replicaRef }) {
@@ -318,6 +381,23 @@ test.each(["success", "projection-error", "fresh-foreground", "checkpoint-hint",
       roots.push(vaultRoot);
       runtimeCompletion = runInvocation("system_mailbox");
       result = await withRealTimeout(runtimeCompletion, 10_000, facts);
+    }
+    if (scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) {
+      assert.ok(refreshWakeSent, facts());
+      assert.equal(events.filter((event) => event === "replica.write").length, 1, facts());
+    }
+    if (scenario.startsWith("refresh-")) {
+      assert.equal(events.includes("replica.publish"), false, facts());
+      assert.equal(result.status, "scheduled", facts());
+      assert.ok(Date.parse(result.nextWakeAt ?? "") <= Date.now(), facts());
+      assert.equal(result.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1", facts());
+      assert.equal(events.filter((event) => event === "reply.sent").length, 1, facts());
+      return;
+    }
+    if (scenario === "scheduler-refresh") {
+      assert.equal(events.filter((event) => event === "refresh.wake_hint").length, 3, facts());
+      assert.equal(events.filter((event) => event === "refresh.mailbox_read").length, 3, facts());
+      assert.equal(events.filter((event) => event === "replica.publish").length, 1, facts());
     }
     const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
     assert.equal(pending.length, 0, JSON.stringify({ retry: pending.map(({ status, lastErrorCode, nextAttemptAt }) => ({ status, lastErrorCode, nextAttemptAt })), ...JSON.parse(facts()) }));

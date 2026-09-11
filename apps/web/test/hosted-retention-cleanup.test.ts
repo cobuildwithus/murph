@@ -155,6 +155,7 @@ describe("hosted retention cleanup", () => {
       expiredGroupParticipantObservationsDeleted: 4,
       expiredGroupCurrentSenderClarificationsDeleted: 3,
       expiredIngressLatencyTracesDeleted: 1,
+      expiredTypingAlertsDeleted: 0,
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
       expiredOperatorTaskResultsRetired: 2,
@@ -221,7 +222,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(19);
+    expect(executeRaw).toHaveBeenCalledTimes(20);
 
     const groupParticipantObservationCall = findRetentionCall(
       executeRaw,

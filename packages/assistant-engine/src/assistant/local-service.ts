@@ -702,9 +702,10 @@ export async function sendAssistantMessageLocal(
               sharedPlan,
             })
           : null
+      const hostedExecutionContext = executionContext?.hosted ?? null
       const typingIndicator = startAssistantChannelTypingIndicator({
         channelDependencies:
-          executionContext?.hosted?.channelTypingDependencies ?? null,
+          hostedExecutionContext?.channelTypingDependencies ?? null,
         input,
         session: resolved.session,
         sharedPlan,
@@ -806,6 +807,7 @@ export async function sendAssistantMessageLocal(
                     ...event,
                     turnId: receipt.turnId,
                   })
+                typingIndicator?.recordAcceptedInputs(event.acceptedInputs.map((item) => item.id))
                 preProviderSteerAcceptedInputJournals.set(
                   JSON.stringify(event.acceptedInputs.map((item) => item.id)),
                   acceptedInputJournal,
@@ -872,7 +874,7 @@ export async function sendAssistantMessageLocal(
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
-        const hostedExecutionContext = executionContext?.hosted ?? null
+        typingIndicator?.recordAcceptedInputs(initialAcceptedInputJournal.inputIds)
         let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
@@ -1269,19 +1271,19 @@ export async function sendAssistantMessageLocal(
             preProviderSteerAcceptedInputJournals.get(
               preProviderSteerJournalKey,
             )
-          if (!preProviderSteerJournal) {
+          let acceptedInputJournal = preProviderSteerJournal
+          if (!acceptedInputJournal) {
             assertAcceptedActiveTurnInputItemsAreNew({
               acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
               inputs: acceptedInputItems,
             })
-          }
-          const acceptedInputJournal =
-            preProviderSteerJournal ??
-            await runtimeState.turns.acceptedInputs.append({
+            acceptedInputJournal = await runtimeState.turns.acceptedInputs.append({
               inputs: acceptedInputItems,
               sessionId: resolved.session.sessionId,
               turnId: currentUserTurn.turnId,
             })
+            typingIndicator?.recordAcceptedInputs(acceptedInputItems.map((item) => item.id))
+          }
           preProviderSteerAcceptedInputJournals.delete(
             preProviderSteerJournalKey,
           )

@@ -14,7 +14,8 @@ import { describeHostedExecutionSafeLogErrorCode } from "./logging";
 export type HostedDirectRuntimeWakeSource =
   | "assistant-ask-completion"
   | "assistant-ask-request"
-  | "linq";
+  | "linq"
+  | "telegram";
 
 const HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS = 29_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS = 25_000;

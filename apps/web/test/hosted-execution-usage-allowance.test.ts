@@ -1,3 +1,4 @@
+import { readHostedImageGenerationAccess } from "@/src/lib/hosted-onboarding/image-generation-access";
 import { HostedBillingStatus } from "@prisma/client";
 import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
@@ -5082,6 +5083,30 @@ function createAllowanceTx(input: {
     },
   };
 }
+
+describe("image access through the canonical usage gate", () => {
+  it.each(["launch_monthly", "launch_group_monthly"])("allows an active %s subscription", async (billingPlanCode) => {
+    const prisma = createGatePrisma({ billingPhase: "paid", billingPlanCode, spentUsdMicros: 0n });
+    await expect(readHostedImageGenerationAccess({ memberId: "member_123", prisma: prisma as never }))
+      .resolves.toEqual({ allowed: true, reason: "allowed" });
+  });
+
+  it("does not treat a saved billing customer as a subscription", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "trial", stripeSubscriptionLookupKey: null, spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 4_500_000n, usageCreditLedgerVersion: 1n,
+    });
+    const member = await prisma.hostedMember.findUnique();
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      ...member,
+      billingRef: Object.assign({}, member.billingRef, { stripeCustomerLookupKey: "customer_synthetic" }),
+    });
+    await expect(readHostedAiUsageGate({ memberId: "member_123", prisma: prisma as never }))
+      .resolves.toMatchObject({ allowed: true, allowanceSource: "direct_starter" });
+    await expect(readHostedImageGenerationAccess({ memberId: "member_123", prisma: prisma as never }))
+      .resolves.toEqual({ allowed: false, reason: "subscription_required" });
+  });
+});
 
 function createGatePrisma(input: {
   aggregate?: ReturnType<typeof vi.fn>;

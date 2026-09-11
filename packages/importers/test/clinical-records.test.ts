@@ -1453,7 +1453,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     }
   });
 
-  it("imports all inline document parts and keeps malformed documents incomplete", async () => {
+  it("imports all inline document parts and records only metadata for unreadable documents", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -1562,28 +1562,16 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", note: "Attachment 1\n\nDischarge summary.\n\nAttachment 2\n\nAddendum: stop medication." })]);
-    expect(reviews(plan)).toHaveLength(4);
-    expect(reviews(plan)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resourceId: "document-malformed-base64",
-          reason: "document reference attachment content is incomplete",
-        }),
-        expect.objectContaining({
-          resourceId: "document-invalid-utf8",
-          reason: "document reference attachment content is incomplete",
-        }),
-        expect.objectContaining({
-          resourceId: "document-valid-then-malformed",
-          reason: "document reference attachment content is incomplete",
-        }),
-        expect.objectContaining({
-          resourceId: "document-numeric-data",
-          reason: "document reference attachment content is incomplete",
-        }),
-      ]),
-    );
+    const notes = upserts(plan).filter((payload) => payload.kind === "note");
+    expect(notes.filter((payload) => payload.noteType === "fhir_document_reference")).toEqual([
+      expect.objectContaining({ note: "Attachment 1\n\nDischarge summary.\n\nAttachment 2\n\nAddendum: stop medication." }),
+    ]);
+    const receipts = notes.filter((payload) => payload.noteType === "clinical-document-receipt");
+    expect(receipts.map((payload) => payload.externalRef?.resourceId)).toEqual([
+      "document-malformed-base64", "document-invalid-utf8", "document-valid-then-malformed", "document-numeric-data",
+    ]);
+    expect(receipts.every((payload) => !/Discharge summary|not-base64|1400/u.test(payload.note ?? ""))).toBe(true);
+    expect(reviews(plan)).toEqual([]);
   });
 
   it("plans complete laboratory panels atomically", async () => {
@@ -1904,25 +1892,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        resourceId: "whitespace-report-summary",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "numeric-report-summary",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "numeric-report-narrative",
-        reason: "diagnostic report summary is not available in raw FHIR page",
-      }),
-      expect.objectContaining({
-        resourceId: "whitespace-lab-analyte",
-        reason: "laboratory observation result is not importable",
-      }),
-    ]));
+    expect(upserts(plan)).toEqual([
+      ...["whitespace-report-summary", "numeric-report-summary", "numeric-report-narrative"].map((resourceId) =>
+        expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId }) })),
+    ]);
+    expect(reviews(plan)).toEqual([expect.objectContaining({
+      resourceId: "whitespace-lab-analyte", reason: "laboratory observation result is not importable",
+    })]);
   });
 
   it("preserves lab analytes that do not derive a slug", async () => {
@@ -2850,8 +2826,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "allergy-scoped-negative" }) })]);
-    expect(reviews(plan)).toHaveLength(18);
+    expect(upserts(plan)).toEqual([
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "report-no-summary" }) }),
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "report-date-only-effective" }) }),
+      expect.objectContaining({ kind: "note", noteType: "clinical-document-receipt", externalRef: expect.objectContaining({ resourceId: "document-metadata-only" }) }),
+      expect.objectContaining({ kind: "note", externalRef: expect.objectContaining({ resourceId: "allergy-scoped-negative" }) }),
+    ]);
+    expect(reviews(plan)).toHaveLength(15);
     expect(reviews(plan)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2893,18 +2874,6 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         expect.objectContaining({
           resourceId: "lab-date-only",
           reason: "clinical timestamp is missing",
-        }),
-        expect.objectContaining({
-          resourceId: "report-no-summary",
-          reason: "diagnostic report summary is not available in raw FHIR page",
-        }),
-        expect.objectContaining({
-          resourceId: "report-date-only-effective",
-          reason: "clinical timestamp is missing",
-        }),
-        expect.objectContaining({
-          resourceId: "document-metadata-only",
-          reason: "document reference attachment content is incomplete",
         }),
         expect.objectContaining({
           resourceId: "allergy-missing-status",
@@ -4654,6 +4623,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       externalRef,
       reason: "unsupported modifier semantics",
       evidence,
+      ...(["DocumentReference", "DiagnosticReport"].includes(resourceType) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
     }]);
   });
 

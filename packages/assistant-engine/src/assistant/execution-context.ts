@@ -96,7 +96,7 @@ import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
   AssistantChannelDependencies,
-  'startLinqTyping' | 'startTelegramTyping'
+  'startLinqTyping' | 'startTelegramTyping' | 'onTypingAccepted'
 >
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
@@ -1121,6 +1121,9 @@ function normalizeAssistantChannelTypingDependencies(
   }
 
   const dependencies: AssistantChannelTypingDependencies = {}
+  if (typeof input.onTypingAccepted === 'function') {
+    dependencies.onTypingAccepted = input.onTypingAccepted
+  }
   if (typeof input.startLinqTyping === 'function') {
     dependencies.startLinqTyping = input.startLinqTyping
   }

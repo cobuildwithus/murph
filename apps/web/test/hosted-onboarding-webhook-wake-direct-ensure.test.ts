@@ -110,7 +110,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
-  it("starts the authorized direct ensure while Temporal acknowledgement is pending", async () => {
+  it.each(["linq", "telegram"] as const)("starts the authorized %s direct ensure while Temporal acknowledgement is pending", async (source) => {
     const afterResponseTasks: Array<() => Promise<void>> = [];
     const wakeOrder: string[] = [];
     let resolveTemporalSignal!: (value: {
@@ -152,7 +152,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       scheduleAfterResponse: (task) => {
         afterResponseTasks.push(task);
       },
-      wakeHandoff: buildWakeHandoff(),
+      wakeHandoff: buildWakeHandoff({ source }),
     });
     void handoff.then(
       () => {
@@ -224,7 +224,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           directEnsureRuntimeAttemptId: "runtime-attempt-test",
         },
       },
-      source: "linq",
+      source,
     });
   });
 
@@ -633,7 +633,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
-  it("skips the direct ensure for non-Linq sources even with checkpoint facts", async () => {
+  it("notifies Telegram conversations through the same authorized direct path", async () => {
     mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
@@ -644,7 +644,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signalAccepted: true,
     });
 
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
 
@@ -698,7 +698,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     consoleWarn.mockRestore();
   });
 
-  it("skips the direct ensure and lane facts when the planner checkpoint is absent", async () => {
+  it("starts the authorized hint after the signal owner rereads an absent planner checkpoint", async () => {
     await maybeHandoffHostedExecutionWebhookWake({
       response,
       wakeHandoff: {
@@ -709,12 +709,13 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       },
     });
 
-    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 
@@ -729,11 +730,12 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       }),
     });
 
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 
@@ -804,4 +806,28 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
+
+  it("persists route receipt and early typing only after response without waiting for typing on handoff", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    const webhookReceivedAt = new Date("2026-09-10T12:00:00.000Z");
+    const typingAt = new Date("2026-09-10T12:00:00.800Z");
+    let finishTyping!: (at: Date) => void;
+    const ingressTypingAcceptedAt = new Promise<Date>((resolve) => { finishTyping = resolve; });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({ workflowId: "synthetic-workflow" });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.recordHostedIngressTemporalSignalAccepted.mockClear();
+    await maybeHandoffHostedExecutionWebhookWake({
+      response,
+      webhookReceivedAt,
+      ingressTypingAcceptedAt,
+      wakeHandoff: buildWakeHandoff(),
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+    });
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).not.toHaveBeenCalled();
+    finishTyping(typingAt);
+    for (const task of tasks) await task();
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(expect.objectContaining({
+      webhookReceivedAt, ingressTypingAcceptedAt: typingAt, mailboxItemId: "mailbox_123",
+    }));
+  });
 });

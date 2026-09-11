@@ -130,9 +130,11 @@ Web-owned and independent of the invocation's provider. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 
-For eligible Linq appends, Web starts its existing payloadless direct wake when
+For admitted Linq and Telegram appends, Web starts its existing payloadless direct wake when
 its authorized Temporal signal request begins. Current member/participant access,
 exact mailbox ownership, and cancellation checks precede both requests. The hint
+uses the same validated callback whether checkpoint facts were cached or reread;
+provider and cache availability do not separately gate the wake. It
 overlaps acknowledgement, while webhook success still waits for Temporal. A
 failed acknowledgement keeps the provider retry path; durable mailbox input and
 consumption evidence continue to suppress duplicate replies. No payload is pushed
@@ -2037,8 +2039,14 @@ first, then Web/Vercel.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
-`assistant_milestone` events for Linq typing request start/acceptance and the
-first locally observed Codex output/text. An accepted ephemeral Linq progress
+`assistant_milestone` events for Linq typing request start, Linq/Telegram typing
+acceptance, and the first locally observed Codex output/text. The engine's turn
+handle reports typing acceptance for the initial accepted-input journal and each
+subsequent admitted input, including pre-provider probes and live steering.
+Admission observes the same provider readiness promise regardless of import
+ordering. The original acceptance timestamp is retained; inactive, stopped or
+aborted handles contribute no new evidence. Mailbox staging never infers typing
+from a process-global target map, and telemetry never delays admission. An accepted ephemeral Linq progress
 send emits `progress_update_accepted` at the provider-acceptance boundary; a
 failed or merely attempted send emits no progress milestone. Progress snapshots
 the active provider request's accepted input ids when Linq accepts the send; it
@@ -2833,8 +2841,14 @@ short `device-sync.reconcile` wake if foreground work preempts that background
 pass. A device-sync pass has its own 120-second budget, independent of the shared
 Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
 may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
-45-second admission cap, and any admitted canonical write finishes its existing
-atomic safety boundary before yielding. Do not add a separate system-lane
+45-second admission cap. A bounded raw cleanup pass attempts the canonical lock
+without waiting; contention returns `hasMore: true` without mutation so the existing
+maintenance continuation remains due. The live foreground-yield predicate reaches
+manifest scans, proof reads, and the boundary before starting a cleanup commit.
+Foreground discards an uncommitted prepared batch; a deadline alone may still
+commit an already prepared bounded batch. Any admitted canonical write finishes
+its existing atomic safety boundary before yielding. Unbounded offline repair
+retains its normal lock wait. Do not add a separate system-lane
 active-wake import path unless measured latency or product behavior proves the
 simpler split is insufficient.
 
@@ -3146,6 +3160,19 @@ compare-and-swap replaces that fence. Concurrent replacement callers converge
 on the authoritative current fence record returned by the same compare-and-swap.
 A wake-unconfirmed active child is not replaced; the caller retries until the
 child finishes, becomes wakeable, or is no longer active.
+Foreground requests notify an existing system-mailbox child under its stored exact
+fence, including trusted Web direct requests. A verified accepted wake remains
+accepted; it does not become a five-second handoff retry or force an abort and
+replacement. An eligible runtime already checks actual conversation input and
+continues into foreground in the same invocation. Execution-blocked or exiting
+children retain their release and immediate-recheck path; a wake hint cannot grant
+provider authority. Retention-only invocations still require exact preemption.
+Deploy this controller only with runtime images that support this continuation,
+or after proving the serving consumer promptly reacts to exact owner release.
+Overlapping wakes that receive identity-verified acknowledgement from the same
+runtime do not invalidate one another. Wake acknowledgement checks actual
+invocation, abort, destroy, and stop changes; the activity generation used to
+protect warm-shell expiry is not runtime ownership.
 A failed transport call to an accepted invocation does not prove the invocation
 died. Before clearing the write fence after an invoke transport failure, the
 UserRunner probes the RunnerContainer for the exact fence identity
@@ -3925,6 +3952,13 @@ checkpoint effects remain. A due mailbox wake alone cannot request an owner
 handoff that would skip projection and recording for that owned completion.
 Fresh foreground input and shutdown keep their existing interruption behavior;
 ordinary owner handoff resumes once the completion effects have drained.
+During the Browser Vault offer, a bounded mailbox read qualifies runtime hints
+before cancellation. A fully caught-up empty prefix keeps the same refresh and
+deadline only while the requested mode is unchanged and no dirty state, image
+work, handoff, or shutdown requires attention. Those local conditions are checked
+again after the read. Real work, an incomplete prefix, or a failed read preserves
+the existing interruption path; harmless hints cannot abandon a saved report's
+publication after its recording item has completed.
 The runtime offers that committed projection before ordinary due-assistant work or
 deferred device maintenance can dirty state again. Browser-only wake retry and
 acknowledgement stay within that offer. A runtime-wake interruption or timeout

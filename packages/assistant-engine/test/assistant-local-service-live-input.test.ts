@@ -97,6 +97,12 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     },
     session,
   })
+  const adapters = await vi.importActual<typeof import('../src/assistant/channel-adapters.ts')>(
+    '../src/assistant/channel-adapters.ts',
+  )
+  mocks.getAssistantChannelAdapter.mockImplementation(adapters.getAssistantChannelAdapter)
+  const startTelegramTyping = vi.fn(async () => ({ stop: async () => undefined }))
+  const onTypingAccepted = vi.fn()
   const providerStarted = createDeferred<void>()
   const providerProgressRequested = createDeferred<void>()
   const providerProgressDelivered = createDeferred<void>()
@@ -177,6 +183,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       hosted: {
         memberId: 'member-hosted',
         progressDeliveryDependencies,
+        channelTypingDependencies: { startTelegramTyping, onTypingAccepted },
         userEnvKeys: [],
       },
     },
@@ -201,6 +208,10 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
   expect(providerBoundInputIds).toEqual([['manual-1']])
+  await vi.waitFor(() => expect(onTypingAccepted).toHaveBeenCalledWith({
+    acceptedInputIds: ['manual-1'], at: expect.any(String), channel: 'telegram',
+  }))
+  expect(startTelegramTyping).toHaveBeenCalledOnce()
   expect(releaseProviderAcceptedInputs).toHaveBeenCalledOnce()
   providerProgressRequested.resolve()
   await providerProgressDelivered.promise
