@@ -67,6 +67,11 @@ included in that output.
 
 ## Fresh reference and execution
 
+Check Vercel's deployment queue before collecting the reference. If existing
+builds occupy the available capacity, wait for a build slot and an empty queue
+first. This check cannot reserve capacity: if another build wins the slot,
+retain the 15-minute expiry and treat a delayed attempt as unqualified.
+
 1. Generate a cryptographically random 32-byte salt, represented as 64 lowercase
    hexadecimal characters. Through `murph-prod-psql-ro`, execute the exact
    exported `databaseProofSql` with `$1` replaced by that validated salt as an SQL
