@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { fromJSONSchema } from 'zod/v4'
 import { automationDeviceActivitySourceValues } from '@murphai/contracts'
 
 import {
@@ -43,27 +44,15 @@ function actionContract(
   return contract
 }
 
-function advertisesRootShape(
-  schema: JsonSchemaObject,
-  value: JsonSchemaObject,
-): boolean {
-  const action = value.action
-  if (typeof action !== 'string') {
-    return false
-  }
-  const branch = asObjectArray(schema.oneOf).find((candidate) => {
-    const properties = asObject(candidate.properties)
-    return asObject(properties.action).const === action
-  })
-  if (!branch) {
-    return false
-  }
-  const allowed = new Set(Object.keys(asObject(branch.properties)))
-  const required = asStringArray(branch.required)
-  return (
-    Object.keys(value).every((name) => allowed.has(name))
-    && required.every((name) => Object.hasOwn(value, name))
-  )
+// Validate the advertised document, independently of the production argument parser.
+// This replaces the old root-key-only approximation, which ignored field types,
+// nested requirements, enum values, bounds, and date formats. Custom runtime
+// refinements and JSON Schema keywords unsupported by this reader are not
+// claimed as parity coverage; the cases below exercise structural admission.
+const advertisedInput = fromJSONSchema(MURPH_AUTOMATION_TOOL.inputSchema)
+
+function advertisesInput(value: JsonSchemaObject): boolean {
+  return advertisedInput.safeParse(value).success
 }
 
 function collectKeys(value: unknown, key: string): unknown[] {
@@ -80,6 +69,54 @@ function collectKeys(value: unknown, key: string): unknown[] {
 }
 
 describe('automation model input schema', () => {
+  const version = '2026-08-21T10:00:00.000Z'
+  const patch = { action: 'patch', lookup: 'automation_synthetic', expectedUpdatedAt: version, title: 'Synthetic reminder' }
+  const reference = { entityKind: 'condition', entityId: 'condition_synthetic' }
+  const cases: { label: string; args: JsonSchemaObject; accepted: boolean }[] = [
+    { label: 'inspect', args: { action: 'inspect', lookup: patch.lookup }, accepted: true },
+    { label: 'save', args: { action: 'save', title: patch.title, instructions: 'Synthetic cue.', schedule: { kind: 'every', everyMs: 3_600_000 } }, accepted: true },
+    { label: 'versioned patch', args: patch, accepted: true },
+    { label: 'onboarding save', args: { action: 'save_onboarding_first_personal_read' }, accepted: true },
+    { label: 'reconcile', args: { action: 'reconcile', desiredAutomationIds: [], supportSeriesId: 'synthetic-series' }, accepted: true },
+    { label: 'follow-up', args: { action: 'attach_follow_up', afterMinutes: 30, instructions: 'Synthetic follow-up.' }, accepted: true },
+    { label: 'recovery dismissal', args: { action: 'dismiss_local_at_recovery', localAtRecoveryKey: 'a'.repeat(64), resolvedLocalDate: '2026-08-21' }, accepted: true },
+    { label: 'missing version', args: { action: 'patch', lookup: patch.lookup, title: patch.title }, accepted: false },
+    { label: 'invalid version format', args: { ...patch, expectedUpdatedAt: 'yesterday' }, accepted: false },
+    { label: 'wrong version type', args: { ...patch, expectedUpdatedAt: 42 }, accepted: false },
+    { label: 'unknown property', args: { ...patch, unexpected: true }, accepted: false },
+    { label: 'unknown action', args: { action: 'overwrite' }, accepted: false },
+    { label: 'empty title', args: { ...patch, title: '' }, accepted: false },
+    { label: 'maximum title', args: { ...patch, title: 'x'.repeat(160) }, accepted: true },
+    { label: 'overlong title', args: { ...patch, title: 'x'.repeat(161) }, accepted: false },
+    { label: 'nested reference', args: { ...patch, contextReferences: [reference] }, accepted: true },
+    { label: 'missing reference id', args: { ...patch, contextReferences: [{ entityKind: reference.entityKind }] }, accepted: false },
+    { label: 'wrong reference id type', args: { ...patch, contextReferences: [{ ...reference, entityId: 42 }] }, accepted: false },
+    { label: 'invalid reference kind pattern', args: { ...patch, contextReferences: [{ ...reference, entityKind: 'Invalid Kind' }] }, accepted: false },
+    { label: 'wrong reference array type', args: { ...patch, contextReferences: reference }, accepted: false },
+    { label: 'nested schedule', args: { ...patch, schedule: { kind: 'every', everyMs: 3_600_000 } }, accepted: true },
+    { label: 'missing schedule interval', args: { ...patch, schedule: { kind: 'every' } }, accepted: false },
+    { label: 'wrong interval type', args: { ...patch, schedule: { kind: 'every', everyMs: '3600000' } }, accepted: false },
+    { label: 'negative interval', args: { ...patch, schedule: { kind: 'every', everyMs: -1 } }, accepted: false },
+    { label: 'unknown status', args: { ...patch, status: 'made_up' }, accepted: false },
+    { label: 'clear nullable summary', args: { ...patch, summary: null }, accepted: true },
+    { label: 'wrong nullable summary type', args: { ...patch, summary: 42 }, accepted: false },
+    { label: 'too many reconciliation ids', args: { action: 'reconcile', supportSeriesId: 'synthetic-series', desiredAutomationIds: Array.from({ length: 201 }, (_, i) => `automation_${i}`) }, accepted: false },
+  ]
+
+  it.each(cases)('matches advertised and runtime structural admission: $label', ({ args, accepted }) => {
+    expect(advertisedInput.safeParse(args).success, 'advertised JSON Schema').toBe(accepted)
+    const parsed = readAutomationDynamicToolRequest({ arguments: args, tool: MURPH_AUTOMATION_TOOL.name })
+    expect(parsed).not.toBeNull()
+    expect(parsed?.kind !== 'invalid-automation-arguments', 'production argument parser').toBe(accepted)
+  })
+
+  it('covers every advertised automation action with an accepted runtime fixture', () => {
+    const actions = asObjectArray(MURPH_AUTOMATION_TOOL.inputSchema.oneOf)
+      .map((branch) => asObject(asObject(branch.properties).action).const)
+    expect([...new Set(cases.filter((entry) => entry.accepted).map((entry) => entry.args.action))].sort())
+      .toEqual(actions.sort())
+  })
+
   it('advertises the canonical device source enum in runtime and model schemas', () => {
     for (const schema of [MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA, MURPH_AUTOMATION_TOOL.inputSchema]) {
       const sources = collectKeys(schema, 'source')
@@ -203,29 +240,29 @@ describe('automation model input schema', () => {
   it('advertises strict action-specific root contracts', () => {
     const schema = MURPH_AUTOMATION_TOOL.inputSchema
 
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'inspect',
       lookup: 'morning-reminder',
     })).toBe(true)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'inspect',
       lookup: 'morning-reminder',
       status: 'archived',
     })).toBe(false)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'save_onboarding_first_personal_read',
     })).toBe(true)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'save_onboarding_first_personal_read',
       title: 'Not accepted by the canonical action',
     })).toBe(false)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'save',
       instructions: 'A useful reminder.',
       schedule: { kind: 'every', everyMs: 3_600_000 },
       title: 'Useful reminder',
     })).toBe(true)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'save',
       instructions: 'Open and follow the group newsletter skill.',
       schedule: {
@@ -236,26 +273,26 @@ describe('automation model input schema', () => {
       slug: 'group-health-newsletter',
       title: 'Weekly health',
     })).toBe(true)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'patch',
       expectedUpdatedAt: '2026-08-21T10:00:00.000Z',
       lookup: 'morning-reminder',
       status: 'archived',
     })).toBe(true)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'patch',
       expectedUpdatedAt: '2026-08-21T10:00:00.000Z',
       lookup: 'automation_01K1ABCDEFGHJKMNPQRSTVWXYZ',
       slug: 'morning-reminder',
     })).toBe(false)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'reconcile',
       desiredAutomationIds: [],
       supportSeriesId: 'weekly-plan',
     })).toBe(true)
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'dismiss_local_at_recovery',
-      localAtRecoveryKey: 'recovery-key',
+      localAtRecoveryKey: 'a'.repeat(64),
       resolvedLocalDate: '2026-08-21',
     })).toBe(true)
 
@@ -263,7 +300,7 @@ describe('automation model input schema', () => {
       expect(asObject(asObject(actionContract(schema, action).properties).lookup))
         .toMatchObject({ type: 'string', minLength: 1 })
     }
-    expect(advertisesRootShape(schema, {
+    expect(advertisesInput({
       action: 'patch', lookup: 'automation_synthetic', instructions: 'Updated cue.',
     })).toBe(false)
   })

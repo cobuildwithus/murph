@@ -576,6 +576,15 @@ including follow-up, maintenance memory, group configuration/challenge/progress
 and both shared-read variants. Route alternatives sharing an identity run in
 separate batches; admission is never broadened to make a test pass.
 
+Automation structural admission also runs the advertised JSON through the existing
+Zod JSON Schema reader and compares accepted/rejected fixtures with the production
+argument parser. Every action needs an accepted fixture; cases cover inspected
+versions, nested references/schedules, types, enums, formats, and bounds.
+Personalization checks every advertised enum value and invalid field types against
+runtime admission, alongside the existing 32 persona-pair/presence combinations.
+These tests do not claim full schema/parser equivalence: custom refinements and
+keywords unsupported by the JSON Schema reader retain their dedicated runtime tests.
+
 The fixture covers small documents and documents above the current compaction
 threshold, reference scopes/definitions, nested arrays/objects, compositions and
 conditionals, bounds, patterns/formats, enum/const/default/nullability, required

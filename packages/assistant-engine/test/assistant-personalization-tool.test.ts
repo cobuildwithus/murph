@@ -1,5 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
+import { fromJSONSchema } from 'zod/v4'
+import { assistantBasePersonaIdValues, assistantTonePreferenceValues, assistantVoiceOptionIdValues } from '@murphai/contracts'
 
 import {
   executeMurphDynamicToolRequest,
@@ -11,6 +13,37 @@ import type {
 } from '../src/assistant/hosted-tool-context.js'
 
 describe('assistant personalization tool', () => {
+  it('keeps every advertised enum value and invalid field type aligned with runtime admission', () => {
+    const properties = MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1].properties
+    expect(properties.mainPersona.enum).toEqual(assistantBasePersonaIdValues)
+    expect(properties.supportingPersona.anyOf[0].enum).toEqual(assistantBasePersonaIdValues)
+    expect(properties.tone.enum).toEqual(assistantTonePreferenceValues)
+    expect(properties.voice.enum).toEqual(assistantVoiceOptionIdValues)
+    const fields = [
+      { name: 'mainPersona', schema: properties.mainPersona, values: assistantBasePersonaIdValues, paired: { supportingPersona: null } },
+      { name: 'supportingPersona', schema: properties.supportingPersona, values: [...assistantBasePersonaIdValues, null], paired: {} },
+      { name: 'tone', schema: properties.tone, values: assistantTonePreferenceValues, paired: {} },
+      { name: 'voice', schema: properties.voice, values: assistantVoiceOptionIdValues, paired: {} },
+    ]
+    for (const field of fields) {
+      const schema: Record<string, unknown> = field.schema
+      const advertised = fromJSONSchema(schema)
+      for (const value of [...field.values, 'unsupported_value', '', 42, false, {}, []]) {
+        const accepted = field.values.some((allowed) => allowed === value)
+        expect(advertised.safeParse(value).success, `${field.name} advertised value`).toBe(accepted)
+        // Satisfy the separate persona-pair constraint when testing an enum.
+        const paired = field.name === 'supportingPersona'
+          ? { mainPersona: assistantBasePersonaIdValues.find((persona) => persona !== value) }
+          : field.paired
+        const parsed = readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: {
+          namespace: 'murph', tool: 'personalization',
+          arguments: { action: 'update', ...paired, [field.name]: value },
+        } })
+        expect(parsed?.kind, `${field.name} runtime value`).toBe(accepted ? 'personalization' : 'invalid-personalization-arguments')
+      }
+    }
+  })
+
   it('advertises sparse updates with paired persona fields and preserves runtime admission', () => {
     expect(MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1]).toMatchObject({
       type: 'object', additionalProperties: false, required: ['action'], minProperties: 2,
