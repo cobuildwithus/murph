@@ -43,6 +43,138 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Ensure-processing summaries
+
+`runner.processing_finished` is one best-effort summary per completed
+`HostedUserRunner.ensureRuntimeProcessingForUser` call, including denied,
+queued-out, uncertain, accepted, and thrown outcomes. It is not a poll trace,
+mailbox admission, runtime health proof, or recovery signal. Only the existing
+`runner.accepted_attempt_failed` event requests failure recovery through this
+callback. No schema migration or new durable state is required.
+
+The existing invocation log owner sends the signed callback in a caught,
+detached promise. `HostedUserRunner` passes that promise to its existing
+`state.waitUntil` owner; neither the request nor its response cancellation is
+awaited by processing control. Response cancellation is initiated with owned
+rejection handling but is not awaited by the telemetry task either. A rejected
+HTTP log write emits only `runtimeLogWriteStatus` in the existing Workers logger,
+never response content. Transport failures, rejections, and scheduling failures
+cannot replace the control result. Delivery remains best-effort.
+
+Correlation uses `orchestrationAttemptFingerprint`, `commandStartedAtEpochMs`,
+and the typed runtime attempt/generation columns when known. The fingerprint is
+lowercase hex SHA-256 of UTF-8 `murph.runtime-processing-attempt.v1`, one NUL byte,
+and the complete caller-selected orchestration attempt id. No syntax-based
+exception permits a plaintext id: the private producer could use a member id.
+Hashing runs only on detached telemetry; a hash failure omits the fingerprint,
+never falls back to the input. This is pseudonymous correlation, not anonymity
+against guessing a low-entropy input. It adds no key, secret or configuration.
+
+Repeated commands can reuse an orchestration id, so retain command start and
+runtime attempt/generation. Detached writes may arrive out of order. On a fence
+change, transport and liveness observations for the superseded target are
+deleted rather than carried into the later one. `wakeAttemptId` and
+`wakeLeaseGeneration`, when present, belong to the last observed fence, as do
+the typed columns. A new fence with an older reply lacking optional metadata
+must not inherit the prior fence's observations. This summary is not a history
+of every target visited during convergence.
+
+Finite `runtimeProcessingStage` values are `consent_queue`, `state_bind`,
+`state_read`, `admission`, `active_wake`, `liveness`, and `fresh_start`.
+`runtimeProcessingOutcome` preserves the public result kind or `threw`;
+`runtimeProcessingAction` is present only for accepted results.
+`activeWakeRpcDispatchedAtEpochMs` marks invocation of the child RPC by the
+caller, not child receipt. `activeWakeRpcOutcome` is `returned`, `caller_timeout`,
+or `rpc_error`. `returned` is not acceptance: it can include a child-reported
+timeout. `caller_timeout` uses the existing command-budget timeout classifier;
+an already-expired budget can prevent dispatch altogether. These fields do not
+cancel the child, suppress late accepted work, or reinterpret the final result.
+`runtimeProcessingRetryAtEpochMs` preserves the actual returned retry time; it
+does not show when the external scheduler will next run.
+`runtimeProcessingRetryReason` preserves the existing retry taxonomy, with
+`admission_denied` for authoritative denial. `runtimeLivenessOutcome` and its
+optional finite reason distinguish exact-active, inactive, mismatch, and
+indeterminate observations. A local exact-active pointer is not a fresh TCP
+health check. No exception text is added by this event.
+
+`wakeStage` is one of `admission`, `dispatch`, `drain`, `acknowledgement`,
+`legacy_health`, or `exiting_owner`. It and the transport timestamps are
+optional across revisions, closed-picked RPC metadata, not control inputs.
+Updated RunnerContainer responses always include observations; no request flag
+is needed. The authoritative ensure-processing response JSON is unchanged.
+The existing TCP handler adds numeric receipt and acceptance timing headers, which are relayed
+without logging any arbitrary headers. Receipt precedes request-body parsing;
+acceptance follows the wake decision. `wakePending=true` means the entrypoint
+retained a wake before callback readiness, **not** that the runtime consumer
+was notified. `wakeAccepted=true` describes headers; a later drain failure can
+still produce `retry_later`. The final outcome must always be read with it.
+
+Use the existing foreground latency milestones (`runtimeWakeNotifiedAtEpochMs`,
+`foregroundWaitResolvedAtEpochMs`, and import/delivery phases) for work after
+notification. Coalescing can retain the earliest notification and first
+orchestration context; do not assume one notification row per ensure attempt.
+
+Deploy the Web parser/event allowlist before emitting this event from Workers.
+Older Web versions reject unknown event codes; older Container/Node revisions
+omit optional metadata. Control results are unchanged under those skews. If an
+RPC loses the caller's deadline race, its transport observations never return
+to this summary: missing fields mean **unobserved**, not “not dispatched” or
+“not received.” A reset or an unbounded await can prevent a final summary
+altogether. This instrumentation does not claim to distinguish SDK readiness
+from platform TCP scheduling inside a request that never returns.
+
+Example bounded SQL (epoch fields are nullable; do not coerce absence to zero):
+
+```sql
+WITH attempts AS (
+  SELECT at, attempt_id, lease_generation, redacted_json AS d
+  FROM hosted_runtime_log
+  WHERE at >= :window_start AND at < :window_end
+    AND event_code = 'runner.processing_finished'
+  ORDER BY at DESC
+  LIMIT 200
+)
+SELECT at, attempt_id, lease_generation,
+  d->>'orchestrationAttemptFingerprint' AS orchestration_attempt_fingerprint,
+  d->>'commandStartedAtEpochMs' AS command_started_epoch_ms,
+  d->>'runtimeProcessingOutcome' AS outcome,
+  d->>'runtimeProcessingAction' AS action,
+  d->>'runtimeProcessingRetryReason' AS retry_reason,
+  d->>'runtimeProcessingRetryAtEpochMs' AS retry_at_epoch_ms,
+  d->>'runtimeProcessingRetryStage' AS retry_stage,
+  d->>'runtimeProcessingStage' AS final_stage,
+  d->>'activeWakeRpcOutcome' AS caller_rpc_outcome,
+  d->>'activeWakeRpcDispatchedAtEpochMs' AS caller_rpc_dispatched_epoch_ms,
+  d->>'wakeStage' AS transport_stage,
+  d->>'wakeStatus' AS response_status,
+  d->>'wakeAccepted' AS accepted_flag,
+  d->>'wakePending' AS pending_flag,
+  d->>'wakeSignalAborted' AS signal_aborted,
+  d->>'runtimeLivenessOutcome' AS liveness,
+  d->>'runtimeLivenessReason' AS liveness_reason,
+  (d->>'userRunnerEnteredAtEpochMs')::bigint
+    - (d->>'cloudflareRouteReceivedAtEpochMs')::bigint AS route_to_runner_ms,
+  (d->>'runtimeConsentLockAcquiredAtEpochMs')::bigint
+    - (d->>'userRunnerEnteredAtEpochMs')::bigint AS consent_queue_ms,
+  (d->>'activeWakeFinishedAtEpochMs')::bigint
+    - (d->>'activeWakeStartedAtEpochMs')::bigint AS active_rpc_ms,
+  (d->>'wakeResponseAtEpochMs')::bigint
+    - (d->>'wakeDispatchAtEpochMs')::bigint AS transport_to_response_ms,
+  (d->>'wakeDrainFinishedAtEpochMs')::bigint
+    - (d->>'wakeResponseAtEpochMs')::bigint AS drain_ms,
+  (d->>'wakeHandlerAcceptedAtEpochMs')::bigint
+    - (d->>'wakeHandlerReceivedAtEpochMs')::bigint AS handler_to_accept_ms
+FROM attempts
+ORDER BY at, orchestration_attempt_fingerprint;
+```
+
+The transport interval includes the SDK's state/readiness work and TCP fetch,
+not just network time. Constructor timestamps can predate a warm request.
+Compare same-owner differences first; Worker, Durable Object, Node, Temporal,
+and Web epoch differences require clock-skew allowance. The SQL completion
+window should include the command budget beyond the ingress window. Do not
+export raw JSON or subject identifiers just to investigate a latency span.
+
 ### Provider request diagnostics
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
