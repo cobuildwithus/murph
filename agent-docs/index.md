@@ -28,6 +28,13 @@ Runtime progress diagnostics (aggregate alerts and code-only first-pending
 evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 
+Automation edit schema discovery and attended progress guidance are owned by
+`ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and
+declaration preservation, independent schema/runtime structural admission parity,
+versioned edits, nutrition/personalization inputs, and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
+`agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
+tool-description transport and its existing byte/count bounds.
+
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
 owners relevant to the task. A row's date is its recorded verification date,
@@ -55,7 +62,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `docs/hosted-auth-migration.md` | Staged Privy removal, encrypted Better Auth backend, Ops import, session/native continuity and retirement gates. | Hosted auth migration rollout | High | 2026-09-09 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, and retention limits. | Hosted account privacy workflow | High | 2026-05-13 |
-| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-09 |
+| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, assembled-bundle owner parity, coverage, and consumer-first rollout), foreground-wake summaries with fingerprinted correlation and caller/transport attribution, migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-09 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents. | Incident coordination and public status policy | High | 2026-08-05 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
@@ -83,7 +90,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/product-specs/journal.md` | Private web and native timelines derived from canonical health records. | Journal product spec | High | 2026-09-06 |
 | `agent-docs/product-specs/personal-patterns.md` | Private context-to-outcome findings, desktop comparisons, and mobile cards with changed results, compact neutral states, tappable recorded-day counts, and inline comparison sample sizes. | Personal Patterns product spec | High | 2026-09-10 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
-| `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable usage-credit ledger; retained paid legacy compatibility. | Hosted access/billing product spec | High | 2026-09-10 |
+| `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable credit ledger, text entry, subscription access for Images and Responses HTTP/WebSocket generation, and abuse alerts; retained paid legacy compatibility. | Hosted access/billing product spec | High | 2026-09-11 |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers. | Hosted billing/current-state spec | High | 2026-07-30 |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Hosted billing/current-state spec. | Hosted billing/current-state spec | High | 2026-08-18 |
 | `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members. | Hosted billing/product spec | High | 2026-08-25 |
@@ -137,7 +144,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `packages/query/bench/README.md` | Reproduce synthetic query resource measurements through public canonical and query APIs in constrained Docker containers. | Query resource benchmarks | Medium | 2026-09-09 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Hosted operator provider authentication, mailbox/workspace checkpoints, v2-only live restore, derived artifact availability, inert legacy cache manifests, retained legacy object cleanup and canonical receipt recovery, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including independent workspace attempts, shared canonical publication, single-pass device-hint coverage, validated continuation scheduling, independent maintenance, future retry wakes after cold restore, vault-share deadline revalidation, fenced prior-snapshot reuse, background Browser Vault freshness, retired member shell hints with historical latency reads, deadline-bound operator diagnostic execution and status, exact future-continuation owner release, metadata-only checkpoint timing, committed Browser Vault publication before subsequent ordinary due work with timeout continuation delivery, and completion ownership across foreground replacement. | Hosted execution architecture | High | 2026-09-11 |
-| `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration target and digest-bound production-core release admission. | Hosted Temporal orchestration target | High | 2026-09-09 |
+| `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration, acknowledged checkpoint rechecks, and digest-bound production-core release admission. | Hosted Temporal orchestration target | High | 2026-09-11 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-09-10 |
 | `agent-docs/research/2026-08-23-vault-cli-error-recovery-audit.md` | Point-in-time exhaustive Vault CLI audit of generic, lossy, untyped, misleading-success, and privacy-unsafe error paths, with prioritized model-recovery work packages. | CLI error-recovery audit | Medium | 2026-08-24 |

@@ -1327,6 +1327,7 @@ model HostedWorkspace {
   systemMailboxProgressGeneration BigInt? @map("system_mailbox_progress_generation")
   inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
   inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")
+  runtimeRecheckSignaledVersion BigInt? @map("runtime_recheck_signaled_version")
   acceptedAttemptFailureRecheckClaimedAt DateTime? @map("accepted_attempt_failure_recheck_claimed_at")
   redactedStatusJson     Json?        @map("redacted_status_json")
   checkpointedAt         DateTime?    @map("checkpointed_at")

@@ -6,6 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH } from "@murphai/hosted-execution/routes";
+
 import { executeCodexAppServerTurn } from "@murphai/assistant-engine/assistant-codex";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -271,9 +273,18 @@ describe("pinned Codex OpenAI egress conformance", () => {
       validateRuntimeProviderEgressCredential,
     });
     const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", upstreamFetch);
+    const imageAccessFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({ allowed: true, reason: "allowed" })
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.pathname === HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH
+        ? imageAccessFetch(request, init)
+        : upstreamFetch(request, init);
+    }));
 
     for (const route of PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes) {
+      const imageAccessCallsBefore = imageAccessFetch.mock.calls.length;
       const upstreamCallsBefore = upstreamFetch.mock.calls.length;
       const validationsBefore = validateRuntimeProviderEgressCredential.mock.calls.length;
       const response = await hostedRunnerIntercept(
@@ -292,6 +303,9 @@ describe("pinned Codex OpenAI egress conformance", () => {
       }
 
       expect(response.status, `${route.method} ${route.pathname}`).toBe(200);
+      expect(imageAccessFetch.mock.calls.length, route.feature).toBe(
+        imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") ? 1 : 0),
+      );
       expect(upstreamFetch.mock.calls.length, route.feature)
         .toBe(upstreamCallsBefore + 1);
       expect(validateRuntimeProviderEgressCredential.mock.calls.length, route.feature)

@@ -2143,6 +2143,13 @@ Last verified: 2026-09-04
   requested checkpoint; only the finished event's `webCheckpointAccepted`
   establishes Web acceptance. Malformed timestamp values and raw wake reasons
   are never copied into these fields.
+- Attended progress guidance distinguishes quick work from a growing sequence.
+  Several edits, substantive checks, or repeated repairs warrant one brief update
+  before continuing; already-visible elapsed time can prompt an update around
+  twenty seconds without adding polling. Quick replies and routine setup stay
+  quiet. Groups retain their one-update limit, and unavailable/background routes
+  gain no progress delivery authority. This is model guidance, not an automatic
+  timer or a guaranteed first-response deadline.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

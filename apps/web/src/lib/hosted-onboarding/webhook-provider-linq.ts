@@ -2018,6 +2018,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
       event: messageEvent,
       participantContact,
       phonePrefixes: instantStartPhonePrefixes,
+      smsEnabled: getHostedOnboardingEnvironment().linqSmsInstantStartEnabled,
     });
   const pendingInstantStartAdmissionEventId =
     existingMember
@@ -2160,6 +2161,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
       event: messageEvent,
       participantContact,
       phonePrefixes: instantStartPhonePrefixes,
+      smsEnabled: getHostedOnboardingEnvironment().linqSmsInstantStartEnabled,
     });
   const contactMemberResolution = existingMember === null
     ? participantContact.kind === "phone"

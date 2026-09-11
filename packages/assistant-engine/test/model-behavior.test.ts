@@ -152,6 +152,13 @@ describe('assistant execution prompt contract', () => {
     const scopedSafety =
       'A diagnosis, medication, disability, age, pregnancy status, allergy, dietary restriction, or other health-context fact can change or block the specific advice it affects, but it is not a blanket veto on benign calculations, summaries, logging, education, or unrelated low-risk actions.'
 
+    expect(groupPrompt).toContain('If an attended request expands into several record edits or repeated repairs')
+    expect(groupPrompt).toContain('Send at most one short, natural group progress update')
+    const unavailable = buildAssistantExecutionBehaviorText({
+      profile: 'gpt5-agentic', progressUpdatesAvailable: false,
+    })
+    expect(unavailable).toContain('Member-visible interim progress is unavailable on this route')
+    expect(unavailable).not.toContain('send one update before starting')
     expect(groupPrompt).toContain(sharedIdentity)
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
@@ -1348,16 +1355,16 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'Default to no progress update',
+      'Keep quick answers and one or two straightforward actions quiet',
     )
     expect(prompt).toContain(
-      'Send one only when the member is likely to wait noticeably',
+      'For several record edits, 3+ substantive checks/actions',
     )
     expect(prompt).toContain(
-      'Routine onboarding/setup never qualifies by itself, even when it uses tools or the runtime is slow',
+      'If a quick task expands into repeated repairs, additional edits, or a noticeable wait',
     )
     expect(prompt).toContain(
-      'one or two quick calls, and the next setup question go straight to the final reply',
+      'aim to update before about 20 seconds of silent work',
     )
     expect(prompt).toContain(
       'send a required child-start acknowledgement after spawning.',
@@ -1402,6 +1409,8 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.',
     )
+    expect(prompt).not.toContain('Default to no progress update')
+    expect(prompt).not.toContain('Routine onboarding/setup never qualifies by itself')
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
     expect(prompt).not.toContain(

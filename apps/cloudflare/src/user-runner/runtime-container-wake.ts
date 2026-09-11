@@ -15,6 +15,7 @@ import {
 } from "../runner-container.js";
 import {
   buildHostedRunnerMetadataOnlyErrorDetails,
+  type RuntimeProcessingDiagnostics,
 } from "./diagnostics.js";
 import {
   isRuntimeProcessingCommandBudgetTimeout,
@@ -25,6 +26,7 @@ import {
 export async function ensureActiveRuntimeProcessing(
   input: {
     activeRuntime: RunnerRuntimeWakeInput;
+    diagnostics: RuntimeProcessingDiagnostics;
     commandBudget: RuntimeProcessingCommandBudget;
     env: HostedExecutionEnvironment;
     runnerContainerName: string | null;
@@ -36,6 +38,9 @@ export async function ensureActiveRuntimeProcessing(
   | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
   | Extract<RunnerContainerEnsureProcessingResult, { kind: "wake-unconfirmed" }>
 > {
+  // A command can converge on a new owner and issue another wake. Missing
+  // metadata from that wake must not retain an earlier owner's observations.
+  delete input.diagnostics.wakeDetails;
   if (!input.runnerContainerNamespace) {
     return { kind: "wake-unconfirmed", reason: "missing-container-binding" };
   }
@@ -62,12 +67,17 @@ export async function ensureActiveRuntimeProcessing(
     try {
       const result = await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
-        operation: async () => await container.ensureProcessing!({
-          activeRuntime: input.activeRuntime,
-          userId: input.activeRuntime.userId,
-        }),
+        operation: async () => {
+          input.diagnostics.details.activeWakeRpcDispatchedAtEpochMs = Date.now();
+          return await container.ensureProcessing!({
+            activeRuntime: input.activeRuntime,
+            userId: input.activeRuntime.userId,
+          });
+        },
         stepTimeoutMs: input.env.webControlTimeoutMs,
       });
+      input.diagnostics.details.activeWakeRpcOutcome = "returned";
+      copyRuntimeWakeDiagnostics(input.diagnostics, result);
       if (
         result.kind === "accepted"
         || result.kind === "start-required"
@@ -77,6 +87,8 @@ export async function ensureActiveRuntimeProcessing(
       }
       return { kind: "wake-unconfirmed", reason: "container-rpc-error" };
     } catch (error) {
+      input.diagnostics.details.activeWakeRpcOutcome = isRuntimeProcessingCommandBudgetTimeout(error)
+        ? "caller_timeout" : "rpc_error";
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(error),
@@ -99,13 +111,17 @@ export async function ensureActiveRuntimeProcessing(
   }
 
   try {
-    const runtimeWake = normalizeRunnerRuntimeWakeResult(
-      await runRuntimeProcessingCommandStep({
-        budget: input.commandBudget,
-        operation: async () => await container.wakeRuntime!(input.activeRuntime),
-        stepTimeoutMs: input.env.webControlTimeoutMs,
-      }),
-    );
+    const result = await runRuntimeProcessingCommandStep({
+      budget: input.commandBudget,
+      operation: async () => {
+        input.diagnostics.details.activeWakeRpcDispatchedAtEpochMs = Date.now();
+        return await container.wakeRuntime!(input.activeRuntime);
+      },
+      stepTimeoutMs: input.env.webControlTimeoutMs,
+    });
+    input.diagnostics.details.activeWakeRpcOutcome = "returned";
+    copyRuntimeWakeDiagnostics(input.diagnostics, result);
+    const runtimeWake = normalizeRunnerRuntimeWakeResult(result);
     if (runtimeWake.kind === "accepted") {
       return { action: runtimeWake.action, kind: "accepted" };
     }
@@ -114,6 +130,8 @@ export async function ensureActiveRuntimeProcessing(
     }
     return { kind: "wake-unconfirmed", reason: runtimeWake.reason };
   } catch (error) {
+    input.diagnostics.details.activeWakeRpcOutcome = isRuntimeProcessingCommandBudgetTimeout(error)
+      ? "caller_timeout" : "rpc_error";
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: buildHostedRunnerMetadataOnlyErrorDetails(error),
@@ -198,4 +216,50 @@ export function readActiveRuntimeRunnerContainerName(input: {
   return storedUserId === input.activeRuntime.userId
     ? input.runnerContainerName.trim()
     : null;
+}
+
+// Do not spread RPC values into runtime-log JSON. Older Workers may omit these
+// fields; unknown fields/stages and malformed values remain unattributed.
+function copyRuntimeWakeDiagnostics(
+  diagnostics: RuntimeProcessingDiagnostics,
+  result: unknown,
+): void {
+  if (!isObjectRecord(result)) return;
+  // Diagnostics are optional across Worker revisions and cannot change the
+  // control result, even for an unexpected throwing in-process test double.
+  try {
+    const details: RuntimeProcessingDiagnostics["details"] = {};
+    copyRuntimeWakeDiagnosticFields(details, result.wakeDiagnostics);
+    diagnostics.wakeDetails = details;
+  } catch {
+    // Keep the original wake result; never reinterpret telemetry as failure.
+  }
+}
+
+function copyRuntimeWakeDiagnosticFields(
+  details: RuntimeProcessingDiagnostics["details"],
+  value: unknown,
+): void {
+  if (!isObjectRecord(value)) return;
+  for (const key of [
+    "wakeEnteredAtEpochMs", "wakeFinishedAtEpochMs", "wakeDispatchAtEpochMs",
+    "wakeResponseAtEpochMs", "wakeDrainFinishedAtEpochMs",
+    "wakeHandlerReceivedAtEpochMs", "wakeHandlerAcceptedAtEpochMs",
+    "wakeStatus", "wakeLifecyclePendingCount",
+  ] as const) {
+    const number = value[key];
+    if (typeof number === "number" && Number.isSafeInteger(number) && number >= 0) {
+      details[key] = number;
+    }
+  }
+  for (const key of [
+    "wakeAccepted", "wakePending", "wakeIdentityChecked", "wakeAbsent",
+    "wakeMismatch", "wakeSignalAborted", "wakeActivePointerPresent",
+  ] as const) {
+    if (typeof value[key] === "boolean") details[key] = value[key];
+  }
+  if (["admission", "dispatch", "drain", "acknowledgement", "legacy_health", "exiting_owner"]
+    .some((stage) => stage === value.wakeStage)) {
+    details.wakeStage = String(value.wakeStage);
+  }
 }

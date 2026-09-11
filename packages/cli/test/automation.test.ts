@@ -1831,6 +1831,7 @@ test("automation compact list retains enumeration state and materially reduces a
     "summary",
     "supportKind",
     "title",
+    "updatedAt",
   ]);
   for (const retainedField of [
     "automationId",
@@ -1841,6 +1842,7 @@ test("automation compact list retains enumeration state and materially reduces a
     "activeUntil",
     "schedule",
     "supportKind",
+    "updatedAt",
   ]) {
     assert.deepEqual(compactItem[retainedField], fullItem[retainedField]);
   }
@@ -1853,7 +1855,6 @@ test("automation compact list retains enumeration state and materially reduces a
     "tags",
     "createdAt",
     "scheduleAnchorAt",
-    "updatedAt",
     "relativePath",
     "instructions",
     "markdown",
