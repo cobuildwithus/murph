@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+import { resolveHostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/config";
+
+import { waitForHostedJunctionReplayCompletion } from "./hosted-local-junction-replay-completion.js";
 
 const mocks = vi.hoisted(() => ({
   issueHostedAppSessionForTest: vi.fn(async (input: { secureCookieMode: boolean }) => ({
@@ -10,7 +13,7 @@ const mocks = vi.hoisted(() => ({
     sessionId: "session-id",
   })),
   ensureHostedRuntimeLogDatabaseForTest: vi.fn(async () => {}),
-  listHostedRuntimeLogsForTest: vi.fn(async () => [{
+  listHostedRuntimeLogsForTest: vi.fn<typeof import("#hosted-web-testing")["listHostedRuntimeLogsForTest"]>(async () => [{
     at: "2026-08-07T12:00:00.000Z",
     attemptId: "attempt_test",
     component: "runner",
@@ -22,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   reserveLocalTcpPort: vi.fn(async () => 4300),
   reserveLocalTemporalTcpPort: vi.fn(async () => 7233),
   startHostedLocalDevHarness: vi.fn(),
+  startHostedLocalDevStack: vi.fn<typeof import("@murphai/hosted-local-harness/dev-hosted-local/stack")["startHostedLocalDevStack"]>(),
   startHostedLocalOidcFixture: vi.fn(async () => ({
     jwksUrl: "http://127.0.0.1:4100/.well-known/jwks.json",
     stop: vi.fn(async () => {}),
@@ -71,6 +75,10 @@ vi.mock("./hosted-local-dev-harness.js", () => ({
   startHostedLocalDevHarness: mocks.startHostedLocalDevHarness,
 }));
 
+vi.mock("@murphai/hosted-local-harness/dev-hosted-local/stack", () => ({
+  startHostedLocalDevStack: mocks.startHostedLocalDevStack,
+}));
+
 vi.mock("./hosted-local-wake.js", () => ({
   appendHostedWake: vi.fn(),
   appendHostedWakeAndWakeWorker: vi.fn(),
@@ -85,6 +93,9 @@ import {
 } from "./hosted-local-full-stack-scenario.js";
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -234,6 +245,105 @@ it("requires progress from the prior completed status before a later completion"
       },
     );
   } finally {
+    await scenario.stop();
+  }
+});
+
+it.each([false, true])(
+  "observes Junction completion through the real scenario and passive harness (retained retry: %s)",
+  async (retainedRetry) => {
+    const scenario = await startScenarioWithRealHarness();
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const baseline = createCompletedStatus("1", "2026-07-10T12:00:00.000Z");
+    const admitted = createCompletedStatus("2", "2026-07-10T12:00:01.000Z");
+    const drained = createCompletedStatus("3", "2026-07-10T12:00:31.000Z");
+    let activated = false;
+    const fetchStatus = vi.fn(async (_request: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json(!activated ? baseline : retainedRetry && Date.now() < startedAt + 30_000
+        ? admitted : drained)
+    );
+    vi.stubGlobal("fetch", fetchStatus);
+    const progress = vi.spyOn(scenario.harness, "waitForHostedProgress");
+    vi.spyOn(scenario, "readJunctionDeviceSyncReplayDrainStatus").mockImplementation(async () => ({
+      hasPendingDirtyConnection: retainedRetry && Date.now() < startedAt + 30_000,
+      hasPendingDirtyConnectionForUser: retainedRetry && Date.now() < startedAt + 30_000,
+      historicalBackfillEmptyAttempts: null,
+      historicalBackfillEvidence: null,
+      historicalBackfillLastEmptyAt: null,
+      historicalBackfillStatus: null,
+      pendingDirtyResourceCount: retainedRetry && Date.now() < startedAt + 30_000 ? 48 : 0,
+    }));
+
+    try {
+      await scenario.waitForHostedCompletion(baseline.userId);
+      activated = true;
+      const completion = expect(waitForHostedJunctionReplayCompletion({
+        assertNoJobFailures: async () => {},
+        connectionId: "junction_replay_fixture",
+        deadlineAtMs: startedAt + 31_000,
+        memberId: baseline.userId,
+        scenario,
+      })).resolves.toMatchObject({ workspace: { version: "3" } });
+      await Promise.all([completion, vi.advanceTimersByTimeAsync(31_000)]);
+      expect(progress).toHaveBeenCalledOnce();
+      expect(progress).toHaveBeenCalledWith(baseline.userId, expect.objectContaining({
+        afterStatus: baseline,
+      }));
+      expect(fetchStatus.mock.calls.every(([, init]) => init?.method === undefined)).toBe(true);
+      expect(scenario.harness.interventionCount).toBe(0);
+
+      // A later turn still needs progress beyond the final observed replay state.
+      const laterCompletion = expect(scenario.waitForHostedCompletion(baseline.userId, {
+        pollIntervalMs: 10,
+        timeoutMs: 50,
+      })).rejects.toThrow("Timed out waiting for hosted production-path progress");
+      await Promise.all([laterCompletion, vi.advanceTimersByTimeAsync(50)]);
+      expect(progress).toHaveBeenLastCalledWith(baseline.userId, expect.objectContaining({
+        afterStatus: expect.objectContaining({ workspace: expect.objectContaining({ version: "3" }) }),
+      }));
+    } finally {
+      vi.useRealTimers();
+      await scenario.stop();
+    }
+  },
+);
+
+it("rejects provider auth failure appearing during a retained Junction continuation", async () => {
+  const scenario = await startScenarioWithRealHarness();
+  vi.useFakeTimers();
+  const startedAt = Date.now();
+  const status = createCompletedStatus("1", "2026-07-10T12:00:00.000Z");
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json(status)));
+  vi.spyOn(scenario, "readJunctionDeviceSyncReplayDrainStatus").mockImplementation(async () => ({
+    hasPendingDirtyConnection: Date.now() < startedAt + 30_000,
+    hasPendingDirtyConnectionForUser: Date.now() < startedAt + 30_000,
+    historicalBackfillEmptyAttempts: null,
+    historicalBackfillEvidence: null,
+    historicalBackfillLastEmptyAt: null,
+    historicalBackfillStatus: null,
+    pendingDirtyResourceCount: Date.now() < startedAt + 30_000 ? 48 : 0,
+  }));
+  const healthyLogs = await mocks.listHostedRuntimeLogsForTest({ environment: {}, userId: status.userId });
+  mocks.listHostedRuntimeLogsForTest.mockImplementation(async () => Date.now() < startedAt + 30_000
+    ? healthyLogs
+    : [{
+      ...healthyLogs[0]!,
+      eventCode: "runner.provider_egress_diagnostic",
+      redactedJson: { providerKind: "openai", responseStatus: 401 },
+    }]);
+  try {
+    const failure = expect(waitForHostedJunctionReplayCompletion({
+      assertNoJobFailures: async () => {},
+      connectionId: "junction_replay_fixture",
+      deadlineAtMs: startedAt + 31_000,
+      memberId: status.userId,
+      scenario,
+    })).rejects.toThrow("recorded provider-egress/auth failures");
+    await Promise.all([failure, vi.advanceTimersByTimeAsync(31_000)]);
+  } finally {
+    mocks.listHostedRuntimeLogsForTest.mockResolvedValue(healthyLogs);
+    vi.useRealTimers();
     await scenario.stop();
   }
 });
@@ -461,6 +571,35 @@ it("includes provider outcome metadata in failures without request text or ident
     await scenario.stop();
   }
 });
+
+async function startScenarioWithRealHarness() {
+  const actualHarness = await vi.importActual<typeof import("./hosted-local-dev-harness.js")>(
+    "./hosted-local-dev-harness.js",
+  );
+  mocks.startHostedLocalDevHarness.mockImplementationOnce(actualHarness.startHostedLocalDevHarness);
+  mocks.startHostedLocalDevStack.mockImplementationOnce(async ({ env }) => ({
+    config: resolveHostedLocalDevConfig(env),
+    hostedAppSessionHmacKey: "synthetic-session-key",
+    kill: vi.fn(),
+    linqWebhookTargetUrl: null,
+    oidcIdentity: { environment: "development", projectName: "murph", teamSlug: "local" },
+    oidcToken: "local-oidc-token",
+    processes: {
+      cloudflare: null, healthCommons: null, linqTunnel: null, minio: null,
+      stripe: null, temporalServer: null, temporalWorker: null, web: null,
+    },
+    ready: Promise.resolve(),
+    runtimeEnv: env,
+    stderrTail: () => "",
+    stdoutTail: () => "",
+    stop: vi.fn(async () => {}),
+    waitForExit: vi.fn(),
+    webBaseUrl: "http://127.0.0.1:4300",
+    workerBaseUrl: "http://127.0.0.1:4300",
+    workerRuntimeEnv: null,
+  }));
+  return await startScenario();
+}
 
 function createScenarioHarness(input: {
   assertNoInterventions?: () => void;

@@ -17,6 +17,7 @@ export async function waitForHostedJunctionReplayCompletion(input: {
 
   while (Date.now() < input.deadlineAtMs) {
     const status = await input.scenario.waitForHostedCompletion(input.memberId, {
+      requireProgress: lastDrain === null,
       timeoutMs: input.deadlineAtMs - Date.now(),
     });
     await input.assertNoJobFailures(status);
@@ -36,6 +37,7 @@ export async function waitForHostedJunctionReplayCompletion(input: {
       // The first status may precede the final acknowledgment. Return a current
       // settled status so replica assertions cannot read that earlier checkpoint.
       const completed = await input.scenario.waitForHostedCompletion(input.memberId, {
+        requireProgress: false,
         timeoutMs: input.deadlineAtMs - Date.now(),
       });
       await input.assertNoJobFailures(completed);

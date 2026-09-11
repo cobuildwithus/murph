@@ -907,7 +907,12 @@ limits, and local proof distinctions are owned by
   It then reads quiescence again before returning workspace state. One deadline
   includes every phase and respects the original outer test budget; failed-job,
   advanced-receipt, final dirty and Browser Vault content assertions remain.
-  Its focused tests cover retained future work, racing continuation, dirty-fact
+  Its first scenario completion retains the default new-progress guard; later
+  observations opt out of that guard while preserving the passive harness's
+  completion checks, the scenario's latest-completion baseline and provider-auth
+  oracle. Composed tests exercise the real scenario and harness for already-drained
+  work, a 30-second retained retry, a later turn's progress guard and an auth failure
+  during continuation. Focused tests also cover racing continuation, dirty-fact
   disagreement, deadline exhaustion and read/job failures. Global continuation
   sequences are not connection-specific completion evidence.
 - Hosted assistant-provider stub failures include only the allowlisted request
