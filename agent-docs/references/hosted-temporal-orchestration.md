@@ -216,8 +216,10 @@ Allowed Temporal state is tiny and pointer-only:
   that calls the existing Cloudflare processing adapter when facts are idle. It
   carries no provider value or credential, is discarded while facts are
   blocked, and is cleared after accepted processing only when no newer wake
-  arrived. Authenticated provider changes are the current Web producer of this
-  payload-free signal. Newly committed hosted-group projection grants instead
+  arrived. Settings no longer produce this signal: inference preferences are
+  saved in Postgres and observed through normal invocation and mailbox reads.
+  The signal remains supported for existing histories and operational callers.
+  Newly committed hosted-group projection grants instead
   atomically admit the existing durable `runtime.maintenance-requested`
   system-mailbox row with the grant transaction, then signal its pointer after
   commit.

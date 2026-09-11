@@ -844,7 +844,16 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("hands a pending turn to a fresh invocation before servicing a later wake", async () => {
+  test.each([
+    { name: "managed provider changed", invocationRevision: null, selectedRevision: null },
+    { name: "custom endpoint selected", invocationRevision: null, selectedRevision: 2 },
+    { name: "custom endpoint replaced and reselected", invocationRevision: 1, selectedRevision: 2 },
+    { name: "custom endpoint deselected or deleted", invocationRevision: 1, selectedRevision: null },
+    { name: "custom identity absent from older Web", invocationRevision: 1, selectedRevision: undefined },
+  ])("hands a pending turn to a fresh invocation without a settings wake: $name", async ({
+    invocationRevision,
+    selectedRevision,
+  }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TEST_NOW));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-handoff-"));
@@ -857,6 +866,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
+          ...(invocationRevision === null ? {} : {
+            forwardedEnv: {
+              HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+              HOSTED_ASSISTANT_MODEL: `murph-custom-r${invocationRevision}`,
+              HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+              MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-sentinel",
+            },
+          }),
           request: {
             attemptId: "attempt_provider_handoff",
             idleCheckpointDelayMs: 180_000,
@@ -902,7 +919,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 };
               },
             },
-            mailboxPort: createMailboxPort({ assistantProvider: "venice", events: [], items: mailboxItems }),
+            mailboxPort: createMailboxPort({
+              assistantCustomInferenceRevision: selectedRevision,
+              assistantProvider: selectedRevision == null ? "venice" : "openai",
+              events: [],
+              items: mailboxItems,
+            }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               checkpointWorkspace: (request) => {
@@ -964,7 +986,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("uses an empty mailbox's provider fact without rereading unavailable settings", async () => {
+  test.each([null, 3])("uses matching mailbox route identity without rereading settings (custom revision %s)", async (revision) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TEST_NOW));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-authority-"));
@@ -974,6 +996,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
+          ...(revision === null ? {} : {
+            forwardedEnv: {
+              HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+              HOSTED_ASSISTANT_MODEL: `murph-custom-r${revision}`,
+              HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+              MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-sentinel",
+            },
+          }),
           request: {
             attemptId: "attempt_provider_authority_unavailable",
             idleCheckpointDelayMs: 180_000,
@@ -995,7 +1025,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 throw new Error("control plane unavailable");
               },
             },
-            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            mailboxPort: createMailboxPort({
+              assistantCustomInferenceRevision: revision,
+              assistantProvider: revision === null ? "openai" : "venice",
+              events: [],
+              items: [],
+            }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events: [],

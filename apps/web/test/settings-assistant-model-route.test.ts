@@ -83,6 +83,8 @@ describe("assistant model settings route", () => {
   });
 
   afterEach(() => {
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
     delete process.env.HOSTED_VENICE_ENABLED;
   });
 
@@ -153,13 +155,6 @@ describe("assistant model settings route", () => {
       prisma: { tx: true },
       provider: "venice",
     });
-    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
-    const task = mocks.after.mock.calls[0]?.[0];
-    await task?.();
-    expect(mocks.signalHostedRuntimeWakeRuntime).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      userId: "member_edge",
-    });
   });
 
   it("persists a provider-only change without rewriting model intent", async () => {
@@ -192,39 +187,6 @@ describe("assistant model settings route", () => {
       prisma: { tx: true },
       provider: "venice",
     });
-    const task = mocks.after.mock.calls[0]?.[0];
-    await task?.();
-    expect(mocks.signalHostedRuntimeWakeRuntime).toHaveBeenCalledOnce();
-  });
-
-  it("keeps a committed provider change successful when the runtime wake fails", async () => {
-    process.env.HOSTED_VENICE_ENABLED = "1";
-    mocks.signalHostedRuntimeWakeRuntime.mockRejectedValueOnce(
-      new Error("orchestration unavailable"),
-    );
-    mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
-      dormantSolPreference: false,
-      effectiveProviderUpdated: true,
-      hostedAssistantProviderOverride: "venice",
-      model: "gpt-5.6-terra",
-      provider: "venice",
-      solAvailable: true,
-      updated: true,
-    });
-
-    const response = await route.POST(jsonRequest({
-      provider: "venice",
-    }));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      ok: true,
-      provider: "venice",
-      updated: true,
-    });
-    const task = mocks.after.mock.calls[0]?.[0];
-    await expect(task?.()).resolves.toBeUndefined();
-    expect(mocks.signalHostedRuntimeWakeRuntime).toHaveBeenCalledOnce();
   });
 
   it("rejects Venice before the rollout gate opens", async () => {

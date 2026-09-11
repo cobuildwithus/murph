@@ -19,6 +19,7 @@ import {
 } from "@murphai/hosted-execution/hosted-codex-subscription-auth";
 import {
   HostedAssistantConfigurationError,
+  HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS,
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
@@ -30,7 +31,6 @@ import {
 import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
@@ -134,11 +134,9 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   // dev subscription mode it is persisted to CODEX_HOME/auth.json instead.
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
 ] as const;
-const HOSTED_CODEX_SUPPORTED_PROVIDER_IDS = new Set<string>([
-  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id,
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
-]);
+const HOSTED_CODEX_SUPPORTED_PROVIDER_IDS = new Set<string>(
+  HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS,
+);
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
   [...HOSTED_CODEX_SUPPORTED_PROVIDER_IDS].join(" or ");
 const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
@@ -441,9 +439,7 @@ function resolveHostedCodexModelProviderConfig(input: {
 }): AssistantCodexModelProviderConfig {
   const resolvedProviderConfig = input.provider
     && HOSTED_CODEX_SUPPORTED_PROVIDER_IDS.has(input.provider)
-    ? input.provider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
-      ? HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG
-      : resolveAssistantCodexModelProviderConfig(input.provider)
+    ? resolveAssistantCodexModelProviderConfig(input.provider)
     : null;
   if (!resolvedProviderConfig) {
     throw new HostedAssistantConfigurationError(

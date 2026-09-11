@@ -45,6 +45,7 @@ export const POST = withJsonError(async (request: Request) => {
       ...hostedRuntimeAiMemberAccessSelect,
       ...hostedAiUsageMemberSelect,
       assistantProviderPreference: true,
+      inferenceConnection: { select: { selected: true, revision: true } },
       threadContainer: {
         select: {
           ...hostedRuntimeAiMemberAccessSelect.threadContainer.select,
@@ -57,6 +58,10 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
     memberState,
   });
+  const assistantCustomInferenceRevision = !access.isThreadContainer
+      && memberState?.inferenceConnection?.selected
+    ? memberState.inferenceConnection.revision
+    : null;
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const fetchedAt = new Date();
   const projection = await fetchHostedRuntimeMailboxProjection({
@@ -93,6 +98,7 @@ export const POST = withJsonError(async (request: Request) => {
   if (!usage.allowed) {
     return jsonOk(parseHostedMailboxFetchResponse({
       assistantProvider: access.assistantProvider,
+      assistantCustomInferenceRevision,
       consumedSeqByLane: body.lanes.map(({ importedSeq, lane }) => ({
         consumedSeq: importedSeq,
         lane,
@@ -118,6 +124,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(parseHostedMailboxFetchResponse({
     assistantProvider: access.assistantProvider,
+    assistantCustomInferenceRevision,
     ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
     ...(groupRunningBit ? { groupRunningBit } : {}),
     consumedSeqByLane: projection.consumedSeqByLane,
