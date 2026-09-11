@@ -1463,7 +1463,6 @@ model HostedAccountGroupBillingRef {
   checkoutAttemptId                 String?         @map("checkout_attempt_id")
   checkoutSeatCount                 Int?            @map("checkout_seat_count")
   checkoutCreatedAt                 DateTime?       @map("checkout_created_at")
-  billedSeatCount                   Int?            @map("billed_seat_count")
   stripeEffectClaimId               String?         @map("stripe_effect_claim_id")
   stripeEffectKind                  String?         @map("stripe_effect_kind")
   stripeEffectSourcePulseSeats      Int?            @map("stripe_effect_source_pulse_seats")

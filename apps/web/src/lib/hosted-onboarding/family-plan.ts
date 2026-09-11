@@ -1861,7 +1861,6 @@ export async function lookupHostedAccountGroupStripeBillingRefByStripeSubscripti
 }
 
 export async function writeHostedAccountGroupStripeBillingTx(input: {
-  billedSeatCount?: number | null;
   billingStatus: HostedBillingStatus;
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
@@ -1931,7 +1930,6 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   const stripeCustomerId = normalizeNullableString(input.stripeCustomerId);
   const stripeSubscriptionId = normalizeNullableString(input.stripeSubscriptionId);
   const stripeSubscriptionItemId = normalizeNullableString(input.stripeSubscriptionItemId);
-  const billedSeatCount = normalizeHostedFamilyOptionalBilledSeatCount(input.billedSeatCount);
   await assertHostedAccountGroupStripeBillingIdentifiersAvailableTx({
     groupId: input.groupId,
     stripeCustomerId,
@@ -1956,7 +1954,6 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   const billingRef = await input.tx.hostedAccountGroupBillingRef.upsert({
     create: {
       ...privateColumns,
-      billedSeatCount,
       checkoutAttemptId: null,
       checkoutCreatedAt: null,
       checkoutSeatCount: null,
@@ -1996,7 +1993,6 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
           currentBillingPlanCode: input.currentBillingPlanCode ?? HOSTED_FAMILY_BILLING_PLAN_CODE,
           currentPeriodEnd: input.currentPeriodEnd ?? null,
           currentPeriodStart: input.currentPeriodStart ?? null,
-          billedSeatCount,
           stripeCheckoutSessionIdEncrypted: null,
           stripeCheckoutSessionLookupKey: null,
           ...(input.preserveLastStripeEventCreatedAt
@@ -2306,7 +2302,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     || input.subscription.status === "incomplete_expired"
   ) {
     await writeHostedAccountGroupStripeBillingTx({
-      billedSeatCount: null,
       billingStatus: HostedBillingStatus.canceled,
       currentBillingPhase: null,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
@@ -2356,7 +2351,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       currentBillingPhase: null,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
       ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
-      billedSeatCount: null,
       groupId: group.id,
       stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
       stripeEventCreatedAt: eventCreatedAt,
@@ -2475,7 +2469,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   const activeMembersFitPaidSeats = HOSTED_FAMILY_PLAN_CODES.every(
     (planCode) => activeCounts[planCode] <= familyPlanState.capacities[planCode],
   );
-  const billedSeatCount = sumHostedFamilyPlanCapacities(familyPlanState.capacities);
   const legacyPulseItem = familyPlanState.itemsByPlan.pulse;
   const billingStatus = stripeBillingStatus === HostedBillingStatus.active &&
       !activeMembersFitPaidSeats
@@ -2495,7 +2488,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       input.subscription,
       legacyPulseItem ?? input.subscription.items.data[0] ?? null,
     ),
-    billedSeatCount,
     groupId: group.id,
     stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
     stripeEventCreatedAt: eventCreatedAt,
@@ -8042,12 +8034,6 @@ function normalizeHostedFamilySeatCount(value: unknown): number {
     httpStatus: 400,
     message: "Family supports 2 to 6 people.",
   });
-}
-
-function normalizeHostedFamilyOptionalBilledSeatCount(value: unknown): number | null {
-  return value === null || value === undefined
-    ? null
-    : normalizeHostedFamilySeatCount(value);
 }
 
 function buildHostedFamilyStripeMetadata(
