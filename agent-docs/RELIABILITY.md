@@ -571,6 +571,22 @@ Last verified: 2026-09-04
   rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.
 
+- Web recovery sweeps spread each selected due-device wake and shared mailbox
+  handoff across a stable zero-to-five-second per-user jitter window. The
+  existing 25-item default, 250-item limit, and five-operation concurrency cap
+  remain; selection/access checks stay bounded and selected items are ordered
+  by offset before taking execution slots. Pacing happens before transaction or
+  signal entry and holds no pooled connection. Offsets use monotonic elapsed
+  time within each batch, so delays do not accumulate per item. The shared
+  handoff deadline includes the pacing window in addition to its existing work
+  budget; both sequential phases add at most ten seconds of intentional pacing
+  to the existing callback. Slow operations can still bunch eligible work under
+  the concurrency cap. No new persistence, retry owner, or schedule is added;
+  interrupted work remains discoverable through existing due state and mailbox
+  ownership. Direct ingress, exact reminders, and runtime/provider retry
+  deadlines do not enter this executor. Jitter reduces recovery bursts, not
+  total work or a guaranteed global requests-per-second ceiling.
+
 ## Runtime Expectations
 
 - Cloudflare ready inventory is a bounded allocation optimization within the
