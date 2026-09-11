@@ -137,6 +137,16 @@ the loaded APT policy, one-shot Playwright status, Ubuntu caller inventory, and
 overall step-timeout contract; exact-head Actions then prove the wrapper on the
 GitHub-hosted Ubuntu runner.
 
+Before checking mergeability, refresh the remote-tracking base with an explicit
+destination refspec: `git fetch origin refs/heads/main:refs/remotes/origin/main`.
+Verify that `git rev-parse origin/main` matches the SHA returned by
+`git ls-remote origin refs/heads/main`; if the base advanced, refresh and check
+again. For another base branch, substitute its name in all three commands.
+A bare `git fetch origin main` can update only `FETCH_HEAD` when another task
+has narrowed the shared fetch mapping, leaving `origin/main` stale. Preserve
+the shared `remote.origin.fetch` configuration and use the verified base for
+the merge-tree proof.
+
 For readiness, the exact PR head is the commit that contains the PR-authored
 change; it does not need to be repeatedly merged with a moving base. Keep green
 required CI on that head and prove current-base mergeability with

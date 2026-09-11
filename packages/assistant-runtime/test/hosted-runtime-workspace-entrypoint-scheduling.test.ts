@@ -3013,23 +3013,38 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
 
   test.each([
     {
+      assistantWakeAt: null,
       checkpointed: false,
       expectedWorkspaceVersion: "0",
       label: "no-progress",
     },
     {
+      assistantWakeAt: null,
       checkpointed: true,
       expectedWorkspaceVersion: "1",
       label: "post-checkpoint",
     },
+    {
+      assistantWakeAt: TEST_NOW,
+      checkpointed: true,
+      expectedWorkspaceVersion: "1",
+      label: "post-checkpoint with due assistant work",
+    },
+    {
+      assistantWakeAt: new Date(Date.parse(TEST_NOW) + 30_000).toISOString(),
+      checkpointed: true,
+      expectedWorkspaceVersion: "1",
+      label: "post-checkpoint with earlier future assistant work",
+    },
   ])(
-    "schedules one delayed continuation in the $label path when forced browser-vault refresh maintenance times out",
-    async ({ checkpointed, expectedWorkspaceVersion, label }) => {
+    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out",
+    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label }) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
       const attemptId = `attempt_synthetic_browser_vault_marker_force_${label}`;
       const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const events: string[] = [];
+      let assistantPhaseCalls = 0;
       const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
       const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
 
@@ -3079,10 +3094,13 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               }),
             }),
             async runAssistantPhase() {
+              assistantPhaseCalls += 1;
               return checkpointed
                 ? {
                     browserVaultReplicaRefreshRequested: true,
                     checkpointReason: "assistant_runtime_commit" as const,
+                    nextWakeAt: assistantWakeAt,
+                    nextWakeReason: assistantWakeAt ? "assistant" : null,
                     progressed: true as const,
                   }
                 : {
@@ -3106,9 +3124,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         );
         expect(checkpointRequests).toHaveLength(checkpointed ? 1 : 0);
         expect(result.status).toBe("scheduled");
-        expect(result.nextWakeAt).toBe(retryAt);
+        expect(result.nextWakeAt).toBe(assistantWakeAt ?? retryAt);
+        expect(assistantPhaseCalls).toBe(1);
         expect(result.nextWakeReason).toBe("assistant");
-        expect(result.immediateRecheckRequested).toBeUndefined();
+        expect(result.immediateRecheckRequested).toBe(assistantWakeAt ? true : undefined);
         const refreshLog = readCapturedRuntimePhaseLogs({
           attemptId,
           spy: consoleInfo,

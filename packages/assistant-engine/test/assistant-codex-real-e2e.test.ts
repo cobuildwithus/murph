@@ -1,3 +1,5 @@
+import { applyAssistantSelfDeliveryTargetDefaults } from '@murphai/operator-config/operator-config'
+import { buildCanonicalAutomationRoute, resolveAssistantCronNotificationDeliveryRoute, validateAssistantCronDeliveryTarget } from '../src/assistant/cron/targets.ts'
 import { importClinicalFhirSnapshot } from '@murphai/vault-usecases/clinical-records'
 import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
@@ -38804,4 +38806,91 @@ describeRealCodex('real Codex downloaded hospital documents e2e', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 720_000)
+})
+
+
+describeRealCodex('real Codex explicit cron audience preservation e2e', () => {
+  it('queues one private reminder after explicit defaults preserve its audience', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-cron-audience-e2e-'))
+    const operatorHome = await mkdtemp(path.join(tmpdir(), 'murph-cron-audience-operator-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      const occurrenceAt = '2026-09-10T16:00:00.000Z'
+      const reminderInput = {
+        continuityPolicy: 'fresh',
+        instructions: 'Send a short, friendly reminder that it is time for the requested afternoon stretch break. Do not add a follow-up, ask a question, or claim the stretch happened.',
+        now: new Date('2026-09-10T15:00:00.000Z'),
+        route: { channel: 'telegram', identityId: null, participantId: null,
+          threadId: 'synthetic-prior-thread', deliveryTarget: null, threadIsDirect: true },
+        schedule: { kind: 'at', at: occurrenceAt },
+        slug: 'synthetic-stretch-break', status: 'active', tags: [],
+        title: 'Synthetic afternoon stretch break', vaultRoot: workingDirectory,
+      } satisfies Parameters<typeof upsertAutomation>[0]
+      const created = await upsertAutomation(reminderInput)
+      // The canonical caller's exact forwarding is proved deterministically.
+      // Exercise the real public defaults owner here with a scoped fixture home.
+      const resolved = await applyAssistantSelfDeliveryTargetDefaults({
+        channel: 'telegram', threadId: 'synthetic-private-thread', threadIsDirect: true,
+      }, { allowSingleSavedTargetFallback: true }, operatorHome)
+      const canonicalRoute = buildCanonicalAutomationRoute(validateAssistantCronDeliveryTarget(resolved))
+      expect(canonicalRoute.threadIsDirect).toBe(true)
+      await upsertAutomation({
+        ...reminderInput, automationId: created.record.automationId, route: canonicalRoute,
+      })
+      const source = findCanonicalAssistantCronRecordInList(
+        await listCanonicalAssistantCronRecords(workingDirectory), created.record.automationId)
+      if (!source || source.kind !== 'automation') throw new Error('Expected canonical reminder.')
+      expect(source.route).toMatchObject({
+        channel: 'telegram', threadId: 'synthetic-private-thread', threadIsDirect: true,
+      })
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({
+        jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt,
+      })
+      const job = projectCanonicalAssistantCronJob({ source, runtimeState })
+      const instructions = buildAssistantCronExecutionInstructions({
+        job, kind: 'canonical', runtimeState, source,
+      }, { automationId: null, contextReferences: [] })
+      const route = resolveAssistantCronNotificationDeliveryRoute(job.target)
+      expect(route.bindingDelivery).toEqual({ kind: 'thread', target: 'synthetic-private-thread' })
+      expect(route.threadIsDirect).toBe(true)
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex reminder model.')
+      let providerRequests = 0
+      const result = await sendAssistantNotificationLocal({
+        actorId: job.target.participantId,
+        onProviderRequestStarted: () => { providerRequests += 1 },
+        bindingDeliveryTarget: route.bindingDelivery?.target, channel: job.target.channel,
+        deliveryTarget: route.deliveryTarget, identityId: job.target.identityId,
+        threadId: job.target.threadId, threadIsDirect: route.threadIsDirect,
+        deliveryDispatchMode: 'queue-only', deliveryDedupeToken: 'synthetic-cron-audience-occurrence',
+        deliveryIdempotencyKey: 'synthetic-cron-audience-occurrence',
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-member', userEnvKeys: [] } },
+        instructions, scheduledAutomationScheduleKind: 'at',
+        scheduledInvocationAuthority: { automationId: created.record.automationId, occurrenceAt },
+        outboxAutomationAuthority: { automationId: created.record.automationId, expectedUpdatedAt: source.updatedAt },
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'automation-cron', vault: workingDirectory, workingDirectory,
+      })
+      process.stdout.write(`[cron-audience-preservation-e2e] ${JSON.stringify({
+        decision: result.decision.kind, delivery: result.deliveryOutcome?.kind, providerRequests, reply: result.response,
+      })}\n`)
+      expect(providerRequests).toBe(1)
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(result.response).toMatch(/stretch/iu)
+      expect(result.response).not.toMatch(/completed|already stretched|scheduled another|follow.up|cron|outbox|unverified/iu)
+      expect(result.response).not.toContain('?')
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'telegram', threadId: 'synthetic-private-thread', threadIsDirect: true })
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, operatorHome, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
