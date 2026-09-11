@@ -7,6 +7,8 @@ import {
   safeParseContract,
 } from "@murphai/contracts";
 
+import * as z from "@murphai/contracts/zod-runtime";
+
 import { buildAuditRecord, resolveAuditShardPath } from "../audit.ts";
 import { generateRecordId } from "../ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
@@ -16,7 +18,6 @@ import { WriteBatch } from "../operations/write-batch.ts";
 import { prepareRawArtifact } from "../raw.ts";
 import { compareIsoTimestampsAscending, toIsoTimestamp } from "../time.ts";
 import { VaultError } from "../errors.ts";
-import { isPlainRecord } from "../types.ts";
 
 import type { UnknownRecord } from "../types.ts";
 import type {
@@ -55,58 +56,23 @@ function parseAssessmentResponse(content: string): UnknownRecord {
   return result.data;
 }
 
-function toAssessmentResponseRecord(value: unknown): AssessmentResponseRecord {
-  if (!isPlainRecord(value)) {
-    throw new VaultError("ASSESSMENT_RESPONSE_INVALID", "Assessment response record must be an object.");
-  }
+// Old ledger readers accepted arbitrary string links and discarded unknown
+// fields. Keep that read compatibility without weakening new canonical writes.
+const storedAssessmentResponseSchema = assessmentResponseSchema
+  .extend({ relatedIds: z.array(z.string()).optional() })
+  .strip();
 
-  const rawPath = normalizeRawPath(value.rawPath);
-  const relatedIds = normalizeRelatedIds(value.relatedIds);
-  const result = safeParseContract(assessmentResponseSchema, {
-    schemaVersion: value.schemaVersion,
-    id: value.id,
-    assessmentType: value.assessmentType,
-    recordedAt: value.recordedAt,
-    source: value.source,
-    rawPath,
-    title: value.title,
-    questionnaireSlug: value.questionnaireSlug,
-    responses: value.responses,
-  });
-
+function toAssessmentResponseRecord(
+  value: unknown,
+  schema: z.ZodType<AssessmentResponseRecord> = assessmentResponseSchema,
+): AssessmentResponseRecord {
+  const result = safeParseContract(schema, value);
   if (!result.success) {
     throw new VaultError("ASSESSMENT_RESPONSE_INVALID", "Assessment response record failed contract validation.", {
       errors: result.errors,
     });
   }
-
-  return {
-    ...result.data,
-    rawPath,
-    ...(relatedIds ? { relatedIds } : {}),
-  };
-}
-
-function normalizeRelatedIds(value: unknown): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
-    throw new VaultError("ASSESSMENT_RESPONSE_INVALID", "Assessment response relatedIds must be a string array.");
-  }
-
-  return value;
-}
-
-function normalizeRawPath(value: unknown): string {
-  if (typeof value !== "string") {
-    throw new VaultError("ASSESSMENT_RESPONSE_INVALID", "Assessment response rawPath is invalid.", {
-      rawPath: value instanceof Error ? value.message : String(value),
-    });
-  }
-
-  return value;
+  return result.data;
 }
 
 function sortAssessmentResponses(records: readonly AssessmentResponseRecord[]): AssessmentResponseRecord[] {
@@ -255,7 +221,7 @@ export async function listAssessmentResponses({
       relativePath: shardPath,
     });
 
-    records.push(...shardRecords.map((record) => toAssessmentResponseRecord(record)));
+    records.push(...shardRecords.map((record) => toAssessmentResponseRecord(record, storedAssessmentResponseSchema)));
   }
 
   return sortAssessmentResponses(records);
