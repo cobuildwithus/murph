@@ -123,6 +123,11 @@ describe("hosted assistant notification destination", () => {
       },
     });
     expect(destination && isHostedThreadContainerNotificationDestination(destination)).toBe(true);
+    if (!destination?.externalThreadRouteAuthority) throw new Error("Expected group route authority.");
+    await expect(assertHostedAssistantNotificationRouteAuthority({
+      authority: destination.externalThreadRouteAuthority,
+      prisma,
+    })).resolves.toBe(false);
     expect(destinationMocks.readHostedMemberAssistantNotificationState).not.toHaveBeenCalled();
     expect(destinationMocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
       authority: destination?.externalThreadRouteAuthority,
@@ -461,7 +466,7 @@ describe("hosted assistant notification destination", () => {
     await expect(assertHostedAssistantNotificationRouteAuthority({
       authority,
       prisma,
-    })).resolves.toBeUndefined();
+    })).resolves.toBe(true);
     await expect(assertHostedAssistantNotificationRouteAuthority({
       authority,
       prisma,

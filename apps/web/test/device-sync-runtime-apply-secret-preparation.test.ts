@@ -149,8 +149,7 @@ function buildHostedConnectionRecord(index: number): HostedConnectionRecord {
     nextReconcileAt: null,
     provider: "oura",
     providerAccountBlindIndex: `blind-${suffix}`,
-    providerApplicationId: null,
-    providerApplicationRevision: null,
+
     providerConfigKey: null,
     refreshLeaseExpiresAt: null,
     refreshLeaseOwner: null,

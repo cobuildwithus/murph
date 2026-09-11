@@ -1,3 +1,4 @@
+import { createHostedDeviceSyncRegistry } from "./providers";
 import {
   createDeviceSyncPublicIngress,
   resolveDeviceSyncWebhookPreflightResponse,
@@ -24,7 +25,6 @@ import {
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
   type StartConnectionSourceLifecycleProof,
-  type DeviceSyncPublicIngressStore,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
 import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
@@ -65,18 +65,6 @@ import {
 import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
-import {
-  DeviceProviderApplicationIngressStore,
-  resolveDeviceProviderApplication,
-  resolveDeviceProviderApplicationForConnection,
-  type DeviceProviderApplicationBinding,
-} from "./provider-applications";
-import {
-  createHostedDeviceSyncRegistry,
-  createHostedDeviceSyncRegistryWithProviderConfigs,
-} from "./providers";
-import { resolveHostedDeviceSyncConnectionCleanup } from "./provider-application-cleanup";
-
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
   private readonly preparedSourceLifecycles = new Map<
@@ -89,23 +77,15 @@ export class HostedDeviceSyncPublicIngressService {
     private readonly webhookAdmin: HostedDeviceSyncWebhookAdminService,
     private readonly registry: DeviceSyncRegistry,
   ) {
-    this.ingress = this.createIngress({
-      ensureWebhookAdmin: true,
-      registry: this.registry,
-      store: this.context.store,
-    });
+    this.ingress = this.createIngress();
   }
 
-  private createIngress(input: {
-    ensureWebhookAdmin: boolean;
-    registry: DeviceSyncRegistry;
-    store: DeviceSyncPublicIngressStore;
-  }): ReturnType<typeof createDeviceSyncPublicIngress> {
+  private createIngress(): ReturnType<typeof createDeviceSyncPublicIngress> {
     return createDeviceSyncPublicIngress({
       publicBaseUrl: this.context.publicIngressBaseUrl,
       allowedReturnOrigins: this.context.allowedReturnOrigins,
-      registry: input.registry,
-      store: input.store,
+      registry: this.registry,
+      store: this.context.store,
       hooks: {
         // Provider-authored Junction events can trigger exact-source
         // verification. Hosted admission still commits only after the provider
@@ -161,9 +141,7 @@ export class HostedDeviceSyncPublicIngressService {
             store: this.context.store,
           });
 
-          if (input.ensureWebhookAdmin) {
-            await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
-          }
+          await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
           return {
             sourceAdmissionCommitted: true,
           };
@@ -176,7 +154,7 @@ export class HostedDeviceSyncPublicIngressService {
           await cleanupRejectedHostedDeviceSyncConnectionSource({
             account,
             connectionStartedAt,
-            registry: input.registry,
+            registry: this.registry,
             sourceProviderSlug,
             store: this.context.store,
           });
@@ -197,7 +175,7 @@ export class HostedDeviceSyncPublicIngressService {
             now,
             ownerId: connectionOwnerId,
             processingAttemptedAt,
-            registry: input.registry,
+            registry: this.registry,
             sourceAdmissionDeferred,
             store: this.context.store,
             traceId,
@@ -242,48 +220,6 @@ export class HostedDeviceSyncPublicIngressService {
       ingress: this.ingress,
       options,
       provider,
-      returnTo,
-      userId,
-    });
-  }
-
-  async startConnectionWithProviderApplication(
-    userId: string,
-    binding: DeviceProviderApplicationBinding,
-    returnTo: string | null,
-    options: {
-      sourceProviderSlug?: string | null;
-      connectSourceId?: string | null;
-      connectTarget?: string | null;
-    } = {},
-  ): Promise<BeginConnectionResult> {
-    const application = await resolveDeviceProviderApplication({
-      applicationId: binding.applicationId,
-      expectedRevision: binding.revision,
-      memberId: userId,
-      prisma: this.context.store.prisma,
-      provider: binding.provider,
-    });
-    const registry = createHostedDeviceSyncRegistryWithProviderConfigs({
-      providerConfigs: application.providerConfigs,
-    });
-    const ingress = this.createIngress({
-      ensureWebhookAdmin: false,
-      registry,
-      store: new DeviceProviderApplicationIngressStore(
-        {
-          applicationId: application.applicationId,
-          provider: application.provider,
-          revision: application.revision,
-        },
-        this.context.store,
-      ),
-    });
-
-    return this.startConnectionWithIngress({
-      ingress,
-      options,
-      provider: application.provider,
       returnTo,
       userId,
     });
@@ -538,11 +474,7 @@ export class HostedDeviceSyncPublicIngressService {
     const url = new URL(this.context.request.url);
     const state = url.searchParams.get("murph_state")
       ?? url.searchParams.get("state");
-    const ingress = await this.resolveIngressForOAuthState({
-      expectedOwnerId: options.expectedOwnerId,
-      provider,
-      state,
-    });
+    const ingress = this.ingress;
     const handleConnectionCallback =
       typeof Reflect.get(ingress, "handleConnectionCallback") === "function"
         ? ingress.handleConnectionCallback.bind(ingress)
@@ -557,51 +489,6 @@ export class HostedDeviceSyncPublicIngressService {
       scope: url.searchParams.get("scope"),
       error: url.searchParams.get("error"),
       errorDescription: url.searchParams.get("error_description"),
-    });
-  }
-
-  private async resolveIngressForOAuthState(input: {
-    expectedOwnerId: string;
-    provider: string;
-    state: string | null;
-  }): Promise<ReturnType<typeof createDeviceSyncPublicIngress>> {
-    if (!input.state) {
-      return this.ingress;
-    }
-
-    const binding = await this.context.store
-      .readOAuthStateProviderApplicationBinding({
-        expectedOwnerId: input.expectedOwnerId,
-        expectedProvider: input.provider,
-        now: new Date().toISOString(),
-        state: input.state,
-      });
-    if (!binding) {
-      return this.ingress;
-    }
-
-    const application = await resolveDeviceProviderApplication({
-      applicationId: binding.applicationId,
-      expectedRevision: binding.revision,
-      memberId: input.expectedOwnerId,
-      prisma: this.context.store.prisma,
-      provider: binding.provider,
-    });
-    const registry = createHostedDeviceSyncRegistryWithProviderConfigs({
-      providerConfigs: application.providerConfigs,
-    });
-
-    return this.createIngress({
-      ensureWebhookAdmin: false,
-      registry,
-      store: new DeviceProviderApplicationIngressStore(
-        {
-          applicationId: application.applicationId,
-          provider: application.provider,
-          revision: application.revision,
-        },
-        this.context.store,
-      ),
     });
   }
 
@@ -687,18 +574,9 @@ export class HostedDeviceSyncPublicIngressService {
     warning?: { code: string; historicalResetIncomplete?: true; message: string };
   }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
-    const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
-      connectionId: connection.id,
-      memberId: userId,
-      prisma: this.context.store.prisma,
-      provider: connection.provider,
-      resolveSharedRegistry: () => this.registry,
-    });
     const disconnected = await disconnectHostedDeviceSyncConnection({
       connectionId: connection.id,
-      registry: cleanup.registry ?? this.registry,
-      revokeAccess: cleanup.revokeAccessOverride,
-      revokeUnavailableWarning: cleanup.warning,
+      registry: this.registry,
       store: this.context.store,
       userId,
     });
@@ -726,10 +604,7 @@ export class HostedDeviceSyncPublicIngressService {
   ): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
 
-    const registry = await this.resolveRegistryForConnection(
-      userId,
-      connection.id,
-    );
+    const registry = this.registry;
     return disconnectHostedDeviceSyncConnectionSource({
       connectionId: connection.id,
       registry,
@@ -743,7 +618,7 @@ export class HostedDeviceSyncPublicIngressService {
     userId: string,
     connectionId: string,
   ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
-    const registry = await this.resolveRegistryForConnection(userId, connectionId);
+    const registry = this.registry;
     return completeHostedGoogleHealthFitbitMigration({
       connectionId,
       registry,
@@ -782,18 +657,9 @@ export class HostedDeviceSyncPublicIngressService {
       }
       attemptedCount += 1;
       try {
-        const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
-          connectionId: connection.id,
-          memberId: userId,
-          prisma: this.context.store.prisma,
-          provider: connection.provider,
-          resolveSharedRegistry: () => this.registry,
-        });
         const disconnected = await disconnectHostedDeviceSyncConnection({
           connectionId: connection.id,
-          registry: cleanup.registry ?? this.registry,
-          revokeAccess: cleanup.revokeAccessOverride,
-          revokeUnavailableWarning: cleanup.warning,
+          registry: this.registry,
           store: this.context.store,
           userId,
         });
@@ -826,22 +692,6 @@ export class HostedDeviceSyncPublicIngressService {
 
   createBrowserConnectionId(connectionId: string): string {
     return createHostedBrowserConnectionId(this.context.env.routingIndexKey, connectionId);
-  }
-
-  private async resolveRegistryForConnection(
-    userId: string,
-    connectionId: string,
-  ): Promise<DeviceSyncRegistry> {
-    const application = await resolveDeviceProviderApplicationForConnection({
-      connectionId,
-      memberId: userId,
-      prisma: this.context.store.prisma,
-    });
-    return application
-      ? createHostedDeviceSyncRegistryWithProviderConfigs({
-          providerConfigs: application.providerConfigs,
-        })
-      : this.registry;
   }
 
   private async hasWithdrawnHealthDataConsent(connectionId: string): Promise<boolean> {
