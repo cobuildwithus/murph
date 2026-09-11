@@ -173,6 +173,7 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, bounded daily temporal recovery, and checkpoint-fenced sweep suppression through warm retries. | Device-sync ingestion contract | High | 2026-09-11 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
+| `agent-docs/exec-plans/completed/2026-09-11-junction-temporal-efficiency.md` | PR #3311: daily queued temporal sweeps, targeted day refreshes, checkpoint-safe recovery, no-op counters, and resolved final review. | Historical implementation evidence | Low | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-11-runner-wake-latency.md` | Small-runner admission capacity recovery, protected rollout convergence, and live reply verification. | Historical implementation evidence | Low | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-10-environment-checkpoint-projection.md` | Clean-return system-work settlement, Environment publication regression, and focused runtime proof. | Historical implementation evidence | Low | 2026-09-10 |
 | `agent-docs/exec-plans/completed/2026-09-10-member-one-vcpu.md` | Dedicated smaller-container deployment, native CLI bootstrap proof and pending natural-traffic measurement. | Historical implementation evidence | Low | 2026-09-10 |

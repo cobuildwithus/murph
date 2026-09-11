@@ -38,7 +38,7 @@ late arrivals. Basic readings and ordinary daily observations have separate
 ingestion paths. The feature's need for a complete-day collection does not,
 by itself, establish the need to refetch seven days every hour.
 
-Current owners:
+Owners inspected during the initial investigation (before this change):
 
 - `packages/device-syncd/src/providers/junction.ts`: newest eligible day
   imported during reconciliation; older resource/day jobs queued separately.
