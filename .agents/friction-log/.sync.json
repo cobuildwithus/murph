@@ -739,6 +739,18 @@
     {
       "issue": "cobuildwithus/murph#3051",
       "path": ".agents/friction-log/20260907011950-voice-activity-orb/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3121",
+      "path": ".agents/friction-log/20260909145950-shared-client-renderer/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3137",
+      "path": ".agents/friction-log/20260909165947-hosted-web-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#3238",
+      "path": ".agents/friction-log/20260910203224-development-cli-evaluation/friction.md"
     }
   ],
   "version": 1
