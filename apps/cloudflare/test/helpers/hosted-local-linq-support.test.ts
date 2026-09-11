@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedRunnerContainerEnv } from "../../src/hosted-env-policy.ts";
+
 import {
   buildHostedLinqInboundEvent,
   HOSTED_LOCAL_LINQ_API_TOKEN,
@@ -18,6 +20,48 @@ const passiveWaitScenario = {
 const providerHeaders = { authorization: `Bearer ${HOSTED_LOCAL_LINQ_API_TOKEN}` };
 
 describe("hosted local Linq provider stub", () => {
+  it.each([
+    { attachmentId: "att_pdf_fixture", extension: "pdf", mimeType: "application/pdf" },
+    { attachmentId: "att_image_fixture", extension: "png", mimeType: "image/png" },
+    { attachmentId: "att_voice_fixture", extension: "wav", mimeType: "audio/wav" },
+  ])("keeps $extension download URLs aligned with the runner CDN origin", async ({
+    attachmentId,
+    extension,
+    mimeType,
+  }) => {
+    const stub = await startHostedLocalLinqStub();
+
+    try {
+      const runnerEnv = buildHostedRunnerContainerEnv({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
+        LINQ_API_BASE_URL: stub.runnerBaseUrl,
+        LINQ_API_TOKEN: HOSTED_LOCAL_LINQ_API_TOKEN,
+        LINQ_ATTACHMENT_CDN_BASE_URL: stub.attachmentDownloadBaseUrl,
+      });
+      const expectedCdnOrigin = `${stub.runnerBaseUrl}/attachment-downloads`;
+      expect(runnerEnv.LINQ_API_BASE_URL).toBe("https://api.linqapp.com/api/partner/v3");
+      expect(runnerEnv.LINQ_ATTACHMENT_CDN_BASE_URL).toBe(expectedCdnOrigin);
+
+      const metadata = await fetch(`${stub.baseUrl}/attachments/${attachmentId}`, {
+        headers: { ...providerHeaders, host: "api.linqapp.com" },
+      });
+      expect(metadata.status).toBe(200);
+      const expectedDownloadUrl = `${expectedCdnOrigin}/${attachmentId}.${extension}`;
+      await expect(metadata.json()).resolves.toEqual({ download_url: expectedDownloadUrl });
+
+      // The host test reaches the same public byte route over loopback.
+      const bytes = await fetch(`${stub.baseUrl}${new URL(expectedDownloadUrl).pathname}`);
+      expect(bytes.status).toBe(200);
+      expect(bytes.headers.get("content-type")).toBe(mimeType);
+      expect((await bytes.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      expect(stub.observedRequests.at(-1)?.authorizationStatus).toBe("missing");
+    } finally {
+      await stub.stop();
+    }
+  });
+
   it("serves canonical direct-chat summaries through its shared runtime URL", async () => {
     const stub = await startHostedLocalLinqStub();
 
