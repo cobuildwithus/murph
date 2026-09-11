@@ -1,6 +1,6 @@
 # Real-model canonical assistant journey gate
 
-Status: active
+Status: completed
 Created: 2026-09-10
 Updated: 2026-09-10
 
@@ -59,4 +59,5 @@ Updated: 2026-09-10
 - After main reconciliation, each focused live case passed using `pnpm test:assistant:live -- --codex-home <AUTHENTICATED_SUBSCRIPTION_HOME> --test <EXACT_CASE_NAME>`, with `gpt-5.6-terra`. Meal save plus fresh-conversation restored-vault readback passed with two actual model turns. Reminder create/fire/cancel passed with three actual model turns, one delivered outbox record, a still-enabled next occurrence before cancel and no enabled reminder after cancel. Group privacy/quiet passed with two actual model turns and no unauthorized canonical/outbox effects. Synthetic replies reviewed: Ready; concise, truthful and matched actual effects.
 - Earlier pre-model authentication attempts failed on unavailable local homes; one authenticated alternate passed and was retained for the behavioral proof. Fixture development also exposed missing audience and named-permission setup, resolved at the fixture/configuration boundary. The cron defaults issue is recorded in the task's Frog entry.
 - Protected provider execution remains an external setup step: configure the main-only `assistant-real-model-sandbox` Environment and its dedicated test-project provider key. Local subscription proof does not certify the configured provider transport or private Worker egress.
-- The original completion owner owns candidate review, exact-head CI, ReviewGPT, readiness and final plan closure. No production deployment or real member delivery was performed.
+- Implementation, local seven-turn proof and parent candidate review are complete. Required CI and final ReviewGPT remain pending under the original completion owner, who also owns PR readiness. The protected provider Environment remains unconfigured. No production deployment or real member delivery was performed.
+Completed: 2026-09-10
