@@ -400,7 +400,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
       releaseHeldReminder = null;
     }
 
-  }, 900_000);
+  }, 900_000 + backlogDrainTimeoutMs);
 });
 
 function buildActivationWake() {

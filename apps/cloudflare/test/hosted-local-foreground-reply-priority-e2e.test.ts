@@ -214,7 +214,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("aborts and replaces generic model-free system work for a signed foreground reply", async () => {
+  it("admits a signed foreground reply after the active system commit", async () => {
     // Production maintains the memberless standby before member traffic arrives.
     // Establish that real precondition before starting the deliberately heavy
     // system-mailbox runtime so the local machine does not provision both
@@ -284,7 +284,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const inboundText = "Reply while the full system mailbox is active.";
     const replyText = "Foreground reply won over the full system mailbox.";
     const providerRequestBaseline = countAssistantProviderInputs(inboundText);
-    const recoveryEvidenceStartedAt = new Date();
+    let recoveryEvidenceStartedAt = new Date();
     const providerStartObservations: Array<{
       activeFence: Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>;
       deviceMailboxItem: Awaited<ReturnType<typeof readHostedMailboxItemForTest>>;
@@ -300,8 +300,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       const foregroundReply = sendInboundAndRequirePromptReply({
         identity: systemMailboxProbe,
         inboundText,
-        label: "system mailbox exact replacement",
+        label: "system mailbox foreground admission",
         onAssistantProviderStart: async () => {
+          recoveryEvidenceStartedAt = new Date();
           const [activeFence, status, deviceMailboxItem] =
             await Promise.all([
               readActiveRuntimeFenceForTest(systemMailboxProbe.userId),
@@ -339,9 +340,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemAttemptId: systemFence.attemptId,
         userId: systemMailboxProbe.userId,
       });
-      // The foreground starts under a new fence after the background owner
-      // settles. It may retain the same member-bound warm target or claim an
-      // observed pristine slot; durable handoff evidence covers either path.
+      // Once the canonical commit is acknowledged, the fenced system owner
+      // may admit the conversation itself or hand off to a replacement.
       await expect(releaseForegroundPriorityOrderingBarrier({
         scenario: requireScenario(),
         userId: systemMailboxProbe.userId,
@@ -358,10 +358,15 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           ["Assistant provider started without an active runtime write fence."],
         ));
       }
-      expect(providerStart.activeFence.processingMode).toBe("default");
-      expect(providerStart.activeFence.attemptId).not.toBe(
-        systemFence.attemptId,
+      expect(["default", "system_mailbox"]).toContain(
+        providerStart.activeFence.processingMode,
       );
+      if (providerStart.activeFence.attemptId === systemFence.attemptId) {
+        expect(providerStart.activeFence.processingMode).toBe("system_mailbox");
+        expect(providerStart.activeFence.runnerContainerName).toBe(
+          systemFence.runnerContainerName,
+        );
+      }
       expect([systemFence.runnerContainerName, ...readyStandbySlotNames]).toContain(
         providerStart.activeFence.runnerContainerName,
       );
@@ -398,22 +403,21 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       }
       await assertExactlyOneAcceptedReplyAfterBoundary({
         identity: systemMailboxProbe,
-        label: "system mailbox exact replacement",
+        label: "system mailbox foreground admission",
         replyText,
       });
       expect(countAssistantProviderInputs(inboundText)).toBe(
         providerRequestBaseline + 1,
       );
 
-      // Do not manufacture a second system pointer. The existing durable
-      // mailbox/Temporal continuation must recover the yielded device/system
-      // work under a non-overlapping invocation and advance the frontier.
+      // Do not manufacture a second system pointer. Require system progress
+      // after provider start, whether the existing owner continues or a later
+      // fenced invocation resumes the durable mailbox/Temporal continuation.
       await requireSystemWakeStormPreserved(
         systemMailboxProbe.userId,
         latestAppend.wake.seq,
         {
           expectedWakeKinds: systemWakes.map((wake) => wake.kind),
-          preemptedAttemptId: systemFence.attemptId,
           recoveryEvidenceStartedAt,
         },
       );
@@ -2835,7 +2839,6 @@ async function requireSystemWakeStormPreserved(
   expectedImportedSeq: string,
   input: {
     expectedWakeKinds: readonly string[];
-    preemptedAttemptId: string;
     recoveryEvidenceStartedAt: Date;
   },
 ): Promise<void> {
@@ -2851,10 +2854,12 @@ async function requireSystemWakeStormPreserved(
     const systemLane = lastStatus.mailboxLag.find((lane) => lane.lane === "system");
     const redactedStatus = lastStatus.workspace?.redactedStatus;
     if (
-      systemLane?.importedSeq === expectedImportedSeq
-      && systemLane.lag === "0"
-      && redactedStatus?.hostedMailboxSystemImportedSeq === expectedImportedSeq
-      && redactedStatus.hostedMailboxRetryableBlockedCount === 0
+      // Processing a seeded action can append a follow-up wake. Require the
+      // seeded frontier, without waiting for all subsequently appended work.
+      BigInt(systemLane?.importedSeq ?? "0") >= BigInt(expectedImportedSeq)
+      && BigInt(redactedStatus?.hostedMailboxSystemImportedSeq ?? "0")
+        >= BigInt(expectedImportedSeq)
+      && redactedStatus?.hostedMailboxRetryableBlockedCount === 0
     ) {
       lastRecoveryLogs = (await listHostedRuntimeLogsForTest({
         environment: requireScenario().runtimeEnv,
@@ -2870,7 +2875,6 @@ async function requireSystemWakeStormPreserved(
       const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
         const wakeKind = entry.redactedJson?.wakeKind;
         return entry.attemptId !== null
-          && entry.attemptId !== input.preemptedAttemptId
           && typeof wakeKind === "string"
           && input.expectedWakeKinds.includes(wakeKind)
           && (
@@ -2887,8 +2891,7 @@ async function requireSystemWakeStormPreserved(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but seeded system work did not continue under a replacement attempt.",
-    `preempted system attempt id: ${input.preemptedAttemptId}`,
+    "Foreground reply succeeded, but seeded system work did not progress after provider start.",
     `expected imported sequence: ${expectedImportedSeq}`,
     `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
     `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,

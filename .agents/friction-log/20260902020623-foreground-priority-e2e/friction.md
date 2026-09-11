@@ -36,3 +36,9 @@ invocation enters the barrier while the fixture waits for the wrong mode until
 snapshot start times out. Expect the current system-mailbox owner and explicitly
 assert that the held handled-through sequence remains below the earlier row.
 Keep the unchanged replica and no-extra-provider-request assertions.
+
+## Follow-up: foreground admission by the current owner
+
+The wake-storm scenario also required provider start under a replacement `default` fence. The runtime now admits a ready conversation through the existing system invocation after its canonical commit is acknowledged. Full integration reached the provider under a valid `system_mailbox` fence and failed the obsolete mode assertion. Accept the current owner or a valid replacement, retain the checkpoint-before-provider, exact reply, and runner-binding checks, and require system progress logged after provider start. The later timestamp prevents pre-reply system progress from satisfying the continuation proof.
+
+A local replay then passed foreground admission but rejected its successful continuation because a seeded member action appended a follow-up wake. The seeded import frontier was complete and a post-provider system-processing record existed, while the newly appended wake made total lane lag nonzero. Compare both imported frontiers against the seeded sequence as a lower bound; retain the no-retry-block and post-provider processing evidence without requiring later generated work to have finished.
