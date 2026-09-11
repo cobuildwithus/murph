@@ -96,9 +96,13 @@ Updated: 2026-09-11
   tests. Full private verification, exact-head CI, and both reviews passed; the
   prerequisite fix merged. A fresh protected deployment is running with all
   predeploy gates enabled.
-- The first deploy also timed out in the synthetic image-reminder checkpoint-race
-  journey; other reminder shards and delivery passed. The fresh deploy repeats
-  that journey. No gate is bypassed, and the failed attempt changed no production
-  state.
+- Both protected attempts timed out in the synthetic image-reminder checkpoint-race
+  journey; every other gate passed in the second attempt. A local reproduction
+  read only the image tool result and proved that the default Starter seed lacks
+  the subscription required for image generation. The entitlement rejection is
+  correct; the positive image fixtures need an explicit paid seed. The scheduled
+  image reminder and generated-image delivery fixtures now use the existing seed's
+  paid plan and synthetic subscription fields. Focused replay is pending. No gate
+  is bypassed, and neither failed attempt changed production state.
 - Actual reply latency and resource identity remain required protected-deployment
   evidence.

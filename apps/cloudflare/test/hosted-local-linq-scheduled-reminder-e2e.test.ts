@@ -118,9 +118,12 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
       homePhone,
       memberId: userId,
       memberPhone,
+      stripeCustomerId: `cus_local_scheduled_reminder_${userId}`,
+      stripeSubscriptionId: `sub_local_scheduled_reminder_${userId}`,
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     const activatedStatus = await requireScenario().waitForHostedCompletion(userId);
