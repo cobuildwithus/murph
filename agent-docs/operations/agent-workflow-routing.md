@@ -1,6 +1,6 @@
 # Agent Workflow Routing
 
-Last verified: 2026-09-04
+Last verified: 2026-09-11
 
 This document owns task classification, action authority, checkout choice, and
 plan/commit routing. `AGENTS.md` owns precedence and baseline constraints.
@@ -40,7 +40,7 @@ can hold implementation, Product UX, and verification decisions.
   Prefer `--wait` or paced polling in the original Codex session/thread; reserve
   detached wake for deliberate handoffs under its Wait And Wake Ownership rule.
 - `product-ux.md`: plan and replay materially different affected journeys for
-  user-facing behavior. No separate specialist review is required.
+  user-facing behavior as part of the parent's review.
 - `local-storage-lifecycle.md`: worktree and build/test residue ownership.
 
 ## Agent Work Contract
@@ -156,9 +156,9 @@ executable behavior and machine-readable formats, not freeze narrative wording
 or require duplicate rules. Update the owner instead of appending the same
 incident detail to every entrypoint and index row.
 
-There is no automatic line-count-driven source split, mandatory local specialist
-review, or separate simplify pass. Inspect changed complexity and simplify when
-it improves the current task. Preserve real authority and correctness boundaries.
+There is no automatic line-count-driven source split. Inspect changed complexity
+and simplify when it improves the current task. Preserve real authority and
+correctness boundaries. The completion workflow owns review requirements.
 
 ## Maintaining Agent Guidance
 
