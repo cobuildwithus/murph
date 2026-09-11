@@ -535,7 +535,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     );
   }, 300_000);
 
-  it("preserves a default-owned row ahead of Environment work", async () => {
+  it("preserves a default-owned row during independent Environment work", async () => {
     await seedProbe(environmentOrderingProbe);
     const baselineStatus = await requireScenario().harness.readUserStatus(
       environmentOrderingProbe.userId,
@@ -580,7 +580,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       });
       await waitForProcessingCheckpointBarrier(
         environmentOrderingProbe.userId,
-        "default",
+        "system_mailbox",
       );
       const heldStatus = await requireScenario().harness.readUserStatus(
         environmentOrderingProbe.userId,
@@ -594,7 +594,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         ? BigInt(heldThrough)
         : 0n;
       expect(heldThroughSeq).toBeLessThan(
-        BigInt(environmentCompletion.append.wake.seq),
+        BigInt(predecessor.wake.seq),
       );
       expect(requireScenario().assistantProviderRequests).toHaveLength(
         providerRequestBaseline,
