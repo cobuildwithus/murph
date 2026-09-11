@@ -9,6 +9,7 @@ import { runHostedAssistantAutomationLane } from "../src/hosted-runtime/maintena
 import { createHostedWorkspaceSystemWork } from "../src/hosted-runtime/workspace-system-work.ts";
 import type { HostedWorkspaceRunnerInput, HostedWorkspaceDurableCheckpointEffect } from "../src/hosted-runtime/workspace-runner.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
+import * as systemMailbox from "../src/hosted-runtime/system-mailbox.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
 import type { HostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
@@ -11394,6 +11395,58 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 // pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
 // owner requirement: these reads intentionally start after the commit settles.
 describe("foreground device ingestion", () => {
+  test("preserves live receipt capacity throughout a system-work pass", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    let receiptCapacityReached = false;
+    const yieldStates: boolean[] = [];
+    const preparation = vi.spyOn(systemMailbox, "prepareHostedSystemMailboxItemForCheckpoint")
+      .mockImplementation(async (input) => {
+        yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+        receiptCapacityReached = true;
+        yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+        receiptCapacityReached = false;
+        yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+        return null;
+      });
+    try {
+      const tracked: Promise<void>[] = [];
+      const owner = createHostedWorkspaceSystemWork({
+        preparation: fixture.ownerInput,
+        runnerInput: {
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_system_capacity", expectedWorkspaceVersion: "0",
+            leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem() { throw new Error("No mailbox import in capacity proof."); },
+          limitPerLane: 1,
+          platform: fixture.platform,
+          requestId: "request_synthetic_system_capacity",
+          shouldYieldBackgroundMaintenance: () => receiptCapacityReached,
+          trackLocalWorkspaceMutationCompletion: (completion) => {
+            if (completion) tracked.push(completion);
+          },
+          vaultRoot: fixture.vaultRoot,
+          workspace: fixture.workspace,
+        },
+        onCompleted() { throw new Error("No prepared item in capacity proof."); },
+        onFailure(error) { throw error; },
+        settleOwnedMutations: async () => { await Promise.all(tracked); },
+      });
+      owner.resume();
+      owner.kick(["run-device-sync-wake"]);
+      await owner.waitForCompletion(null, async () => false);
+      assert.deepEqual(yieldStates, [false, true, false]);
+      receiptCapacityReached = true;
+      owner.kick(["run-device-sync-wake"]);
+      await owner.waitForCompletion(null, async () => false);
+      assert.equal(preparation.mock.calls.length, 1);
+    } finally {
+      preparation.mockRestore();
+      await fixture.cleanup();
+    }
+  });
+
   test("retains an independent device receipt when vault-share publication fails", async () => {
     const fixture = await createForegroundDeviceFixture();
     try {

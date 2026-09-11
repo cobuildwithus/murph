@@ -48,7 +48,6 @@ import {
   buildAssistantProviderMurphToolCall,
   buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
-  hostedLocalAssistantProviderLatestUserInputContains,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -283,7 +282,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(experimentAdherenceChatId)}/messages`;
-    const setupOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    const setupOutboundBaseline = requireLinqStub().countAcceptedSends(replyPath);
     activeScenario.queueAssistantResponses(
       buildExperimentAdherenceSetupResponses(activityPlan),
       { matchInputContains: experimentSetupText },
@@ -298,7 +297,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       },
     ));
     expect(setupResponse.status).toBe(202);
-    const setupReply = await requireLinqStub().waitForAdditionalSend({
+    const setupReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: setupOutboundBaseline,
       expectedPath: replyPath,
       scenario: activeScenario,
@@ -335,7 +334,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       startAt: triggeredRunningStart.toISOString(),
     });
 
-    const nudgeOutboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    const nudgeOutboundBaseline = requireLinqStub().countAcceptedSends(replyPath);
     const nudgeProviderBaseline = countAssistantResponsesApiRequests();
     activeScenario.queueAssistantResponses([
       buildAssistantProviderVaultCliCall([
@@ -392,7 +391,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       userId: experimentAdherenceUserId,
     });
 
-    const nudge = await requireLinqStub().waitForAdditionalSend({
+    const nudge = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: nudgeOutboundBaseline,
       expectedPath: replyPath,
       scenario: activeScenario,
@@ -401,6 +400,9 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(requireLinqStub().readObservedMessageText(nudge)).toBe(
       experimentActivityNudgeReplyText,
     );
+    const nudgePayload = JSON.parse(nudge.body) as { message: { idempotency_key?: string } };
+    expect(nudgePayload.message.idempotency_key?.length, "Activity nudge provider idempotency key length").toBeLessThanOrEqual(255);
+    expect(requireLinqStub().countAcceptedSends(replyPath), "Activity nudge must be accepted by the provider").toBe(nudgeOutboundBaseline + 1);
     const finalStatus = await activeScenario.waitForHostedIdle(
       experimentAdherenceUserId,
     );
@@ -411,14 +413,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       ? undefined
       : await activeScenario.buildFailureMessage(experimentAdherenceUserId, [
           "Hosted Junction activity nudge made an unexpected number of model requests.",
-          `latest user input matches nudge instructions: ${JSON.stringify(
-            activeScenario.assistantProviderRequests
-              .filter((request) => request.url === "/v1/responses")
-              .map((request) => hostedLocalAssistantProviderLatestUserInputContains(
-                request,
-                experimentActivityNudgeInstructions,
-              )),
-          )}`,
         ]);
     expect(nudgeProviderRequestCount, nudgeProviderFailure).toBe(nudgeProviderBaseline + 2);
 

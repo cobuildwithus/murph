@@ -850,8 +850,8 @@ reply after its deadline.
 exact-notification policy. Device, clinical, and Environment attempts belong to
 the fenced workspace and use existing mailbox claims; the invocation's policy
 still decides which families are allowed. Device and Environment work can start
-without assistant preparation. A conversation can upgrade that invocation while
-the same import continues. The default assistant and ordered controls remain
+without assistant preparation. A conversation or canonically due assistant
+automation can upgrade that invocation while the same import continues. The default assistant and ordered controls remain
 single-writer; ordinary replies neither cancel nor join independent imports. The
 assistant phase has no inline device executor or turn-local dirty-ack buffer.
 Device hints, restored timers, imports, activity scheduling, and exact
@@ -910,14 +910,20 @@ requested mode handoff and never interrupts foreground work. Wake acceptance
 is not import completion: durable mailbox and import receipts remain the
 completion authority, including when an older warm child handles the wake.
 
-An active default invocation may prepare device work after its model provider
-starts. Its existing watcher admits conversation input first, then one bounded
+An active assistant invocation prepares independent device work alongside its
+assistant phase. Its existing watcher admits conversation input first, then one bounded
 system page, including when the conversation-input budget is full. The device
 pass uses the same restored workspace, fence, canonical write port, and receipt
 history. It retains the existing 100-job pass ceiling and provider-specific job
-bounds; it does not run retention or activity-automation maintenance alongside
+bounds. Every running system pass retains the canonical-write receipt capacity
+guard. A projected assistant deadline wakes the existing admission check;
+canonical due assistant work can enter the same foreground loop as conversation
+input while the import continues. The assistant execution policy still applies,
+and empty wake hints do not grant authority. Pending checkpoint effects do not
+block this admission. It does not run retention or activity-automation maintenance alongside
 the model. New conversation arrivals can proceed while provider I/O is pending.
-Reply preparation cancels device work and stops mailbox staging together.
+Ordinary replies do not cancel independent device work. Snapshot and workspace
+release boundaries stop admission and settle owned mutations.
 Canonical commits already underway finish persistence or rollback before the
 runner checkpoints or releases ownership; cancellation never detaches a mutator.
 

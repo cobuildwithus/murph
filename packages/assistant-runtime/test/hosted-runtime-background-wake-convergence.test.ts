@@ -111,7 +111,7 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
             ...baseMailboxPort,
             async fetch(request) {
               const response = await baseMailboxPort.fetch(request);
-              if (request.requestId.includes(":independent-completion-foreground-check")) {
+              if (request.requestId.includes(":system-work-assistant-upgrade")) {
                 wakeChecks += 1;
                 if (response.items.length === 0) emptyWakeChecked.resolve();
               }
