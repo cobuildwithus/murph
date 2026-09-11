@@ -34,6 +34,7 @@ export function resolveHostedLinqInstantStartPhonePrefix(input: {
 export function isHostedLinqInstantStartEventCandidate(input: {
   event: HostedLinqMessageReceivedEvent;
   phonePrefixes: readonly string[];
+  smsEnabled?: boolean;
 }): boolean {
   const participantContact = resolveHostedLinqParticipantContact(input.event);
   return participantContact !== null
@@ -41,6 +42,7 @@ export function isHostedLinqInstantStartEventCandidate(input: {
       event: input.event,
       participantContact,
       phonePrefixes: input.phonePrefixes,
+      smsEnabled: input.smsEnabled,
     });
 }
 
@@ -48,16 +50,20 @@ export function isHostedLinqInstantStartCandidate(input: {
   event: HostedLinqMessageReceivedEvent;
   participantContact: HostedLinqParticipantContact;
   phonePrefixes: readonly string[];
+  smsEnabled?: boolean;
 }): boolean {
   return input.event.data.chat?.is_group === false
     && !input.event.data.is_from_me
-    && isHostedLinqIMessageService(input.event.data.service)
     && (
       input.participantContact.kind === "email"
-      || resolveHostedLinqInstantStartPhonePrefix({
-          phoneNumber: input.participantContact.value,
-          prefixes: input.phonePrefixes,
-        }) !== null
+        ? isHostedLinqIMessageService(input.event.data.service)
+        : (isHostedLinqIMessageService(input.event.data.service)
+            || (input.smsEnabled === true && ["sms", "rcs"].includes(
+              input.event.data.service?.trim().toLowerCase() ?? "",
+            ))) && resolveHostedLinqInstantStartPhonePrefix({
+            phoneNumber: input.participantContact.value,
+            prefixes: input.phonePrefixes,
+          }) !== null
     );
 }
 
@@ -66,6 +72,7 @@ export function isHostedLinqInstantStartEligible(input: {
   event: HostedLinqMessageReceivedEvent;
   participantContact: HostedLinqParticipantContact;
   phonePrefixes: readonly string[];
+  smsEnabled?: boolean;
 }): boolean {
   return input.admissionDecision?.kind === "allow"
     && input.admissionDecision.source === "model"

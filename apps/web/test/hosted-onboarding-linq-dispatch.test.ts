@@ -113,6 +113,7 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionModel: "gpt-5.4-nano",
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqInstantStartPhonePrefixes: ["+44"] as readonly string[],
+      linqSmsInstantStartEnabled: true,
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
@@ -1229,6 +1230,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+44"];
+    mocks.hostedOnboardingEnvironment.linqSmsInstantStartEnabled = true;
     mocks.checkHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",
@@ -7643,7 +7645,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("reconciles an exact provider-redelivered event after activation commits before its continuation returns", async () => {
+  it.each(["iMessage", "SMS", "RCS"])("reconciles an exact %s redelivery after activation commits before its continuation returns", async (service) => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_retry";
     const eventId = "evt_instant_start_retry";
@@ -7784,13 +7786,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             handle: "+15550000000",
             id: "handle_owner_123",
             is_me: true,
-            service: "iMessage",
+            service,
           },
         },
         parts: [{ type: "text", value: "Hey Murph" }],
       },
       eventId,
-      service: "iMessage",
+      service,
     });
 
     await expect(handleHostedOnboardingLinqWebhook({
@@ -9703,7 +9705,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("instant-starts an admitted iMessage email handle without asserting verified email", async () => {
+  it.each([
+    { service: "iMessage", kind: "email", contact: "person@example.test" },
+    { service: "SMS", kind: "phone", contact: "+15551234567" },
+    { service: "RCS", kind: "phone", contact: "+15551234567" },
+  ] as const)("instant-starts a new model-admitted $service $kind contact", async ({ service, kind, contact }) => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     let createdMemberId: string | null = null;
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -9767,17 +9774,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               handle: "+15550000000",
               id: "handle_owner_123",
               is_me: true,
-              service: "iMessage",
+              service,
             },
           },
           sender_handle: {
-            handle: "Buddy@iCloud.com",
+            handle: contact,
             id: "handle_sender_email",
-            service: "iMessage",
+            service,
           },
         },
         eventId: "evt_email_handle",
-        service: "iMessage",
+        service,
       })),
     );
 
@@ -9804,7 +9811,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         reason: "instant-start-enrollment-required",
       },
     });
-    expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
+    if (kind === "email") expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
           linqEmailHandleLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
@@ -9817,15 +9824,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedMemberRouting.upsert).toHaveBeenLastCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          pendingLinqParticipantContactKind: "email",
-          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+          pendingLinqParticipantContactKind: kind,
+          pendingLinqParticipantContactLookupKey: expect.any(String),
         }),
         update: expect.objectContaining({
-          pendingLinqParticipantContactKind: "email",
-          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+          pendingLinqParticipantContactKind: kind,
+          pendingLinqParticipantContactLookupKey: expect.any(String),
         }),
       }),
     );
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledWith(
       expect.objectContaining({
