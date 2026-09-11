@@ -63,22 +63,23 @@ describe("bounded individual recovery jitter", () => {
     expect(performance.now() - startedAt).toBeLessThanOrEqual(15_000);
   });
 
-  it("drains started siblings before propagating an unexpected failure", async () => {
+  it("drains started siblings and preserves the first observed failure", async () => {
     const failure = new Error("synthetic recovery failure");
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => { release = resolve; });
     const started: string[] = [];
     let settled = false;
     const batch = runHostedRecoveryBatch([
-      { userId: "fails" }, { userId: "held" },
+      { userId: "held" }, { userId: "fails" },
     ], async ({ userId }) => {
       started.push(userId);
       if (userId === "fails") throw failure;
       await held;
+      throw new Error("later failure from the earlier slot");
     }, false);
     const observed = batch.catch((error: unknown) => { settled = true; return error; });
     await vi.advanceTimersByTimeAsync(0);
-    expect(started).toEqual(["fails", "held"]);
+    expect(started).toEqual(["held", "fails"]);
     expect(settled).toBe(false);
     release();
     expect(await observed).toBe(failure);

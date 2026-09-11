@@ -1,6 +1,6 @@
 # Spread individual recovery wakes with bounded jitter
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -24,10 +24,11 @@ Ordinary failures retain per-item accounting; unexpected worker failures drain s
 - [x] Implement bounded jitter and update the reliability owner.
 - [x] Prove distribution, stable retries, maximum cardinality/concurrency, draining, timeout allowance, and both composed dispatch paths.
 - [x] Run focused tests, Web typecheck, complexity guard, and parent review.
-- [ ] Commit, open companion PR, run final ReviewGPT and exact-head CI, close this plan.
+- [x] Commit, open companion PR, complete the initial full ReviewGPT audit, and prepare the final verified candidate. Final-head review and CI remain tracked on PR #3310.
 
 ## Validation results
 
 The five focused suites passed all 31 tests, including actual dispatch through both sweeps at 250-user cardinality. The helper cohort spans all five one-second bins, with more than 230 distinct millisecond dispatch times; slow work peaks at five active operations. Reversing the retry input preserves per-user offsets. Both new composed timing assertions fail against the original source because every start shares one instant. Existing consent, dedupe, orphaned-work identity, failure-accounting, and bounded hung-handoff tests pass.
 
-Web dependency builds, Web typecheck, scoped ESLint, diff whitespace, and complexity guard passed. No changed function exceeds complexity 20. Parent Product UX walkthrough: Ready for eligible recovery timing; direct ingress and exact reminder/provider deadlines remain outside the executor. No measured production pressure reduction is claimed. Final ReviewGPT, exact-head CI, and plan closure remain pending.
+Web dependency builds, Web typecheck, scoped ESLint, diff whitespace, and complexity guard passed. No changed function exceeds complexity 20. Parent Product UX walkthrough: Ready for eligible recovery timing; direct ingress and exact reminder/provider deadlines remain outside the executor. No measured production pressure reduction is claimed. ReviewGPT round 1 passed on the initial candidate with no qualifying findings. It independently validated the composed sweeps and real-timer distribution. Parent review then tightened unexpected-error propagation to preserve the first observed failure after sibling draining; its two-failure regression and all 31 focused tests pass, as do Web typecheck, lint, and the complexity guard (helper maximum 4). This closes implementation tracking; the final candidate review and exact-head CI remain pending on PR #3310. Neither deployment nor production pressure improvement has been verified.
+Completed: 2026-09-11

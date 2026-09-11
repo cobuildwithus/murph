@@ -23,23 +23,26 @@ export async function runHostedRecoveryBatch<T extends { userId: string }>(
 
   // Order by eligibility before taking slots: a late offset must not hide an
   // earlier one behind it. Offsets are relative to the batch, not cumulative.
-  const results = await Promise.allSettled(Array.from({
+  const failures: unknown[] = [];
+  await Promise.all(Array.from({
     length: Math.min(RECOVERY_CONCURRENCY, pending.length),
   }, async () => {
-    while (nextIndex < pending.length) {
-      const { item, offsetMs } = pending[nextIndex++];
-      const remainingMs = offsetMs - (performance.now() - startedAt);
-      if (remainingMs > 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, remainingMs));
+    try {
+      while (nextIndex < pending.length) {
+        const { item, offsetMs } = pending[nextIndex++];
+        const remainingMs = offsetMs - (performance.now() - startedAt);
+        if (remainingMs > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, remainingMs));
+        }
+        await worker(item);
       }
-      await worker(item);
+    } catch (error) {
+      failures.push(error);
     }
   }));
   // Drain owned siblings before reporting an unexpected failure. Ordinary
   // per-item recovery failures are accounted for by the sweep's worker.
-  for (const result of results) {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
+  if (failures.length > 0) {
+    throw failures[0];
   }
 }
