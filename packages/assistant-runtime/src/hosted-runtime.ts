@@ -4615,6 +4615,29 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           platform: guardedRuntime.platform,
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           signal: maintenanceSignal,
+          async shouldInterruptRuntimeWake(notification, signal) {
+            const localWorkPending = (): boolean =>
+              runtimeStateDirty
+              || runtimeOwnerHandoffRequested
+              || options.shutdownSignal?.aborted === true
+              || imageGenerationController?.hasWork() === true;
+            if (
+              localWorkPending()
+              || (notification.requestedProcessingMode != null
+                && notification.requestedProcessingMode !== (input.request.processingMode ?? "default"))
+            ) return true;
+            const prefetch = await createHostedForegroundMailboxPrefetch({
+              lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+              limitPerLane: mailboxBudget.fetchLimitPerLane,
+              requestId: `${requestId}:browser-vault-refresh-wake-check`,
+              runnerInput: baseRunnerInput,
+              signal,
+            });
+            const inspection = await inspectHostedPreCheckpointSystemMailboxPrefetch(prefetch);
+            // Keep one refresh and its deadline through scheduler-only hints.
+            // Local work may have arrived while the bounded mailbox read waited.
+            return localWorkPending() || !inspection.caughtUpToEveryLaneHighWater;
+          },
           timeoutMs: null,
           vaultRoot: restored.vaultRoot,
           workspace: maintenanceInput.workspace,

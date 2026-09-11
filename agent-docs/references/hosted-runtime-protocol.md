@@ -3916,6 +3916,13 @@ checkpoint effects remain. A due mailbox wake alone cannot request an owner
 handoff that would skip projection and recording for that owned completion.
 Fresh foreground input and shutdown keep their existing interruption behavior;
 ordinary owner handoff resumes once the completion effects have drained.
+During the Browser Vault offer, a bounded mailbox read qualifies runtime hints
+before cancellation. A fully caught-up empty prefix keeps the same refresh and
+deadline only while the requested mode is unchanged and no dirty state, image
+work, handoff, or shutdown requires attention. Those local conditions are checked
+again after the read. Real work, an incomplete prefix, or a failed read preserves
+the existing interruption path; harmless hints cannot abandon a saved report's
+publication after its recording item has completed.
 The runtime offers that committed projection before ordinary due-assistant work or
 deferred device maintenance can dirty state again. Browser-only wake retry and
 acknowledgement stay within that offer. A runtime-wake interruption or timeout
