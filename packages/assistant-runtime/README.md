@@ -7,7 +7,7 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
-- preserve independent system-work completion snapshots across empty runtime nudges; check the existing conversation mailbox before interrupting and reuse that fetched batch for a real foreground handoff
+- preserve independent system-work completion across empty runtime nudges during projection discovery/delivery, browser-vault publication, recording, and snapshotting; qualify notifications against the bounded conversation mailbox and reuse that fetched batch for a real foreground handoff
 - publish a device-sync completion record's retained provider cadence and
   checkpoint mailbox removal inside the same runtime admission after the exact
   completion record is durable, without another provider-free completion wake
