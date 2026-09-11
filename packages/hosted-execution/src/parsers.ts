@@ -204,10 +204,6 @@ export {
   parseHostedRuntimeLatencyTraceEvent,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
-  parseHostedRuntimeLogEntry,
-  parseHostedRuntimeRedactedJson,
-  parseHostedRuntimeLogRequest,
-  parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
   parseHostedRuntimeAssistantAskControlRequest,
@@ -234,6 +230,12 @@ export {
   parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
+export {
+  parseHostedRuntimeLogEntry,
+  parseHostedRuntimeRedactedJson,
+  parseHostedRuntimeLogRequest,
+  parseHostedRuntimeLogResponse,
+} from "./parsers/runtime-log.ts";
 export {
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,

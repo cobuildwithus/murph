@@ -2,19 +2,18 @@
 
 Status: Implemented
 
-Last verified: 2026-07-16
+Last verified: 2026-09-10
 
 ## Member outcome
 
-A hosted member can browse the current lab catalog on the authenticated,
-unlinked `/labs` page or ask private Murph what tests are available. Both paths
-read the catalog live and expose the same bounded facts about available panels,
+A hosted member can ask private Murph what tests are available. Conversational
+discovery reads the catalog live and exposes the same bounded facts about available panels,
 individual biomarkers, current catalog prices, and ZIP-based collection
 locations.
 
 This is discovery only. Murph cannot order, pay for, book, or determine
-eligibility for a test. The page has no navigation entry, map, or commerce
-control, and a returned location does not reserve an appointment or prove that
+eligibility for a test. The experimental browser page and its API are retired; `/labs` redirects to
+Home. A returned location does not reserve an appointment or prove that
 a particular offering can be collected there.
 
 ## Discovery behavior
@@ -29,10 +28,8 @@ a particular offering can be collected there.
   collection availability plus a bounded list of nearby patient service
   centers when it reports coverage.
 
-The authenticated `POST /api/labs` browser API and signed
-`POST /api/internal/hosted-execution/labs/tool` callback use the same stateless
-service. The page makes no initial provider request; catalog and ZIP lookups are
-separate submit-driven actions with independent state. Search results preserve
+The signed `POST /api/internal/hosted-execution/labs/tool` callback uses the
+stateless discovery service. Search results preserve
 provider facts rather than adding a Murph popularity rank, medical
 recommendation, or custom panel. Prices are labeled as current catalog prices,
 may be unavailable, and are not final quotes.
@@ -51,7 +48,7 @@ test is medically necessary, eligible for the member, orderable through Murph,
 booked, or available at a final quoted price. It must not promise an ordering
 launch date.
 
-Member-facing pages and assistant replies describe this as Murph lab test
+Assistant replies describe this as Murph lab test
 discovery. The provider name, provider identifiers, catalog source, and
 integration plumbing stay internal. When ordering is relevant, Murph may say
 that it can help explore tests now and that ordering through Murph is planned
@@ -62,8 +59,7 @@ for later, without promising timing.
 `apps/web` is the sole Junction credential and provider-egress owner for this
 feature. It reads the canonical `JUNCTION_API_KEY`, targets the code-owned
 production US provider origin, and converts provider responses into strict,
-bounded Labs contracts. The browser API is bound to the hosted app session; the
-assistant path is bound to the existing signed Cloudflare-to-Web callback.
+bounded Labs contracts. The assistant path is bound to the existing signed Cloudflare-to-Web callback.
 
 Cloudflare is an optional transport port only. Assistant runtime carries the
 semantic request and normalized response, and assistant-engine advertises
@@ -79,7 +75,7 @@ bodies, and raw provider errors must not enter logs, diagnostics, fixtures, or
 client responses. Queries and ZIP codes must not enter Murph logs, diagnostics,
 analytics, fixtures, or persisted state.
 
-The browser and hosted-runtime boundaries accept those values only in POST
+The hosted-runtime boundary accepts those values only in POST
 bodies. Junction's documented read APIs for [catalog
 markers](https://docs.junction.com/api-reference/lab-testing/biomarkers), [area
 coverage](https://docs.junction.com/api-reference/lab-testing/area-info), and
@@ -120,8 +116,6 @@ Missing or incompatible capability fails closed as unavailable. For rollback,
 remove the runtime capability before removing the Web route.
 
 Direct proof covers strict contracts, provider normalization and failures,
-browser-session and signed-callback authorization, Cloudflare transport,
-assistant registration/audience policy/prompt guidance, runtime wiring, and UI
-states. Final UI proof includes authenticated renders at each viewport where
-the result can differ, then the required frontend, coverage, Fable-or-Opus UI,
-and ReviewGPT reviews.
+signed-callback authorization, Cloudflare transport, assistant registration,
+audience policy, prompt guidance, and runtime wiring. Legacy browser links
+redirect to current destinations without reading private data.

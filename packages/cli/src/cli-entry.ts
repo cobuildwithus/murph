@@ -307,13 +307,6 @@ async function runSetupInvocation(input: {
     return
   }
 
-  process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
-  await serveVaultCliWithExistingContext({
-    argv: ['assistant', 'chat'],
-    programName: input.programName,
-    serveOptions: input.serveOptions,
-    vaultContext,
-  })
 }
 
 async function serveVaultCliWithExistingContext(input: {

@@ -51,6 +51,115 @@ test("normalizeOuraSnapshot covers dailySpo2 aliasing", () => {
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
+test("normalizeOuraSnapshot preserves daily resource order, fallback identity, and evidence", () => {
+  const importedAt = "2026-03-16T10:00:00.000Z";
+  const personalInfo = { id: "synthetic-oura-account" };
+  const activity = {
+    id: 42,
+    day: "2026-03-14",
+    timestamp: "2026-03-15T01:30:00+02:00",
+    score: "80",
+    steps: 42,
+  };
+  const dailySleep = { day: "2026-03-15", score: 90 };
+  const invalidReadiness = { score: "invalid", temperature_deviation: Infinity };
+  const readiness = { score: 0, temperature_deviation: "-0.2" };
+  const spo2 = {
+    spo2_percentage: { average: 97 },
+    breathing_disturbance_index: 2,
+  };
+  const sleep = { average_hrv: 42 };
+  const payload = normalizeOuraSnapshot({
+    importedAt,
+    personalInfo,
+    dailyActivity: [null, false, [], {}, activity],
+    dailySleep: [dailySleep],
+    dailyReadiness: [invalidReadiness, readiness],
+    dailySpO2: [spo2],
+    sleeps: [sleep],
+  });
+
+  assert.deepEqual(payload.events?.map((event) => [
+    event.externalRef?.resourceType,
+    event.externalRef?.resourceId,
+    event.externalRef?.facet,
+    event.fields?.value,
+  ]), [
+    ["daily-activity", "42", "activity-score", 80],
+    ["daily-activity", "42", "steps", 42],
+    ["daily-sleep", "2026-03-15", "sleep-score", 90],
+    ["daily-readiness", "daily-readiness-4", "readiness-score", 0],
+    ["daily-readiness", "daily-readiness-4", "temperature-deviation", -0.2],
+    ["daily-spo2", "daily-spo2-6", "spo2-average", 97],
+    ["daily-spo2", "daily-spo2-6", "breathing-disturbance-index", 2],
+    ["sleep", "sleep-8", "average-hrv", 42],
+  ]);
+  assert.deepEqual(payload.events?.slice(0, 7).map((event) => [
+    event.occurredAt, event.recordedAt, event.dayKey, event.externalRef?.version,
+  ]), [
+    ["2026-03-14T23:30:00.000Z", "2026-03-14T23:30:00.000Z", "2026-03-14", "2026-03-14T23:30:00.000Z"],
+    ["2026-03-14T23:30:00.000Z", "2026-03-14T23:30:00.000Z", "2026-03-14", "2026-03-14T23:30:00.000Z"],
+    ["2026-03-15T00:00:00.000Z", "2026-03-15T00:00:00.000Z", "2026-03-15", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+  ]);
+  for (const event of payload.events?.slice(0, 7) ?? []) {
+    assert.equal(event.fields?.observationGrain, "summary");
+    assert.equal(event.externalRef?.system, "oura");
+    assert.deepEqual(event.evidenceRoles, [
+      `${event.externalRef?.resourceType}:${event.externalRef?.resourceId}`,
+    ]);
+  }
+  assert.deepEqual(payload.evidenceParts?.map((part) => [part.role, part.fileName]), [
+    ["personal-info", "personal-info.json"],
+    ["daily-activity:42", "daily-activity-42.json"],
+    ["daily-sleep:2026-03-15", "daily-sleep-2026-03-15.json"],
+    ["daily-readiness:daily-readiness-4", "daily-readiness-daily-readiness-4.json"],
+    ["daily-readiness:daily-readiness-4", "daily-readiness-daily-readiness-4.json"],
+    ["daily-spo2:daily-spo2-6", "daily-spo2-daily-spo2-6.json"],
+    ["sleep:sleep-8", "sleep-sleep-8.json"],
+  ]);
+  assert.deepEqual(payload.evidenceParts?.map((part) => part.content), [
+    personalInfo, activity, dailySleep, invalidReadiness, readiness, spo2, sleep,
+  ]);
+  assert.deepEqual(payload.provenance?.importedSections, {
+    personalInfo: true,
+    dailyActivity: 2,
+    dailySleep: 1,
+    dailyReadiness: 2,
+    dailySpO2: 1,
+    sleeps: 1,
+    sessions: 0,
+    workouts: 0,
+    deletions: 0,
+  });
+});
+
+test("normalizeOuraSnapshot prefers dailySpO2 even when the primary collection is empty", () => {
+  const alias = [{ day: "2026-03-15", spo2_percentage: { average: 97 } }];
+  for (const dailySpO2 of [[], [{ day: "2026-03-14", spo2_percentage: { average: 98 } }]]) {
+    const payload = normalizeOuraSnapshot({
+      importedAt: "2026-03-16T10:00:00.000Z",
+      dailySpO2,
+      dailySpo2: alias,
+    });
+    assert.deepEqual(payload.events?.map((event) => event.fields?.value), dailySpO2.length ? [98] : []);
+    assert.deepEqual(payload.evidenceParts?.map((part) => part.content), dailySpO2);
+  }
+});
+
+test.each(["dailyActivity", "dailySleep", "dailyReadiness", "dailySpO2"])(
+  "normalizeOuraSnapshot rejects an invalid %s timestamp before day fallback",
+  (collection) => {
+    assert.throws(() => normalizeOuraSnapshot({
+      importedAt: "2026-03-16T10:00:00.000Z",
+      [collection]: [{ timestamp: "invalid", day: "2026-03-15" }],
+    }), { name: "TypeError", message: "timestamp must be a valid timestamp" });
+  },
+);
+
 test("normalizeOuraSnapshot preserves explicit main-sleep and nap identity without guessing unknown types", () => {
   const sleeps = [
     { id: "main", type: "sleep" },

@@ -54,8 +54,7 @@ export async function resolveAssistantTurnSharedPlan(
           channel: conversationPolicy.audience.channel ?? resolved.session.binding.channel,
           identityId: conversationPolicy.audience.identityId ?? resolved.session.binding.identityId,
           threadId: conversationPolicy.audience.threadId ?? resolved.session.binding.threadId,
-          threadIsDirect:
-            conversationPolicy.audience.threadIsDirect ?? resolved.session.binding.threadIsDirect,
+          threadIsDirect: conversationPolicy.audience.threadIsDirect,
         })
       : []
   const onboardingGuidanceOpen =

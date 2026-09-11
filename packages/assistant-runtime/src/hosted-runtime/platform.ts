@@ -452,6 +452,7 @@ export interface HostedRuntimeAssistantAskPrivateCompletionAuthorityResult {
 
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
+  threadIsDirect?: boolean;
 }
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {

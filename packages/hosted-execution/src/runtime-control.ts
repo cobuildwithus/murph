@@ -25,6 +25,7 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionWake,
   HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
@@ -763,6 +764,8 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
 }
 
 export interface HostedMailboxItem {
+  /** Ephemeral Worker decryption; never written to the canonical mailbox. */
+  decodedWake?: HostedExecutionWake;
   causalSeq?: string | null;
   consumedAt?: string | null;
   createdAt: string;
@@ -3120,25 +3123,6 @@ export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
 
-export const HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS = [
-  "shellPrewarmOrchestrationAttemptId",
-  "shellPrewarmRequestStartedAtEpochMs",
-  "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
-  "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
-  "shellPrewarmCloudflareRouteReceivedAtEpochMs",
-  "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
-  "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
-  "shellPrewarmUserRunnerRpcStartedAtEpochMs",
-  "shellPrewarmConsentLockAcquiredAtEpochMs",
-  "shellPrewarmAdmissionReadStartedAtEpochMs",
-  "shellPrewarmAdmissionReadFinishedAtEpochMs",
-] as const;
-
-export type HostedRuntimeShellPrewarmOrchestrationDiagnostics = Pick<
-  HostedRuntimeOrchestrationLatencyDiagnostics,
-  (typeof HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS)[number]
->;
-
 export const HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER =
   "x-hosted-runtime-orchestration-latency";
 
@@ -3192,25 +3176,6 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
   return Object.keys(diagnostics).length > 0
     ? diagnostics as HostedRuntimeOrchestrationLatencyDiagnostics
-    : null;
-}
-
-export function sanitizeHostedRuntimeShellPrewarmOrchestrationDiagnostics(
-  value: unknown,
-): HostedRuntimeShellPrewarmOrchestrationDiagnostics | null {
-  const orchestration = sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(value);
-  if (!orchestration) {
-    return null;
-  }
-  const diagnostics = Object.fromEntries(
-    HOSTED_RUNTIME_SHELL_PREWARM_ORCHESTRATION_DIAGNOSTIC_KEYS.flatMap(
-      (key) => orchestration[key] === undefined
-        ? []
-        : [[key, orchestration[key]]],
-    ),
-  ) as Partial<HostedRuntimeShellPrewarmOrchestrationDiagnostics>;
-  return Object.keys(diagnostics).length > 0
-    ? diagnostics as HostedRuntimeShellPrewarmOrchestrationDiagnostics
     : null;
 }
 

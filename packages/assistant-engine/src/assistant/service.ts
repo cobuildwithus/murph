@@ -29,7 +29,6 @@ export {
   sendAssistantAskContinuationLocal,
 } from './ask-continuation.js'
 export type {
-  AssistantChatInput,
   AssistantBeforeProviderAcceptedInputsHook,
   AssistantChannelTypingDependencies,
   AssistantExecutionContext,

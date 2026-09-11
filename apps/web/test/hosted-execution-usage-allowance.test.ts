@@ -3979,6 +3979,21 @@ describe("resolveHostedAiUsageGate", () => {
 });
 
 describe("readHostedAiUsageGate", () => {
+  it("confirms a projected denial with freshly read billing state", async () => {
+    const oldPrisma = createGatePrisma({ spentUsdMicros: 0n, suspendedAt: new Date() });
+    const memberState = await oldPrisma.hostedMember.findUnique();
+    const prisma = createGatePrisma({ spentUsdMicros: 0n });
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      memberState,
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ allowed: true });
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalled();
+  });
+
   it("shows zero spend immediately when Pulse upgrades to Edge", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",

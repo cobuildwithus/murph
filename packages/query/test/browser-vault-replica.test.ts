@@ -20,8 +20,7 @@ import {
   parseBrowserVaultReplica,
   selectBrowserVaultExperimentResults,
   selectBrowserVaultExperimentMetricKeys,
-  selectBrowserVaultHistory,
-  selectBrowserVaultOverview,
+  selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "../src/browser.ts";
 import { analyzeExperimentOutcome, buildMetricProjection } from "../src/index.ts";
@@ -93,12 +92,9 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   assert.match(replica.source.dataVersion, /^[0-9a-f]{64}$/u);
 
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
-  const overview = selectBrowserVaultOverview(client);
-  const history = selectBrowserVaultHistory(client);
 
   assert.equal(selectBrowserVaultTrackedExperiments(client)[0]?.title, "Morning walk");
-  assert.equal(overview.recentJournals[0]?.title, "Travel recovery note");
-  assert.ok(history.timeline.some((entry) => entry.title === "Travel recovery note"));
+  assert.ok(client.timeline.list().some((entry) => entry.title === "Travel recovery note"));
   assert.equal(client.entities.get("exp_1")?.title, "Morning walk");
   assert.ok(client.search("steadier").some((row) => row.entityId === "journal_1"));
 });
@@ -443,15 +439,17 @@ test("browser vault overview experiment summary is uncapped and completed-status
       vaultRoot: "browser://vault",
     }),
   });
-  const overview = selectBrowserVaultOverview(createBrowserVaultQueryClient(replica));
+  const client = createBrowserVaultQueryClient(replica);
+  const trackedExperiments = selectBrowserVaultTrackedExperiments(client);
+  const experimentSummary = selectBrowserVaultExperimentSummary(client);
 
-  assert.equal(overview.trackedExperiments.length, 24);
-  assert.equal(overview.experimentSummary.activeCount, 25);
-  assert.equal(overview.experimentSummary.activePreview.length, 4);
-  assert.equal(overview.experimentSummary.completedCount, 2);
-  assert.equal(overview.experimentSummary.latestCompleted?.title, "Finished repeat");
+  assert.equal(trackedExperiments.length, 24);
+  assert.equal(experimentSummary.activeCount, 25);
+  assert.equal(experimentSummary.activePreview.length, 4);
+  assert.equal(experimentSummary.completedCount, 2);
+  assert.equal(experimentSummary.latestCompleted?.title, "Finished repeat");
   assert.equal(
-    overview.trackedExperiments.some((entry) => entry.id === "done_old"),
+    trackedExperiments.some((entry) => entry.id === "done_old"),
     false,
   );
 });

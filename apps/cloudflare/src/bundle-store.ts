@@ -1,17 +1,13 @@
 import {
-  decodeHostedBundleBase64,
   sha256HostedBundleHex,
-  sameHostedBundlePayloadRef,
   type HostedExecutionBundleKind,
   type HostedExecutionBundleRef,
-  type HostedExecutionBundleRefIdentity,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 import {
   buildHostedStorageAad,
 } from "./crypto-context.js";
 import {
-  hostedBundleObjectKey,
   hostedBundleUserPrefix,
   hostedArtifactObjectKey,
   hostedMediaObjectKey,
@@ -43,7 +39,6 @@ export interface R2BucketLike extends EncryptedR2BucketLike {
 export interface HostedBundleStore {
   deleteBundle(ref: HostedExecutionBundleRef | null): Promise<void>;
   readBundle(ref: HostedExecutionBundleRef | null): Promise<Uint8Array | null>;
-  writeBundle(kind: HostedExecutionBundleKind, plaintext: Uint8Array): Promise<HostedExecutionBundleRef>;
 }
 
 export interface HostedArtifactStore {
@@ -91,81 +86,6 @@ export function isStoredHostedBundleObjectKey(key: string): boolean {
 
 export interface HostedRunnerSecretsReader {
   readRunnerSecrets(userId: string): Promise<Uint8Array | null>;
-}
-
-export function describeHostedBundleBytesRef(
-  kind: HostedExecutionBundleKind,
-  plaintext: Uint8Array,
-): HostedExecutionBundleRefIdentity {
-  const hash = sha256HostedBundleHex(plaintext);
-
-  return {
-    hash,
-    key: pendingBundleRefKey(kind),
-    size: plaintext.byteLength,
-  };
-}
-
-export function describeHostedBase64BundleRef(input: {
-  kind: HostedExecutionBundleKind;
-  value: string | null;
-}): {
-  plaintext: Uint8Array;
-  ref: HostedExecutionBundleRefIdentity;
-} | null {
-  if (input.value === null) {
-    return null;
-  }
-
-  const plaintext = decodeHostedBundleBase64(input.value) ?? new Uint8Array();
-
-  return {
-    plaintext,
-    ref: describeHostedBundleBytesRef(input.kind, plaintext),
-  };
-}
-
-export async function writeHostedBundleBytesIfChanged(input: {
-  bundleStore: HostedBundleStore;
-  currentRef: HostedExecutionBundleRef | null;
-  kind: HostedExecutionBundleKind;
-  plaintext: Uint8Array;
-}): Promise<HostedExecutionBundleRef> {
-  const nextRef = describeHostedBundleBytesRef(input.kind, input.plaintext);
-
-  if (sameHostedBundlePayloadRef(input.currentRef, nextRef)) {
-    return input.currentRef!;
-  }
-
-  const writtenRef = await input.bundleStore.writeBundle(input.kind, input.plaintext);
-
-  return {
-    ...writtenRef,
-    size: writtenRef.size ?? input.plaintext.byteLength,
-  };
-}
-
-export async function writeHostedBase64BundleIfChanged(input: {
-  bundleStore: HostedBundleStore;
-  currentRef: HostedExecutionBundleRef | null;
-  kind: HostedExecutionBundleKind;
-  value: string | null;
-}): Promise<HostedExecutionBundleRef | null> {
-  const decoded = describeHostedBase64BundleRef({
-    kind: input.kind,
-    value: input.value,
-  });
-
-  if (!decoded) {
-    return null;
-  }
-
-  return writeHostedBundleBytesIfChanged({
-    bundleStore: input.bundleStore,
-    currentRef: input.currentRef,
-    kind: input.kind,
-    plaintext: decoded.plaintext,
-  });
 }
 
 export function createHostedBundleStore(input: {
@@ -219,37 +139,6 @@ export function createHostedBundleStore(input: {
 
       assertHostedBundleMatchesRef(ref, plaintext);
       return plaintext;
-    },
-
-    async writeBundle(kind, plaintext) {
-      const hash = sha256HostedBundleHex(plaintext);
-      const key = await hostedBundleObjectKey({
-        hash,
-        kind,
-        userId: input.userId ?? null,
-      });
-      await writeEncryptedR2Payload({
-        aad: buildHostedStorageAad({
-          hash,
-          key,
-          kind,
-          purpose: "bundle",
-          size: plaintext.byteLength,
-        }),
-        bucket: input.bucket,
-        cryptoKey: input.key,
-        key,
-        keyId: input.keyId,
-        plaintext,
-        scope: "bundle",
-      });
-
-      return {
-        hash,
-        key,
-        size: plaintext.byteLength,
-        updatedAt: new Date().toISOString(),
-      };
     },
   };
 }
@@ -467,10 +356,6 @@ export function createHostedRunnerSecretsReader(input: {
       });
     },
   };
-}
-
-function pendingBundleRefKey(kind: HostedExecutionBundleKind): string {
-  return `pending/${kind}/candidate`;
 }
 
 function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {

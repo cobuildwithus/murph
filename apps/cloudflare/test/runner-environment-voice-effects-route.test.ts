@@ -17,7 +17,7 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestRootKey, MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
-  requireRunnerRuntimeWriteFenceWrite: vi.fn(),
+  requireRunnerRuntimeWriteFence: vi.fn(),
   resolveRunnerOutboundUserCryptoContext: vi.fn(),
 }));
 
@@ -37,8 +37,8 @@ vi.mock("../src/runner-outbound/write-fence.ts", async () => {
   >("../src/runner-outbound/write-fence.ts");
   return {
     ...actual,
-    requireRunnerRuntimeWriteFenceWrite:
-      mocks.requireRunnerRuntimeWriteFenceWrite,
+    requireRunnerRuntimeWriteFence:
+      mocks.requireRunnerRuntimeWriteFence,
   };
 });
 
@@ -66,7 +66,7 @@ describe("runner environment voice effects route", () => {
       sha256,
     });
     const { env, environment } = createRunnerContext(bucket);
-    mocks.requireRunnerRuntimeWriteFenceWrite.mockResolvedValue({
+    mocks.requireRunnerRuntimeWriteFence.mockResolvedValue({
       attemptId: "attempt_1",
       generation: "1",
       workspaceVersion: "1",
@@ -103,7 +103,7 @@ describe("runner environment voice effects route", () => {
       expect(deleted.status).toBe(204);
     }
     await expect(store.readAudio(staged.audioKey)).resolves.toBeNull();
-    expect(mocks.requireRunnerRuntimeWriteFenceWrite).toHaveBeenCalledTimes(3);
+    expect(mocks.requireRunnerRuntimeWriteFence).toHaveBeenCalledTimes(3);
   });
 
   it("rejects stale write fences and unsupported methods", async () => {
@@ -111,7 +111,7 @@ describe("runner environment voice effects route", () => {
     const { env, environment } = createRunnerContext(bucket);
     const url =
       `http://results.worker/environment-voice/${"a".repeat(40)}`;
-    mocks.requireRunnerRuntimeWriteFenceWrite.mockRejectedValueOnce(
+    mocks.requireRunnerRuntimeWriteFence.mockRejectedValueOnce(
       new RunnerRuntimeWriteFenceError(),
     );
 
@@ -134,7 +134,7 @@ describe("runner environment voice effects route", () => {
       userId: "user_123",
     });
     expect(wrongMethod.status).toBe(405);
-    expect(mocks.requireRunnerRuntimeWriteFenceWrite).toHaveBeenCalledTimes(1);
+    expect(mocks.requireRunnerRuntimeWriteFence).toHaveBeenCalledTimes(1);
   });
 });
 
