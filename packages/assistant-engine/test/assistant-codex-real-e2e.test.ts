@@ -38673,10 +38673,10 @@ describeRealCodex('real Codex reminder execution inspection e2e', () => {
 })
 
 
-describeRealCodex('real Codex Starter image card recovery', () => {
-  it('explains the Starter image card requirement after a denied background completion without retrying', async () => {
+describeRealCodex('real Codex Starter image subscription recovery', () => {
+  it('explains the Starter image subscription requirement after a denied background completion without retrying', async () => {
     const config = await resolveRealCodexE2eConfig()
-    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-starter-card-e2e-'))
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-starter-subscription-e2e-'))
     try {
       let imageRequests = 0
       const denied = await executeGenerateImageTool({
@@ -38684,12 +38684,12 @@ describeRealCodex('real Codex Starter image card recovery', () => {
         env: { OPENAI_API_KEY: 'synthetic-image-key' },
         fetchImpl: async () => {
           imageRequests += 1
-          return Response.json({ error: { code: 'MURPH_IMAGE_CARD_REQUIRED' } }, { status: 403 })
+          return Response.json({ error: { code: 'MURPH_IMAGE_SUBSCRIPTION_REQUIRED' } }, { status: 403 })
         },
         providerRequestOrdinal: 1,
       })
       expect(denied.rpcSuccess).toBe(false)
-      expect(denied.rpcText).toContain('saved payment card')
+      expect(denied.rpcText).toContain('requires a subscription')
       expect(imageRequests).toBe(1)
       expect(denied.usageDraft).toBeUndefined()
       const identity = `image-completion:${'a'.repeat(64)}`
@@ -38719,12 +38719,14 @@ describeRealCodex('real Codex Starter image card recovery', () => {
         reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
       })
       const actions = readCapabilityRoutingActions(result.jsonEvents)
-      process.stdout.write(`[starter-image-card-e2e] ${JSON.stringify({ model: config.model, actions: actions.length, reply: result.finalMessage })}\n`)
+      process.stdout.write(`[starter-image-subscription-e2e] ${JSON.stringify({ model: config.model, actions: actions.length, reply: result.finalMessage })}\n`)
       expect(actions).toEqual([])
       expect(result.responseMedia).toEqual([])
-      expect(result.finalMessage).toMatch(/card/iu)
+      expect(result.finalMessage).toMatch(/subscri/iu)
+      expect(result.finalMessage).toMatch(/Pulse/iu)
+      expect(result.finalMessage).toMatch(/Group/iu)
       expect(result.finalMessage).toContain('https://www.withmurph.ai/settings#subscription')
-      expect(result.finalMessage).toMatch(/(?:no|not|won.t|doesn.t)[^.!?]*(?:charg|subscription)/iu)
+      expect(result.finalMessage).not.toMatch(/(?:no charge|won.t (?:be )?charg|doesn.t (?:charge|start a subscription)|without (?:a )?subscription|(?:save|add) (?:a |your )?card)/iu)
       expect(result.finalMessage).not.toMatch(/(?:generated|created|attached|sent) (?:your|the) (?:image|illustration)/iu)
       expect(imageRequests).toBe(1)
     } finally {

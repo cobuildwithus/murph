@@ -7,6 +7,6 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: 128,
   });
   // The signed member binding is the only account authority; body fields cannot
-  // select a payer or claim that a card has been saved.
+  // select a payer or claim subscription access.
   return jsonOk(await readHostedImageGenerationAccess({ memberId }));
 });

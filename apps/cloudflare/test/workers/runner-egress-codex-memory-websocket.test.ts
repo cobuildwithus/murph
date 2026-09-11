@@ -28,10 +28,10 @@ async function openImageGateSocket(nativeMemory = false) {
   const provider = pair[1];
   provider.accept({ allowHalfOpen: true });
   provider.addEventListener("close", (event) => provider.close(event.code, event.reason), { once: true });
-  let cardAllowed = false;
-  const cardAccess = vi.fn(async () => Response.json({
-    allowed: cardAllowed,
-    reason: cardAllowed ? "allowed" : "card_required",
+  let subscriptionAllowed = false;
+  const subscriptionAccess = vi.fn(async () => Response.json({
+    allowed: subscriptionAllowed,
+    reason: subscriptionAllowed ? "allowed" : "subscription_required",
   }));
   vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (target) => {
     const url = new URL(target instanceof Request ? target.url : String(target));
@@ -39,7 +39,7 @@ async function openImageGateSocket(nativeMemory = false) {
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
     expect(url.pathname).toBe("/api/internal/hosted-execution/image-generation/access");
-    return await cardAccess();
+    return await subscriptionAccess();
   }));
   const env: RunnerOutboundEnvironmentSource = {
     ...createHostedExecutionTestEnv(),
@@ -66,7 +66,7 @@ async function openImageGateSocket(nativeMemory = false) {
   if (!client) throw new Error("Expected image-gated Responses socket.");
   client.accept({ allowHalfOpen: true });
   client.addEventListener("close", (event) => { client.close(event.code, event.reason); }, { once: true });
-  return { cardAccess, client, provider, setCard: (allowed: boolean) => { cardAllowed = allowed; } };
+  return { subscriptionAccess, client, provider, setSubscription: (allowed: boolean) => { subscriptionAllowed = allowed; } };
 }
 
 const imageFrame = JSON.stringify({
@@ -77,20 +77,20 @@ const imageFrame = JSON.stringify({
 });
 
 test.each([false, true])("blocks native image frames before provider spend (memory=%s)", async (nativeMemory) => {
-  const { cardAccess, client, provider } = await openImageGateSocket(nativeMemory);
+  const { subscriptionAccess, client, provider } = await openImageGateSocket(nativeMemory);
   const received = vi.fn();
   provider.addEventListener("message", received);
   const denied = nextMessage(client);
   const closed = nextClose(client);
   client.send(new TextEncoder().encode(imageFrame).buffer);
-  expect(JSON.parse(String(await denied))).toMatchObject({ type: "error", error: { code: "MURPH_IMAGE_CARD_REQUIRED" } });
+  expect(JSON.parse(String(await denied))).toMatchObject({ type: "error", error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
   await expect(closed).resolves.toMatchObject({ code: 1008 });
-  expect(cardAccess).toHaveBeenCalledTimes(1);
+  expect(subscriptionAccess).toHaveBeenCalledTimes(1);
   expect(received).not.toHaveBeenCalled();
 });
 
-test("preserves text streams and checks the current card for each image frame", async () => {
-  const { cardAccess, client, provider, setCard } = await openImageGateSocket();
+test("preserves text streams and checks the current subscription for each image frame", async () => {
+  const { subscriptionAccess, client, provider, setSubscription } = await openImageGateSocket();
   const received: Array<string | ArrayBuffer> = [];
   provider.addEventListener("message", (event) => { received.push(event.data); });
   for (const streamId of ["first", "second"]) {
@@ -99,25 +99,25 @@ test("preserves text streams and checks the current card for each image frame", 
     client.send(text);
     await expect(forwarded).resolves.toBe(text);
   }
-  expect(cardAccess).not.toHaveBeenCalled();
-  setCard(true);
+  expect(subscriptionAccess).not.toHaveBeenCalled();
+  setSubscription(true);
   const forwardedImage = nextMessage(provider);
   client.send(imageFrame);
   await expect(forwardedImage).resolves.toBe(imageFrame);
-  expect(cardAccess).toHaveBeenCalledTimes(1);
-  setCard(false);
+  expect(subscriptionAccess).toHaveBeenCalledTimes(1);
+  setSubscription(false);
   const denied = nextMessage(client);
   const closed = nextClose(client);
   client.send(imageFrame);
-  expect(JSON.parse(String(await denied))).toMatchObject({ error: { code: "MURPH_IMAGE_CARD_REQUIRED" } });
+  expect(JSON.parse(String(await denied))).toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
   await expect(closed).resolves.toMatchObject({ code: 1008 });
-  expect(cardAccess).toHaveBeenCalledTimes(2);
+  expect(subscriptionAccess).toHaveBeenCalledTimes(2);
   expect(received).toHaveLength(3);
 });
 
 test("fails closed when image access is unavailable on an existing socket", async () => {
-  const { cardAccess, client, provider } = await openImageGateSocket();
-  cardAccess.mockResolvedValueOnce(Response.json({}));
+  const { subscriptionAccess, client, provider } = await openImageGateSocket();
+  subscriptionAccess.mockResolvedValueOnce(Response.json({}));
   const received = vi.fn();
   provider.addEventListener("message", received);
   const denied = nextMessage(client);

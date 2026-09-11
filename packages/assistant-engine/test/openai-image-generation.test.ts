@@ -38,15 +38,15 @@ function openAiImageResponse(): Response {
 }
 
 describe('generateOpenAiImage', () => {
-  it('returns actionable Starter card recovery without retrying the image provider', async () => {
+  it('returns actionable Starter subscription recovery without retrying the image provider', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ error: {
-      code: 'MURPH_IMAGE_CARD_REQUIRED', message: 'untrusted provider prose',
+      code: 'MURPH_IMAGE_SUBSCRIPTION_REQUIRED', message: 'untrusted provider prose',
     } }, { status: 403 }))
     await expect(generateOpenAiImage({
       apiKey: 'test-key', fetchImpl, outputFormat: 'png',
       prompt: 'Draw a small lighthouse', quality: 'low', size: '1024x1024',
     })).rejects.toMatchObject({
-      code: 'ASSISTANT_IMAGE_CARD_REQUIRED',
+      code: 'ASSISTANT_IMAGE_SUBSCRIPTION_REQUIRED',
       message: expect.stringContaining('https://www.withmurph.ai/settings#subscription'),
     })
     expect(fetchImpl).toHaveBeenCalledTimes(1)

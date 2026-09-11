@@ -2,17 +2,19 @@
   "publishedOn": "2026-09-10",
   "order": 100,
   "item": {
-    "id": "text-start-and-image-card",
+    "id": "text-start-and-image-subscriptions",
     "kind": "improvement",
     "priority": 3,
     "title": "Start Murph by text",
     "summary": "Eligible new SMS and RCS conversations can start chatting without opening a signup link.",
-    "details": "Starter text chat needs no card. Image generation on Starter requires a saved card, which you can add in Settings without a charge or subscription.",
+    "details": "Starter includes text chat within its allowance. To generate or edit images, start a Pulse subscription or, if eligible, a Group subscription through Settings.",
     "relevanceTags": [
       "messaging",
       "onboarding",
       "images"
     ],
-    "sourcePullRequests": [3225]
+    "sourcePullRequests": [
+      3225
+    ]
   }
 }

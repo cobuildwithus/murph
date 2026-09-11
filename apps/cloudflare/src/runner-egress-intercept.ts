@@ -4563,10 +4563,10 @@ async function checkHostedImageGenerationAccess(input: {
     });
     if (result && typeof result === "object" && "allowed" in result && "reason" in result) {
       if (result.allowed === true && result.reason === "allowed") return null;
-      if (result.allowed === false && result.reason === "card_required") {
+      if (result.allowed === false && result.reason === "subscription_required") {
         return Response.json({ error: {
-          code: "MURPH_IMAGE_CARD_REQUIRED",
-          message: "Save a card at https://www.withmurph.ai/settings#subscription to generate images. Saving a card does not charge you or start a subscription.",
+          code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED",
+          message: "Image generation requires a subscription. Start Pulse or, if eligible, Group at https://www.withmurph.ai/settings#subscription, then ask for the image again.",
         } }, { status: 403 });
       }
     }

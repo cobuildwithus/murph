@@ -686,7 +686,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     const imageAccessFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
       const url = new URL(request instanceof Request ? request.url : String(request));
       expect(url.pathname).toBe(HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH);
-      return Response.json({ allowed, reason: allowed ? "allowed" : "card_required" });
+      return Response.json({ allowed, reason: allowed ? "allowed" : "subscription_required" });
     });
     const handler = readHostedLocalTestOutboundByHost()[
       HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
@@ -704,7 +704,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     expect(imageAccessFetch).toHaveBeenCalledTimes(1);
     if (!allowed) {
       expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_CARD_REQUIRED" } });
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
       return;
     }
     expect(response.status).toBe(200);

@@ -93,35 +93,32 @@ token still own activation. Existing pending accounts are not converted by this
 change. iMessage email handles retain their separate existing identity path;
 SMS/RCS cannot claim email-handle authority.
 
-All personal Starter accounts require a currently attached Stripe card before
-a hosted image generation or image edit request. Ordinary text chat remains
-available within the existing allowance. Paid, Family-sponsored, and group
-access retain their current allowance owners. This check is in the Cloudflare
-provider interceptor, including requests outside the normal dynamic tool; local
-assistant image generation keeps its existing behavior.
+Personal Starter accounts must start a subscription through the normal Pulse
+or eligible Group signup flow before hosted image generation or editing.
+A saved card alone grants no image access. Ordinary text chat remains available
+within the existing Starter allowance. Active paid plans, Family sponsorship,
+and group runtimes retain their existing allowance owners and limits.
 
-The same access decision covers native `image_generation` tools in OpenAI
-Responses HTTP requests and WebSocket client frames. Each image request checks
-current card attachment, including a later image on an existing socket. Bounded
-JSON inspection and one Responses relay preserve ordinary text streams without
-card-network work; native-memory usage recording remains enabled only for its
-authenticated memory lane. Queued client frames share the existing 32 MiB
-message budget while an access check is pending.
+Web derives image permission from the canonical usage gate: denied usage stays
+denied; allowed direct Starter requires a subscription; other allowed sources
+retain image access. Subscription activation, cancellation, sponsorship,
+suspension, and exhaustion converge through those existing owners. There is no
+new Stripe read, card setup flow, account field, or cached entitlement.
 
-Web resolves the current usage source and, for direct Starter, lists one card
-on the member's existing encrypted Stripe customer binding. It checks mode and
-attachment and rechecks the binding after Stripe responds. Missing cards,
-provider failure, or incompatible responses cannot authorize an image request.
-There is no cached ever-added-card flag or new account field. The gateway uses
-its authenticated runtime member binding for the signed Web callback and never
-accepts a caller-selected payer.
+The Cloudflare provider interceptor enforces the signed, runtime-member-bound
+Web decision before Images API generation/editing and native `image_generation`
+tools in Responses HTTP requests and WebSocket frames, including later images
+on an existing socket. Ordinary text adds no access callback. Bounded JSON
+inspection and the ordered Responses relay retain the shared 32 MiB queued-frame
+budget. Native-memory accounting stays restricted to its authenticated lane.
+Missing, failed, or incompatible access responses cannot authorize image spend;
+the caller cannot select a different payer. Local image generation is unchanged.
 
-Settings offers card-only Stripe Checkout in setup mode, reusing the existing
-member customer owner. Saving a card starts no subscription and creates no
-charge or additional usage grant. Setup completion and expiry are receipt-only
-Stripe events; image access reads current attachment directly. A denied image
-completion tells the member how to save a card and request the image again,
-without automatically retrying or claiming an image exists.
+A denied image completion directs the member to normal subscription Settings
+and invites them to request the image again after subscribing. It never starts
+checkout or retries automatically, asks for payment details in chat, promises
+no charge, or claims an image was created. Existing subscription checkout owns
+its normal pricing, confirmation, activation, and retries.
 
 The existing operational alert cron also evaluates Starter abuse signals:
 10 enrolled accounts created in 15 minutes, or 3 accounts created in the past
@@ -133,7 +130,7 @@ quiet hours and do not depend on latency timezone configuration. Email contains
 aggregate counts and an Ops link, not member identities or messages. These
 signals request investigation; they neither prove fraud nor suspend accounts.
 
-Deploy the Web access route, setup-event handling, and Settings consumer with
+Deploy the Web subscription-access route with
 `HOSTED_ONBOARDING_LINQ_SMS_INSTANT_START_ENABLED` unset first, then deploy
 the Cloudflare gateway check. Only after its signed access proof passes, set
 that Web variable to `1` to enable new SMS/RCS instant start. It defaults off

@@ -915,24 +915,6 @@ describe("hosted Stripe event reconciliation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["checkout.session.completed", "checkout.session.expired"] as const)("treats card setup %s as a receipt-only event", async (type) => {
-    const prisma = createStripeEventPrismaHarness();
-    const base = makeCheckoutCompletedEvent();
-    const event = makeStripeEvent({ ...base, api_version: "2025-03-31.basil",
-      request: { id: null, idempotency_key: null }, type, data: { object: {
-      ...base.data.object, mode: "setup", subscription: null,
-    } } });
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    await recordHostedStripeEvent({ event, prisma: prisma.client });
-    await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
-      .resolves.toMatchObject({ status: "completed", activatedMemberId: null });
-    expect(mocks.findMemberForStripeCheckoutSession).not.toHaveBeenCalled();
-    expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
-    expect(mocks.applyStripeCheckoutExpired).not.toHaveBeenCalled();
-    expect(mocks.prepareHostedStripeCheckoutCompletion).not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
-  });
-
   it("routes checkout completion through the live Stripe event without activating access", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();

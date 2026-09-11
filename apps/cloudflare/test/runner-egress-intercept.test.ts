@@ -1560,15 +1560,15 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it.each([
-    { cardAllowed: false, image: true, status: 403 },
-    { cardAllowed: true, image: true, status: 200 },
-    { cardAllowed: false, image: false, status: 200 },
-  ])("checks Responses image access without gating text (card=$cardAllowed image=$image)", async ({ cardAllowed, image, status }) => {
+    { subscriptionAllowed: false, image: true, status: 403 },
+    { subscriptionAllowed: true, image: true, status: 200 },
+    { subscriptionAllowed: false, image: false, status: 200 },
+  ])("checks Responses image access without gating text (subscription=$subscriptionAllowed image=$image)", async ({ subscriptionAllowed, image, status }) => {
     const fetchMock = vi.fn<typeof fetch>(async (request) => {
       const url = new URL(request instanceof Request ? request.url : String(request));
       return url.hostname === "api.openai.com"
         ? Response.json({ id: "response_synthetic", output: [] })
-        : Response.json({ allowed: cardAllowed, reason: cardAllowed ? "allowed" : "card_required" });
+        : Response.json({ allowed: subscriptionAllowed, reason: subscriptionAllowed ? "allowed" : "subscription_required" });
     });
     vi.stubGlobal("fetch", fetchMock);
     const credential = await createTestProviderEgressCredential();
@@ -1590,14 +1590,14 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).toHaveBeenCalledTimes(Number(image) + Number(status === 200));
   });
 
-  it.each(["generations", "edits"])("denies image %s before OpenAI when the saved-card gate rejects", async (operation) => {
-    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ allowed: false, reason: "card_required" }));
+  it.each(["generations", "edits"])("denies image %s before OpenAI when the subscription gate rejects", async (operation) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ allowed: false, reason: "subscription_required" }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await hostedRunnerIntercept(new Request(`https://api.openai.com/v1/images/${operation}`, {
       method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` },
     }), createInterceptEnv({ OPENAI_API_KEY: "openai-worker-secret", validateRuntimeWriteFence: async () => true }), { containerId: "member_123--v-version_1" });
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_CARD_REQUIRED" } });
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
