@@ -4,8 +4,7 @@ Last verified: 2026-09-04
 
 Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
 the user requests it. It owns the managed-browser review, exact-head packaging,
-finding disposition, retries, and base-update rules. It does not add a local
-specialist or deep-review pass.
+finding disposition, retries, and base-update rules.
 
 Read the sections needed for the current round. Run on the stable pushed head
 after focused local proof and parent candidate review, concurrently with CI.

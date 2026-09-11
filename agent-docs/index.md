@@ -155,14 +155,14 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/research/2026-07-10-junction-labs-commerce-and-fulfillment.md` | Point-in-time Junction lab-ordering research and phased product, commerce, fulfillment, result-import, and launch-gate proposal. | Research and future planning artifact | Medium | 2026-07-10 |
 | `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules. | Murph Age research workflow | High | 2026-05-09 |
-| `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-04 |
+| `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-11 |
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; GitHub dispatch, protected execution, exact receipts and cross-repository rollout. | Live provider proof | High | 2026-09-10 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, and remote browser health readiness. | Verification policy | High | 2026-09-11 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
-| `agent-docs/operations/completion-workflow.md` | Completion workflow and verified-base mergeability gate. | Completion workflow | High | 2026-09-11 |
+| `agent-docs/operations/completion-workflow.md` | Parent-owned completion evidence, final ReviewGPT eligibility, and verified-base mergeability; specialist passes are retired. | Completion workflow | High | 2026-09-11 |
 | `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy. | Phone-number messaging policy | High | 2026-08-11 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle and guarded partial-retirement recovery. | Local rebuildable-storage lifecycle | High | 2026-09-06 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
@@ -184,7 +184,6 @@ Generated-image retirement after hosted media expiry is owned by
 | `agent-docs/exec-plans/completed/2026-09-08-shared-codex-tool-input-contract.md` | PR3059 canonical tool-contract preservation, measured payloads, five Ready journeys, and validated final review/CI closure. | Historical implementation evidence | Low | 2026-09-08 |
 | `agent-docs/exec-plans/completed/2026-09-08-device-checkpoint-replay.md` | PRs #3080 and #3084: reproduced continuation validation failure, corrected reader, and verified live progress recovery. | Historical implementation evidence | Low | 2026-09-09 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
-| `agent-docs/prompts/` | Optional task-specific review prompts; the completion workflow determines required gates. | Workflow prompt library | Low | 2026-08-17 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, build/deploy contracts, and bounded legacy phone-call deletion execution. | `apps/web/**` | Medium | 2026-09-10 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview, runtime contract, and retired member shell-hint transport. | `apps/cloudflare/**` | Medium | 2026-09-10 |
