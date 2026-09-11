@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "private-reminder-targets",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable private reminders",
+    "summary": "Reminders keep their private conversation setting when their destination is explicitly updated.",
+    "details": "An update to the same destination preserves whether the conversation is private or shared. Saved defaults cannot transfer that setting to a different destination.",
+    "relevanceTags": [
+      "reminders",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}
