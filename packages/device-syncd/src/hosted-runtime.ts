@@ -255,6 +255,10 @@ export function mergeHostedDeviceSyncConnectionMetadata(input: {
   const localSweepKey = input.localMetadata?.[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
   if (typeof localSweepKey === "string") {
     merged.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY] = localSweepKey;
+    // The accepted hydration baseline must remain the actual Web metadata until
+    // this local scheduling progress has crossed its checkpoint boundary.
+    merged.preservedLocalProgress ||= localSweepKey
+      !== input.hostedMetadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
   }
   return merged;
 }

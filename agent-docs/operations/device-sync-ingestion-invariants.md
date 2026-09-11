@@ -324,6 +324,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    wake or the post-checkpoint completion fence proves durable recovery. A crash
    before checkpoint replays the original root; a cold restore after checkpoint
    recovers both queued work and suppression under the existing connection epoch.
+   Warm hydration marks a differing local sweep hash as unpublished progress so
+   the accepted comparison baseline remains the actual Web metadata, including
+   after an applied control update loses its transport response.
    Missing or unrecognized metadata schedules safely. The marker is never health
    completeness or source authority, and ordinary reconciliation is unchanged.
    Oxygen/stress data-event execution also schedules affected local days within

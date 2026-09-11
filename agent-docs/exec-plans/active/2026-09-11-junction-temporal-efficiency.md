@@ -107,5 +107,17 @@ Remediation verification:
   jobs before remote suppression, no additional HTTP call or persistence owner is
   introduced, and old readers can drop the optional hint without losing jobs.
 
-Pending: round 2 exact-head external review and required CI, followed by the supported
+Round 2 found the same recovery gap through warm hydration: preserving the local
+marker without setting `preservedLocalProgress` let an accepted baseline contain
+unpublished state. The finding is accepted. The real hosted-pass fixture now
+reproduces the failure after a successful Web apply loses its response, retries
+in the same workspace, handles a resource-unavailable metadata change, loses a
+second apply response, and then restores the original checkpoint without SQLite.
+The existing unpublished-progress flag now includes local/remote sweep-hash
+mismatches. The regression failed on the reviewed candidate and passes after this
+four-line correction. All 240 affected hosted-runtime/hint tests and both package
+typechecks pass; completed checkpoint, cadence, reconnect, and coalescing proof
+remain intact. No additional state owner or API request was added.
+
+Pending: round 3 exact-head external review and required CI, followed by the supported
 hosted rollout and a bounded production traffic/no-op comparison.

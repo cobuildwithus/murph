@@ -430,7 +430,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     };
     expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
       localMetadata: { junctionTemporalSweepV1: localKey },
-    }).metadata).toEqual({ junctionTemporalSweepV1: localKey, otherProgress: "remote" });
+    })).toEqual({
+      metadata: { junctionTemporalSweepV1: localKey, otherProgress: "remote" },
+      preservedLocalProgress: true,
+    });
+    expect(mergeHostedDeviceSyncConnectionMetadata({ ...input,
+      localMetadata: { junctionTemporalSweepV1: hostedKey },
+    }).preservedLocalProgress).toBe(false);
     expect(mergeHostedDeviceSyncConnectionMetadata({ ...input, localMetadata: undefined }).metadata)
       .toEqual(input.hostedMetadata);
   });

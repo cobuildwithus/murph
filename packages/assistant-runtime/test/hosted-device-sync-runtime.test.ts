@@ -15454,6 +15454,9 @@ describe("hosted device-sync runtime", () => {
       nextReconcileAt: "2026-04-24T13:00:00.000Z", lastSyncCompletedAt: "2026-04-24T11:00:00.000Z",
     };
     let crashAfterApply = true;
+    let unavailableOnWarmRetry = false;
+    let observedVersion = now;
+    let appliedVersion = 0;
     const authoritativeDays: string[] = [];
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({ connectionId, sourceProviderSlug: "garmin" });
     assert.ok(sourceInstanceKey);
@@ -15461,7 +15464,7 @@ describe("hosted device-sync runtime", () => {
       ...createNoDirtyStateDeviceSyncPortMethods(),
       async fetchSnapshot() {
         return buildRuntimeSnapshot({
-          connectedAt, connectionId, externalAccountId, generatedAt: now, hostedUpdatedAt: now,
+          connectedAt, connectionId, externalAccountId, generatedAt: now, hostedUpdatedAt: observedVersion,
           credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
           localState, metadata, provider: "junction",
           sources: [{
@@ -15476,6 +15479,10 @@ describe("hosted device-sync runtime", () => {
         for (const update of input.updates) {
           if (update.connection?.metadata) metadata = { ...update.connection.metadata };
           localState = { ...localState, ...update.localState };
+        }
+        if (input.updates.length > 0) {
+          appliedVersion += 1;
+          observedVersion = new Date(Date.parse(now) + appliedVersion).toISOString();
         }
         if (crashAfterApply) throw new Error("simulated crash after control apply before checkpoint");
         return {
@@ -15498,6 +15505,10 @@ describe("hosted device-sync runtime", () => {
       }
       if (url.pathname.startsWith("/v2/summary/")) return createTestJsonResponse({ data: [] });
       assert.ok(url.pathname.startsWith(`/v2/timeseries/${externalAccountId}/`));
+      if (unavailableOnWarmRetry) {
+        unavailableOnWarmRetry = false;
+        return createTestJsonResponse({ code: "resource_unavailable", detail: "Resource unavailable" }, 404);
+      }
       const start = url.searchParams.get("start_date");
       const end = url.searchParams.get("end_date");
       if (start !== end) {
@@ -15550,7 +15561,19 @@ describe("hosted device-sync runtime", () => {
         const importsBeforeCrash = authoritativeDays.length;
         assert.ok(importsBeforeCrash < 7, "Staggered children must outlive this pass");
 
-        // The earlier checkpoint has the original wake and no runner SQLite.
+        // The first response was lost after Web applied it. A warm mailbox retry
+        // hydrates that new server version while SQLite retains the local sweep.
+        // A real optional-resource result changes ordinary provider metadata.
+        unavailableOnWarmRetry = true;
+        await assert.rejects(runHostedDeviceSyncPass(wake, first.vaultRoot, config, port, 120_000, options),
+          /simulated crash after control apply before checkpoint/u);
+        assert.equal(unavailableOnWarmRetry, false);
+        assert.ok(Number(metadata.junctionSkippedResourceTotal) > 0);
+        assert.equal(metadata.junctionTemporalSweepV1, undefined,
+          "Warm hydration must not promote a local sweep into the published baseline");
+
+        // A second lost response is followed by cold restoration of the original
+        // checkpoint, whose root has no newly queued child hints or SQLite.
         crashAfterApply = false;
         const replayed = await runHostedDeviceSyncPass(wake, replay.vaultRoot, config, port, 120_000, options);
         assert.ok(replayed.processedJobs > 0);
