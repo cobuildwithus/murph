@@ -27,13 +27,11 @@ import {
   applyStripeSubscriptionUpdated,
   cleanupHostedFamilySponsoredDirectSubscription,
   cleanupHostedStandardCheckoutAndRetireAttempt,
-  cancelHostedPulseTrialCheckoutLoserSubscription,
   HostedStripeFamilySponsoredCleanupPendingError,
   type HostedStripeCheckoutCleanup,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
   prepareHostedStripeCheckoutCompletion,
-  prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeReversalProviderState,
   isHostedStripeRefundEventType,
   type PreparedHostedStripeCheckoutCompletion,
@@ -98,9 +96,6 @@ import {
   HostedStripeCheckoutLoserCleanupPendingError,
   refundHostedExactOrdinaryInvoicePayment,
 } from "./stripe-checkout-loser-cleanup";
-import {
-  isHostedLegacyPulseTrialRetirableStatus,
-} from "./pulse-trial-subscription-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -433,7 +428,6 @@ async function processHostedStripeEventRecord(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -447,32 +441,13 @@ async function processHostedStripeEventRecord(
 
   switch (event.type) {
     case "checkout.session.completed":
-      if (processingContext.preparedCheckoutCompletion) {
-        return mapHostedStripeActivationOutcome(
-          await applyStripeCheckoutCompleted(
-            payload as Stripe.Checkout.Session,
-            prisma,
-            dispatchContext,
-            processingContext.preparedCryptoDomainRoots.size > 0
-              ? processingContext.preparedCryptoDomainRoots
-              : undefined,
-            processingContext.preparedCheckoutCompletion,
-          ),
-        );
-      }
       return mapHostedStripeActivationOutcome(
-        processingContext.preparedCryptoDomainRoots.size > 0
-          ? await applyStripeCheckoutCompleted(
-              payload as Stripe.Checkout.Session,
-              prisma,
-              dispatchContext,
-              processingContext.preparedCryptoDomainRoots,
-            )
-          : await applyStripeCheckoutCompleted(
-              payload as Stripe.Checkout.Session,
-              prisma,
-              dispatchContext,
-            ),
+        await applyStripeCheckoutCompleted(
+          payload as Stripe.Checkout.Session,
+          prisma,
+          dispatchContext,
+          processingContext.preparedCheckoutCompletion ?? undefined,
+        ),
       );
     case "checkout.session.expired":
       await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, prisma);
@@ -489,9 +464,6 @@ async function processHostedStripeEventRecord(
           dispatchContext,
           prisma,
           processingContext.preparedFamilyCryptoDomainRoots,
-          processingContext.preparedCryptoDomainRoots.size > 0
-            ? processingContext.preparedCryptoDomainRoots
-            : undefined,
         ),
       );
     case "subscription_schedule.updated":
@@ -1138,9 +1110,6 @@ async function processClaimedHostedStripeEvent(
           prisma,
         });
       }
-      if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
-        throw new Error("Pulse Trial cleanup requires a direct billing member.");
-      }
       if (
         result.cleanupFamilySponsoredStripeSubscriptionId &&
         !processingMemberId
@@ -1222,13 +1191,6 @@ async function processClaimedHostedStripeEvent(
           prisma,
           sourceEventId: `${claimed.eventId}:family-sponsored-checkout-cleanup`,
           subscriptionId: result.cleanupFamilySponsoredCheckout.subscriptionId,
-        });
-      }
-      if (result.cleanupPulseTrialStripeSubscriptionId && processingMemberId) {
-        await cancelHostedPulseTrialCheckoutLoserSubscription({
-          memberId: processingMemberId,
-          prisma,
-          subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
         });
       }
       if (result.cleanupStandardCheckout && processingMemberId) {
@@ -1690,29 +1652,6 @@ async function processHostedStripeEventWithVerifiedMemberLockCore(
   };
 }
 
-function hostedStripeEventMayActivateDirectMember(
-  stripeEvent: Stripe.Event,
-  canonicalSubscription: Stripe.Subscription | null,
-): boolean {
-  if (stripeEvent.type === "invoice.paid") {
-    return true;
-  }
-  if (stripeEvent.type === "checkout.session.completed") {
-    const session = stripeEvent.data.object as Stripe.Checkout.Session;
-    return parseHostedBillingCheckoutOffer(session.metadata?.checkoutOffer)
-      === HOSTED_PULSE_TRIAL_OFFER;
-  }
-  if (stripeEvent.type.startsWith("customer.subscription.")) {
-    const subscription = canonicalSubscription
-      ?? (stripeEvent.data.object as Stripe.Subscription);
-    return parseHostedBillingCheckoutOffer(
-      subscription.metadata?.checkoutOffer,
-    ) === HOSTED_PULSE_TRIAL_OFFER
-      && isHostedLegacyPulseTrialRetirableStatus(subscription.status);
-  }
-  return false;
-}
-
 function hostedStripeEventNeedsPreflightProcessingContext(
   stripeEvent: Stripe.Event,
 ): boolean {
@@ -1733,18 +1672,9 @@ async function prepareHostedStripeEventCryptoDomainRoots(input: {
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   if (
     input.canonicalSubscription?.metadata.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND
-    || !hostedStripeEventMayActivateDirectMember(
-      input.stripeEvent,
-      input.canonicalSubscription,
-    )
+    || input.stripeEvent.type !== "invoice.paid"
   ) {
     return new Map();
-  }
-  if (input.stripeEvent.type === "checkout.session.completed") {
-    return prepareHostedStripeDirectMemberActivationCrypto({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
   }
   return prepareHostedCryptoDomainRootCandidates({
     prisma: input.prisma,
@@ -2115,7 +2045,6 @@ function mapHostedStripeActivationOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-    cleanupPulseTrialStripeSubscriptionId?: string | null;
     cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId: string | null;
     hostedExecutionMailboxItemId?: string | null;
@@ -2128,7 +2057,6 @@ function mapHostedStripeActivationOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -2144,8 +2072,6 @@ function mapHostedStripeActivationOutcome(
       outcome.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
-    cleanupPulseTrialStripeSubscriptionId:
-      outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
     cleanupStandardCheckout: outcome.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     hostedExecutionMailboxItemId:
@@ -2189,7 +2115,6 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-    cleanupPulseTrialStripeSubscriptionId?: string | null;
     cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId?: string | null;
     hostedExecutionMailboxItemId?: string | null;
@@ -2203,7 +2128,6 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -2219,8 +2143,6 @@ function mapHostedStripeSubscriptionUpdateOutcome(
       outcome?.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
-    cleanupPulseTrialStripeSubscriptionId:
-      outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
     cleanupStandardCheckout: outcome?.cleanupStandardCheckout ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     hostedExecutionMailboxItemId:
@@ -2238,7 +2160,6 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
@@ -2252,7 +2173,6 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     activatedMembers: [],
     cleanupFamilySponsoredCheckout: null,
     cleanupFamilySponsoredStripeSubscriptionId: null,
-    cleanupPulseTrialStripeSubscriptionId: null,
     cleanupStandardCheckout: null,
     hostedExecutionEventId: null,
     hostedExecutionMailboxItemId: null,

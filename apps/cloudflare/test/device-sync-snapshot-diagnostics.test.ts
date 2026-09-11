@@ -77,24 +77,25 @@ function failureLogs() {
     entry.message === invalidJsonMessage || entry.message === invalidShapeMessage);
 }
 
-function expectFailureMetadata(details: Record<string, unknown>) {
+function expectFailureMetadata(details: Record<string, unknown>, attempts = 1) {
   details = {
     responseContentEncodingCategory: "missing", responseContentLengthCategory: "missing", ...details,
   };
-  expect(mocks.log).toHaveBeenCalledTimes(3);
+  expect(mocks.log).toHaveBeenCalledTimes(3 * attempts);
   const entries = failureLogs();
-  expect(entries).toHaveLength(1);
-  const entry = entries[0]!;
-  expect(entry).toMatchObject({ level: "warn", details });
-  // Exercise the real retained-log sanitizer and its existing 32-key cap too.
-  expect(buildHostedExecutionStructuredLogRecord(entry).details).toMatchObject(details);
+  expect(entries).toHaveLength(attempts);
+  for (const entry of entries) {
+    expect(entry).toMatchObject({ level: "warn", details });
+    // Exercise the real retained-log sanitizer and its existing 32-key cap too.
+    expect(buildHostedExecutionStructuredLogRecord(entry).details).toMatchObject(details);
+    expect(entry).not.toHaveProperty("error");
+    expect(entry.details).not.toHaveProperty("errorMessage");
+    expect(entry.details).not.toHaveProperty("errorStack");
+  }
   const logs = JSON.stringify(mocks.log.mock.calls);
   for (const sentinel of [privateBody, privateMime, privateMarker, "synthetic-private-parameter"]) {
     expect(logs).not.toContain(sentinel);
   }
-  expect(entry).not.toHaveProperty("error");
-  expect(entry.details).not.toHaveProperty("errorMessage");
-  expect(entry.details).not.toHaveProperty("errorStack");
 }
 
 function chunkedResponse(bytes: Uint8Array, headers: Headers): Response {
@@ -142,7 +143,27 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
     expect(JSON.stringify(mocks.log.mock.calls)).not.toContain(privateBody);
   });
 
-  it.each(["shortened", "equal_length_corruption"] as const)("classifies %s without changing the JSON error", async (kind) => {
+  it.each(["empty", "invalid_json"] as const)("recovers a transient %s with a newly signed exact read", async (kind) => {
+    let attempts = 0;
+    const { port, fetchImpl } = harness(async (response) => {
+      attempts += 1;
+      if (attempts !== 1) return response;
+      const text = await response.text();
+      return new Response(kind === "empty" ? "" : text.slice(0, -1), { headers: response.headers });
+    });
+    await expect(port.fetchSnapshot({ includeCredentialMaterial: false })).resolves.toEqual(expectedSnapshot);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(mocks.consumeNonce).toHaveBeenCalledTimes(2);
+    const nonces = mocks.consumeNonce.mock.calls.map(([input]) => input.nonceHash);
+    expect(new Set(nonces).size).toBe(2);
+    expect(fetchImpl.mock.calls[1]?.[1]?.body).toBe(fetchImpl.mock.calls[0]?.[1]?.body);
+    expect(mocks.readState).toHaveBeenCalledTimes(2);
+    expect(failureLogs()).toHaveLength(1);
+    expect(mocks.log).toHaveBeenCalledTimes(5);
+    expect(JSON.stringify(mocks.log.mock.calls)).not.toContain(privateBody);
+  });
+
+  it.each(["shortened", "equal_length_corruption"] as const)("classifies %s at the existing decoder", async (kind) => {
     let producerBytes = 0;
     let deliveredBytes = 0;
     const { port, fetchImpl } = harness(async (response) => {
@@ -153,16 +174,20 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
       deliveredBytes = delivered.byteLength;
       return chunkedResponse(delivered, response.headers);
     });
-    await expect(port.fetchSnapshot()).rejects.toMatchObject({
+    const attempts = kind === "shortened" ? 2 : 1;
+    await expect(port.fetchSnapshot()).rejects.toMatchObject(kind === "shortened" ? {
+      code: "HOSTED_WEB_CONTROL_INCOMPLETE_SNAPSHOT_RESPONSE",
+      message: "Hosted device-sync runtime snapshot returned an incomplete snapshot response.",
+    } : {
       message: "Hosted device-sync runtime snapshot returned invalid JSON.",
       cause: expect.any(SyntaxError),
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(attempts);
     expectFailureMetadata({
       responseBodyShape: "invalid_json", responseMimeCategory: "json",
       responseBodyBytes: deliveredBytes, responseExpectedBodyBytes: producerBytes,
       responseByteCountComparison: kind === "shortened" ? "mismatch" : "match",
-    });
+    }, attempts);
   });
 
   it.each([
@@ -181,15 +206,17 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
       return new Response(body, { headers: response.headers });
     });
     const result = port.fetchSnapshot();
-    if (body === "{") await expect(result).rejects.toMatchObject({
-      message: "Hosted device-sync runtime snapshot returned invalid JSON.", cause: expect.any(SyntaxError),
+    const incomplete = body === "{" || body === "";
+    if (incomplete) await expect(result).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_INCOMPLETE_SNAPSHOT_RESPONSE",
     });
     else await expect(result).rejects.toThrow("Hosted device-sync runtime snapshot response must be an object.");
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const attempts = incomplete ? 2 : 1;
+    expect(fetchImpl).toHaveBeenCalledTimes(attempts);
     expectFailureMetadata({
       responseContentEncodingCategory: encodingCategory, responseContentLengthCategory: lengthCategory,
       responseBodyBytes: new TextEncoder().encode(body).byteLength,
-    });
+    }, attempts);
     const logs = JSON.stringify(mocks.log.mock.calls);
     for (const sentinel of ["synthetic-private-header", "x".repeat(64), "9".repeat(64), "9007199254740991"]) {
       expect(logs).not.toContain(sentinel);
@@ -215,15 +242,20 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
     { body: JSON.stringify(privateBody), shape: "scalar" },
     { body: "42", shape: "scalar" },
     { body: "true", shape: "scalar" },
-  ])("retains the exact root-object error for $shape ($body)", async ({ body, shape }) => {
+  ])("keeps bounded warnings and the appropriate failure for $shape ($body)", async ({ body, shape }) => {
     const bytes = new TextEncoder().encode(body ?? "").byteLength;
     const { port, fetchImpl } = harness((response) => new Response(body, { headers: response.headers }));
     const result = port.fetchSnapshot();
-    await expect(result).rejects.toBeInstanceOf(TypeError);
-    await expect(result).rejects.toThrow("Hosted device-sync runtime snapshot response must be an object.");
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    if (shape === "empty") {
+      await expect(result).rejects.toMatchObject({ code: "HOSTED_WEB_CONTROL_INCOMPLETE_SNAPSHOT_RESPONSE" });
+    } else {
+      await expect(result).rejects.toBeInstanceOf(TypeError);
+      await expect(result).rejects.toThrow("Hosted device-sync runtime snapshot response must be an object.");
+    }
+    const attempts = shape === "empty" ? 2 : 1;
+    expect(fetchImpl).toHaveBeenCalledTimes(attempts);
     expect(failureLogs()[0]?.message).toBe(invalidShapeMessage);
-    expectFailureMetadata({ responseBodyShape: shape, responseBodyBytes: bytes, responseByteCountComparison: "mismatch" });
+    expectFailureMetadata({ responseBodyShape: shape, responseBodyBytes: bytes, responseByteCountComparison: "mismatch" }, attempts);
   });
 
   it.each([null, "", "-1", "01", "1e3", "1.5", "9007199254740992", "10, 10", privateMarker, "9".repeat(128), "0"])(
@@ -270,6 +302,7 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
   ])("reduces MIME %s to a finite category", async (mime, category) => {
     const { port } = harness((response) => {
       const delivered = new Response(privateBody, { headers: response.headers });
+      delivered.headers.set(bytesHeader, String(new TextEncoder().encode(privateBody).byteLength));
       if (mime === null) delivered.headers.delete("content-type");
       else delivered.headers.set("content-type", mime);
       return delivered;
@@ -341,7 +374,7 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
       name: "HostedWebControlPlaneResponseError", status: 503,
       code: "SYNTHETIC_UNAVAILABLE", retryable: true,
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(failureLogs()).toEqual([]);
   });
 

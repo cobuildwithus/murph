@@ -68,11 +68,6 @@ Internal control routes:
   failed, or unavailable child abort keeps the existing fail-closed outer
   cancellation. Callback-signed Temporal/default work retains the cooperative
   wake-and-retry behavior.
-- `POST /internal/users/:userId/runtime/shell-prewarm` remains a Vercel
-  OIDC-authenticated compatibility receiver for older Web deployments. It
-  accepts the existing request contract but does not create a container or
-  member binding. Current Web no longer sends typing, routing, or instant-start
-  hints; the coordinator owns pristine global prewarming.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `GET /internal/temporal-worker/binding-admission` authenticates the existing
@@ -84,6 +79,15 @@ Internal control routes:
 The supported worker HTTP surface stops at those narrow control routes, the
 binding-admission and deploy-smoke callbacks, and the public banner and health
 checks.
+
+The retired `POST /internal/users/:userId/runtime/shell-prewarm` endpoint returns
+404 without resolving a runtime owner. Its client and Durable Object RPC
+compatibility methods are removed. Current Web sends no typing, routing, or
+instant-start shell hints; older Web's best-effort helper tolerates the optional
+failure. The coordinator owns pristine global prewarming, and durable mailbox
+signaling plus the post-Temporal direct ensure retain their existing behavior.
+Deployment and rollback constraints remain in
+[DEPLOY.md](./DEPLOY.md#retired-member-shell-prewarm-transport).
 
 ### Unified runner fleet and ready inventory
 
@@ -187,7 +191,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 - The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to the canonical ENAM R2 bucket through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
 - V2 snapshot creation validates the planned durable-root entries, then streams `tar -> zstd -> AES-GCM` into the encrypted object. Restore treats v2 snapshots as first-party authenticated artifacts: it verifies the encrypted object size/hash, AES-GCM tag, and plaintext compressed archive hash, extracts once into a temporary root, then swaps that root into place. Restore does not re-list tar members; a valid encrypted snapshot is trusted as output from the snapshot writer.
 - Ordinary inbound hosted video bytes are not portable workspace state. Snapshot planning excludes normalized video paths derived from validated canonical inbox captures even while accepted input still protects the local file; invalid capture metadata fails planning closed. Unprotected videos are immediately eligible for the existing atomic inbox-retention cleanup, while explicit canonical event raw references remain the durable-save exception.
-- Legacy full/base bundle refs and legacy artifact sidecars remain restoreable during migration, but v2 snapshot production does not externalize raw files into artifact blobs.
+- Live workspace restore and checkpoint construction accept v2 refs or null bootstrap state. Legacy ref decoders and object cleanup remain for retained orphan metadata; canonical write receipt artifact recovery remains supported.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and short-lived direct-R2 upload sessions without persisted presigned URLs. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; snapshot refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
 - A valid workspace-CAS snapshot is not discarded because web observes newer conversation input. Current web commits the request snapshot, redacted watermarks, and wake projection as one prefix and may return `conversationInputAhead`; a live default-mode runtime imports through the existing foreground path, while retention-only work or shutdown leaves the durable mailbox row for reconciliation. The runner performs no post-upload wake discard and no metadata-only shutdown resnapshot. If shutdown follows a real import that staged assistant input, its ordinary dirty checkpoint carries a due assistant wake so restore can run it. Handling for an old web deployment's `foreground_pending` checkpoint response remains compatibility-only.
@@ -624,10 +628,11 @@ in-memory diagnostics. `prewarm_typing_start_issued_warm` and
 `prewarm_message_routing_start_issued_warm` mean the platform start call
 completed without a newly observed lifecycle start;
 their corresponding `*_cold_start_observed` cohorts mean the same container
-lifecycle did observe a cold start. Neither means health readiness completed. One observation contains
-one terminal operation outcome; later hints may increase only its bounded
-coalesced-hint count and never launch another operation before readiness
-consumes it.
+lifecycle did observe a cold start. Neither means health readiness completed.
+Historical observations recorded one terminal operation outcome; later hints
+could increase only its bounded coalesced-hint count before readiness consumed
+it. Current runtime preparation no longer forwards hint observations; stored
+fields remain readable by the latency schema and report.
 
 The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
@@ -671,8 +676,8 @@ trace, or attempt identifiers.
 Admission is read once before each fresh or replacement runtime session. Active
 wakes reuse the existing write fence and make no health-data admission callback.
 Explicit withdrawal still serializes behind ensures, clears the fence, and stops
-the exact runner before acknowledgement. Legacy member-specific prewarm hints
-are no-ops and perform no admission or allocation work.
+the exact runner before acknowledgement. Retired member-specific hint requests
+perform no admission or allocation work.
 
 Fresh starts overlap workspace metadata and runtime crypto reads with slot
 allocation after admission. The reads use the original command budget and stay

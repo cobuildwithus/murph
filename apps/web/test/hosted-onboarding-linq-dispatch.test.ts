@@ -115,7 +115,6 @@ const mocks = vi.hoisted(() => {
       linqInstantStartPhonePrefixes: ["+44"] as readonly string[],
       linqSmsInstantStartEnabled: true,
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
-      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -14533,7 +14532,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const prisma = asPrismaTransactionClient({
       hostedLinqLine: buildHostedLinqLineFixture({
-        activeMemberLimit: 1,
         maxNewConversationsPerDay: 1,
         phoneNumber: homeLinePhone,
       }),
@@ -15315,7 +15313,6 @@ function buildManagedInboundHostedLinqLineFixture(
         )
       )
         ? [{
-            activeMemberLimit: null,
             assignmentWeight: 1,
             configuredAt: new Date("2026-03-26T00:00:00.000Z"),
             egressPolicy: "enabled",
@@ -15337,7 +15334,6 @@ function buildManagedInboundHostedLinqLineFixture(
 }
 
 function buildHostedLinqLineFixture(input: {
-  activeMemberLimit?: number | null;
   maxNewConversationsPerDay?: number | null;
   phoneNumber: string;
 }): HostedLinqLineFixture {
@@ -15351,7 +15347,6 @@ function buildHostedLinqLineFixture(input: {
         )
       )
         ? [{
-            activeMemberLimit: input.activeMemberLimit ?? null,
             assignmentWeight: 1,
             maxNewConversationsPerDay: input.maxNewConversationsPerDay ?? null,
             phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(input.phoneNumber),
@@ -15373,7 +15368,6 @@ function buildHostedLinqLineFixture(input: {
 
 function buildHostedLinqLinePoolFixture(input: {
   lines: Array<{
-    activeMemberLimit?: number | null;
     maxNewConversationsPerDay?: number | null;
     phoneNumber: string;
     proactiveConversationCount?: number | null;
@@ -15381,7 +15375,6 @@ function buildHostedLinqLinePoolFixture(input: {
   }>;
 }): HostedLinqLineFixture {
   const rows = input.lines.map((line) => ({
-    activeMemberLimit: line.activeMemberLimit ?? null,
     assignmentWeight: 1,
     configuredAt: new Date("2026-03-26T00:00:00.000Z"),
     egressPolicy: "enabled",
@@ -15409,7 +15402,6 @@ function buildHostedLinqLinePoolFixture(input: {
         : rows;
 
       return matchingRows.map((row) => ({
-        activeMemberLimit: row.activeMemberLimit,
         assignmentWeight: row.assignmentWeight,
         configuredAt: row.configuredAt,
         egressPolicy: row.egressPolicy,
@@ -15527,7 +15519,6 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
               )
             )
               ? [{
-                  activeMemberLimit: null,
                   assignmentWeight: 1,
                   maxNewConversationsPerDay: null,
                   phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

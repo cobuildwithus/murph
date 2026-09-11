@@ -3522,25 +3522,6 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it.each(["stopped", "running"] as const)(
-    "accepts pre-unified UserRunner hint RPCs without touching a %s container",
-    async (initialStatus) => {
-      const { container, containerFetch, getState, start, startAndWaitForPorts } =
-        createContainerDouble({ initialStatus });
-      const args = [{ timeoutMs: 7_500, userId: "member_123", source: "linq-typing-started" }];
-
-      await expect(Reflect.apply(container.beginShellPrewarm, container, args))
-        .resolves.toEqual({ accepted: true });
-      await expect(Reflect.apply(container.prewarmShell, container, args))
-        .resolves.toEqual({ action: "superseded", kind: "superseded" });
-
-      expect(start).not.toHaveBeenCalled();
-      expect(startAndWaitForPorts).not.toHaveBeenCalled();
-      expect(containerFetch).not.toHaveBeenCalled();
-      expect(getState).not.toHaveBeenCalled();
-    },
-  );
-
   it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 

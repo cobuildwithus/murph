@@ -944,8 +944,8 @@ Last verified: 2026-09-04
   state.
 - Web and companion onboarding use the same semantic-keyed starter grant with
   their own bounded source references. A repeated enrollment cannot replace the
-  accepted grant or add balance. Historical trial metadata remains only for
-  delayed Stripe cleanup and migration audit; missing legacy provenance maps to
+  accepted grant or add balance. Historical trial metadata remains for
+  paid Stripe normalization and migration audit; missing legacy provenance maps to
   Unknown rather than being inferred from mutable identity state.
 
 - Define startup requirements, health checks, and critical invariants.
@@ -1046,9 +1046,6 @@ Last verified: 2026-09-04
   cancellation owner before preparing the final customer-cleanup receipt.
   Provider `processing` or `succeeded` state remains a deletion blocker; only a
   provider-proven cancellation may terminalize local `payment_pending` state.
-  Legacy Pulse Trial loser cleanup validates exact provider targets before one short
-  member-owner revalidation transaction and cancels them only after that
-  transaction releases; no Stripe request is made while that lock is held.
   Direct paid and direct Trial conversion to Family updates the exact existing
   Subscription in place under the owner lock, clears Trial-only metadata, and
   ends a Trial immediately instead of creating a competing Subscription. A
@@ -1393,16 +1390,36 @@ Last verified: 2026-09-04
   category (`json`, `html`, `text`, `other`, `missing`), body shape
   (`invalid_json`, `empty`, `null`, `array`, `scalar`) and byte-count comparison
   (`match`, `mismatch`, `missing`, `invalid`). Empty/nonobject snapshots emit
-  one bounded shape warning before the unchanged required-object parser
-  rejects them. Only canonical nonnegative safe-integer markers yield a
-  numeric expected count; raw headers, body text, parser messages, content
-  hashes and new identifiers are never logged. Existing log retention and
-  cardinality caps apply. The marker never gates acceptance, auth or retries:
-  old readers ignore it, new readers accept its absence, and either deployment
-  order or rollback is safe. A mismatch establishes a length discrepancy
-  against the claimed producer count, not the corrupting hop. A match does not
-  prove identical content, rule out equal-length corruption or authenticate a
-  spoofed marker. No new retry or successful-body logging is introduced.
+  one bounded shape warning per failed attempt. Only canonical nonnegative
+  safe-integer markers yield a numeric expected count; raw headers, body text,
+  parser messages, content hashes and new identifiers are never logged.
+  Existing log schemas, retention and cardinality caps apply.
+  Snapshot reads opt into the existing deadline-bounded single exact replay,
+  in both direct and proxy transports. At the decoder, an already-rejected
+  empty or invalid-JSON successful response becomes a typed incomplete-snapshot
+  error only when that canonical producer count is strictly greater than the
+  actual streamed bytes, after transport decompression and before text
+  decoding. The retry predicate recognizes that error; complete valid JSON
+  still reaches the existing snapshot parser regardless of a missing, invalid
+  or mismatched marker. Missing/invalid markers, equal counts, overlong bodies,
+  valid-JSON nonobjects and unrelated schema/parser failures do not acquire
+  incomplete-response retryability. The marker is never an integrity or auth
+  gate, and older Web producers may omit it.
+  The same opt-in also permits the existing replay-safe request/body transport
+  failures and HTTP `5xx`, even without the marker. Known `4xx` (including
+  `401`, `403`, `408` and `429`), authority rejection, caller cancellation and
+  request/body timeouts do not replay. Caller cancellation is rechecked before
+  replay; both network attempts share the original configured total read
+  deadline. Cost is at most one extra identical read-only snapshot POST to Web
+  per call, with no added Worker body buffering, sleep, scheduler, cache or
+  durable queue. Persistent failure still reaches the existing durable
+  device-sync retry owner. No new log event or successful-body logging is added.
+  Old consumers retain their prior durable-only recovery for these short
+  bodies; either deployment order or rollback remains safe. A mismatch
+  establishes a length discrepancy against the claimed producer count, not
+  the corrupting hop. A match does not prove identical content, rule out
+  equal-length corruption or authenticate a spoofed marker. This is bounded
+  consumer recovery, not a fix for the underlying transport interruption.
   The existing Worker web-control response-received event for successful
   snapshots and those existing consumer decoding/shape warnings also carry
   `responseContentEncodingCategory` (`missing`, `identity`, `gzip`, `br`,
@@ -1416,9 +1433,10 @@ Last verified: 2026-09-04
   no exact Content-Length is logged or compared to the producer byte marker.
   Native Headers normalization precedes these checks. Missing diagnostic fields
   mean an older emitter or an out-of-scope event, not a missing HTTP header.
-  The added cost is two finite fields (eighteen possible pairs) on existing
-  events only: no extra log events, consumer success enrichment, body access,
-  response replacement, requests, retries, sampling state or retention changes.
+  The two header classifications themselves add only two finite fields
+  (eighteen possible pairs) on existing events: no extra log events, consumer
+  success enrichment, body access, response replacement, requests, retries,
+  sampling state or retention changes.
   Use a fixed start/end observation window of natural authorized reads and only
   existing private operation context to compare observations. Do not claim
   per-request matching when that context is insufficient. Different categories

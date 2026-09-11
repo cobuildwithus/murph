@@ -323,7 +323,6 @@ describe("hosted ops growth metrics", () => {
       payingFamilyGroups: [
         {
           billingRef: {
-            billedSeatCount: 4,
             currentBillingPhase: "paid",
           },
           id: "group_family",
@@ -386,6 +385,34 @@ describe("hosted ops growth metrics", () => {
     expect(metrics.mrrUsdCents)
       .toBe(800 + 2_000 + 5_000 + 2 * 700 + 1_900 + 4_900);
     expect(metrics.unpricedPaidMembers).toBe(1);
+  });
+
+  it("counts Family capacity without a legacy total and excludes missing tier rows", () => {
+    const group = {
+      billingRef: { currentBillingPhase: "paid" },
+      id: "group_family",
+      memberships: [{ memberId: "member_family" }],
+      planCapacities: [{ billedQuantity: 2, planCode: "pulse" }],
+    };
+    const unprojectedGroup = {
+      ...group,
+      billingRef: { ...group.billingRef, billedSeatCount: 4 },
+      id: "group_unprojected",
+      planCapacities: [],
+    };
+    const metrics = calculateHostedGrowthCurrentMetrics({
+      payingFamilyGroups: [group, unprojectedGroup],
+      payingIndividuals: [],
+      statusCounts: zeroStatusCounts,
+      totalMembers: 2,
+      trialCandidates: [],
+      windowEnd: new Date("2026-07-06T12:00:00.000Z"),
+    });
+
+    expect(metrics.payingFamilyGroups).toBe(1);
+    expect(metrics.payingFamilySeats).toBe(2);
+    expect(metrics.coveredMembers).toBe(1);
+    expect(metrics.familyMrrUsdCents).toBe(1_400);
   });
 
   it("uses shared trial state logic for active or paused unsuspended trial members", () => {
@@ -1062,13 +1089,11 @@ describe("hosted ops growth metrics", () => {
                 group: {
                   billingRef: {
                     is: {
-                      billedSeatCount: {
-                        gte: 1,
-                      },
                       currentBillingPhase: "paid",
                     },
                   },
                   billingStatus: HostedBillingStatus.active,
+                  planCapacities: { some: {} },
                   suspendedAt: null,
                 },
                 status: "active",
@@ -1120,13 +1145,11 @@ describe("hosted ops growth metrics", () => {
                     group: {
                       billingRef: {
                         is: {
-                          billedSeatCount: {
-                            gte: 1,
-                          },
                           currentBillingPhase: "paid",
                         },
                       },
                       billingStatus: HostedBillingStatus.active,
+                      planCapacities: { some: {} },
                       suspendedAt: null,
                     },
                     status: "active",
@@ -2870,7 +2893,6 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
       {
         billingRef: {
-          billedSeatCount: 2,
           currentBillingPhase: "paid",
         },
         id: "group_family",
@@ -3428,13 +3450,11 @@ describe("hosted ops growth metrics", () => {
       where: {
         billingRef: {
           is: {
-            billedSeatCount: {
-              gte: 1,
-            },
             currentBillingPhase: "paid",
           },
         },
         billingStatus: HostedBillingStatus.active,
+        planCapacities: { some: {} },
         suspendedAt: null,
       },
       select: {
@@ -3555,7 +3575,6 @@ function queueCurrentMetricMocks(input: { includeMax?: boolean } = {}) {
   mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
     {
       billingRef: {
-        billedSeatCount: 1,
         currentBillingPhase: "paid",
       },
       id: "group_family",

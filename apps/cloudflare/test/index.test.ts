@@ -359,7 +359,6 @@ describe("cloudflare worker routes", () => {
       "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
-      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -398,7 +397,6 @@ describe("cloudflare worker routes", () => {
       "deploy-artifact-smoke",
       "deploy-container-smoke",
       "runtime-ensure-processing",
-      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -3834,7 +3832,7 @@ describe("cloudflare worker routes", () => {
       ),
       '{"obsoleteField":true}',
       "ignored legacy body",
-    ])("acknowledges a legacy shell hint entirely in the Worker: %s", async (body) => {
+    ])("does not address a runtime owner for a retired shell hint: %s", async (body) => {
       const runnerContainerGetByName = vi.fn();
       const userRunnerGetByName = vi.fn();
       const env = createWorkerEnv(createUserRunnerStub(), {
@@ -3854,77 +3852,9 @@ describe("cloudflare worker routes", () => {
         env,
       );
 
-      expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({ accepted: true });
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: "Not found" });
       expect(userRunnerGetByName).not.toHaveBeenCalled();
-      expect(runnerContainerGetByName).not.toHaveBeenCalled();
-    });
-
-    it("bounds ignored shell-prewarm bodies before acknowledging them", async () => {
-      const userRunnerGetByName = vi.fn();
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        USER_RUNNER: { getByName: userRunnerGetByName },
-      });
-
-      const response = await worker.fetch(
-        await signControlRequest(new Request(
-          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-          { body: "x".repeat(4 * 1024 + 1), method: "POST" },
-        )),
-        env,
-      );
-
-      expect(response.status).toBe(400);
-      expect(userRunnerGetByName).not.toHaveBeenCalled();
-    });
-
-    it.each([
-      { boundUserId: null, method: "POST", status: 401 },
-      { boundUserId: "another-user", method: "POST", status: 401 },
-      { boundUserId: "test-user", method: "GET", status: 405 },
-    ])("preserves shell-prewarm request authority and method checks: %j", async ({
-      boundUserId,
-      method,
-      status,
-    }) => {
-      const userRunnerGetByName = vi.fn();
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        USER_RUNNER: { getByName: userRunnerGetByName },
-      });
-      const response = await worker.fetch(
-        await signControlRequest(new Request(
-          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-          { method },
-        ), { boundUserId }),
-        env,
-      );
-
-      expect(response.status).toBe(status);
-      expect(userRunnerGetByName).not.toHaveBeenCalled();
-    });
-
-    it("rejects shell prewarm when the only credential is a web callback signature", async () => {
-      const runnerContainerGetByName = vi.fn();
-      const env = createWorkerEnv(createUserRunnerStub(), {
-        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
-      });
-
-      const response = await worker.fetch(
-        await signWebCallbackControlRequest(
-          new Request(
-            "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
-            {
-              body: "{}",
-              headers: { "content-type": "application/json; charset=utf-8" },
-              method: "POST",
-            },
-          ),
-          env,
-        ),
-        env,
-      );
-
-      expect(response.status).toBe(401);
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
