@@ -1144,7 +1144,7 @@ test("Telegram typing records acceptance only after the provider starts the indi
       assistantInputIds: ["synthetic-input"],
       latencyTracePort: { record },
       runtimeAttemptId: "synthetic-attempt",
-      source: "telegram",
+      source: "linq",
     },
   });
   expect(await typing.startTelegramTyping?.({ target: "synthetic-thread" })).toBe(handle);

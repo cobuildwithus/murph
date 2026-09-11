@@ -44,13 +44,16 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "future", { elapsed: 100_000 });
       await insertTrace(tx, "legacy-no-receipt", { elapsed: 50_000, receivedAt: null });
       await insertTrace(tx, "telegram-slow", { source: "telegram", elapsed: 3001 });
+      await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 3000 });
+      await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 10_000 });
+      await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 10_001 });
       await insertTrace(tx, "telemetry-in-flight", { elapsed: null, receivedAt: new Date(now.getTime() - 5000) });
       const rows = await tx.$queryRaw<Array<{ id: string; workspaceState: string; elapsedMs: bigint }>>(
         buildHostedRuntimeTypingAlertQuery({ now }),
       );
       expect(rows.map((row) => row.id).sort()).toEqual([
         "cold-slow", "missing-cold", "missing-warm", "retained-after-cold", "rollout-slow",
-        "telegram-slow", "unconfirmed", "warm-slow",
+        "telegram-slow", "telegram-cold-slow", "unconfirmed", "warm-slow",
       ].map((id) => `runtime-typing/${id}`).sort());
       expect(rows.find((row) => row.id.endsWith("retained-after-cold"))?.workspaceState).toBe("warm");
       // Acceptance happens two seconds after webhook receipt; those seconds count.
@@ -62,10 +65,10 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
-  it("sends separate overnight emails, deduplicates replays, and retries the frozen body through existing recovery", async () => {
+  it.each(["linq", "telegram"] as const)("deduplicates %s emails and retries their frozen body through existing recovery", async (source) => {
     await withTables(async (tx) => {
-      await insertTrace(tx, "first", { elapsed: 4000 });
-      await insertTrace(tx, "second", { cold: true, elapsed: 11_000 });
+      await insertTrace(tx, "first", { source, elapsed: 4000 });
+      await insertTrace(tx, "second", { source, cold: true, elapsed: 11_000 });
       const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response("failed", { status: 500 }));
       const first = await runHostedRuntimeTypingAlertMonitor({ env, fetchImpl, now, prisma: tx });
       expect(first.queuedCount).toBe(2);

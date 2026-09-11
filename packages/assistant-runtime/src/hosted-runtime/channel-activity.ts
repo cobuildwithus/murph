@@ -211,7 +211,10 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       const handle = await startTelegramTypingIndicator(request, dependencies);
       if (handle) {
         recordHostedAssistantMilestonesBestEffort({
-          context: input.latencyTraceContext,
+          context: input.latencyTraceContext ? {
+            ...input.latencyTraceContext,
+            source: "telegram",
+          } : null,
           milestones: [{
             at: new Date().toISOString(),
             milestone: "telegram_typing_accepted",
