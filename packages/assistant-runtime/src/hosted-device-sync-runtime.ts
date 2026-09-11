@@ -474,7 +474,7 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
   signal?: AbortSignal | null;
   wake: HostedExecutionDeviceSyncWake;
-}): Promise<string | null> {
+}): Promise<void> {
   const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
   if (
     wakeContext.hint?.reason !== HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
@@ -487,7 +487,7 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
   }
   const connectionId = wakeContext.connectionId;
   if (!connectionId) {
-    return null;
+    return;
   }
 
   const snapshot = await input.deviceSyncPort.fetchSnapshot({
@@ -505,7 +505,7 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
     || baseline.connection.connectedAt !== wakeContext.expectedConnectedAt
     || baseline.connection.status !== "active"
   ) {
-    return null;
+    return;
   }
 
   const nextReconcileAt = resolveHostedWakeNextReconcileAt(
@@ -513,7 +513,7 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
     wakeContext.hint.nextReconcileAt,
   );
   if (!nextReconcileAt) {
-    return baseline.localState.nextReconcileAt;
+    return;
   }
 
   const response = await input.deviceSyncPort.applyUpdates({
@@ -538,9 +538,8 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
   switch (applied.writeUpdate) {
     case "applied":
     case "unchanged":
-      return nextReconcileAt;
     case "missing":
-      return null;
+      return;
     case "skipped_version_mismatch":
       throw new Error(
         "Hosted device-sync completion fence lost its connection version fence.",

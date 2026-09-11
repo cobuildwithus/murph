@@ -23,7 +23,6 @@ import type {
 import {
   JUNCTION_ECG_BINDING_REASONS,
   resolveDeviceSyncStoreNextJobWakeAt,
-  resolveDeviceSyncStoreNextWakeAt,
   type DeviceSyncService,
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
@@ -85,7 +84,7 @@ import {
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 import {
-  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
+  setHostedDeviceSyncMaintenanceMailboxWakeAt,
 } from "./system-mailbox-state.ts";
 import {
   resolveHostedRuntimeDeviceSyncProviderConfigs,
@@ -184,9 +183,10 @@ export async function runHostedDeviceSyncPass(
 }> {
   options.onStage?.("starting");
   const platformEnv = options.platformEnv ?? {};
+  const signal = options.signal ?? null;
   const shouldYield = createHostedDeviceSyncYieldPredicate(
     options.shouldYield ?? null,
-    options.signal ?? null,
+    signal,
   );
   const startedAtMs = Date.now();
   if (shouldYieldHostedDeviceSync(shouldYield)) {
@@ -201,10 +201,10 @@ export async function runHostedDeviceSyncPass(
     preloadedSnapshot = await preloadHostedDeviceSyncRuntimeSnapshot({
       deviceSyncConfig,
       deviceSyncPort,
-      signal: options.signal ?? null,
+      signal,
     });
   } catch (error) {
-    if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
+    if (isHostedDeviceSyncAbortError(error, signal)) {
       return buildHostedDeviceSyncPreServiceYieldedPassResult(
         options.stagedDirtyAcks ?? null,
       );
@@ -257,7 +257,7 @@ export async function runHostedDeviceSyncPass(
 
   try {
     options.onStage?.("retry_fence");
-    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+    await setHostedDeviceSyncMaintenanceMailboxWakeAt({
       nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
       persistAtCanonicalBoundary: true,
       userId: wake.userId,
@@ -281,7 +281,7 @@ export async function runHostedDeviceSyncPass(
         deviceSyncPort,
         wake,
         secret,
-        signal: options.signal ?? null,
+        signal,
         service,
         snapshot: preloadedSnapshot,
         skipDirtyPendingFetch: true,
@@ -293,7 +293,7 @@ export async function runHostedDeviceSyncPass(
       options.onStage?.("superseded");
       const stagedDirtyAcks = options.stagedDirtyAcks ?? [];
       return {
-        nextWakeAt: resolveHostedDeviceSyncServiceNextWakeAt(service),
+        nextWakeAt: service.getNextJobWakeAt(),
         postCheckpointRecord: null,
         processedJobs: 0,
         skipped: false,
@@ -336,7 +336,7 @@ export async function runHostedDeviceSyncPass(
       await applyHostedPendingDirtyDeviceSyncStateForWake({
         deviceSyncPort,
         service,
-        signal: options.signal ?? null,
+        signal,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
         state: syncState,
         wake,
@@ -420,12 +420,18 @@ export async function runHostedDeviceSyncPass(
     syncState = await reconcileHostedDeviceSyncPassControlPlane({
       deviceSyncPort,
       onStage: options.onStage ?? null,
-      platform: options.runtimeLogPlatform ?? null,
       secret,
       service,
-      signal: options.signal ?? null,
+      signal,
       state: syncState,
       wake,
+    });
+    const migrationRetryAt = await completeHostedDeviceSyncFitbitMigrations({
+      deviceSyncPort,
+      platform: options.runtimeLogPlatform ?? null,
+      service,
+      signal,
+      state: syncState,
     });
     const wakeRecovery = resolveHostedDeviceSyncWakeRecovery({
       service,
@@ -453,14 +459,14 @@ export async function runHostedDeviceSyncPass(
       return yieldPass();
     }
 
-    const serviceNextWakeAt = resolveHostedDeviceSyncServiceNextWakeAt(service);
+    const nextJobWakeAt = service.getNextJobWakeAt();
     deferHostedPendingDirtyPayloadAcksUntil({
-      nextWakeAt: serviceNextWakeAt,
+      nextWakeAt: nextJobWakeAt,
       state: syncState,
     });
     const postCheckpointRecord = attachHostedDeviceSyncFollowUpWake({
       nextWakeAt: options.retainFollowUpWakeUntilCheckpoint === true
-        ? serviceNextWakeAt
+        ? nextJobWakeAt
         : null,
       record: attachHostedDeviceSyncMailboxRetry({
         mailboxRetryAt: wakeRecovery?.retryAt ?? null,
@@ -475,11 +481,12 @@ export async function runHostedDeviceSyncPass(
     });
 
     options.onStage?.("wake_projection");
-    const denseRawRetentionWakeAt = denseRawRetention.hasMore
-      ? resolveHostedDeviceSyncYieldRetryAt()
-      : null;
-    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
-      nextWakeAt: denseRawRetentionWakeAt,
+    const maintenanceWakeAt = earliestHostedMaintenanceWakeAt(
+      denseRawRetention.hasMore ? resolveHostedDeviceSyncYieldRetryAt() : null,
+      migrationRetryAt,
+    );
+    await setHostedDeviceSyncMaintenanceMailboxWakeAt({
+      nextWakeAt: maintenanceWakeAt,
       userId: wake.userId,
       vaultRoot,
     });
@@ -487,8 +494,8 @@ export async function runHostedDeviceSyncPass(
     options.onStage?.("completed");
     return {
       nextWakeAt: earliestHostedMaintenanceWakeAt(
-        serviceNextWakeAt,
-        denseRawRetentionWakeAt,
+        nextJobWakeAt,
+        maintenanceWakeAt,
       ),
       postCheckpointRecord,
       processedJobs,
@@ -496,7 +503,7 @@ export async function runHostedDeviceSyncPass(
       ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
     };
   } catch (error) {
-    if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
+    if (isHostedDeviceSyncAbortError(error, signal)) {
       return yieldPass();
     }
     throw error;
@@ -508,7 +515,6 @@ export async function runHostedDeviceSyncPass(
 async function reconcileHostedDeviceSyncPassControlPlane(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
   onStage: ((stage: HostedDeviceSyncPassStage) => void) | null;
-  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   secret: string | null;
   service: DeviceSyncService;
   signal: AbortSignal | null;
@@ -613,13 +619,6 @@ async function reconcileHostedDeviceSyncPassControlPlane(input: {
     }
   }
 
-  await completeHostedDeviceSyncFitbitMigrations({
-    deviceSyncPort,
-    platform: input.platform,
-    service: input.service,
-    signal: input.signal,
-    state,
-  });
   return state;
 }
 
@@ -629,10 +628,10 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
   service: DeviceSyncService;
   signal: AbortSignal | null;
   state: HostedDeviceSyncRuntimeSyncState;
-}): Promise<void> {
+}): Promise<string | null> {
   const completeFitbitMigration = input.deviceSyncPort?.completeFitbitMigration;
   if (!completeFitbitMigration) {
-    return;
+    return null;
   }
 
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
@@ -667,9 +666,9 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
     HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS,
   );
   const deferred = rotatedCandidates[HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS];
-  if (deferred) {
-    scheduleHostedDeviceSyncFitbitMigrationRetry(store, deferred.localAccountId);
-  }
+  let retryAt = deferred
+    ? resolveHostedDeviceSyncFitbitMigrationRetryAt(store, deferred.localAccountId)
+    : null;
 
   for (const candidate of attempts) {
     try {
@@ -678,13 +677,19 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
         signal: input.signal,
       });
       if (outcome.status === "pending") {
-        scheduleHostedDeviceSyncFitbitMigrationRetry(store, candidate.localAccountId);
+        retryAt = earliestHostedMaintenanceWakeAt(
+          retryAt,
+          resolveHostedDeviceSyncFitbitMigrationRetryAt(store, candidate.localAccountId),
+        );
       }
     } catch (error) {
       if (input.signal?.aborted) {
         throw input.signal.reason ?? error;
       }
-      scheduleHostedDeviceSyncFitbitMigrationRetry(store, candidate.localAccountId);
+      retryAt = earliestHostedMaintenanceWakeAt(
+        retryAt,
+        resolveHostedDeviceSyncFitbitMigrationRetryAt(store, candidate.localAccountId),
+      );
       if (input.platform) {
         await writeHostedRuntimeLogBestEffort({
           entry: {
@@ -704,25 +709,20 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
       }
     }
   }
+  return retryAt;
 }
 
-function scheduleHostedDeviceSyncFitbitMigrationRetry(
+function resolveHostedDeviceSyncFitbitMigrationRetryAt(
   store: HostedDeviceSyncMaintenanceStore,
   localAccountId: string,
-): void {
+): string | null {
   const account = store.getAccountById(localAccountId);
   if (account?.status !== "active") {
-    return;
+    return null;
   }
-  const retryAt = new Date(
+  return new Date(
     Date.now() + HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_RETRY_DELAY_MS,
   ).toISOString();
-  store.patchAccount(account.id, {
-    nextReconcileAt: earliestHostedMaintenanceWakeAt(
-      account.nextReconcileAt ?? null,
-      retryAt,
-    ),
-  });
 }
 
 function writeHostedDeviceSyncImportCompletedRuntimeLogs(input: {
@@ -799,16 +799,9 @@ export function resolveHostedDeviceSyncNextWakeAt(input: {
   }
 
   try {
-    const nextJobWakeAt = resolveDeviceSyncStoreNextJobWakeAt({
-      vaultRoot: input.vaultRoot,
-    });
-    const nextWakeAt = resolveDeviceSyncStoreNextWakeAt({
-      vaultRoot: input.vaultRoot,
-    });
-    return selectHostedDeviceSyncServiceNextWakeAt({
-      nextJobWakeAt,
-      nextWakeAt,
-    });
+    // Web's scheduled reconciler owns provider cadence; only unfinished jobs
+    // need a runtime wake. Including cadence creates a connectionless pass.
+    return resolveDeviceSyncStoreNextJobWakeAt({ vaultRoot: input.vaultRoot });
   } catch (error) {
     if (input.platform?.logPort) {
       void writeHostedRuntimeLogBestEffort({
@@ -887,30 +880,6 @@ function buildHostedDeviceSyncPreServiceYieldedPassResult(
   };
 }
 
-function resolveHostedDeviceSyncServiceNextWakeAt(
-  service: DeviceSyncService,
-): string | null {
-  return selectHostedDeviceSyncServiceNextWakeAt({
-    nextJobWakeAt: service.getNextJobWakeAt(),
-    nextWakeAt: service.getNextWakeAt(),
-  });
-}
-
-function selectHostedDeviceSyncServiceNextWakeAt(input: {
-  nextJobWakeAt: string | null;
-  nextWakeAt: string | null;
-}): string | null {
-  const { nextJobWakeAt, nextWakeAt } = input;
-  if (!nextWakeAt || nextWakeAt === nextJobWakeAt) {
-    return nextWakeAt;
-  }
-
-  const nextWakeMs = Date.parse(nextWakeAt);
-  return Number.isFinite(nextWakeMs) && nextWakeMs > Date.now()
-    ? nextWakeAt
-    : nextJobWakeAt;
-}
-
 function buildHostedDeviceSyncYieldedPassResult(input: {
   processedJobs: number;
   retainFollowUpWakeUntilCheckpoint: boolean;
@@ -953,13 +922,13 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
         },
       }
     : wakeRecovery?.wake ?? null;
-  const serviceNextWakeAt = resolveHostedDeviceSyncServiceNextWakeAt(input.service);
+  const nextJobWakeAt = input.service.getNextJobWakeAt();
   return {
     nextWakeAt,
     postCheckpointRecord: syncState
       ? attachHostedDeviceSyncFollowUpWake({
           nextWakeAt: input.retainFollowUpWakeUntilCheckpoint
-            ? serviceNextWakeAt
+            ? nextJobWakeAt
             : null,
           record: attachHostedDeviceSyncMailboxRetry({
             mailboxRetryAt: wakeRecovery ? nextWakeAt : null,

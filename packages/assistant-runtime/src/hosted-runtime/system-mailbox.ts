@@ -988,7 +988,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultShareProjectionResult: input.vaultShareProjectionResult,
       vaultRoot: input.vaultRoot,
     });
-    const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
+    const completionRetentionAt = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
       acceptedInCurrentAdmission:
         input.deviceSyncCompletionAcceptedInCurrentAdmission === true,
       item: input.item,
@@ -999,7 +999,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const { dirtyRemainderDiscovered, retainUntil } = resolveHostedDeviceSyncDirtyRemainderRetention({
       item: input.item,
       nextDirtyWakeAt: recordResult.nextWakeAt,
-      retainUntil: completion.retainUntil,
+      retainUntil: completionRetentionAt,
       stillDirty: recordResult.stillDirty,
     });
     const immediateDirtyContinuationCanProgress = retainUntil !== null
@@ -1034,10 +1034,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       ),
       createHostedRuntimeWakeCandidate(
         retainUntil === null || immediateDirtyContinuationCanProgress
-          ? earliestHostedSystemMailboxWakeAt(
-              recordResult.nextWakeAt,
-              completion.nextWakeAt,
-            )
+          ? recordResult.nextWakeAt
           : null,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
@@ -1205,14 +1202,11 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
   runtime: HostedSystemMailboxRuntime;
   signal?: AbortSignal | null;
   stillDirty: boolean;
-}): Promise<{
-  nextWakeAt: string | null;
-  retainUntil: string | null;
-}> {
+}): Promise<string | null> {
   const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
   const completionWake = resolveHostedDeviceSyncCompletionFenceWake(input.item);
   if (!input.acceptedInCurrentAdmission || !completionWake || input.stillDirty) {
-    return { nextWakeAt: null, retainUntil };
+    return retainUntil;
   }
 
   const deviceSyncPort = input.runtime.platform.deviceSyncPort;
@@ -1221,14 +1215,12 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
       "Hosted device-sync completion fence requires a configured runtime port.",
     );
   }
-  return {
-    nextWakeAt: await publishHostedDeviceSyncCompletionFence({
-      deviceSyncPort,
-      signal: input.signal ?? null,
-      wake: completionWake,
-    }),
-    retainUntil: null,
-  };
+  await publishHostedDeviceSyncCompletionFence({
+    deviceSyncPort,
+    signal: input.signal ?? null,
+    wake: completionWake,
+  });
+  return null;
 }
 
 function hostedDeviceSyncRetainedWakeHasCapacity(
