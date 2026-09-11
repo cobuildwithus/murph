@@ -24,9 +24,3 @@ Bind each step's guard to its command in the policy assertions. Require the shar
 ## Context
 
 A workflow prerequisite correction left its static policy assertion stale. Unrelated pull requests inherit the failure after reconciling main. Update the workflow and its executable policy proof together.
-
-The same policy suite's exhaustive pull-request workflow inventory also omitted
-the newly added path-scoped Garmin Secret Migration Proof. Its existing owner
-documents synthetic tests and typechecking without Environment or provider
-credentials. Include that exact workflow in the lightweight inventory and bind
-its two migration-only path filters, preserving the expensive Ready-only owners.
