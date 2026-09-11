@@ -16166,6 +16166,53 @@ describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', ()
   )
 })
 
+describeRealCodex('real Codex personal email audience e2e', () => {
+  it('answers a personal email with copied recipients in one queued private reply', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-email-audience-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'member@example.test', channel: 'email',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'member@example.test',
+        deliveryIdempotencyKey: 'synthetic-personal-email-reply',
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-member', userEnvKeys: [] } },
+        identityId: 'synthetic-email-identity',
+        instructions: [
+          'Answer this email with one short practical suggestion, without asking a question or taking any other action.',
+          'Sender summary - Member <member@example.test>',
+          'Cc summary - teammate@example.test',
+          'Email body preview - I have two minutes between meetings. Suggest one easy stretch break I can do at my desk.',
+        ].join('\n'),
+        threadId: 'synthetic-personal-email', threadIsDirect: true,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'email', threadIsDirect: true, explicitTarget: 'member@example.test', status: 'pending' })
+      const reply = result.response ?? ''
+      process.stdout.write(`[real-codex personal email audience] ${JSON.stringify({ reply, intents: intents.length })}\n`)
+      expect(reply).toMatch(/stretch|shoulder|neck|roll|stand/iu)
+      expect(reply).not.toMatch(/\?|teammate@|verif|audience|permission|sent|scheduled/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex direct email signup welcome e2e', () => {
   it('delivers the exact activation welcome through the production notification turn', async () => {
     const config = await resolveRealCodexE2eConfig()
