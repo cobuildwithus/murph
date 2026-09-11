@@ -20,7 +20,10 @@ provider configuration and real-device qualification remain rollout gates.
 `apps/cloudflare/test/helpers/hosted-local-workspace-snapshot.test.ts` proves the
 shared hosted-local v2 snapshot seed with actual signed runtime-envelope
 verification, wrapped data keys, tar/zstd/AES-GCM construction, and the current
-encrypted restore owner. Workspace provisioning, the Web envelope response and
+encrypted restore owner. A deterministic IV containing non-URL-safe base64
+characters also passes the canonical checkpoint-reference parser as base64url
+before restore; tolerant decryption alone does not prove the wire format.
+Workspace provisioning, the Web envelope response and
 object-store HTTP transport are fixtures. It proves loopback and explicitly
 marked Docker bridge uploads through canonical R2 validation, rejection of
 unmarked/mismatched bridges and production settings, and no locator publication
