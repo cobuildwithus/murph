@@ -29,7 +29,7 @@ import {
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
-import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
+import type { HostedRuntimeLatencyTraceRequest, HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import { readHostedAssistantInputCurrentDeliveryRoute } from "../src/hosted-runtime/current-delivery-route.ts";
@@ -41,6 +41,8 @@ test.each([
   "success",
   "projection-error",
   "fresh-foreground",
+  "checkpoint-hint",
+  "checkpoint-foreground",
   "scheduler-refresh",
   "refresh-foreground",
   "refresh-read-error",
@@ -57,6 +59,14 @@ test.each([
   let refreshReadFault: "error" | "incomplete" | null = null;
   let completeRefreshWakeRead: (() => void) | null = null;
   let effectStartedAt = 0;
+  const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+  const checkpointExpectationCount = () => latencyTraceRequests.filter((request) =>
+    request.event.type === "runtime_milestone"
+    && request.event.milestone === "checkpoint_publication_expected_by"
+  ).length;
+  let checkpointHintInjected = false;
+  let expectationsAtCheckpointHint = 0;
+  let expectationsAtFirstEffect = 0;
   const createSystemWork = systemWork.createHostedWorkspaceSystemWork;
   const systemWorkObserver = vi.spyOn(systemWork, "createHostedWorkspaceSystemWork").mockImplementation((input) => createSystemWork({
     ...input,
@@ -64,6 +74,7 @@ test.each([
       const effects = completion.afterDurableCheckpoint;
       const observe = (effect: Exclude<typeof effects, undefined | null | readonly unknown[]>) => Object.assign(async (context: Parameters<typeof effect>[0]) => {
         effectContexts.push(context?.vaultShareProjectionResult?.outcome ?? "absent");
+        if (effectContexts.length === 1) expectationsAtFirstEffect = checkpointExpectationCount();
         effectStartedAt = Date.now();
         return await effect(context);
       }, effect);
@@ -137,7 +148,7 @@ test.each([
 
     const mailboxPort = createMailboxPort({ events, items });
     const basePlatform = createPlatform({
-      events, artifactBytesByHash,
+      events, artifactBytesByHash, latencyTraceRequests,
       mailboxPort: {
         ...mailboxPort,
         async fetch(request, context) {
@@ -256,10 +267,30 @@ test.each([
       },
     }), {
       vaultRoot, runtimeWakeSignal, signal: controller.signal,
-      async createCheckpointSnapshot() {
+      async createCheckpointSnapshot(snapshotInput, context) {
         assert.ok(idleCheckpoints < 8, facts());
         const checkpointSnapshot = await createVaultSnapshotBundle({ vaultRoot });
         artifactBytesByHash.set(checkpointSnapshot.hash, checkpointSnapshot.bytes);
+        if ((scenario === "checkpoint-hint" || scenario === "checkpoint-foreground")
+          && !initialSystemOwner && !checkpointHintInjected
+          && snapshotInput.reason === "idle_shutdown") {
+          assert.ok(events.includes("reply.sent"), "Checkpoint hint follows the foreground reply.");
+          assert.equal(effectContexts.length, 0, "Recording still awaits this checkpoint.");
+          checkpointHintInjected = true;
+          expectationsAtCheckpointHint = checkpointExpectationCount();
+          events.push("checkpoint.default-hint");
+          if (scenario === "checkpoint-foreground") {
+            items.push(createMailboxItem({ id: "mailbox_item_synthetic_checkpoint_foreground", laneSeq: "2" }));
+          }
+          runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+          const signal = context?.signal;
+          assert.ok(signal);
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) resolve();
+            else signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          signal.throwIfAborted();
+        }
         return { snapshotRef: checkpointSnapshot.snapshotRef };
       },
       async importItem(item) {
@@ -373,8 +404,19 @@ test.each([
     assert.ok(events.includes("reply.sent"), facts());
     assert.equal(result.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1", facts());
     assert.ok(events.includes("replica.publish"), facts());
-    assert.equal(events.filter((event) => event === "reply.sent").length, scenario === "fresh-foreground" ? 2 : 1, facts());
+    assert.equal(events.filter((event) => event === "reply.sent").length,
+      scenario === "fresh-foreground" || scenario === "checkpoint-foreground" ? 2 : 1, facts());
     if (scenario !== "projection-error") assert.ok(!effectContexts.includes("error"), facts());
+    if (scenario === "checkpoint-hint") {
+      assert.ok(checkpointHintInjected, facts());
+      assert.equal(expectationsAtFirstEffect, expectationsAtCheckpointHint,
+        "A caught-up checkpoint wake must not start another idle window before recording completes.");
+    }
+    if (scenario === "checkpoint-foreground") {
+      assert.ok(checkpointHintInjected, facts());
+      assert.ok(expectationsAtFirstEffect > expectationsAtCheckpointHint,
+        "Fresh foreground work still restarts its full idle window before recording completes.");
+    }
   } finally {
     systemWorkObserver.mockRestore();
     controller.abort();

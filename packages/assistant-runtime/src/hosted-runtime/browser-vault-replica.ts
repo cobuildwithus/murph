@@ -38,7 +38,6 @@ import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
 import type {
-  RuntimeWakeNotification,
   RuntimeWakeSignal,
 } from "./runtime-wake.ts";
 import {
@@ -244,10 +243,6 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
   maxAgeMs?: number | null;
   platform: HostedRuntimePlatform;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
-  shouldInterruptRuntimeWake?(
-    notification: RuntimeWakeNotification,
-    signal: AbortSignal,
-  ): Promise<boolean>;
   signal?: AbortSignal | null;
   timeoutMs?: number | null;
   vaultRoot: string;
@@ -276,7 +271,6 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
     attempt,
     configuredTimeoutMs,
     runtimeWakeSignal: input.runtimeWakeSignal ?? null,
-    shouldInterruptRuntimeWake: input.shouldInterruptRuntimeWake,
     signal: input.signal ?? null,
     timeoutMs,
   });
@@ -800,10 +794,6 @@ function createBrowserVaultRefreshCancellation(input: {
   attempt: HostedBrowserVaultReplicaRefreshAttempt;
   configuredTimeoutMs: number;
   runtimeWakeSignal: RuntimeWakeSignal | null;
-  shouldInterruptRuntimeWake?(
-    notification: RuntimeWakeNotification,
-    signal: AbortSignal,
-  ): Promise<boolean>;
   signal: AbortSignal | null;
   timeoutMs: number;
 }): {
@@ -872,22 +862,10 @@ function createBrowserVaultRefreshCancellation(input: {
   if (input.signal?.aborted) {
     externalAbort();
   }
-  const waitForRuntimeWake = async (): Promise<void> => {
-    if (!input.runtimeWakeSignal) return;
-    while (!waiterAbortController.signal.aborted) {
-      const notification = await input.runtimeWakeSignal.wait(waiterAbortController.signal);
-      if (
-        input.shouldInterruptRuntimeWake
-        && !await input.shouldInterruptRuntimeWake(notification, waiterAbortController.signal)
-      ) continue;
-      defer("deferred_runtime_wake");
-      return;
-    }
-  };
-  void waitForRuntimeWake().catch(() => {
-    // An unavailable wake classification cannot establish that work is absent.
-    if (!waiterAbortController.signal.aborted) defer("deferred_runtime_wake");
-  });
+  input.runtimeWakeSignal?.wait(waiterAbortController.signal).then(
+    () => defer("deferred_runtime_wake"),
+    () => undefined,
+  );
 
   return {
     cleanup() {

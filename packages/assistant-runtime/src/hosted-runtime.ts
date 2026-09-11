@@ -4597,6 +4597,36 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedBrowserVaultReplicaRefreshResult> => {
       const maintenanceSignal = maintenanceInput.signal ?? runtimeAbortController.signal;
+      const refreshWakeSignal = createCoalescingRuntimeWakeSignal();
+      const qualificationAbortController = new AbortController();
+      const qualificationSignal = AbortSignal.any([
+        maintenanceSignal,
+        qualificationAbortController.signal,
+      ]);
+      const wakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
+        enabled: true,
+        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+        async shouldInterrupt(notification) {
+          const localWorkPending = (): boolean =>
+            runtimeStateDirty
+            || runtimeOwnerHandoffRequested
+            || options.shutdownSignal?.aborted === true
+            || imageGenerationController?.hasWork() === true;
+          if (!localWorkPending()
+            && (notification.requestedProcessingMode == null
+              || notification.requestedProcessingMode === (input.request.processingMode ?? "default"))) {
+            const classification = await classifyHostedPostCheckpointWake({
+              latencySeed: createHostedRuntimeWakeLatencySeed(notification)!,
+              requestId: `${requestId}:browser-vault-wake-classify`,
+              signal: qualificationSignal,
+            });
+            // Local work may have arrived while the bounded mailbox read waited.
+            if (!localWorkPending() && classification.caughtUpToEveryLaneHighWater) return false;
+          }
+          refreshWakeSignal.notify(notification);
+          return true;
+        },
+      });
       emitPhaseLog({
         details: {
           workspacePresent: maintenanceInput.workspace !== null,
@@ -4613,31 +4643,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           force: browserVaultReplicaRefreshRequested,
           generatedAt: new Date().toISOString(),
           platform: guardedRuntime.platform,
-          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          runtimeWakeSignal: refreshWakeSignal,
           signal: maintenanceSignal,
-          async shouldInterruptRuntimeWake(notification, signal) {
-            const localWorkPending = (): boolean =>
-              runtimeStateDirty
-              || runtimeOwnerHandoffRequested
-              || options.shutdownSignal?.aborted === true
-              || imageGenerationController?.hasWork() === true;
-            if (
-              localWorkPending()
-              || (notification.requestedProcessingMode != null
-                && notification.requestedProcessingMode !== (input.request.processingMode ?? "default"))
-            ) return true;
-            const prefetch = await createHostedForegroundMailboxPrefetch({
-              lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
-              limitPerLane: mailboxBudget.fetchLimitPerLane,
-              requestId: `${requestId}:browser-vault-refresh-wake-check`,
-              runnerInput: baseRunnerInput,
-              signal,
-            });
-            const inspection = await inspectHostedPreCheckpointSystemMailboxPrefetch(prefetch);
-            // Keep one refresh and its deadline through scheduler-only hints.
-            // Local work may have arrived while the bounded mailbox read waited.
-            return localWorkPending() || !inspection.caughtUpToEveryLaneHighWater;
-          },
           timeoutMs: null,
           vaultRoot: restored.vaultRoot,
           workspace: maintenanceInput.workspace,
@@ -4663,6 +4670,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           });
         }
         throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
+      } finally {
+        qualificationAbortController.abort();
+        await wakeInterruption.dispose();
+        const notification = wakeInterruption.takeNotification();
+        if (notification) options.runtimeWakeSignal?.notify(notification);
       }
     };
     const { createHostedImageGenerationController } = await import(
@@ -5075,6 +5087,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const classifyHostedPostCheckpointWake = async (input: {
       latencySeed: HostedRuntimeWakeLatencySeed;
       requestId: string;
+      signal?: AbortSignal;
     }): Promise<{
       caughtUpToEveryLaneHighWater: boolean;
       containsOnlyBrowserVaultRefreshWakes: boolean;
@@ -5087,6 +5100,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId: input.requestId,
           runnerInput: baseRunnerInput,
+          signal: input.signal,
         });
         const inspection =
           await inspectHostedPreCheckpointSystemMailboxPrefetch(
@@ -6062,6 +6076,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             input.rearmIdleCheckpointAfterEmptyProbe !== true
             || input.latencySeed === null
             || !shouldContinue()
+            || pendingDurableCheckpointEffects.length > 0
+            || readyDurableCheckpointEffects.length > 0
+            || durableCheckpointFollowUpPending
           ) {
             return;
           }

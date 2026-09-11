@@ -126,7 +126,6 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
-  MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
   MURPH_AUTOMATION_TOOL,
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 import {
@@ -187,6 +186,30 @@ import {
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
+
+// Minimal synthetic prior advertisement with types factored outside action branches.
+const priorFactoredAutomationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: { enum: ['inspect', 'patch'] },
+    lookup: { type: 'string' },
+    expectedUpdatedAt: { type: 'string' },
+  },
+  required: ['action'],
+  oneOf: [
+    {
+      properties: { action: { const: 'inspect' }, lookup: {} },
+      required: ['action', 'lookup'],
+      additionalProperties: false,
+    },
+    {
+      properties: { action: { const: 'patch' }, lookup: {}, expectedUpdatedAt: {} },
+      required: ['action', 'lookup', 'expectedUpdatedAt'],
+      additionalProperties: false,
+    },
+  ],
+}
 
 afterEach(() => {
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
@@ -395,11 +418,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "757568d3540567e1636768d073f456bdf2a41cde31565d7e31a6e3c061a31cf1",
+        "direct": "4a603e3bf41bda41170edefa2a341684f3ad889f2d070c832410a106165e1465",
         "group": "054070d3529e0550288c4393ac6bc943e8179587bc4977b2dbfc6e03d40c2918",
         "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "a0115a2444bc2e56bc1c413fc02af91731685cf17a2a2a767432416a80bfbe06",
+        "scheduledEmail": "278c3199b6d90381bf192e4fd870f0edcc9294ae218bdb11adf1df40793e6efc",
       }
     `)
   })
@@ -5579,7 +5602,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
   })
 
-  it('replays bounded history once when the automation descriptor compacts, then resumes', async () => {
+  it('replays bounded history once when the factored automation descriptor is replaced, then resumes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -5647,7 +5670,7 @@ describe('assistant Codex turn planning', () => {
         tool.name === MURPH_AUTOMATION_TOOL.name
           ? {
               ...tool,
-              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+              inputSchema: priorFactoredAutomationSchema,
             }
           : tool)
       const oldContractFingerprint = buildAssistantCodexContractFingerprint({
@@ -5659,7 +5682,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint: oldContractFingerprint,
           routeFingerprint,
-          threadId: 'thread-full-automation-schema',
+          threadId: 'thread-factored-automation-schema',
         },
         turnCount: 1,
       })
@@ -5697,14 +5720,14 @@ describe('assistant Codex turn planning', () => {
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
-          codexThreadId: 'thread-compact-automation-schema',
+          codexThreadId: 'thread-canonical-automation-schema',
           routeFingerprint,
           session: transitionSession,
           vault,
         })
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
-        .toBe('thread-compact-automation-schema')
+        .toBe('thread-canonical-automation-schema')
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
@@ -5783,7 +5806,7 @@ describe('assistant Codex turn planning', () => {
         tool.name === MURPH_AUTOMATION_TOOL.name
           ? {
               ...tool,
-              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+              inputSchema: priorFactoredAutomationSchema,
             }
           : tool)
       const oldContractFingerprint = buildAssistantCodexContractFingerprint({
@@ -5795,7 +5818,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint: oldContractFingerprint,
           routeFingerprint,
-          threadId: 'thread-expired-full-automation-schema',
+          threadId: 'thread-expired-factored-automation-schema',
         },
         turnCount: 1,
       })
@@ -5817,14 +5840,14 @@ describe('assistant Codex turn planning', () => {
           assistantContractFingerprint:
             transitionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
-          codexThreadId: 'thread-expired-compact-automation-schema',
+          codexThreadId: 'thread-expired-canonical-automation-schema',
           routeFingerprint,
           session: transitionSession,
           vault,
         })
       const resumedPlan = await buildPlan(transitionedSession)
       expect(resumedPlan.resume?.codexThreadId)
-        .toBe('thread-expired-compact-automation-schema')
+        .toBe('thread-expired-canonical-automation-schema')
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)

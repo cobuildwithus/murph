@@ -3788,6 +3788,15 @@ refresh runs only after foreground work and checkpoint correctness are settled,
 is capped by the browser-vault replica byte limit, and races the existing runtime
 wake signal; if a wake arrives before publish, refresh retains the current work
 instead of publishing partial state.
+The default owner's refresh qualifies notifications through the existing bounded
+conversation/system mailbox prefix read. Only a fully caught-up empty prefix,
+unchanged owner and processing mode, clean local runtime, and no ready image
+completion allow the current refresh to continue. Real work, incomplete coverage, or a failed
+read retains conservative preemption. The qualification read shares the refresh
+owner's cancellation and is aborted and joined before release; a notification
+accepted during that boundary remains available to foreground handling. An empty
+scheduler hint therefore cannot abandon a dirty replica refresh after its
+recording item has already completed.
 The default refresh deadline is 30 seconds and remains bounded by any earlier
 invocation deadline. Cancellation reaches the direct canonical reads, replica
 build checkpoints, content hashing, and size serialization; parallel source
@@ -3965,7 +3974,11 @@ If an interrupting runtime notification's immediate mailbox probe finds neither
 runnable conversation work nor system mailbox work that explains the
 notification, that single empty probe is not checkpoint authority. The runtime
 retains the notification and restarts the existing idle checkpoint quiet window
-so a later causal mailbox wake can enter foreground admission first. It records
+so a later causal mailbox wake can enter foreground admission first. Pending or
+ready durable checkpoint effects, and their staged follow-up checkpoint, retain
+their existing deadline after an empty probe; repeated scheduler hints cannot
+postpone their completion by another quiet window. Actual foreground work still
+restarts the full quiet window and runs before those effects. It records
 only the probe outcome, counts, lane watermarks, and checkpoint-deferral
 decision; message contents and item identifiers remain out of runtime
 diagnostics.
