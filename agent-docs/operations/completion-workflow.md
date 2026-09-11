@@ -170,7 +170,9 @@ Before final ReviewGPT, read back the rendered PR body and confirm the complete
 intent and evidence. Add exactly one of each machine-readable line:
 
 - `ReviewGPT first-reviewed head: <full-sha>`: the 40-character pushed commit
-  from `git rev-parse HEAD`; this round-one baseline stays immutable.
+  from `git rev-parse HEAD`; this baseline stays immutable after the first valid
+  substantive review. Before then, an invalid initial attempt followed by an
+  authorized head change uses the recovery in `pr-reviewgpt-loop.md`.
 - `ReviewGPT context sensitivity: routine` or
   `ReviewGPT context sensitivity: sensitive`, with a reason. Any sensitive
   trigger above makes it sensitive regardless of size. Missing/invalid metadata
