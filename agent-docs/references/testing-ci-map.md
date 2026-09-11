@@ -614,6 +614,20 @@ silently replace the existing isolated provider-key mode. Live scenarios print
 only synthetic reply evidence for human UX review; routine CI keeps the live
 gate unset and makes no paid request.
 
+The separate `Assistant Real Model` workflow runs three bounded canonical
+journeys on protected `main` only, using a dedicated sandbox Environment key and
+fixed `gpt-5.6-terra` with the production Responses websocket-enabled setting.
+`scripts/run-assistant-real-model-gate.ts` preflights all exact names and requires
+one executed passing assertion per scenario; missing configuration and skipped
+tests fail. The journeys exercise production assistant service/tool planning,
+shipped CLI writes/readback, process restart plus vault restore, recurring
+reminder lifecycle and group privacy/quiet behavior. External Linq route metadata
+and delivery acknowledgement are synthetic. Artifacts contain commit/run/model,
+configured transport and scenario status, never transcripts. This post-merge lane is not a
+managed-container, private Worker egress, or Temporal proof. Environment setup,
+limits, and local proof distinctions are owned by
+`agent-docs/operations/verification-and-runtime.md`.
+
 ## Current CI Workflows
 
 - The root package-test umbrella runs every curated Vitest project together on
