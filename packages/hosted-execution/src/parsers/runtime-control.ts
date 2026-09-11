@@ -1196,6 +1196,25 @@ export function parseHostedRuntimeGroupToolRequest(
     record.action,
     "Hosted runtime group tool request action",
   );
+  const parsed =
+    parseHostedRuntimeGroupConsultationRequest(record, action) ??
+    parseHostedRuntimeGroupJournalRequest(record, action) ??
+    parseHostedRuntimeGroupDisclosureRequest(record, action) ??
+    parseHostedRuntimeGroupSharedDataRequest(record, action) ??
+    parseHostedRuntimeGroupUsageReferralRequest(record, action) ??
+    parseHostedRuntimeGroupMembershipRequest(record, action) ??
+    parseHostedRuntimeGroupChatRequest(record, action, options) ??
+    parseHostedRuntimeGroupContactCardRequest(record, action, options);
+  if (parsed) {
+    return parsed;
+  }
+  throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+function parseHostedRuntimeGroupConsultationRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "ask") {
     const label = "Hosted runtime group tool ask request";
     assertAllowedObjectKeys(
@@ -1303,10 +1322,13 @@ export function parseHostedRuntimeGroupToolRequest(
       origin,
     };
   }
-  const journalRequest = parseHostedRuntimeGroupJournalRequest(record, action);
-  if (journalRequest) {
-    return journalRequest;
-  }
+  return null;
+}
+
+function parseHostedRuntimeGroupDisclosureRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
     const grantId = parseHostedRuntimeGroupDisclosureGrantId(
@@ -1375,6 +1397,13 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  return null;
+}
+
+function parseHostedRuntimeGroupSharedDataRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "read_participant_display_names") {
     assertAllowedObjectKeys(
       record,
@@ -1429,6 +1458,49 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "revoke_own_email_share") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "participant", "selfOptOut"]),
+      "Hosted runtime group tool revoke_own_email_share request",
+    );
+    if (
+      record.participant !== undefined &&
+      record.participant !== null &&
+      record.selfOptOut !== undefined &&
+      record.selfOptOut !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
+      );
+    }
+    if (record.participant !== undefined && record.participant !== null) {
+      return {
+        action,
+        participant: parseHostedRuntimeGroupToolParticipant(
+          record.participant,
+          "Hosted runtime group tool revoke_own_email_share request participant",
+        ),
+      };
+    }
+    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
+      return {
+        action,
+        selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
+          record.selfOptOut,
+          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+        ),
+      };
+    }
+    return { action };
+  }
+  return null;
+}
+
+function parseHostedRuntimeGroupUsageReferralRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "create_signup_referral_link") {
     const label =
       "Hosted runtime group tool create_signup_referral_link request";
@@ -1533,6 +1605,13 @@ export function parseHostedRuntimeGroupToolRequest(
       policyCodes,
     };
   }
+  return null;
+}
+
+function parseHostedRuntimeGroupMembershipRequest(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolRequest | null {
   if (action === "prepare_next_group") {
     assertAllowedObjectKeys(
       record,
@@ -1629,6 +1708,28 @@ export function parseHostedRuntimeGroupToolRequest(
     }
     return { action, membershipId };
   }
+  if (action === "create_join_link") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "joinLink"]),
+      "Hosted runtime group tool create_join_link request",
+    );
+    if (record.joinLink === undefined || record.joinLink === null) {
+      return { action };
+    }
+    return {
+      action,
+      joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
+    };
+  }
+  return null;
+}
+
+function parseHostedRuntimeGroupChatRequest(
+  record: Record<string, unknown>,
+  action: string,
+  options: { privateMediaDeliveryOrigin?: string | null },
+): HostedRuntimeGroupToolRequest | null {
   if (action === "update_display_name") {
     assertAllowedObjectKeys(
       record,
@@ -1648,20 +1749,6 @@ export function parseHostedRuntimeGroupToolRequest(
       updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
         record.updateDisplayName,
       ),
-    };
-  }
-  if (action === "create_join_link") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action", "joinLink"]),
-      "Hosted runtime group tool create_join_link request",
-    );
-    if (record.joinLink === undefined || record.joinLink === null) {
-      return { action };
-    }
-    return {
-      action,
-      joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
     };
   }
   if (action === "post_join_offer") {
@@ -1759,6 +1846,14 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  return null;
+}
+
+function parseHostedRuntimeGroupContactCardRequest(
+  record: Record<string, unknown>,
+  action: string,
+  options: { privateMediaDeliveryOrigin?: string | null },
+): HostedRuntimeGroupToolRequest | null {
   if (action === "share_contact_card") {
     const label = "Hosted runtime group tool share_contact_card request";
     assertAllowedObjectKeys(
@@ -1823,43 +1918,7 @@ export function parseHostedRuntimeGroupToolRequest(
       }),
     };
   }
-  if (action === "revoke_own_email_share") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action", "participant", "selfOptOut"]),
-      "Hosted runtime group tool revoke_own_email_share request",
-    );
-    if (
-      record.participant !== undefined &&
-      record.participant !== null &&
-      record.selfOptOut !== undefined &&
-      record.selfOptOut !== null
-    ) {
-      throw new TypeError(
-        "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
-      );
-    }
-    if (record.participant !== undefined && record.participant !== null) {
-      return {
-        action,
-        participant: parseHostedRuntimeGroupToolParticipant(
-          record.participant,
-          "Hosted runtime group tool revoke_own_email_share request participant",
-        ),
-      };
-    }
-    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
-      return {
-        action,
-        selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
-          record.selfOptOut,
-          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
-        ),
-      };
-    }
-    return { action };
-  }
-  throw new TypeError("Hosted runtime group tool action is not supported.");
+  return null;
 }
 
 function parseHostedRuntimeGroupUpdateDisplayNameRequest(
@@ -3052,6 +3111,32 @@ export function parseHostedRuntimeGroupToolResponse(
     new Set(["action", "result"]),
     "Hosted runtime group tool response",
   );
+  const parsed =
+    parseHostedRuntimeGroupConsultationResponse(record, action) ??
+    parseHostedRuntimeGroupDisclosureResponse(record, action) ??
+    parseHostedRuntimeGroupCurrentGroupResponse(record, action) ??
+    parseHostedRuntimeGroupPendingGroupResponse(record, action) ??
+    parseHostedRuntimeGroupChatNameResponse(record, action) ??
+    parseHostedRuntimeGroupUsageResponse(record, action) ??
+    parseHostedRuntimeGroupSharedDataResponse(record, action) ??
+    parseHostedRuntimeGroupUsageReferralResponse(record, action) ??
+    parseHostedRuntimeGroupMembershipResponse(record, action) ??
+    parseHostedRuntimeGroupSignupReferralResponse(record, action) ??
+    parseHostedRuntimeGroupChatParticipantsResponse(record, action) ??
+    parseHostedRuntimeGroupChatAvatarResponse(record, action) ??
+    parseHostedRuntimeGroupContactSharingResponse(record, action);
+  if (parsed) {
+    return parsed;
+  }
+  throw new TypeError(
+    "Hosted runtime group tool response action/status is not supported.",
+  );
+}
+
+function parseHostedRuntimeGroupConsultationResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "ask_member") {
     return {
       action,
@@ -3143,7 +3228,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupDisclosureResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "post_disclosure_request") {
     const result = requireObject(
       record.result,
@@ -3179,7 +3270,6 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
-
   if (action === "revoke_disclosure_grant") {
     const result = requireObject(
       record.result,
@@ -3215,7 +3305,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupCurrentGroupResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (
     action === "read_current" ||
     action === "create_join_link" ||
@@ -3383,7 +3479,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupPendingGroupResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (
     action === "prepare_next_group" ||
     action === "read_next_group" ||
@@ -3450,7 +3552,13 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     throw new TypeError(`${label} status is invalid.`);
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupChatNameResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_chat_name") {
     const label = "Hosted runtime group tool read_chat_name response result";
     const result = requireObject(record.result, label);
@@ -3515,7 +3623,13 @@ export function parseHostedRuntimeGroupToolResponse(
       "Hosted runtime group tool read_chat_name response status is invalid.",
     );
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupUsageResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_usage") {
     const result = requireObject(
       record.result,
@@ -3544,66 +3658,11 @@ export function parseHostedRuntimeGroupToolResponse(
         "remainingPercent",
       ].some((key) => Object.prototype.hasOwnProperty.call(usage, key));
       if (isLegacyUsageProjection) {
-        assertAllowedObjectKeys(
-          usage,
-          new Set([
-            "capacityState",
-            "fundingUrl",
-            "periodEnd",
-            "remainingPercent",
-          ]),
-          "Hosted runtime group tool read_usage legacy usage",
-        );
-        const capacityState = requireString(
-          usage.capacityState,
-          "Hosted runtime group tool read_usage legacy capacityState",
-        );
-        if (
-          capacityState !== "healthy" &&
-          capacityState !== "low" &&
-          capacityState !== "exhausted"
-        ) {
-          throw new TypeError(
-            "Hosted runtime group tool read_usage legacy capacityState is invalid.",
-          );
-        }
-        const periodEnd = requireString(
-          usage.periodEnd,
-          "Hosted runtime group tool read_usage legacy periodEnd",
-        );
-        const periodEndDate = new Date(periodEnd);
-        if (
-          !Number.isFinite(periodEndDate.getTime()) ||
-          periodEndDate.toISOString() !== periodEnd
-        ) {
-          throw new TypeError(
-            "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
-          );
-        }
-        const remainingPercent =
-          usage.remainingPercent === undefined
-            ? undefined
-            : requireNonNegativeInteger(
-                usage.remainingPercent,
-                "Hosted runtime group tool read_usage legacy remainingPercent",
-              );
-        if (remainingPercent !== undefined && remainingPercent > 100) {
-          throw new TypeError(
-            "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
-          );
-        }
-        const fundingUrl = readNullableString(
-          usage.fundingUrl,
-          "Hosted runtime group tool read_usage legacy fundingUrl",
-        );
         return {
           action,
           result: {
             status,
-            usage: {
-              fundingNeeded: capacityState !== "healthy",
-              fundingUrl,
-            },
+            usage: parseHostedRuntimeGroupLegacyUsageProjection(usage),
           },
         };
       }
@@ -3693,7 +3752,74 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
+function parseHostedRuntimeGroupLegacyUsageProjection(
+  usage: Record<string, unknown>,
+): { fundingNeeded: boolean; fundingUrl: string | null } {
+  assertAllowedObjectKeys(
+    usage,
+    new Set([
+      "capacityState",
+      "fundingUrl",
+      "periodEnd",
+      "remainingPercent",
+    ]),
+    "Hosted runtime group tool read_usage legacy usage",
+  );
+  const capacityState = requireString(
+    usage.capacityState,
+    "Hosted runtime group tool read_usage legacy capacityState",
+  );
+  if (
+    capacityState !== "healthy" &&
+    capacityState !== "low" &&
+    capacityState !== "exhausted"
+  ) {
+    throw new TypeError(
+      "Hosted runtime group tool read_usage legacy capacityState is invalid.",
+    );
+  }
+  const periodEnd = requireString(
+    usage.periodEnd,
+    "Hosted runtime group tool read_usage legacy periodEnd",
+  );
+  const periodEndDate = new Date(periodEnd);
+  if (
+    !Number.isFinite(periodEndDate.getTime()) ||
+    periodEndDate.toISOString() !== periodEnd
+  ) {
+    throw new TypeError(
+      "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
+    );
+  }
+  const remainingPercent =
+    usage.remainingPercent === undefined
+      ? undefined
+      : requireNonNegativeInteger(
+          usage.remainingPercent,
+          "Hosted runtime group tool read_usage legacy remainingPercent",
+        );
+  if (remainingPercent !== undefined && remainingPercent > 100) {
+    throw new TypeError(
+      "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
+    );
+  }
+  const fundingUrl = readNullableString(
+    usage.fundingUrl,
+    "Hosted runtime group tool read_usage legacy fundingUrl",
+  );
+  return {
+    fundingNeeded: capacityState !== "healthy",
+    fundingUrl,
+  };
+}
+
+function parseHostedRuntimeGroupSharedDataResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_participant_display_names") {
     return {
       action,
@@ -3702,7 +3828,31 @@ export function parseHostedRuntimeGroupToolResponse(
       ),
     };
   }
+  if (action === "read_shared") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupSharedReadResult(record.result),
+    };
+  }
+  if (action === "prepare_email") {
+    const parsed = parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
+      result: record.result,
+    });
+    if (parsed.action !== "prepare_email") {
+      throw new TypeError(
+        "Hosted runtime group tool prepare_email response action is invalid.",
+      );
+    }
+    return { action, result: parsed.result };
+  }
+  return null;
+}
 
+function parseHostedRuntimeGroupUsageReferralResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (
     action === "arm_usage_referral" ||
     action === "cancel_usage_referral" ||
@@ -3762,27 +3912,13 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     throw new TypeError(`${label} status is not supported.`);
   }
+  return null;
+}
 
-  if (action === "read_shared") {
-    return {
-      action,
-      result: parseHostedRuntimeGroupSharedReadResult(record.result),
-    };
-  }
-
-  if (action === "prepare_email") {
-    const parsed = parseHostedRuntimeGroupEmailEffectResponse({
-      action: "prepare_email",
-      result: record.result,
-    });
-    if (parsed.action !== "prepare_email") {
-      throw new TypeError(
-        "Hosted runtime group tool prepare_email response action is invalid.",
-      );
-    }
-    return { action, result: parsed.result };
-  }
-
+function parseHostedRuntimeGroupMembershipResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "list_memberships") {
     const result = requireObject(
       record.result,
@@ -3877,7 +4013,52 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  if (action === "leave_membership") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool leave_membership response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool leave_membership response status",
+    );
+    if (
+      status === "left" ||
+      status === "already_left" ||
+      status === "owner_cannot_leave"
+    ) {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool leave_membership response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool leave_membership unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group tool leave_membership unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+  return null;
+}
 
+function parseHostedRuntimeGroupSignupReferralResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "create_signup_referral_link") {
     const label =
       "Hosted runtime group tool create_signup_referral_link response";
@@ -3919,47 +4100,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
-  if (action === "leave_membership") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool leave_membership response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool leave_membership response status",
-    );
-    if (
-      status === "left" ||
-      status === "already_left" ||
-      status === "owner_cannot_leave"
-    ) {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status"]),
-        "Hosted runtime group tool leave_membership response result",
-      );
-      return { action, result: { status } };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason"]),
-        "Hosted runtime group tool leave_membership unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group tool leave_membership unavailableReason",
-          ),
-        },
-      };
-    }
-  }
-
+function parseHostedRuntimeGroupChatParticipantsResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "read_chat_participants") {
     const result = requireObject(
       record.result,
@@ -4004,7 +4151,48 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  if (action === "preflight_set_chat_avatar") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool preflight_set_chat_avatar response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool preflight_set_chat_avatar response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool preflight_set_chat_avatar ok response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool preflight_set_chat_avatar unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+  return null;
+}
 
+function parseHostedRuntimeGroupChatAvatarResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "set_chat_avatar") {
     const result = requireObject(
       record.result,
@@ -4080,43 +4268,13 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
+  return null;
+}
 
-  if (action === "preflight_set_chat_avatar") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool preflight_set_chat_avatar response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool preflight_set_chat_avatar response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status"]),
-        "Hosted runtime group tool preflight_set_chat_avatar ok response result",
-      );
-      return { action, result: { status } };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason"]),
-        "Hosted runtime group tool preflight_set_chat_avatar unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-        },
-      };
-    }
-  }
-
+function parseHostedRuntimeGroupContactSharingResponse(
+  record: Record<string, unknown>,
+  action: string,
+): HostedRuntimeGroupToolResponse | null {
   if (action === "share_contact_card") {
     const result = requireObject(
       record.result,
@@ -4156,7 +4314,6 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
-
   if (action === "revoke_own_email_share") {
     const result = requireObject(
       record.result,
@@ -4215,10 +4372,7 @@ export function parseHostedRuntimeGroupToolResponse(
       };
     }
   }
-
-  throw new TypeError(
-    "Hosted runtime group tool response action/status is not supported.",
-  );
+  return null;
 }
 
 function parseHostedRuntimeUsageReferralSnapshot(
