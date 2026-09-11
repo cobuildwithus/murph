@@ -40,3 +40,5 @@ Keep the unchanged replica and no-extra-provider-request assertions.
 ## Follow-up: seeded recovery with newly appended work
 
 A local replay passed foreground admission and checkpoint ordering but rejected successful continuation because a seeded member action appended a follow-up wake. Both imported frontiers covered the seed and a successful post-provider processing record existed, while the new wake made total lane lag nonzero. Require the seeded frontiers, no retryable block, and attributed post-provider processing without requiring subsequently generated work to finish. Preserve the exact fence and standby checks at provider start.
+
+The base subsequently extracted this observer into `hosted-local-mailbox-progress.ts`. Apply the correction at that existing helper and update its focused test to accept imported seeded work with a queued follow-up; retain the missing-frontier, malformed-sequence, blocked-work, and receipt-rejection coverage.
