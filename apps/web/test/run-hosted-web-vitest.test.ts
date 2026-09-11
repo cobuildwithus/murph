@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedWebVitestArgs,
@@ -118,6 +118,49 @@ describe("hosted Web Vitest entrypoint", () => {
       webTestFile,
     ]);
   });
+
+  it.each([
+    ["action-approvals.db.test.ts"],
+    ["test/action-approvals.db.test.ts"],
+    ["apps/web/test/action-approvals.db.test.ts"],
+    [path.join(repoRoot, "apps/web/test/action-approvals.db.test.ts")],
+    [webTestFile, "test/action-approvals.db.test.ts"],
+    ["test/action-approvals.db.test.ts", webTestFile],
+    ["--", webTestFile, "test/action-approvals.db.test.ts"],
+    ["--passWithNoTests", "test/action-approvals.db.test.ts"],
+    ["-t", "renders", "test/action-approvals.db.test.ts"],
+    ["--project", "hosted-web-store-config", "test/action-approvals.db.test.ts"],
+  ])("rejects excluded database file requests: %j", (...callerArgs) => {
+    expect(() => buildHostedWebVitestArgs(callerArgs, repoRoot)).toThrow(
+      /action-approvals\.db\.test\.ts.*pnpm exec vitest run --config apps\/web\/vitest\.config\.ts --no-coverage/u,
+    );
+  });
+
+  it.each([
+    ["--exclude", "action-approvals.db.test.ts"],
+    ["-t", "action-approvals.db.test.ts"],
+    ["--testNamePattern=action-approvals.db.test.ts"],
+    ["--outputFile", "action-approvals.db.test.ts"],
+  ])("preserves database-shaped option values: %j", (...optionArgs) => {
+    const callerArgs = [webTestFile, ...optionArgs];
+    expect(buildHostedWebVitestArgs(callerArgs, repoRoot).slice(-callerArgs.length))
+      .toEqual(callerArgs);
+  });
+
+  it.each(["--help", "-h", "--version", "-v"])(
+    "leaves %s output to the Vitest child without rejecting unused filters",
+    (flag) => {
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        const callerArgs = [flag, "action-approvals.db.test.ts"];
+        expect(buildHostedWebVitestArgs(callerArgs, repoRoot).slice(-2))
+          .toEqual(callerArgs);
+        expect(output).not.toHaveBeenCalled();
+      } finally {
+        output.mockRestore();
+      }
+    },
+  );
 
   it("forwards native shard selection without narrowing the workspace", () => {
     expect(
