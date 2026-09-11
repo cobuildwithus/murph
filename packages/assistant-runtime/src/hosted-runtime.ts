@@ -4607,18 +4607,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         enabled: true,
         runtimeWakeSignal: options.runtimeWakeSignal ?? null,
         async shouldInterrupt(notification) {
-          const classification = await classifyHostedPostCheckpointWake({
-            latencySeed: createHostedRuntimeWakeLatencySeed(notification)!,
-            requestId: `${requestId}:browser-vault-wake-classify`,
-            signal: qualificationSignal,
-          });
-          if (!runtimeStateDirty
-            && !runtimeOwnerHandoffRequested
-            && !imageGenerationController?.hasCompleted()
+          const localWorkPending = (): boolean =>
+            runtimeStateDirty
+            || runtimeOwnerHandoffRequested
+            || options.shutdownSignal?.aborted === true
+            || imageGenerationController?.hasWork() === true;
+          if (!localWorkPending()
             && (notification.requestedProcessingMode == null
-              || notification.requestedProcessingMode === (input.request.processingMode ?? "default"))
-            && classification.caughtUpToEveryLaneHighWater) {
-            return false;
+              || notification.requestedProcessingMode === (input.request.processingMode ?? "default"))) {
+            const classification = await classifyHostedPostCheckpointWake({
+              latencySeed: createHostedRuntimeWakeLatencySeed(notification)!,
+              requestId: `${requestId}:browser-vault-wake-classify`,
+              signal: qualificationSignal,
+            });
+            // Local work may have arrived while the bounded mailbox read waited.
+            if (!localWorkPending() && classification.caughtUpToEveryLaneHighWater) return false;
           }
           refreshWakeSignal.notify(notification);
           return true;
