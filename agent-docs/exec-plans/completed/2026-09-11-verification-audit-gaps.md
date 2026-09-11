@@ -1,6 +1,6 @@
 # Close verification inventory, routing, and timezone gaps
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-11
 
@@ -52,5 +52,8 @@ Updated: 2026-09-11
 - Implemented seven audit corrections. Cold recovery requires a small private scenario-manifest companion.
 - Passed: 47 composed verification tests; Node inventory and cross-repository guard tests; 89 Prisma unit cases; real PostgreSQL timezone proof; 33 harness orchestration cases; real Vitest selection regression; Web, harness and repository-tool typechecks.
 - Complexity guard passes. Existing Prisma error classification and diff summary hotspots remain unchanged in complexity.
-- Cold E2E first attempt failed during container smoke with HTTP 400 before test execution. Diagnostic rerun is investigating this setup boundary; it is not passing evidence.
-- Private full verification is running; the manifest selection regression passes.
+- Cold recovery passed through the full local stack, preserving the 25-second import deadline and actual provider reply. Removed the obsolete timeout override and replaced a retired log event observer with the canonical conversation import watermark.
+- Private companion full verification and its 12 manifest selection tests passed.
+- Current foreground and scheduled-reminder partitions passed actual Vitest collection. Cloudflare and repository-tool typechecks passed after the final fixture correction.
+- Local implementation and candidate review are complete. Public PR #3332 and private companion #139 retain external review and exact-head CI gates; no merge or deployment is included.
+Completed: 2026-09-11
