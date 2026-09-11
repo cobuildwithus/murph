@@ -2006,6 +2006,23 @@ the flow. Foreground native refresh and a fresh website load both re-read the
 same fact. The short-lived native vCard handoff reuses the existing signed card
 claim and never makes the app a routing-data owner.
 
+### Native Environment report and voice audit
+
+The companion Environment route projects only Habitat report data from the
+published Browser Vault core replica. It reuses the browser's bounded encrypted
+session decoder with an ephemeral recipient key, then the Environment page's existing pure selectors and grading. Decrypted input and the report
+remain request-local; there is no score persistence or native vault replica.
+Privy bearer admission and current access/consent checks surround replica I/O.
+The native Home card and report retain only a session-fenced in-memory response.
+The Habitat product spec owns the wire shape, freshness, and voice flow.
+The native voice page runs the existing interview headlessly in an invisible
+WKWebView. SwiftUI owns presentation and controls; bounded snapshots and closed
+commands connect it to the existing engine through the operation bridge.
+Native keeps credentials and calls the existing realtime and
+topic APIs, pinning the expected identity to prevent account-switch races.
+Bearer admission checks live access/consent; cookie mutations retain CSRF checks.
+Canonical scripts, parsing, mailbox persistence and grading have one Web owner.
+
 ### iOS address-book advisory names
 
 The iOS companion owns the optional system Contacts prompt and produces one

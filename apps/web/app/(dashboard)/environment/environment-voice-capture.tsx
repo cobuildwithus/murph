@@ -1,5 +1,10 @@
 "use client";
 
+import { useNativeVoiceController } from "@/src/lib/environment/native-voice-controller";
+import type { ReactNode } from "react";
+
+import { requestEnvironmentVoice, type EnvironmentVoiceRequest } from "@/src/lib/environment/voice-transport";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ENVIRONMENT_INTERVIEW_NOTE_MAX_LENGTH,
@@ -188,6 +193,9 @@ export function EnvironmentVoiceCapture({
   authGate = true,
   contactOptions = [],
   disabled = false,
+  native = false,
+  apiRequest = requestEnvironmentVoice,
+  onClosed,
   initialTopicId = null,
   onRequestedTopicHandled,
   onAccepted,
@@ -203,6 +211,9 @@ export function EnvironmentVoiceCapture({
   authGate?: boolean;
   contactOptions?: readonly MurphContactOption[];
   disabled?: boolean;
+  native?: boolean;
+  apiRequest?: EnvironmentVoiceRequest;
+  onClosed?: () => void;
   initialTopicId?: string | null;
   onRequestedTopicHandled?: () => void;
   onAccepted?: () => void;
@@ -215,7 +226,8 @@ export function EnvironmentVoiceCapture({
   triggerSize?: "sm" | "default" | "lg";
   triggerVariant?: "default" | "outline";
 }) {
-  const [open, setOpen] = useState(Boolean(preview || requestedTopicId));
+  const startsOpen = Boolean(preview || requestedTopicId || native);
+  const [open, setOpen] = useState(startsOpen);
   const [state, setState] = useState<RealtimeState>(preview?.state ?? "idle");
   const [topicIndex, setTopicIndex] = useState(() => {
     if (!requestedTopicId) {
@@ -256,7 +268,7 @@ export function EnvironmentVoiceCapture({
   );
   const [sessionScript, setSessionScript] =
     useState<EnvironmentVoiceScript | null>(
-      preview || requestedTopicId ? script : null,
+      startsOpen ? script : null,
     );
   const completedTopicIdsRef = useRef(new Set<string>());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -678,16 +690,11 @@ export function EnvironmentVoiceCapture({
       setNotice(null);
 
       try {
-        const response = await fetch("/api/environment/realtime/topics", {
-          body: JSON.stringify({
+        const response = await apiRequest("save", JSON.stringify({
             completedAt: new Date().toISOString(),
             completionId: crypto.randomUUID(),
             topics: unsavedTopics,
-          }),
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        });
+          }));
         if (!response.ok) {
           throw new Error(await readApiError(response));
         }
@@ -730,7 +737,7 @@ export function EnvironmentVoiceCapture({
         });
       }
     },
-    [onAccepted],
+    [onAccepted, apiRequest],
   );
 
   const goBackOneTopic = useCallback(() => {
@@ -1211,12 +1218,7 @@ export function EnvironmentVoiceCapture({
         });
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
-        const response = await fetch("/api/environment/realtime", {
-          body: offer.sdp ?? "",
-          credentials: "same-origin",
-          headers: { "content-type": "application/sdp" },
-          method: "POST",
-        });
+        const response = await apiRequest("connect", offer.sdp ?? "");
         if (!response.ok) {
           throw new Error(await readApiError(response));
         }
@@ -1227,15 +1229,17 @@ export function EnvironmentVoiceCapture({
       } catch (error) {
         closeConnection();
         setState("error");
-        setNotice(realtimeConnectionNotice(error));
+        setNotice(realtimeConnectionNotice(error, native));
       }
     },
     [
+      native,
       closeConnection,
       handleRealtimeEvent,
       prepareForNextTurn,
       sendSessionUpdate,
       startAudioMeter,
+      apiRequest,
       updateTranscript,
     ],
   );
@@ -1348,8 +1352,20 @@ export function EnvironmentVoiceCapture({
     if (!nextOpen) {
       reset();
       onRequestedTopicHandled?.();
+      onClosed?.();
     }
   };
+
+  useNativeVoiceController({
+    audioNeedsAttention,
+    enabled: native, phase: state, topic, topicIndex: activeTopicIndex,
+    topicCount: scriptForView.topics.length, captured: capturedFieldKeys,
+    pending: pendingFieldKeys, languageCode: languageChoice, notice, transcript,
+    hasAcceptedAnswers: completionHasAcceptedWrite,
+    controls: { start: startRealtime, back: goBackOneTopic, next: advanceCurrentTopic,
+      finish: finishInterview, language: selectLanguage },
+  });
+  if (native) return null;
 
   if (presentation === "inline") {
     if (state === "idle") {
@@ -1497,39 +1513,7 @@ export function EnvironmentVoiceCapture({
           className="flex h-[calc(100dvh-1rem)] max-h-[52rem] flex-col gap-0 overflow-hidden p-0 sm:h-[min(46rem,calc(100dvh-3rem))] sm:max-w-4xl"
           showCloseButton={false}
         >
-          <DialogHeader className="shrink-0 border-b border-border px-5 py-4 sm:px-7">
-            <div className="flex min-h-9 items-center gap-3">
-              {state === "idle" || state === "complete" ? (
-                <p className="min-w-0 truncate font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-                  Environment report
-                </p>
-              ) : (
-                <>
-                  <p className="shrink-0 font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-                    {activeTopicIndex + 1} of {scriptForView.topics.length}
-                  </p>
-                  <span
-                    className="h-1 flex-1 overflow-hidden rounded-full bg-secondary/50"
-                    aria-hidden="true"
-                  >
-                    <span
-                      className="block h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
-                      style={{
-                        width: `${Math.round(
-                          (100 * (activeTopicIndex + 1)) /
-                            scriptForView.topics.length,
-                        )}%`,
-                      }}
-                    />
-                  </span>
-                </>
-              )}
-              <div className="ml-auto flex shrink-0 items-center gap-2">
-                {state !== "complete" ? (
-                  <>
-                    <span className="hidden text-xs text-muted-foreground sm:inline">
-                      Speaking language
-                    </span>
+          <VoiceDialogHeader state={state} script={scriptForView} topicIndex={activeTopicIndex}>
                     <LanguagePicker
                       detectedLanguageCode={detectedLanguageCode}
                       needsAttention={languageNeedsAttention}
@@ -1538,32 +1522,7 @@ export function EnvironmentVoiceCapture({
                       open={languagePickerOpen}
                       selectedCode={languageChoice}
                     />
-                  </>
-                ) : null}
-                <DialogClose
-                  render={
-                    <Button
-                      aria-label="Close"
-                      className="size-11 shrink-0"
-                      disabled={state === "saving" || state === "finishing"}
-                      size="icon"
-                      type="button"
-                      variant="ghost"
-                    />
-                  }
-                >
-                  <X className="size-4" aria-hidden="true" />
-                  <span className="sr-only">Close</span>
-                </DialogClose>
-              </div>
-            </div>
-            <DialogTitle className="sr-only">
-              {scriptForView.dialogTitle}
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              Answer one Environment topic at a time by voice.
-            </DialogDescription>
-          </DialogHeader>
+          </VoiceDialogHeader>
 
           {state === "idle" ? (
             <div className="grid min-h-0 flex-1 sm:grid-cols-[17rem_minmax(0,1fr)]">
@@ -2665,10 +2624,12 @@ function environmentTopicIsResolved(
   );
 }
 
-function realtimeConnectionNotice(error: unknown): string {
+function realtimeConnectionNotice(error: unknown, native = false): string {
   const name = errorName(error);
   if (name === "NotAllowedError" || name === "SecurityError") {
-    return "Microphone access is blocked for this site. Allow it in your browser settings, then try again.";
+    return native
+      ? "Microphone access is off. Allow Murph to use your microphone in Settings, then try again."
+      : "Microphone access is blocked for this site. Allow it in your browser settings, then try again.";
   }
   if (name === "NotFoundError") {
     return "No microphone was found. Connect one, then try again.";
@@ -2718,4 +2679,74 @@ function isAnswerValue(value: unknown): value is string | number | boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function VoiceDialogHeader({ state, script, topicIndex, children }: {
+  state: RealtimeState;
+  script: EnvironmentVoiceScript;
+  topicIndex: number;
+  children: ReactNode;
+}) {
+  return (
+  <DialogHeader className="shrink-0 border-b border-border px-5 py-4 sm:px-7">
+    <div className="flex min-h-9 items-center gap-3">
+      {state === "idle" || state === "complete" ? (
+        <p className="min-w-0 truncate font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+          Environment report
+        </p>
+      ) : (
+        <>
+          <p className="shrink-0 font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            {topicIndex + 1} of {script.topics.length}
+          </p>
+          <span
+            className="h-1 flex-1 overflow-hidden rounded-full bg-secondary/50"
+            aria-hidden="true"
+          >
+            <span
+              className="block h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
+              style={{
+                width: `${Math.round(
+                  (100 * (topicIndex + 1)) /
+                    script.topics.length,
+                )}%`,
+              }}
+            />
+          </span>
+        </>
+      )}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {state !== "complete" ? (
+          <>
+            <span className="hidden text-xs text-muted-foreground sm:inline">
+              Speaking language
+            </span>
+            {children}
+          </>
+        ) : null}
+        <DialogClose
+          render={
+            <Button
+              aria-label="Close"
+              className="size-11 shrink-0"
+              disabled={state === "saving" || state === "finishing"}
+              size="icon"
+              type="button"
+              variant="ghost"
+            />
+          }
+        >
+          <X className="size-4" aria-hidden="true" />
+          <span className="sr-only">Close</span>
+        </DialogClose>
+      </div>
+    </div>
+    <DialogTitle className="sr-only">
+      {script.dialogTitle}
+    </DialogTitle>
+    <DialogDescription className="sr-only">
+      Answer one Environment topic at a time by voice.
+    </DialogDescription>
+  </DialogHeader>
+  );
 }

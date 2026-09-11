@@ -342,6 +342,38 @@ export async function decodeReadyBrowserVaultSession({
   };
 }
 
+/** Decodes a request-local core projection using the same identity, AAD and
+ * bounded payload validation as the browser. No decrypted data is cached. */
+export async function decodeBrowserVaultCoreSession(input: {
+  sessionValue: unknown;
+  privateKeyJwk: Awaited<ReturnType<typeof generateHostedUserRecipientKeyPair>>["privateKeyJwk"];
+  expectedMemberId: string;
+  signal?: AbortSignal;
+}): Promise<BrowserVaultCoreCapableQueryClient> {
+  const session = parseBrowserVaultSessionResponse(input.sessionValue);
+  if (session.state !== "ready"
+    || getReadySessionMemberId(session) !== input.expectedMemberId) {
+    throw new Error("Environment replica identity is unavailable.");
+  }
+  const replicaKey = await unwrapHostedBrowserSessionKey({
+    envelope: session.replicaKeyEnvelope,
+    recipientPrivateKeyJwk: input.privateKeyJwk,
+  });
+  assertNotAborted(input.signal);
+  const demand = {
+    replicaKey,
+    requestedMetricBuckets: [],
+    requestedShards: ["core"] as const,
+    signal: input.signal,
+  };
+  const loaded = session.transport === "legacy"
+    ? await loadLegacyBrowserVaultReplica({ ...demand, session })
+    : await loadShardedBrowserVaultReplica({
+        ...demand, session, knownReplicaRef: null, knownReplicaShards: null,
+      });
+  return createBrowserVaultRouteQueryClient(loaded.shards, ["core"], []);
+}
+
 async function loadLegacyBrowserVaultReplica(input: {
   replicaKey: Uint8Array;
   requestedMetricBuckets: readonly BrowserVaultMetricBucketId[];

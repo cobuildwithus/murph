@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  bearerAuth: vi.fn(), authority: vi.fn(), refresh: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createEnvironmentRealtimeCall: vi.fn(),
@@ -24,6 +26,8 @@ const transaction = vi.fn(async (callback: (tx: {
   })
 );
 
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActivePrivyMemberAuthFromBearerToken: mocks.bearerAuth }));
+vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: () => ({
     createEnvironmentRealtimeCall: mocks.createEnvironmentRealtimeCall,
@@ -53,6 +57,7 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+  signalHostedBrowserVaultRefreshRuntime: mocks.refresh,
 }));
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({ $transaction: transaction }),
@@ -71,6 +76,8 @@ import {
 describe("Environment Realtime routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.bearerAuth.mockResolvedValue({ member: { id: "member_123" }, identity: { userId: "synthetic-identity" } });
+    mocks.authority.mockResolvedValue(undefined);
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_123" },
     });
@@ -223,5 +230,61 @@ describe("Environment Realtime routes", () => {
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
     });
+  });
+});
+
+const nativeHeaders = { authorization: "Bearer synthetic-token", "x-murph-companion-identity": "synthetic-identity", "content-type": "application/sdp" };
+describe("native Environment admission", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.bearerAuth.mockResolvedValue({ member: { id: "member_123" }, identity: { userId: "synthetic-identity" } });
+    mocks.authority.mockResolvedValue(undefined);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+    mocks.createEnvironmentRealtimeCall.mockResolvedValue({ sdp: "v=0\r\nanswer" });
+  });
+  it("reuses realtime with native admission and no cookie fallback", async () => {
+    const response = await createRealtimeCall(new Request("https://example.test/api/environment/realtime", { method: "POST", headers: nativeHeaders, body: "v=0\r\noffer" }));
+    expect(response.status).toBe(200);
+    expect(mocks.bearerAuth).toHaveBeenCalledOnce();
+    expect(mocks.authority).toHaveBeenCalledOnce();
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
+  });
+  it("rejects an identity switch before contacting realtime", async () => {
+    const response = await createRealtimeCall(new Request("https://example.test/api/environment/realtime", { method: "POST", headers: { ...nativeHeaders, "x-murph-companion-identity": "previous-identity" }, body: "v=0\r\noffer" }));
+    expect(response.status).toBe(409);
+    expect(mocks.createEnvironmentRealtimeCall).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+  });
+  it("does not fall back to a cookie after a rejected bearer", async () => {
+    mocks.bearerAuth.mockRejectedValueOnce(new Error("synthetic rejection"));
+    await createRealtimeCall(new Request("https://example.test/api/environment/realtime", { method: "POST", headers: nativeHeaders, body: "v=0\r\noffer" }));
+    expect(mocks.createEnvironmentRealtimeCall).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+  });
+  it("saves spoken native answers through the same canonical mailbox", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({ dedupeConflict: false, duplicate: false, item: { id: "mailbox_123" } });
+    const response = await saveTopics(new Request("https://example.test/api/environment/realtime/topics", {
+      method: "POST", headers: { ...nativeHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ completedAt: new Date().toISOString(), completionId: "550e8400-e29b-41d4-a716-446655440099",
+        topics: [{ topicId: "sleep:0", answers: [{ aspectId: "sleep-environment", indicatorId: "night_temp_c", value: 20 }] }] }),
+    }));
+    expect(response.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({ expectedUserId: "member_123", mailboxItemId: "mailbox_123" });
+    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
+  });
+  it("requires native consent before accepting any spoken answer", async () => {
+    mocks.authority.mockRejectedValueOnce(hostedOnboardingError({ code: "CONSENT_REQUIRED", message: "Review consent", httpStatus: 403 }));
+    const response = await saveTopics(new Request("https://example.test/api/environment/realtime/topics", { method: "POST", headers: nativeHeaders, body: "{}" }));
+    expect(response.status).toBe(403);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+  it("uses the existing recheck to refresh a processed native report", async () => {
+    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValueOnce(null);
+    const response = await recheckTopicProcessing(new Request("https://example.test/api/environment/realtime/topics", { method: "PATCH", headers: nativeHeaders }));
+    expect(response.status).toBe(200);
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 });

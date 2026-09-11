@@ -32,6 +32,7 @@ vi.mock("@murphai/runtime-state", async () => {
 
 import {
   createBrowserVaultRouteQueryClient,
+  decodeBrowserVaultCoreSession,
   decodeReadyBrowserVaultSession,
   isBrowserVaultAbortError,
   isBrowserVaultUnauthorizedError,
@@ -1119,3 +1120,31 @@ function createReplicaEnvelope() {
     scope: "browser-vault-replica" as const,
   };
 }
+
+
+test("companion core decoder binds member identity before unwrapping private data", async () => {
+  const fixture = createShardedReadyFixture(["core"]);
+  const sessionValue = await fixture.response.json();
+  await assert.rejects(decodeBrowserVaultCoreSession({
+    sessionValue, privateKeyJwk: { kty: "EC", crv: "P-256", d: "synthetic", x: "synthetic", y: "synthetic" }, expectedMemberId: "different-member",
+  }), /identity/);
+  assert.equal(runtimeMocks.unwrapHostedBrowserSessionKey.mock.calls.length, 0);
+  runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) =>
+    readFixtureEncodedPayload(fixture, envelope.ciphertext),
+  );
+  const client = await decodeBrowserVaultCoreSession({
+    sessionValue, privateKeyJwk: { kty: "EC", crv: "P-256", d: "synthetic", x: "synthetic", y: "synthetic" }, expectedMemberId: "member_123",
+  });
+  assert.equal(client.capability, "core");
+  assert.deepEqual(client.entities.list({ families: ["habitat"] }), []);
+});
+
+test("companion core decoder rejects an inconsistent shard before projection", async () => {
+  const fixture = createShardedReadyFixture(["core"], { coreGeneratedAt: "2026-06-01T00:00:00.000Z" });
+  runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) =>
+    readFixtureEncodedPayload(fixture, envelope.ciphertext),
+  );
+  await assert.rejects(decodeBrowserVaultCoreSession({
+    sessionValue: await fixture.response.json(), privateKeyJwk: { kty: "EC", crv: "P-256", d: "synthetic", x: "synthetic", y: "synthetic" }, expectedMemberId: "member_123",
+  }));
+});

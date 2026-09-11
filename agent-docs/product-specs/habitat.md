@@ -21,6 +21,54 @@ Habitat is the umbrella for this knowledge: durable, structured facts about the 
   no Habitat value is placed in public metadata or a public share asset. The
   separate Share action remains a generic card without member facts.
 
+## Native Environment report
+
+The iOS Home screen includes a compact Environment grade card opening a native
+report and in-app voice interview. It presents the same five categories, known facts, targets,
+coverage, declined answers, and derived grades as the web page. Missing or
+insufficient evidence never produces an invented grade. The native welcome
+uses the website's known-value rule and Habitat illustrations. Voice reuses
+the existing web walkthrough and conversations remain an editing surface.
+
+`GET /api/device-sync/companion/environment?units=metric|imperial` authenticates
+only a Privy identity bearer. It checks current access and required launch
+consent before reading the published Browser Vault core projection and again
+before returning the report. The existing replica decoder enforces member,
+key-envelope, AAD, identity, and byte-budget checks. An ephemeral recipient key
+and decrypted core live only for the request; only the Environment projection
+is returned with `Cache-Control: no-store`. iOS retains it only in memory,
+clears it at account/consent boundaries, and rejects late session responses.
+
+The versioned `murph.companion.environment.v1` response is `preparing` when no
+replica exists, or `ready` with `generatedAt`, `freshness`, `grade`, and
+`categories`. Stale/missing replicas use the existing best-effort refresh owner;
+there is no new job, database, or score store. An unavailable read remains
+retryable without blocking Health or Meals. Deploy this additive Web route
+before releasing the native consumer; older Web returns an unavailable report.
+
+The native voice page `/companion/environment-voice` hosts the existing
+`EnvironmentVoiceCapture` headlessly with an injected native transport. SwiftUI
+owns all visible questions, progress, language selection and recording controls.
+A bounded `state` snapshot publishes the topic, answer statuses, phase and a
+transcript tail; closed native commands invoke existing interview actions. The
+engine renders no Web controls. It has no cookie
+session or private bootstrap of its own. `?view=voice` on the companion route
+returns the canonical question script from the same authorized core snapshot.
+The WKWebView reply bridge carries bounded operation/body messages and plain
+responses; native retains the Privy credential. Bearer realtime and topic
+requests require a matching `X-Murph-Companion-Identity` and live access/consent.
+Cookie-authenticated web requests retain their existing origin checks, and a
+failed bearer never falls back to cookies. The existing SDP, usage gate, topic
+parser, idempotent mailbox and runtime writer remain the only recording owners.
+
+Native uses the existing topic status/recheck endpoints after accepted answers.
+A pending recheck retries the existing mailbox wake. For a processed native
+interview, recheck requests the existing browser replica refresh; bounded native
+polling reads the canonical report and retains a delayed-refresh notice on
+failure. The ready report adds `hasEnvironmentData`: empty and declined-only
+values show first use; known optional values also count. Deploy Web before iOS.
+Local previews do not prove physical microphone or hosted save convergence.
+
 ## Domains
 
 | Domain | Scope | Owner | Status |

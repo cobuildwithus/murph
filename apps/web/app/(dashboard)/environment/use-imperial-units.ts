@@ -4,9 +4,7 @@ import { useSyncExternalStore } from "react";
 
 const IMPERIAL_REGIONS = new Set(["US", "LR", "MM"]);
 
-export function toFahrenheit(celsius: number): number {
-  return Math.round((celsius * 9) / 5 + 32);
-}
+export { toFahrenheit } from "@/src/lib/environment/units";
 
 const subscribeToNothing = () => () => undefined;
 

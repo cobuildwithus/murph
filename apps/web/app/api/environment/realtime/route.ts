@@ -1,6 +1,5 @@
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import { requireEnvironmentRequestAuth } from "@/src/lib/environment/request-auth";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { resolveHostedRuntimeAiUsageGate } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
@@ -10,8 +9,7 @@ import { getPrisma } from "@/src/lib/prisma";
 const SDP_MAX_BYTES = 64 * 1_024;
 
 export const POST = withJsonError(async (request: Request) => {
-  assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const auth = await requireEnvironmentRequestAuth(request);
   if (request.headers.get("content-type")?.split(";", 1)[0] !== "application/sdp") {
     throw invalidRealtimeRequest();
   }

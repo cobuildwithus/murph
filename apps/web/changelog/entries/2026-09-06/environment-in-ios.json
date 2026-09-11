@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-06",
+  "order": 300,
+  "item": {
+    "id": "environment-in-ios",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Your Environment report in the iOS app",
+    "summary": "Open the Environment card on Home to see how your sleep setup, air, lighting, recovery tools, and workspace support you.",
+    "details": "Start with a guided audit or update an existing report by talking through native questions. Your spoken answers use the same Environment report as the website. New reports start with a clear invitation to begin, without an invented grade.",
+    "relevanceTags": [
+      "environment",
+      "ios"
+    ],
+    "sourcePullRequests": [
+      3015
+    ]
+  }
+}
