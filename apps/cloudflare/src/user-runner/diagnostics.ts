@@ -29,8 +29,6 @@ export type RuntimeProcessingContainerBusyStage =
   | "active_runtime_contention"
   | "background_preemption_not_accepted"
   | "background_preemption_unavailable"
-  | "cooperative_handoff_pending"
-  | "non_runtime_write_fence"
   | "stopped_container_record_pending";
 
 export type RuntimeProcessingRetryAttribution =

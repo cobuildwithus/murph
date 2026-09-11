@@ -448,29 +448,12 @@ export class RuntimeProcessingController {
     }
 
     const activeFence = record.writeFence;
-    if (activeFence.kind !== "runtime") {
-      return this.createRetryLater({
-        orchestrationAttemptId: input.input.orchestrationAttemptId,
-        reason: "container_busy",
-        stage: "non_runtime_write_fence",
-        userId: input.input.userId,
-      });
-    }
-
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
-    const triggeredByTrustedWebDirect =
-      isTrustedWebDirectRuntimeProcessing(input.input);
-    const cooperativeMailboxOwnerHandoff =
+    const foregroundPromotionRequested =
       activeFence.processingMode === "system_mailbox"
       && requestedProcessingMode === "default";
     if (activeFence.processingMode !== requestedProcessingMode) {
-      if (
-        activeFence.processingMode === "inbox_media_retention"
-        || (
-          cooperativeMailboxOwnerHandoff
-          && triggeredByTrustedWebDirect
-        )
-      ) {
+      if (activeFence.processingMode === "inbox_media_retention") {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
           activeFence,
           commandBudget: input.commandBudget,
@@ -480,8 +463,8 @@ export class RuntimeProcessingController {
         });
       }
       // Retention waits behind either conversational owner. Default and system
-      // work can wake the same child; only foreground promotion requests a mode
-      // handoff below. A system wake never downgrades a foreground owner.
+      // work can wake the same child. The child checks its existing authority
+      // before foreground promotion; a system wake never downgrades it.
       if (requestedProcessingMode === "inbox_media_retention") {
         const activeRuntimeState =
           await this.readActiveRuntimeFenceLiveness({
@@ -567,7 +550,7 @@ export class RuntimeProcessingController {
           ? { orchestration: inputAtActiveWakeStart.orchestration }
           : {}),
         processingMode: activeFence.processingMode,
-        ...(cooperativeMailboxOwnerHandoff
+        ...(foregroundPromotionRequested
           ? { requestedProcessingMode }
           : {}),
         userId: record.userId,
@@ -588,16 +571,9 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
-      if (cooperativeMailboxOwnerHandoff) {
-        // The active child accepted the wake so it can checkpoint and release.
-        // It did not accept processing under the requested mode.
-        return this.createRetryLater({
-          orchestrationAttemptId: input.input.orchestrationAttemptId,
-          reason: "container_busy",
-          stage: "cooperative_handoff_pending",
-          userId: input.input.userId,
-        });
-      }
+      // Acceptance belongs to this exact child, not to a replacement owner.
+      // A consented system-mailbox child can service foreground in place;
+      // blocked or exiting children retain their normal release/recheck path.
       const action = containerResult.action === "already_running"
         ? "already_running"
         : "woken";

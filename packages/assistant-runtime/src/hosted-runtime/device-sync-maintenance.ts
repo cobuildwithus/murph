@@ -1150,6 +1150,7 @@ async function runHostedDeviceSyncDenseRawRetention(input: {
       deadlineMs: input.deadlineMs,
       maxBytes: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES,
       maxFiles: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES,
+      shouldYield: input.shouldYield ?? undefined,
       vaultRoot: input.vaultRoot,
     });
 

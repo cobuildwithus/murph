@@ -1463,7 +1463,6 @@ export class RunnerContainer extends Container {
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
     this.authorizeBoundUser(input.userId);
     this.noteContainerInteraction();
-    const interactionGeneration = this.containerInteractionGeneration;
     const destroyRequestAtWakeStart = this.lastDestroyRequest;
     const stopGenerationAtWakeStart = this.stopGeneration;
     if (this.workspaceInvocationNoPointerAbort) {
@@ -1623,8 +1622,7 @@ export class RunnerContainer extends Container {
         (
           !active
           && (
-            this.containerInteractionGeneration !== interactionGeneration
-            || this.lastDestroyRequest !== destroyRequestAtWakeStart
+            this.lastDestroyRequest !== destroyRequestAtWakeStart
             || this.stopGeneration !== stopGenerationAtWakeStart
           )
         )

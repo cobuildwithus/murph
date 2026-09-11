@@ -3197,19 +3197,21 @@ describe("HostedUserRunner execution coordination", () => {
       });
     });
 
+    const firstRequest = invoke.mock.calls[0]?.[0].job.request;
+    if (!firstRequest) {
+      throw new Error("Expected the denied background invocation request.");
+    }
     platformAiUsageAllowed = true;
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-restored-foreground-attempt",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: "2026-04-27T00:00:05.050Z",
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:01:34.050Z",
+      runtimeAttemptId: firstRequest.attemptId,
     });
 
-    const firstRequest = invoke.mock.calls[0]?.[0].job.request;
-    if (!firstRequest) {
-      throw new Error("Expected the denied background invocation request.");
-    }
     expect(ensureProcessing).toHaveBeenCalledWith({
       activeRuntime: expect.objectContaining({
         attemptId: firstRequest.attemptId,
@@ -4002,8 +4004,8 @@ describe("HostedUserRunner execution coordination", () => {
   it.each([
     ["retention-only", "default", "inbox_media_retention", undefined, false, false, false],
     ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false, false, false],
-    ["system-mailbox", "default", "system_mailbox", undefined, true, false, true],
-    ["completing system-mailbox", "default", "system_mailbox", undefined, true, true, true],
+    ["retention-only (Web direct)", "default", "inbox_media_retention", undefined, true, false, true],
+    ["completing retention-only (Web direct)", "default", "inbox_media_retention", undefined, true, true, true],
   ] as const)(
     "preempts active %s work before starting %s processing",
     async (
@@ -4282,6 +4284,13 @@ describe("HostedUserRunner execution coordination", () => {
 
   it.each([
     [
+      "a validated Web-direct identity",
+      {
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
+      },
+    ],
+    [
       "non-direct Temporal default processing",
       {
         orchestration: {
@@ -4298,7 +4307,7 @@ describe("HostedUserRunner execution coordination", () => {
       },
     ],
   ] as const)(
-    "wakes active system-mailbox work before retrying %s",
+    "accepts foreground on the exact system-mailbox child for %s",
     async (_label, ensureInput) => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date(FIXED_NOW));
@@ -4329,8 +4338,10 @@ describe("HostedUserRunner execution coordination", () => {
         ...ensureInput,
         userId: TEST_USER_ID,
       })).resolves.toEqual({
-        kind: "retry_later",
-        retryAt: "2026-04-27T00:00:05.000Z",
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+        runtimeAttemptId: token.attemptId,
       });
 
       expect(ensureProcessing).toHaveBeenCalledWith({
@@ -4345,15 +4356,7 @@ describe("HostedUserRunner execution coordination", () => {
       });
       expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
       expect(invoke).not.toHaveBeenCalled();
-      expect(writeDataPoint).toHaveBeenCalledWith({
-        blobs: [
-          HOSTED_RUNTIME_RETRY_ANALYTICS_SCHEMA,
-          "container_busy",
-          "cooperative_handoff_pending",
-        ],
-        doubles: [1, 5_000],
-        indexes: ["container_busy"],
-      });
+      expect(writeDataPoint).not.toHaveBeenCalled();
       expect(readRunnerMeta(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
         active_expires_at: null,
@@ -4524,7 +4527,9 @@ describe("HostedUserRunner execution coordination", () => {
         orchestrationAttemptId: "composed-default-wake",
         userId: TEST_USER_ID,
       })).resolves.toMatchObject({
-        kind: "retry_later",
+        action: "already_running",
+        kind: "runtime_processing_accepted",
+        runtimeAttemptId: attemptId,
       });
       await expect(runner.ensureRuntimeProcessingForUser({
         orchestrationAttemptId: "composed-system-wake",

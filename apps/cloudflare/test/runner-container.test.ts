@@ -1204,6 +1204,46 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
+  it("accepts overlapping wakes acknowledged by the same exact runtime after losing the local pointer", async () => {
+    const requestsStarted = createDeferred<void>();
+    const releaseResponses = createDeferred<void>();
+    let requestCount = 0;
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: true,
+      containerFetch: vi.fn(async (url: string) => {
+        expect(url).toContain("/internal/runtime-wake");
+        requestCount += 1;
+        if (requestCount === 2) requestsStarted.resolve(undefined);
+        await releaseResponses.promise;
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "x-runtime-wake-accepted": "1",
+            "x-runtime-wake-identity-checked": "1",
+          },
+        });
+      }),
+    });
+    const input = {
+      activeRuntime: {
+        attemptId: "attempt_concurrent_foreground_wakes",
+        leaseGeneration: "12",
+        userId: "member_123",
+      },
+      userId: "member_123",
+    };
+    const wakes = [container.ensureProcessing(input), container.ensureProcessing(input)];
+    await requestsStarted.promise;
+    releaseResponses.resolve(undefined);
+    expect(await Promise.all(wakes)).toEqual([
+      { action: "woken", kind: "accepted" },
+      { action: "woken", kind: "accepted" },
+    ]);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
   it("rejects a delayed pointerless wake after an exact abort settles", async () => {
     const wakeRequestStarted = createDeferred<void>();
     const wakeResponse = createDeferred<Response>();
