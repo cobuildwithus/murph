@@ -4,6 +4,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client } from "pg";
 import { databaseProofClientConfig, provePreviewDatabaseIsolation, readProofReference } from "../scripts/preview-database-proof";
 
 const now = 1_800_000_000_000;
@@ -80,12 +81,26 @@ describe("Preview database separation proof", () => {
     expect(() => databaseProofClientConfig("postgresql://test@runtime.example.test/test")).toThrow();
   });
 
+  it("recognizes the driver's host override and refuses it before any connection", async () => {
+    const overridden = `${environment.DATABASE_URL}?host=production.example.test`;
+    expect(new Client({ connectionString: overridden })).toHaveProperty("connectionParameters.host", "production.example.test");
+    const connect = vi.spyOn(Client.prototype, "connect").mockImplementation(async () => {
+      throw new Error("Unexpected database connection.");
+    });
+    try {
+      expect(await provePreviewDatabaseIsolation({ ...environment, DATABASE_URL: overridden }, undefined, () => now)).toBe("unable to verify");
+      expect(connect).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+    }
+  });
+
   it("publishes only a coarse static result and refuses to reuse existing output", () => {
     const cwd = mkdtempSync(join(tmpdir(), "murph-db-proof-"));
     try {
       const script = fileURLToPath(new URL("../scripts/preview-database-proof.ts", import.meta.url));
       const run = () => spawnSync(process.execPath, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script, "--vercel-build"], {
-        cwd, encoding: "utf8", env: { VERCEL: "1", VERCEL_ENV: "preview" }, timeout: 10_000,
+        cwd, encoding: "utf8", env: { NODE_ENV: "test", VERCEL: "1", VERCEL_ENV: "preview" }, timeout: 10_000,
       });
       const result = run();
       expect(result.status).toBe(0);
@@ -104,7 +119,7 @@ describe("Preview database separation proof", () => {
     try {
       const script = fileURLToPath(new URL("../scripts/preview-database-proof.ts", import.meta.url));
       const result = spawnSync(process.execPath, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script, "--vercel-build"], {
-        cwd, encoding: "utf8", env: { VERCEL: "1", VERCEL_ENV: "production" }, timeout: 10_000,
+        cwd, encoding: "utf8", env: { NODE_ENV: "test", VERCEL: "1", VERCEL_ENV: "production" }, timeout: 10_000,
       });
       expect(result.status).toBe(1);
       expect(result.stdout).toBe("unable to verify\n");
