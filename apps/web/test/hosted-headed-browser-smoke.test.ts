@@ -516,7 +516,10 @@ describe("hosted headed browser boundary", () => {
         } catch (error) {
           if (error instanceof Error) failure = error;
         }
-        expect(failure?.message).toBe("Authorization action failed (timeout).");
+        expect(failure?.message).toBe(
+          "Authorization action failed (timeout); action=whoop_grant; "
+          + "before=whoop.com/other; after=whoop.com/other.",
+        );
         expect(failure?.message).not.toContain("synthetic-private-marker");
         expect(failure?.message).not.toContain("id.whoop.com");
       } finally {
