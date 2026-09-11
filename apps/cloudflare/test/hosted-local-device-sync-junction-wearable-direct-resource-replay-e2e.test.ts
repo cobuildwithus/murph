@@ -48,6 +48,7 @@ import {
   buildAssistantProviderMurphToolCall,
   buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
+  hostedLocalAssistantProviderLatestUserInputContains,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -404,7 +405,21 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     );
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(nudgeOutboundBaseline + 1);
-    expect(countAssistantResponsesApiRequests()).toBe(nudgeProviderBaseline + 2);
+    const nudgeProviderRequestCount = countAssistantResponsesApiRequests();
+    const nudgeProviderFailure = nudgeProviderRequestCount === nudgeProviderBaseline + 2
+      ? undefined
+      : await activeScenario.buildFailureMessage(experimentAdherenceUserId, [
+          "Hosted Junction activity nudge made an unexpected number of model requests.",
+          `latest user input matches nudge instructions: ${JSON.stringify(
+            activeScenario.assistantProviderRequests
+              .filter((request) => request.url === "/v1/responses")
+              .map((request) => hostedLocalAssistantProviderLatestUserInputContains(
+                request,
+                experimentActivityNudgeInstructions,
+              )),
+          )}`,
+        ]);
+    expect(nudgeProviderRequestCount, nudgeProviderFailure).toBe(nudgeProviderBaseline + 2);
 
     const nudgeProviderText = collectAssistantProviderRequestTextSince(nudgeProviderBaseline);
     expect(nudgeProviderText).toContain(experimentAdherenceSlug);

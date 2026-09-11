@@ -488,7 +488,11 @@ async function startHostedLocalFullStackScenarioAttempt(
             request.body,
             providerRequestBodyFingerprintSecret,
           ),
+          fixtureMatch: request.fixtureMatch ?? "not_applicable",
           method: request.method,
+          queuedResponseCount: request.queuedResponseCount ?? null,
+          requestKind: request.requestKind ?? "unknown",
+          responseStatus: request.responseStatus ?? null,
           url: request.url,
         }));
         const recentLogs = status ? summarizeHostedRecentLogsForFailure(status) : [];

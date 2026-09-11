@@ -414,6 +414,54 @@ it("forwards explicitly supplied provider credentials to the worker harness", as
   }
 });
 
+it("includes provider outcome metadata in failures without request text or identifiers", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+  const scenario = await startScenario();
+  const body = JSON.stringify({
+    client_metadata: {
+      session_id: "synthetic-private-session-sentinel",
+      turn_id: "synthetic-private-turn-sentinel",
+    },
+    input: [{ content: "synthetic-private-prompt-sentinel", role: "user" }],
+  });
+  scenario.assistantProviderRequests.push({
+    body,
+    fixtureMatch: "none",
+    method: "POST",
+    queuedResponseCount: 0,
+    requestKind: "turn",
+    responseStatus: 500,
+    url: "/v1/responses",
+  });
+
+  try {
+    const failure = await scenario.buildFailureMessage("member_diagnostic_fixture", [
+      "Synthetic request-count failure.",
+    ]);
+    const requestLogLine = failure.split("\n").find((line) =>
+      line.startsWith("assistant provider requests: ")
+    );
+    expect(requestLogLine).toBeDefined();
+    expect(JSON.parse(requestLogLine!.slice("assistant provider requests: ".length))).toEqual([
+      {
+        bodyBytes: Buffer.byteLength(body, "utf8"),
+        bodyFingerprint: expect.any(String),
+        fixtureMatch: "none",
+        method: "POST",
+        queuedResponseCount: 0,
+        requestKind: "turn",
+        responseStatus: 500,
+        url: "/v1/responses",
+      },
+    ]);
+    expect(failure).not.toContain("synthetic-private-");
+    expect(failure).not.toContain("client_metadata");
+  } finally {
+    await scenario.stop();
+  }
+});
+
 function createScenarioHarness(input: {
   assertNoInterventions?: () => void;
   completionStatuses?: HostedRunnerStatusResponse[];
