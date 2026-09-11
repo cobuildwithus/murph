@@ -822,6 +822,13 @@ scan. A conversation import that lands while foreground-owned maintenance is
 in flight aborts that work through the runner-scoped background-maintenance
 signal so the new message can enter assistant admission immediately.
 
+Freshly staged assistant input IDs already prove foreground work. Before that
+lane starts, derive the immediate pending wake from the phase clock instead of
+reading the pending index, automation state, and indexed event/terminal evidence
+again. Still read the oldest occurrence among those exact current IDs to bound
+causal Ask completion ordering. Explicit maintenance wake overrides take
+precedence; without fresh IDs, pending discovery and recovery remain unchanged.
+
 Foreground wake projection is read-only unless the foreground turn itself
 committed a canonical write under `bank/automations`. That write arms an
 immediate assistant maintenance wake, where exact cron reconciliation remains

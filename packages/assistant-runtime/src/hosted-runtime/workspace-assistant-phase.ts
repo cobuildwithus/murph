@@ -4816,9 +4816,9 @@ async function runSystemMailboxMaintenancePhase(input: {
   );
   let pendingAssistantInputWakeAt = hasPendingAssistantInputWakeOverride
     ? input.pendingAssistantInputWakeAt ?? null
-    : await resolvePendingAssistantInputWakeAt(phaseInput, {
-        inspectOnly: input.hasFreshConversationInput,
-      });
+    : input.hasFreshConversationInput
+    ? new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString()
+    : await resolvePendingAssistantInputWakeAt(phaseInput);
   const assistantAskCompletionOccurredBefore = pendingAssistantInputWakeAt === null
     ? undefined
     : input.hasFreshConversationInput
@@ -4931,13 +4931,11 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   const foregroundCausalAttempted = foregroundCausalPreparation !== null;
   if (
-    (phaseInput.foregroundCausalOnly === true && !foregroundCausalAttempted)
-    || (
-      (
-        input.hasFreshConversationInput
-        || phaseInput.shouldYieldBackgroundMaintenance?.() === true
-      )
-      && !foregroundCausalAttempted
+    !foregroundCausalAttempted
+    && (
+      phaseInput.foregroundCausalOnly === true
+      || input.hasFreshConversationInput
+      || phaseInput.shouldYieldBackgroundMaintenance?.() === true
     )
   ) {
     return {
