@@ -8,7 +8,12 @@
     "title": "Background updates finish more reliably after a chat",
     "summary": "Environment and other background updates avoid extra waiting and stale vault views after Murph replies.",
     "details": "New messages still take priority. Background checks no longer interrupt an otherwise ready update.",
-    "relevanceTags": ["environment", "reliability"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "environment",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3283
+    ]
   }
 }
