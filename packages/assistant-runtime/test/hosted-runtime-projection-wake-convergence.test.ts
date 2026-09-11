@@ -187,7 +187,7 @@ test.each(scenarios)(
                 async fetch(request) {
                   emptyMailboxReads += 1;
                   const response = await baseMailboxPort.fetch(request);
-                  if (request.requestId.includes(":independent-completion-foreground-check")) {
+                  if (request.requestId.includes(":system-work-assistant-upgrade")) {
                     wakeChecks += 1;
                     assert.deepEqual(request.lanes.map((lane) => lane.lane), ["conversation"]);
                     assert.ok(request.limitPerLane > 0 && request.limitPerLane <= 100);
