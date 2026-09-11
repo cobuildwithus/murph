@@ -946,7 +946,10 @@ gate unset and makes no paid request.
   evidence with explicit continuation ownership, status transitions, legacy
   promotion, and fail-closed cardinality/binding checks; job hints do not decide
   the diagnostic. The PostgreSQL proof retains the 20,000 raw-candidate cap
-  before exclusions plus one truncation probe. The hosted-local
+  before exclusions plus one truncation probe. The inactive and active cap
+  cases seed and analyze their full fixtures in a separate transaction, keep
+  the reader's existing budget, and remove only their own member prefix
+  afterward. The hosted-local
   foreground-priority leg drives this monitor through authenticated cron HTTP
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, short-window active-incident coalescing,
