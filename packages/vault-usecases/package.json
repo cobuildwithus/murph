@@ -82,6 +82,7 @@
     "@murphai/health-metrics": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/operator-config": "workspace:*",
+    "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },
